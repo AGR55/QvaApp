@@ -7,7 +7,7 @@
 | Puerta | Resultado | Evidencia |
 | --- | --- | --- |
 | TypeScript estricto | Correcto | `pnpm typecheck`; sin errores |
-| Pruebas | Correcto | 80 ejecutadas, 80 aprobadas, 0 omitidas |
+| Pruebas | Correcto | 81 ejecutadas, 81 aprobadas, 0 omitidas |
 | Servidor | Correcto | `tsc -p tsconfig.build.json` |
 | Panel | Correcto | Vite; JS principal 231.57 kB (72.63 kB gzip), gráficas diferidas 377.68 kB (110.42 kB gzip), CSS 21.50 kB (5.12 kB gzip) |
 | Secretos literales | Correcto | `pnpm check:secrets`; ninguno detectado |
@@ -31,6 +31,8 @@ pnpm check:ui
 ## Cobertura financiera relevante
 
 La suite cubre política de riesgo y números no finitos, reserva QUSD, límites por operación/día/exposición/concurrencia, cooldown persistente por mercado y contraparte, pausa por errores, serialización de mutaciones, idempotencia, resultado remoto incierto, compensación, migraciones con backup, reinicio y conciliación. También comprueba el flujo TOTP, los timeouts de autenticación, la verificación previa del token y que el pago fiat queda como acción humana.
+
+La normalización decimal de `GET /p2p` también se comprobó mediante una lectura autenticada y no mutante de 50 ofertas reales: todas entregaron `amount` y `receive` como números positivos al dominio. No se imprimieron importes, UUID ni datos personales.
 
 ## Decisiones de herramientas
 

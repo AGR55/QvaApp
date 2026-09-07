@@ -247,8 +247,8 @@ test("lee la respuesta P2P paginada que usa data", async () => {
             uuid: "offer-1",
             type: "sell",
             coin: "BANK_CUP",
-            amount: 10,
-            receive: 9_700,
+            amount: "10.00",
+            receive: "9700.00",
             status: "open",
           },
         ],
@@ -263,6 +263,8 @@ test("lee la respuesta P2P paginada que usa data", async () => {
     assert.equal(page.total, 1);
     assert.equal(page.offers.length, 1);
     assert.equal(page.offers[0]?.uuid, "offer-1");
+    assert.equal(page.offers[0]?.amount, 10);
+    assert.equal(page.offers[0]?.receive, 9_700);
   } finally {
     globalThis.fetch = originalFetch;
   }

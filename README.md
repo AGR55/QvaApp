@@ -36,7 +36,7 @@ La primera revisión de límites debe hacerse en **Estrategia**. Empieza en simu
 pnpm typecheck       # análisis estático estricto
 pnpm test            # suite unitaria, contractual e integrada
 pnpm build           # servidor + panel de producción
-pnpm check           # tipos, 80 pruebas, builds y escáner de secretos
+pnpm check           # tipos, 81 pruebas, builds y escáner de secretos
 pnpm check:ui        # build + recorrido Chromium, responsive y WCAG automatizado
 pnpm start           # ejecuta dist/index.js
 ```

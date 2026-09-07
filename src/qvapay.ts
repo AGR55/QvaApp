@@ -531,7 +531,14 @@ function parseAverages(value: Record<string, unknown>): Record<string, P2pAverag
 }
 
 function positiveNumber(value: unknown, context: string): number {
-  const number = typeof value === "number" ? value : Number.NaN;
+  const decimalString =
+    typeof value === "string" && /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value);
+  const number =
+    typeof value === "number"
+      ? value
+      : decimalString
+        ? Number(value)
+        : Number.NaN;
   if (!Number.isFinite(number) || number <= 0)
     throw new Error(`Respuesta inválida de QvaPay (${context}): debe ser positivo.`);
   return number;

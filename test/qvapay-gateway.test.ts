@@ -59,16 +59,29 @@ test("incluye una clave de idempotencia al crear ofertas", async () => {
   assert.equal(sent?.idempotency_key, "intent-12345678");
 });
 
-test("rechaza ofertas remotas incompletas antes de llegar al dominio", async () => {
+test("normaliza los strings decimales documentados antes de llegar al dominio", async () => {
   const client = new QvaPayClient(() => "token", {
     now: () => 1_000,
     sleep: async () => undefined,
-    fetch: async () => new Response(JSON.stringify({ data: [{ uuid: "rota", type: "buy", coin: "BANK_CUP", amount: "20", receive: 20_000, status: "open" }] }), { status: 200 }),
+    fetch: async () => new Response(JSON.stringify({ data: [{ uuid: "documentada", type: "buy", coin: "BANK_CUP", amount: "20.50", receive: "20000.25", status: "open" }] }), { status: 200 }),
   });
-  await assert.rejects(
-    () => client.listOffersPage({ take: 20 }),
-    /amount.*debe ser positivo/,
-  );
+  const page = await client.listOffersPage({ take: 20 });
+  assert.equal(page.offers[0]?.amount, 20.5);
+  assert.equal(page.offers[0]?.receive, 20_000.25);
+});
+
+test("rechaza strings ambiguos o importes no positivos", async () => {
+  let amount = "20 QUSD";
+  const client = new QvaPayClient(() => "token", {
+    now: () => 1_000,
+    sleep: async () => undefined,
+    fetch: async () => new Response(JSON.stringify({ data: [{ uuid: "rota", type: "buy", coin: "BANK_CUP", amount, receive: "20000", status: "open" }] }), { status: 200 }),
+  });
+  await assert.rejects(() => client.listOffersPage({ take: 20 }), /amount.*debe ser positivo/);
+  amount = "0";
+  await assert.rejects(() => client.listOffersPage({ take: 20 }), /amount.*debe ser positivo/);
+  amount = "1e3";
+  await assert.rejects(() => client.listOffersPage({ take: 20 }), /amount.*debe ser positivo/);
 });
 
 test("normaliza promedios numéricos y rechaza valores no finitos", async () => {
