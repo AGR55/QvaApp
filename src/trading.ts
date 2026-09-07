@@ -1,0 +1,1475 @@
+import type { config as Config } from "./config.js";
+import { randomUUID } from "node:crypto";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  MarketConfigService,
+  type MarketConfig,
+  type TradingConfig,
+} from "./market-config.js";
+import { QvaApiError, QvaMutationUncertainError } from "./qvapay.js";
+import type { Store } from "./store.js";
+import type { FiatMarket, P2pAverage, P2pOffer } from "./types.js";
+import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
+import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
+import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
+
+type RuntimeConfig = typeof Config;
+type Notify = (message: string, operationUuid?: string) => Promise<void>;
+
+export type MarketDecision = "auto_buy" | "manual_sell" | "blocked" | "ignored";
+export interface MarketItem {
+  offer: P2pOffer;
+  rate: number;
+  decision: MarketDecision;
+  reason: string;
+}
+export interface MarketSnapshot {
+  items: MarketItem[];
+  total: number;
+  scannedAt: number;
+}
+
+export const marketLabel = (coin: FiatMarket): string => coin;
+export const marketCurrency = (_coin: FiatMarket): string => "USD";
+// Compatibilidad temporal para los comandos de Telegram; las decisiones usan
+// la comprobación dinámica de la instancia.
+export const isFiatMarket = (value: string): value is FiatMarket =>
+  Boolean(value);
+
+export class TradingEngine {
+  private averagesCache?: {
+    value: Record<string, P2pAverage>;
+    expiresAt: number;
+  };
+  private refreshRoundInFlight = false;
+  private scanInFlight: Promise<{
+    inspected: number;
+    candidates: number;
+    action?: string;
+  }> | undefined;
+  constructor(
+    private readonly store: TradingRepository,
+    private readonly qva: QvaPayGateway,
+    private readonly cfg: RuntimeConfig,
+    marketConfigOrNotify: MarketConfigService | Notify,
+    notify?: Notify,
+  ) {
+    this.marketConfig =
+      typeof marketConfigOrNotify === "function"
+        ? new MarketConfigService(
+            this.cfg.dataDir ??
+              mkdtempSync(join(tmpdir(), "qvaapply-test-config-")),
+            this.cfg,
+            this.store as Store,
+          )
+        : marketConfigOrNotify;
+    this.notify =
+      typeof marketConfigOrNotify === "function"
+        ? marketConfigOrNotify
+        : notify!;
+    this.opportunityOrchestrator = new OpportunityOrchestrator(
+      this.store as Store,
+      this.qva,
+      this.marketConfig,
+      { notify: (message) => this.notify(message) },
+    );
+    for (const market of this.marketConfig.markets()) {
+      if (this.store.get(`fiat_balance:${market.code}`) === undefined) {
+        this.store.set(
+          `fiat_balance:${market.code}`,
+          String(market.fiatBalance),
+        );
+        this.store.audit(
+          "fiat_balance",
+          `Saldo inicial declarado: ${market.fiatBalance} ${market.currency} (${market.code})`,
+        );
+      }
+    }
+  }
+
+  private readonly marketConfig: MarketConfigService;
+  private readonly notify: Notify;
+  private readonly opportunityOrchestrator: OpportunityOrchestrator;
+
+  markets(): MarketConfig[] {
+    return this.marketConfig.markets();
+  }
+  activeMarkets(): MarketConfig[] {
+    return this.marketConfig.activeMarkets();
+  }
+  market(code: FiatMarket): MarketConfig | undefined {
+    return this.marketConfig.find(code);
+  }
+  isMarket(code: string): code is FiatMarket {
+    return Boolean(this.market(code));
+  }
+  marketLabel(code: FiatMarket): string {
+    return this.market(code)?.label ?? code;
+  }
+  marketCurrency(code: FiatMarket): string {
+    return this.market(code)?.currency ?? "";
+  }
+  saveConfig(
+    next: TradingConfig,
+    source = "panel",
+    reason = "Configuración actualizada desde el panel local",
+  ): void {
+    const saved = this.marketConfig.save(
+      next,
+      source,
+      reason,
+    );
+    for (const market of saved.markets) {
+      this.store.set(`fiat_balance:${market.code}`, String(market.fiatBalance));
+    }
+    this.store.audit(
+      "config",
+      "Configuración de mercados actualizada desde el panel local",
+    );
+  }
+
+  isPaused(): boolean {
+    return this.store.get("paused") !== "false";
+  }
+  mode(): "simulation" | "real" {
+    return this.store.get("mode") === "real" ? "real" : "simulation";
+  }
+  refreshEnabled(): boolean {
+    return this.store.get("refresh_enabled") === "true";
+  }
+  fiatBalance(coin: FiatMarket = "BANK_CUP"): number {
+    return Number(this.store.get(`fiat_balance:${coin}`) ?? 0);
+  }
+
+  setPaused(paused: boolean, source = "Telegram"): void {
+    if (!paused && this.store.get("emergency_stop") === "true")
+      throw new Error(
+        "Desactiva primero la parada de emergencia; la reanudación permanece bloqueada.",
+      );
+    this.store.set("paused", String(paused));
+    this.store.audit(
+      paused ? "paused" : "resumed",
+      `Automatización modificada desde ${source}`,
+    );
+  }
+  setFiatBalance(coin: FiatMarket, amount: number): void {
+    if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
+    this.store.set(`fiat_balance:${coin}`, String(amount));
+    this.marketConfig.updateBalance(coin, amount);
+    this.store.audit(
+      "fiat_balance",
+      `Saldo fiat declarado: ${amount} ${this.marketCurrency(coin)} (${coin})`,
+    );
+  }
+  strategy() {
+    const config = this.marketConfig.current();
+    return {
+      buyMax: Object.fromEntries(
+        config.markets.map((market) => [market.code, market.buyMaxRate]),
+      ),
+      sellMin: Object.fromEntries(
+        config.markets.map((market) => [market.code, market.sellMinRate]),
+      ),
+      reserve: config.qusdReserve,
+      maxOpenOffers: config.maxOpenOffers,
+    };
+  }
+  updateStrategy(
+    values: Partial<{
+      buyMaxCup: number;
+      buyMaxUsd: number;
+      sellMinCup: number;
+      sellMinUsd: number;
+      reserve: number;
+      cupLimit: number;
+    }>,
+  ): void {
+    for (const raw of Object.values(values)) {
+      if (!Number.isFinite(raw) || raw < 0)
+        throw new Error("Los límites deben ser números positivos.");
+    }
+    const next = this.marketConfig.current();
+    const cup = next.markets.find((market) => market.code === "BANK_CUP");
+    const usd = next.markets.find((market) => market.code === "BANDECPREPAGO");
+    if (values.buyMaxCup !== undefined && cup)
+      cup.buyMaxRate = values.buyMaxCup;
+    if (values.sellMinCup !== undefined && cup)
+      cup.sellMinRate = values.sellMinCup;
+    if (values.cupLimit !== undefined && cup)
+      cup.purchaseMaxQusd = values.cupLimit;
+    if (values.buyMaxUsd !== undefined && usd)
+      usd.buyMaxRate = values.buyMaxUsd;
+    if (values.sellMinUsd !== undefined && usd)
+      usd.sellMinRate = values.sellMinUsd;
+    if (values.reserve !== undefined) {
+      next.qusdReserve = values.reserve;
+      next.risk.minQusdReserve = values.reserve;
+    }
+    this.saveConfig(next);
+    this.store.audit("strategy", "Estrategia actualizada desde el panel local");
+  }
+  setRefresh(enabled: boolean): void {
+    this.store.set("refresh_enabled", String(enabled));
+    this.store.audit(
+      "refresh",
+      enabled ? "Refresco activado" : "Refresco desactivado",
+    );
+  }
+
+  setMode(mode: "simulation" | "real"): void {
+    if (mode === "real" && !this.cfg.realTradingAllowed)
+      throw new Error(
+        "Para usar modo real, cambia CONFIRM_REAL_TRADING=true en .env y reinicia el bot.",
+      );
+    this.store.set("mode", mode);
+    this.store.audit("mode", `Modo ${mode} seleccionado`);
+  }
+
+  setEmergencyStop(enabled: boolean, source = "panel"): void {
+    this.store.set("emergency_stop", String(enabled));
+    if (enabled) this.store.set("paused", "true");
+    this.store.audit(
+      enabled ? "emergency_stop" : "emergency_stop_cleared",
+      enabled
+        ? `Parada de emergencia activada desde ${source}; no se iniciarán operaciones.`
+        : `Parada de emergencia desactivada desde ${source}; la automatización permanece pausada.`,
+    );
+  }
+
+  async activate(): Promise<void> {
+    // Verifica una sesión real antes de reanudar; saldo 0 sigue siendo una sesión válida.
+    await this.qva.qusdBalance();
+    this.setPaused(false);
+    this.store.audit(
+      "automation_activated",
+      `Automatización activada en modo ${this.mode()}`,
+    );
+  }
+
+  reconcilePendingWorkflows() {
+    return this.opportunityOrchestrator.reconcilePending();
+  }
+
+  reconcileWorkflow(workflowId: string) {
+    return this.opportunityOrchestrator.reconcile(workflowId);
+  }
+
+  async inspectMarket(coin: FiatMarket): Promise<MarketSnapshot> {
+    if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
+    const page = await this.qva.listOffersPage({
+      take: 20,
+      page: 1,
+      coin,
+      status: "open",
+      orderBy: "updated_at",
+      orderType: "desc",
+    });
+    const averages = await this.getAverages();
+    return {
+      items: page.offers.map((offer) =>
+        this.classifyOffer(offer, averages?.[offer.coin]),
+      ),
+      total: page.total,
+      scannedAt: Date.now(),
+    };
+  }
+
+  async scan(): Promise<{
+    inspected: number;
+    candidates: number;
+    action?: string;
+  }> {
+    if (this.scanInFlight) return this.scanInFlight;
+    const run = this.scanOnce();
+    this.scanInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.scanInFlight === run) this.scanInFlight = undefined;
+    }
+  }
+
+  private async scanOnce(): Promise<{
+    inspected: number;
+    candidates: number;
+    action?: string;
+  }> {
+    if (this.isPaused())
+      return { inspected: 0, candidates: 0, action: "pausado" };
+    try {
+      const snapshots = await Promise.all(
+        this.activeMarkets().map((market) => this.inspectMarket(market.code)),
+      );
+      const items = snapshots.flatMap((market) => market.items);
+      const offers = items.map((item) => item.offer);
+      const candidates = items
+        .filter(
+          (item) =>
+            item.decision === "auto_buy" || item.decision === "manual_sell",
+        )
+        .map((item) => item.offer);
+      const sellCandidates = items
+        .filter(
+          (item) =>
+            item.decision === "auto_buy" && !this.store.isSeen(item.offer.uuid),
+        )
+        .map((item) => item.offer);
+      const buyCandidates = items
+        .filter(
+          (item) =>
+            item.decision === "manual_sell" &&
+            !this.store.isSeen(item.offer.uuid),
+        )
+        .map((item) => item.offer);
+
+      this.syncWebAlerts(items);
+
+      for (const item of items.filter(
+        (candidate) =>
+          candidate.decision === "blocked" &&
+          !this.store.isSeen(candidate.offer.uuid),
+      )) {
+        this.store.markSeen(item.offer.uuid);
+        this.store.audit("price_guard_block", item.reason, item.offer.uuid);
+        await this.notify(
+          `🛡️ Oferta bloqueada por cortafuegos (${this.marketLabel(this.offerMarket(item.offer))})\n${item.offer.amount} QUSD · ${item.rate.toFixed(2)} ${this.marketCurrency(this.offerMarket(item.offer))}/QUSD\n${item.reason}\nOferta: ${item.offer.uuid}`,
+        );
+      }
+
+      // Las compras automáticas solo se ejecutan para ofertas sell: pagas el fiat del mercado y recibes QUSD.
+      const bestByMarket = this.activeMarkets()
+        .map(
+          (market) =>
+            sellCandidates
+              .filter((offer) => offer.coin === market.code)
+              .sort((a, b) => rate(a) - rate(b))[0],
+        )
+        .filter((offer): offer is P2pOffer => Boolean(offer));
+      const best = bestByMarket.find((offer) => this.canFund(offer));
+      if (best) {
+        const bestCoin = this.offerMarket(best);
+        if (this.mode() === "real") {
+          const risk = await this.evaluateAutomaticBuy(best);
+          if (risk.kind !== "apply") {
+            this.store.audit("risk_block", risk.reasons.join(" · "), best.uuid);
+            await this.notify(
+              `🛡️ Compra automática bloqueada: ${risk.reasons.join(" · ")}`,
+            );
+            this.recordScan(offers.length, candidates.length, `Bloqueada ${best.uuid}`);
+            return {
+              inspected: offers.length,
+              candidates: candidates.length,
+              action: `bloqueada ${best.uuid}`,
+            };
+          }
+          await this.applyBuyQusd(best, true);
+          this.store.markSeen(best.uuid);
+          this.recordScan(
+            offers.length,
+            candidates.length,
+            `Aplicada ${best.uuid}`,
+          );
+          return {
+            inspected: offers.length,
+            candidates: candidates.length,
+            action: `aplicada ${best.uuid}`,
+          };
+        }
+        this.store.markSeen(best.uuid);
+        await this.notify(
+          `SIMULACIÓN: aplicaría a venta ${best.amount} QUSD por ${best.receive} ${this.marketCurrency(bestCoin)} (${rate(best).toFixed(2)} ${this.marketCurrency(bestCoin)}/QUSD) en ${this.marketLabel(bestCoin)}.\nOferta: ${best.uuid}`,
+        );
+        this.store.audit(
+          "simulated_apply",
+          `Compra simulada a ${rate(best).toFixed(2)} ${this.marketCurrency(bestCoin)}/QUSD (${bestCoin})`,
+          best.uuid,
+        );
+        this.recordScan(
+          offers.length,
+          candidates.length,
+          `Simulada ${best.uuid}`,
+        );
+        return {
+          inspected: offers.length,
+          candidates: candidates.length,
+          action: `simulada ${best.uuid}`,
+        };
+      }
+
+      const bestExternalBuy = buyCandidates
+        .slice()
+        .sort((left, right) => rate(right) - rate(left))[0];
+      if (bestExternalBuy && this.mode() === "real") {
+        const coin = this.offerMarket(bestExternalBuy);
+        const configured = this.market(coin)!;
+        const averages = await this.getAverages();
+        const reference = numeric(averages?.[coin]?.average_buy);
+        const expectedMargin = configured.buyMaxRate
+          ? ((rate(bestExternalBuy) * (1 - configured.sellFeePercent / 100) -
+              configured.buyMaxRate) /
+              configured.buyMaxRate) *
+            100
+          : 0;
+        const result = await this.opportunityOrchestrator.execute({
+          target: bestExternalBuy,
+          referenceRate: reference ?? rate(bestExternalBuy),
+          expectedMarginPercent: expectedMargin,
+          priceDecision: reference ? "eligible" : "blocked",
+          priceReason: reference
+            ? "La tasa supera el mínimo configurado y tiene referencia de mercado."
+            : "No existe una referencia de mercado válida.",
+        });
+        if (result.workflow?.state === "applied") {
+          this.store.markSeen(bestExternalBuy.uuid);
+          this.recordScan(
+            offers.length,
+            candidates.length,
+            `Venta aplicada ${bestExternalBuy.uuid}`,
+          );
+          return {
+            inspected: offers.length,
+            candidates: candidates.length,
+            action: `venta aplicada ${bestExternalBuy.uuid}`,
+          };
+        }
+        this.store.audit(
+          "risk_block",
+          result.decision.reasons.join(" · "),
+          bestExternalBuy.uuid,
+        );
+      }
+
+      for (const offer of buyCandidates) {
+        if (this.mode() === "real") continue;
+        this.store.markSeen(offer.uuid);
+        await this.notify(
+          `Oportunidad de VENTA detectada en ${this.marketLabel(this.offerMarket(offer))} (requiere /apply manual): ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} (${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD).\nOferta: ${offer.uuid}`,
+        );
+        this.store.audit(
+          "sell_alert",
+          `Venta candidata a ${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD (${offer.coin})`,
+          offer.uuid,
+        );
+      }
+      this.recordScan(offers.length, candidates.length, "Sin aplicación");
+      return { inspected: offers.length, candidates: candidates.length };
+    } catch (error) {
+      await this.handleError("scan", error);
+      return { inspected: 0, candidates: 0, action: "error" };
+    }
+  }
+
+  async applyManually(uuid: string): Promise<string> {
+    const strategy = this.strategy();
+    this.requireRealMode();
+    const offer = await this.qva.getOffer(uuid);
+    if (offer.status !== "open" || !this.isMarket(offer.coin))
+      throw new Error(
+        "La oferta ya no está abierta o no usa un mercado fiat compatible.",
+      );
+    if (offer.type === "sell") {
+      if (rate(offer) > this.market(this.offerMarket(offer))!.buyMaxRate)
+        throw new Error(
+          `La tasa ${rate(offer).toFixed(2)} supera tu máximo de compra.`,
+        );
+      if (!this.canFund(offer))
+        throw new Error("Saldo fiat declarado insuficiente para esta compra.");
+      await this.applyBuyQusd(offer, false);
+      return "Aplicaste a una venta; realiza el pago y usa /paid con la referencia.";
+    }
+    if (rate(offer) < this.market(this.offerMarket(offer))!.sellMinRate)
+      throw new Error(
+        `La tasa ${rate(offer).toFixed(2)} no alcanza tu mínimo de venta.`,
+      );
+    const balance = await this.qva.qusdBalance();
+    if (balance - strategy.reserve < offer.amount)
+      throw new Error(
+        `Saldo QUSD insuficiente. Disponible para operar: ${(balance - strategy.reserve).toFixed(2)} QUSD.`,
+      );
+    await this.executeMutation("apply", uuid, { uuid }, () =>
+      this.qva.apply(uuid),
+    );
+    this.store.createOperation({
+      uuid,
+      offerType: "buy",
+      coin: this.offerMarket(offer),
+      amount: offer.amount,
+      receive: offer.receive,
+      rate: rate(offer),
+      state: "applied",
+      autoApplied: false,
+      cancelAt: null,
+      createdAt: Date.now(),
+      ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
+    });
+    await this.sendChatBestEffort(uuid);
+    this.store.audit(
+      "manual_apply_sell",
+      `Aplicación manual a oferta de compra`,
+      uuid,
+    );
+    return "Aplicaste como vendedor de QUSD. Espera el pago fiat y usa /received solo después de verificarlo.";
+  }
+
+  async acknowledge(uuid: string): Promise<void> {
+    const operation = this.requireOperation(uuid);
+    if (operation.offerType !== "sell")
+      throw new Error(
+        "En esta operación no debes pagar fiat; espera la transferencia y confirma recepción cuando corresponda.",
+      );
+    if (operation.state !== "applied")
+      throw new Error("La operación ya no está esperando tu respuesta.");
+    this.store.updateOperation(uuid, "acknowledged");
+    this.store.audit(
+      "acknowledged",
+      "Usuario indicó que realizará el pago",
+      uuid,
+    );
+  }
+
+  async markPaid(uuid: string, reference: string): Promise<void> {
+    this.requireRealMode();
+    const operation = this.requireOperation(uuid);
+    if (
+      operation.offerType !== "sell" ||
+      !["applied", "acknowledged"].includes(operation.state)
+    )
+      throw new Error(
+        "Esta operación no permite marcar pago en su estado actual.",
+      );
+    if (!reference.trim())
+      throw new Error("La referencia de transferencia es obligatoria.");
+    await this.qva.getOffer(uuid); // comprueba sesión y estado remoto antes de la acción irreversible
+    await this.executeMutation(
+      "paid",
+      uuid,
+      { uuid, reference: reference.trim() },
+      () => this.qva.markPaid(uuid, reference.trim()),
+    );
+    this.store.updateOperation(uuid, "paid");
+    this.store.audit("marked_paid", "Pago fiat marcado por el usuario", uuid);
+  }
+
+  async confirmReceived(uuid: string): Promise<void> {
+    this.requireRealMode();
+    const operation = this.requireOperation(uuid);
+    if (operation.offerType !== "buy")
+      throw new Error(
+        "En una compra de QUSD debes marcar pago, no confirmar recepción.",
+      );
+    await this.qva.getOffer(uuid);
+    await this.executeMutation("received", uuid, { uuid }, () =>
+      this.qva.confirmReceived(uuid),
+    );
+    this.store.updateOperation(uuid, "completed");
+    this.store.audit("received", "Usuario confirmó recepción de fiat", uuid);
+  }
+
+  async cancel(uuid: string, automatic = false): Promise<void> {
+    this.requireRealMode();
+    const operation = this.requireOperation(uuid);
+    if (
+      automatic &&
+      (operation.offerType !== "sell" ||
+        !operation.autoApplied ||
+        operation.state !== "applied")
+    )
+      throw new Error(
+        "Cancelación automática no permitida para esta operación.",
+      );
+    await this.qva.getOffer(uuid);
+    await this.executeMutation("cancel", uuid, { uuid, automatic }, () =>
+      this.qva.cancel(uuid),
+    );
+    this.store.updateOperation(uuid, "cancelled");
+    this.store.audit(
+      automatic ? "auto_cancel" : "cancel",
+      automatic ? "Venció el plazo de 10 min" : "Cancelada por el usuario",
+      uuid,
+    );
+  }
+
+  async expireOperations(): Promise<void> {
+    if (this.mode() !== "real") return;
+    for (const operation of this.store.pendingCancellations(Date.now())) {
+      try {
+        const remote = await this.qva.getOffer(operation.uuid);
+        if (isTerminal(remote.status)) {
+          this.closeRemoteOperation(
+            operation.uuid,
+            `Estado remoto terminal: ${remote.status}`,
+          );
+          continue;
+        }
+        await this.executeMutation(
+          "cancel",
+          operation.uuid,
+          { uuid: operation.uuid, automatic: true },
+          () => this.qva.cancel(operation.uuid),
+        );
+        this.store.updateOperation(operation.uuid, "cancelled");
+        this.store.audit(
+          "auto_cancel",
+          `Venció el plazo de ${this.cfg.autoCancelMs / 60_000} min`,
+          operation.uuid,
+        );
+        await this.notify(
+          `Operación ${operation.uuid} cancelada automáticamente: no respondiste en ${this.cfg.autoCancelMs / 60_000} min.`,
+        );
+      } catch (error) {
+        if (
+          error instanceof QvaApiError &&
+          (error.status === 403 || error.status === 404)
+        ) {
+          this.closeRemoteOperation(
+            operation.uuid,
+            "QvaPay indica que ya no eres participante o la oferta no existe",
+          );
+          continue;
+        }
+        if (this.isMutationUncertain(error)) {
+          this.store.updateOperation(operation.uuid, "applied", null);
+          this.store.audit(
+            "auto_cancel_reconciliation_required",
+            error instanceof Error ? error.message : String(error),
+            operation.uuid,
+          );
+          try {
+            await this.notify(
+              `⚠️ No se pudo confirmar la cancelación automática de ${operation.uuid}. Se detuvieron los reintentos; requiere conciliación manual con QvaPay.`,
+            );
+          } catch (notificationError) {
+            this.store.audit(
+              "notification_warning",
+              notificationError instanceof Error
+                ? notificationError.message
+                : String(notificationError),
+              operation.uuid,
+            );
+          }
+          continue;
+        }
+        this.scheduleAutoCancelRetry(operation.uuid, error);
+      }
+    }
+  }
+
+  async listOwnOffers(): Promise<P2pOffer[]> {
+    return this.qva.listOffers({ my: true, take: 20, page: 1, status: "open" });
+  }
+
+  async syncFiatFromQva(): Promise<number> {
+    const startedAt = new Map<FiatMarket, number>();
+    for (const { code: coin } of this.markets()) {
+      const value = Number(
+        this.store.get(`fiat_ledger_started_at:${coin}`) ?? 0,
+      );
+      if (!value) {
+        this.store.set(`fiat_ledger_started_at:${coin}`, String(Date.now()));
+        this.store.audit(
+          "fiat_ledger_started",
+          `Saldo ${this.marketLabel(coin)} fijado como base; no se importó historial previo`,
+        );
+      } else startedAt.set(coin, value);
+    }
+    const profile = await this.qva.profile();
+    const [created, asPeer] = await Promise.all([
+      this.qva.listOffersPage({
+        my: true,
+        take: 50,
+        page: 1,
+        orderBy: "updated_at",
+        orderType: "desc",
+      }),
+      this.qva.listOffersPage({
+        peer: profile.uuid,
+        take: 50,
+        page: 1,
+        orderBy: "updated_at",
+        orderType: "desc",
+      }),
+    ]);
+    const offers = new Map<string, P2pOffer>();
+    for (const offer of [...created.offers, ...asPeer.offers])
+      offers.set(offer.uuid, offer);
+    let movements = 0;
+    for (const offer of offers.values()) {
+      const updatedAt = offer.updated_at
+        ? Date.parse(offer.updated_at)
+        : Number.NaN;
+      if (!this.isMarket(offer.coin)) continue;
+      const coin = offer.coin;
+      const marketStartedAt = startedAt.get(coin);
+      if (
+        !marketStartedAt ||
+        !Number.isFinite(updatedAt) ||
+        updatedAt < marketStartedAt
+      )
+        continue;
+      const creator = offer.User?.uuid === profile.uuid;
+      const peer = offer.Peer?.uuid === profile.uuid;
+      const paysFiat =
+        (creator && offer.type === "buy") || (peer && offer.type === "sell");
+      const receivesFiat =
+        (creator && offer.type === "sell") || (peer && offer.type === "buy");
+      const needsFiatMovement =
+        (paysFiat && ["paid", "completed"].includes(offer.status)) ||
+        (receivesFiat && offer.status === "completed");
+      if (!needsFiatMovement) continue;
+
+      const fiatAmount = numeric(offer.receive);
+      if (!fiatAmount) {
+        const warningKey = `fiat_sync_invalid_amount:${offer.uuid}`;
+        if (this.store.get(warningKey) !== "true") {
+          this.store.set(warningKey, "true");
+          this.store.audit(
+            "fiat_sync_skipped",
+            `Oferta ${coin} omitida: importe fiat inválido (${String(offer.receive)})`,
+            offer.uuid,
+          );
+        }
+        continue;
+      }
+
+      if (
+        paysFiat &&
+        ["paid", "completed"].includes(offer.status) &&
+        this.store.recordFiatMovement(
+          offer.uuid,
+          coin,
+          "debit",
+          fiatAmount,
+          "QvaPay reconciliado",
+        )
+      )
+        movements += 1;
+      if (
+        receivesFiat &&
+        offer.status === "completed" &&
+        this.store.recordFiatMovement(
+          offer.uuid,
+          coin,
+          "credit",
+          fiatAmount,
+          "QvaPay reconciliado",
+        )
+      )
+        movements += 1;
+    }
+    for (const market of this.markets())
+      this.marketConfig.updateBalance(
+        market.code,
+        this.fiatBalance(market.code),
+      );
+    this.store.set("last_fiat_sync", String(Date.now()));
+    if (movements)
+      this.store.audit(
+        "fiat_sync",
+        `${movements} movimiento(s) reconciliado(s)`,
+      );
+    return movements;
+  }
+
+  async refreshOwnOffer(uuid: string): Promise<void> {
+    this.requireRealMode();
+    const offer = (await this.listOwnOffers()).find(
+      (candidate) => candidate.uuid === uuid,
+    );
+    if (!offer) throw new Error("No es una oferta propia abierta.");
+    const refreshed = await this.executeMutation(
+      "edit_offer",
+      uuid,
+      { uuid, refresh: true },
+      () =>
+        this.qva.editOffer(uuid, {
+          message: (offer.message ?? this.cfg.welcomeMessage).slice(0, 79),
+        }),
+    );
+    this.recordRefresh(uuid, refreshed?.updated_at);
+    this.store.audit(
+      "refresh_offer",
+      "Oferta propia actualizada manualmente",
+      uuid,
+    );
+  }
+
+  async createOwnOffer(
+    coin: FiatMarket,
+    type: "buy" | "sell",
+    amount: number,
+    fiatPerQusd: number,
+  ): Promise<P2pOffer> {
+    this.requireRealMode();
+    if (amount <= 0 || fiatPerQusd <= 0)
+      throw new Error("El importe y la tasa deben ser positivos.");
+    const market = this.market(coin);
+    if (!market) throw new Error("Mercado no configurado.");
+    if (
+      type === "buy" &&
+      market.purchaseMaxQusd > 0 &&
+      amount > market.purchaseMaxQusd
+    )
+      throw new Error(
+        `Las compras en ${market.label} están limitadas a ${market.purchaseMaxQusd} QUSD por oferta.`,
+      );
+    const open = await this.listOwnOffers();
+    if (open.length >= this.strategy().maxOpenOffers)
+      throw new Error(
+        `Ya alcanzaste el máximo de ${this.strategy().maxOpenOffers} ofertas abiertas.`,
+      );
+    if (type === "buy") {
+      const committed = open
+        .filter(
+          (offer) =>
+            offer.type === "buy" &&
+            offer.coin === coin &&
+            offer.status === "open",
+        )
+        .reduce((sum, offer) => sum + offer.receive, 0);
+      const available = this.fiatBalance(coin) - committed;
+      if (amount * fiatPerQusd > available + 0.000001)
+        throw new Error(
+          `Saldo ${this.marketLabel(coin)} insuficiente. Disponible para nuevas compras: ${available.toFixed(2)} ${this.marketCurrency(coin)}.`,
+        );
+    }
+    if (
+      !this.market(coin)?.paymentDetails.length ||
+      this.market(coin)?.paymentDetails.some((detail) => !detail.value)
+    )
+      throw new Error(
+        `Configura los datos de pago de ${this.marketLabel(coin)} antes de crear ofertas.`,
+      );
+    const idempotencyKey = randomUUID();
+    const message = (this.cfg.welcomeMessage ?? "").slice(0, 79);
+    const request = {
+      type,
+      coin,
+      amount,
+      receive: amount * fiatPerQusd,
+      details: this.market(coin)!.paymentDetails,
+      ...(message ? { message } : {}),
+      idempotencyKey,
+    };
+    const offer = await this.executeMutation(
+      "create_offer",
+      undefined,
+      request,
+      () => this.qva.createOffer(request),
+      idempotencyKey,
+    );
+    this.store.audit(
+      "create_offer",
+      `Oferta propia ${type} en ${coin}: ${amount} QUSD a ${fiatPerQusd}`,
+      offer.uuid,
+    );
+    return offer;
+  }
+
+  async editOwnOffer(
+    uuid: string,
+    amount: number,
+    fiatPerQusd: number,
+  ): Promise<void> {
+    this.requireRealMode();
+    if (amount <= 0 || fiatPerQusd <= 0)
+      throw new Error("El importe y la tasa deben ser positivos.");
+    const offer = (await this.listOwnOffers()).find(
+      (candidate) => candidate.uuid === uuid,
+    );
+    if (!offer) throw new Error("No es una oferta propia abierta.");
+    if (!this.isMarket(offer.coin))
+      throw new Error("La oferta no usa un mercado fiat compatible.");
+    const market = this.market(offer.coin);
+    if (
+      offer.type === "buy" &&
+      market &&
+      market.purchaseMaxQusd > 0 &&
+      amount > market.purchaseMaxQusd
+    )
+      throw new Error(
+        `Las compras en ${market.label} están limitadas a ${market.purchaseMaxQusd} QUSD por oferta.`,
+      );
+    if (offer.type === "buy") {
+      const committed = (await this.listOwnOffers())
+        .filter(
+          (candidate) =>
+            candidate.uuid !== uuid &&
+            candidate.type === "buy" &&
+            candidate.coin === offer.coin &&
+            candidate.status === "open",
+        )
+        .reduce((sum, candidate) => sum + candidate.receive, 0);
+      const available = this.fiatBalance(offer.coin) - committed;
+      if (amount * fiatPerQusd > available + 0.000001)
+        throw new Error(
+          `Saldo ${this.marketLabel(offer.coin)} insuficiente. Disponible para esta oferta: ${available.toFixed(2)} ${this.marketCurrency(offer.coin)}.`,
+        );
+    }
+    await this.executeMutation(
+      "edit_offer",
+      uuid,
+      { uuid, amount, receive: amount * fiatPerQusd },
+      () => this.qva.editOffer(uuid, { amount, receive: amount * fiatPerQusd }),
+    );
+    this.store.audit(
+      "edit_offer",
+      `Oferta propia ${offer.coin} actualizada: ${amount} QUSD a ${fiatPerQusd}`,
+      uuid,
+    );
+  }
+
+  async cancelOwnOffer(uuid: string): Promise<void> {
+    this.requireRealMode();
+    const offer = (await this.listOwnOffers()).find(
+      (candidate) => candidate.uuid === uuid,
+    );
+    if (!offer) throw new Error("No es una oferta propia abierta.");
+    await this.executeMutation("cancel_offer", uuid, { uuid }, () =>
+      this.qva.cancel(uuid),
+    );
+    this.store.audit(
+      "cancel_own_offer",
+      "Oferta propia abierta cancelada",
+      uuid,
+    );
+  }
+
+  async qusdBalance(): Promise<number> {
+    return this.qva.qusdBalance();
+  }
+
+  lastRefresh(uuid: string): number | undefined {
+    const raw = this.store.get(`last_refresh:${uuid}`);
+    const value = raw ? Number(raw) : Number.NaN;
+    return Number.isFinite(value) ? value : undefined;
+  }
+
+  logs(limit = 12) {
+    return this.store.recentAudit(limit);
+  }
+  fiatMovements(coin: FiatMarket, limit = 5) {
+    return this.store.recentFiat(coin, limit);
+  }
+
+  operationalState(): {
+    paused: boolean;
+    mode: "simulation" | "real";
+    fiat: Record<FiatMarket, number>;
+    refresh: boolean;
+    active: number;
+    lastScan?: {
+      at: number;
+      inspected: number;
+      candidates: number;
+      result: string;
+    };
+  } {
+    const raw = this.store.get("last_scan");
+    let lastScan:
+      | { at: number; inspected: number; candidates: number; result: string }
+      | undefined;
+    try {
+      if (raw) lastScan = JSON.parse(raw) as typeof lastScan;
+    } catch {
+      /* Ignora datos antiguos */
+    }
+    return {
+      paused: this.isPaused(),
+      mode: this.mode(),
+      fiat: Object.fromEntries(
+        this.markets().map((market) => [
+          market.code,
+          this.fiatBalance(market.code),
+        ]),
+      ),
+      refresh: this.refreshEnabled(),
+      active: this.store.activeOperations().length,
+      ...(lastScan ? { lastScan } : {}),
+    };
+  }
+
+  async refreshOwnOffers(): Promise<void> {
+    if (!this.refreshEnabled() || this.isPaused() || this.mode() !== "real")
+      return;
+    if (this.refreshRoundInFlight) return;
+    this.refreshRoundInFlight = true;
+    try {
+      for (const offer of await this.listOwnOffers()) {
+        const now = Date.now();
+        const key = `last_refresh:${offer.uuid}`;
+        const retryAt = Number(
+          this.store.get(`refresh_retry:${offer.uuid}`) ?? 0,
+        );
+        if (retryAt > now) continue;
+        if (
+          now - Number(this.store.get(key) ?? 0) <
+          this.cfg.offerRefreshIntervalMs
+        )
+          continue;
+        try {
+          const refreshed = await this.qva.editOffer(offer.uuid, {
+            message: offer.message ?? "",
+          });
+          this.recordRefresh(offer.uuid, refreshed?.updated_at);
+          this.store.audit(
+            "refresh_offer",
+            "Oferta propia actualizada en ronda automática",
+            offer.uuid,
+          );
+        } catch (error) {
+          this.scheduleRefreshRetry(offer.uuid, error);
+        }
+      }
+    } finally {
+      this.refreshRoundInFlight = false;
+    }
+  }
+
+  status(): string {
+    const active = this.store.activeOperations();
+    return [
+      `Modo: ${this.mode()}${this.isPaused() ? " (PAUSADO)" : " (activo)"}`,
+      `Saldo CUP declarado: ${this.fiatBalance("BANK_CUP").toFixed(2)} CUP`,
+      `Saldo Prepago declarado: ${this.fiatBalance("BANDECPREPAGO").toFixed(2)} USD`,
+      `Refresco: ${this.refreshEnabled() ? "activo" : "apagado"}`,
+      `Operaciones activas: ${active.length}`,
+    ].join("\n");
+  }
+
+  private classifyOffer(offer: P2pOffer, average?: P2pAverage): MarketItem {
+    const value = rate(offer);
+    if (
+      offer.status !== "open" ||
+      !this.isMarket(offer.coin) ||
+      offer.amount <= 0 ||
+      offer.receive <= 0
+    )
+      return {
+        offer,
+        rate: value,
+        decision: "ignored",
+        reason: "Oferta no operable",
+      };
+    const coin = this.offerMarket(offer);
+    const configured = this.market(coin)!;
+    const buyMax = configured.buyMaxRate;
+    const sellMin = configured.sellMinRate;
+    if (offer.type === "sell") {
+      const market = this.market(coin);
+      if (market?.purchaseMaxQusd && offer.amount > market.purchaseMaxQusd)
+        return {
+          offer,
+          rate: value,
+          decision: "ignored",
+          reason: `Supera límite de ${market.purchaseMaxQusd} QUSD por compra`,
+        };
+      if (value > buyMax)
+        return {
+          offer,
+          rate: value,
+          decision: "ignored",
+          reason: `Supera máximo de compra (${buyMax} ${this.marketCurrency(coin)}/QUSD)`,
+        };
+      const marketAverage = numeric(average?.average_sell);
+      if (!marketAverage)
+        return {
+          offer,
+          rate: value,
+          decision: "blocked",
+          reason: "Promedio P2P no disponible; compra automática bloqueada",
+        };
+      const floor = marketAverage * (1 - this.cfg.priceGuardPercent / 100);
+      if (value < floor)
+        return {
+          offer,
+          rate: value,
+          decision: "blocked",
+          reason: `${this.cfg.priceGuardPercent}% por debajo del promedio de venta (${marketAverage.toFixed(2)})`,
+        };
+      if (!this.canFund(offer))
+        return {
+          offer,
+          rate: value,
+          decision: "ignored",
+          reason: "Saldo fiat declarado insuficiente",
+        };
+      return {
+        offer,
+        rate: value,
+        decision: "auto_buy",
+        reason: "Compra automática elegible",
+      };
+    }
+    if (value < sellMin)
+      return {
+        offer,
+        rate: value,
+        decision: "ignored",
+        reason: `No alcanza mínimo de venta (${sellMin} ${this.marketCurrency(coin)}/QUSD)`,
+      };
+    const marketAverage = numeric(average?.average_buy);
+    if (!marketAverage)
+      return {
+        offer,
+        rate: value,
+        decision: "blocked",
+        reason: "Promedio P2P no disponible; venta bloqueada",
+      };
+    const ceiling = marketAverage * (1 + this.cfg.priceGuardPercent / 100);
+    if (value > ceiling)
+      return {
+        offer,
+        rate: value,
+        decision: "blocked",
+        reason: `${this.cfg.priceGuardPercent}% por encima del promedio de compra (${marketAverage.toFixed(2)})`,
+      };
+    return {
+      offer,
+      rate: value,
+      decision: "manual_sell",
+      reason: "Venta elegible con aplicación manual",
+    };
+  }
+
+  private canFund(offer: P2pOffer): boolean {
+    const committed = this.store
+      .activeOperations()
+      .filter(
+        (op) => op.offerType === "sell" && op.coin === this.offerMarket(offer),
+      )
+      .reduce((sum, op) => sum + op.receive, 0);
+    return (
+      this.fiatBalance(this.offerMarket(offer)) - committed >= offer.receive
+    );
+  }
+
+  private async evaluateAutomaticBuy(offer: P2pOffer): Promise<RiskDecision> {
+    const store = this.store as Store;
+    const config = this.marketConfig.current();
+    const market = this.market(this.offerMarket(offer))!;
+    const averages = await this.getAverages();
+    const reference = numeric(averages?.[offer.coin]?.average_sell);
+    const currentRate = rate(offer);
+    const expectedMargin = currentRate
+      ? ((market.sellMinRate * (1 - market.sellFeePercent / 100) - currentRate) /
+          currentRate) *
+        100
+      : 0;
+    const now = Date.now();
+    return evaluateRisk({
+      now,
+      opportunity: {
+        uuid: offer.uuid,
+        market: offer.coin,
+        side: "buy_qusd",
+        qusdAmount: offer.amount,
+        requiredFiat: offer.receive,
+        quotedRate: currentRate,
+        referenceRate: reference ?? currentRate,
+        observedAt: now,
+        ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
+      },
+      limits: config.risk,
+      priceDecision:
+        config.risk.reviewedAt === null
+          ? "manual_review"
+          : reference
+            ? "eligible"
+            : "blocked",
+      priceReason:
+        config.risk.reviewedAt === null
+          ? "Los límites globales todavía no han sido revisados desde el panel."
+          : reference
+            ? "La tasa cumple el máximo de compra configurado."
+            : "No existe una referencia de mercado válida.",
+      expectedMarginPercent: expectedMargin,
+      qusdBalance: await this.qva.qusdBalance(),
+      fiatAvailable: this.fiatBalance(offer.coin),
+      concurrentQusdExposure:
+        store.activeOperations().reduce(
+          (sum, operation) => sum + operation.amount,
+          0,
+        ) + store.activeReservedQusd(),
+      dailyAppliedQusd: store.dailyAppliedQusd(dayStart(now)),
+      activeOperations: store.activeOperations().length,
+      consecutiveErrors: Number(store.get("consecutive_errors") ?? 0),
+      paused: this.isPaused(),
+      emergencyStop: store.get("emergency_stop") === "true",
+      hasUnresolvedMutation: store.hasUnresolvedMutation(),
+      ...this.riskCooldowns(offer),
+    });
+  }
+
+  private syncWebAlerts(items: MarketItem[]): void {
+    if (this.isPaused() || this.mode() !== "real") {
+      this.store.syncTradingAlerts([]);
+      return;
+    }
+    this.store.syncTradingAlerts(
+      items.flatMap((item) => {
+        if (item.decision !== "auto_buy" && item.decision !== "manual_sell")
+          return [];
+        return [
+          {
+            uuid: item.offer.uuid,
+            coin: this.offerMarket(item.offer),
+            offerType: item.offer.type,
+            amount: item.offer.amount,
+            receive: item.offer.receive,
+            rate: item.rate,
+            decision: item.decision,
+            reason: item.reason,
+          },
+        ];
+      }),
+    );
+  }
+
+  private async applyBuyQusd(
+    offer: P2pOffer,
+    automatic: boolean,
+  ): Promise<void> {
+    await this.executeMutation(
+      "apply",
+      offer.uuid,
+      { uuid: offer.uuid, automatic },
+      () => this.qva.apply(offer.uuid),
+    );
+    this.store.createOperation({
+      uuid: offer.uuid,
+      offerType: "sell",
+      coin: this.offerMarket(offer),
+      amount: offer.amount,
+      receive: offer.receive,
+      rate: rate(offer),
+      state: "applied",
+      autoApplied: automatic,
+      cancelAt: automatic ? Date.now() + this.cfg.autoCancelMs : null,
+      createdAt: Date.now(),
+      ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
+    });
+    await this.sendChatBestEffort(offer.uuid);
+    this.store.audit(
+      automatic ? "auto_apply_buy" : "manual_apply_buy",
+      `Compra de ${offer.amount} QUSD a ${rate(offer).toFixed(2)}`,
+      offer.uuid,
+    );
+    await this.notify(
+      `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} (${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD) en ${this.marketLabel(this.offerMarket(offer))}.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? "Cancelaré automáticamente en 10 min si no indicas que pagarás: /ack " + offer.uuid : ""}`,
+      offer.uuid,
+    );
+  }
+
+  private requireOperation(uuid: string) {
+    const operation = this.store.getOperation(uuid);
+    if (!operation)
+      throw new Error("No existe una operación local con ese UUID.");
+    return operation;
+  }
+  private async executeMutation<T>(
+    kind: string,
+    operationUuid: string | undefined,
+    request: unknown,
+    action: () => Promise<T>,
+    idempotencyKey?: string,
+  ): Promise<T> {
+    const intentId = randomUUID();
+    this.store.createMutationIntent({
+      intentId,
+      ...(operationUuid ? { operationUuid } : {}),
+      kind,
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      request,
+    });
+    try {
+      const result = await action();
+      this.store.updateMutationIntent(intentId, "confirmed", result);
+      return result;
+    } catch (error) {
+      const uncertain = this.isMutationUncertain(error);
+      const message = error instanceof Error ? error.message : String(error);
+      this.store.updateMutationIntent(
+        intentId,
+        uncertain ? "uncertain" : "rejected",
+        undefined,
+        message,
+      );
+      this.store.audit(
+        uncertain ? "mutation_uncertain" : "mutation_rejected",
+        `${kind}: ${message}`,
+        operationUuid,
+      );
+      throw error;
+    }
+  }
+  private async sendChatBestEffort(uuid: string): Promise<void> {
+    try {
+      await this.qva.sendChat(uuid, this.cfg.welcomeMessage);
+    } catch (error) {
+      this.store.audit(
+        "chat_warning",
+        error instanceof Error ? error.message : String(error),
+        uuid,
+      );
+      await this.notify(
+        `⚠️ La operación ${uuid} quedó registrada, pero no se pudo enviar el mensaje automático al chat P2P.`,
+      );
+    }
+  }
+  private offerMarket(offer: Pick<P2pOffer, "coin">): FiatMarket {
+    if (!this.isMarket(offer.coin))
+      throw new Error(`Mercado fiat no compatible: ${offer.coin}`);
+    return offer.coin;
+  }
+  private requireRealMode(): void {
+    if (this.mode() !== "real" || !this.cfg.realTradingAllowed)
+      throw new Error(
+        "Acción bloqueada: activa /mode real y CONFIRM_REAL_TRADING=true.",
+      );
+  }
+
+  private async handleError(
+    action: string,
+    error: unknown,
+    uuid?: string,
+  ): Promise<void> {
+    const message = error instanceof Error ? error.message : String(error);
+    const failures = Number(this.store.get("consecutive_errors") ?? 0) + 1;
+    this.store.set("consecutive_errors", String(failures));
+    this.store.audit(`${action}_error`, message, uuid);
+    const threshold = this.marketConfig.current().risk.maxConsecutiveErrors;
+    if (
+      (error instanceof QvaApiError && error.status === 401) ||
+      failures >= threshold
+    )
+      this.setPaused(true, "protección automática por errores");
+    await this.notify(
+      `Error en ${action}${uuid ? ` (${uuid})` : ""}: ${message}${error instanceof QvaApiError && error.status === 401 ? "\nEl bot fue pausado; ejecuta pnpm login." : ""}`,
+    );
+  }
+
+  private async getAverages(): Promise<Record<string, P2pAverage> | undefined> {
+    if (this.averagesCache && this.averagesCache.expiresAt > Date.now())
+      return this.averagesCache.value;
+    try {
+      const value = await this.qva.p2pAverages();
+      this.averagesCache = { value, expiresAt: Date.now() + 60_000 };
+      return value;
+    } catch (error) {
+      this.store.audit(
+        "averages_error",
+        error instanceof Error ? error.message : String(error),
+      );
+      return undefined;
+    }
+  }
+
+  private closeRemoteOperation(uuid: string, detail: string): void {
+    this.store.updateOperation(uuid, "cancelled");
+    this.store.set(`retry:auto_cancel:${uuid}`, "0");
+    this.store.audit("remote_operation_closed", detail, uuid);
+  }
+
+  private isMutationUncertain(error: unknown): boolean {
+    return (
+      error instanceof QvaMutationUncertainError ||
+      (error instanceof QvaApiError && error.status >= 500)
+    );
+  }
+
+  private scheduleAutoCancelRetry(uuid: string, error: unknown): void {
+    const attempts =
+      Number(this.store.get(`retry:auto_cancel:${uuid}`) ?? 0) + 1;
+    const delay = Math.min(
+      10 * 60_000,
+      60_000 * 2 ** Math.min(attempts - 1, 4),
+    );
+    this.store.set(`retry:auto_cancel:${uuid}`, String(attempts));
+    this.store.updateOperation(uuid, "applied", Date.now() + delay);
+    this.store.audit(
+      "auto_cancel_retry",
+      `Reintento ${attempts} en ${Math.round(delay / 60_000)} min: ${error instanceof Error ? error.message : String(error)}`,
+      uuid,
+    );
+  }
+
+  private scheduleRefreshRetry(uuid: string, error: unknown): void {
+    const key = `refresh_attempts:${uuid}`;
+    const attempts = Number(this.store.get(key) ?? 0) + 1;
+    const delay = Math.min(
+      10 * 60_000,
+      60_000 * 2 ** Math.min(attempts - 1, 4),
+    );
+    this.store.set(key, String(attempts));
+    this.store.set(`refresh_retry:${uuid}`, String(Date.now() + delay));
+    this.store.audit(
+      "refresh_retry",
+      `Reintento ${attempts} en ${Math.round(delay / 60_000)} min: ${error instanceof Error ? error.message : String(error)}`,
+      uuid,
+    );
+  }
+
+  private recordRefresh(uuid: string, updatedAt?: string): void {
+    const timestamp = updatedAt ? Date.parse(updatedAt) : Date.now();
+    this.store.set(
+      `last_refresh:${uuid}`,
+      String(Number.isFinite(timestamp) ? timestamp : Date.now()),
+    );
+    this.store.set(`refresh_retry:${uuid}`, "0");
+    this.store.set(`refresh_attempts:${uuid}`, "0");
+  }
+
+  private recordScan(
+    inspected: number,
+    candidates: number,
+    result: string,
+  ): void {
+    const snapshot = { at: Date.now(), inspected, candidates, result };
+    this.store.set("consecutive_errors", "0");
+    this.store.set("last_scan", JSON.stringify(snapshot));
+    this.store.audit(
+      "scan_complete",
+      `${inspected} ofertas · ${candidates} candidatas · ${result}`,
+    );
+  }
+
+  private riskCooldowns(offer: P2pOffer) {
+    const store = this.store as Store;
+    const marketAt = store.lastOperationAt(offer.coin);
+    const counterpartyAt = offer.User?.uuid
+      ? store.lastOperationAt(offer.coin, offer.User.uuid)
+      : undefined;
+    return {
+      ...(marketAt === undefined ? {} : { lastMarketOperationAt: marketAt }),
+      ...(counterpartyAt === undefined
+        ? {}
+        : { lastCounterpartyOperationAt: counterpartyAt }),
+    };
+  }
+}
+
+/** @deprecated Use TradingEngine. Kept while Telegram and HTTP adapters migrate. */
+export { TradingEngine as TradingService };
+
+export const rate = (offer: Pick<P2pOffer, "amount" | "receive">): number =>
+  offer.receive / offer.amount;
+const numeric = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : typeof value === "string" &&
+        Number.isFinite(Number(value)) &&
+        Number(value) > 0
+      ? Number(value)
+      : undefined;
+const isTerminal = (status: string): boolean =>
+  ["cancelled", "canceled", "completed", "revision"].includes(
+    status.toLowerCase(),
+  );
+
+function dayStart(now: number): number {
+  const date = new Date(now);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}

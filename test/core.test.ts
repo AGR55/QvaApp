@@ -1,0 +1,505 @@
+import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { Store } from "../src/store.js";
+import { rate, TradingService } from "../src/trading.js";
+import { Vault } from "../src/vault.js";
+import { QvaMutationUncertainError } from "../src/qvapay.js";
+
+test("calcula correctamente la tasa CUP por QUSD", () => {
+  assert.equal(rate({ amount: 10, receive: 9_700 }), 970);
+  assert.equal(rate({ amount: 34, receive: 34_340 }), 1010);
+});
+
+test("el vault cifra los tokens y permite recuperarlos", () => {
+  const vault = new Vault("a".repeat(64));
+  const encrypted = vault.encrypt("sesion-secreta");
+  assert.notEqual(encrypted, "sesion-secreta");
+  assert.equal(vault.decrypt(encrypted), "sesion-secreta");
+});
+
+test("el vault rechaza claves locales débiles", () => {
+  assert.throws(() => new Vault("invalida"), /64 caracteres/);
+});
+
+test("el libro fiat registra cada movimiento una sola vez y separa CUP de USD", () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-ledger-")));
+  store.set("fiat_balance:BANK_CUP", "35050");
+  store.set("fiat_balance:BANDECPREPAGO", "110");
+
+  assert.equal(
+    store.recordFiatMovement("offer-1", "BANK_CUP", "debit", 9700, "prueba"),
+    true,
+  );
+  assert.equal(store.get("fiat_balance:BANK_CUP"), "25350");
+  assert.equal(
+    store.recordFiatMovement("offer-1", "BANK_CUP", "debit", 9700, "prueba"),
+    false,
+  );
+  assert.equal(store.get("fiat_balance:BANK_CUP"), "25350");
+
+  assert.equal(
+    store.recordFiatMovement("offer-2", "BANDECPREPAGO", "credit", 5, "prueba"),
+    true,
+  );
+  assert.equal(store.get("fiat_balance:BANDECPREPAGO"), "115");
+  assert.deepEqual(
+    store
+      .recentFiat("BANK_CUP", 2)
+      .map((movement) => [movement.uuid, movement.direction, movement.amount]),
+    [["offer-1", "debit", 9700]],
+  );
+});
+
+test("la conciliación omite una operación sin importe CUP y conserva el saldo", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-fiat-sync-")));
+  store.set("fiat_balance:BANK_CUP", "3050");
+  store.set("fiat_ledger_started_at:BANK_CUP", String(Date.now() - 1_000));
+  store.set("fiat_ledger_started_at:BANDECPREPAGO", String(Date.now() - 1_000));
+  const qva = {
+    profile: async () => ({ uuid: "me" }),
+    listOffersPage: async () => ({
+      offers: [
+        {
+          uuid: "missing-cup",
+          type: "sell",
+          coin: "BANK_CUP",
+          amount: 10,
+          receive: 0,
+          status: "completed",
+          updated_at: new Date().toISOString(),
+          User: { uuid: "me" },
+        },
+      ],
+      total: 1,
+      currentPage: 1,
+      perPage: 50,
+    }),
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.syncFiatFromQva(), 0);
+  assert.equal(store.get("fiat_balance:BANK_CUP"), "3050");
+  assert.equal(store.countAudit("fiat_sync_skipped"), 1);
+
+  await trading.syncFiatFromQva();
+  assert.equal(store.countAudit("fiat_sync_skipped"), 1);
+});
+
+test("la conciliación USD actualiza únicamente Bandec Prepago", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-usd-sync-")));
+  store.set("fiat_balance:BANK_CUP", "3050");
+  store.set("fiat_balance:BANDECPREPAGO", "110");
+  store.set("fiat_ledger_started_at:BANK_CUP", String(Date.now() - 1_000));
+  store.set("fiat_ledger_started_at:BANDECPREPAGO", String(Date.now() - 1_000));
+  const qva = {
+    profile: async () => ({ uuid: "me" }),
+    listOffersPage: async () => ({
+      offers: [
+        {
+          uuid: "usd-sale",
+          type: "sell",
+          coin: "BANDECPREPAGO",
+          amount: 10,
+          receive: 11.2,
+          status: "completed",
+          updated_at: new Date().toISOString(),
+          User: { uuid: "me" },
+        },
+      ],
+      total: 1,
+      currentPage: 1,
+      perPage: 50,
+    }),
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.syncFiatFromQva(), 1);
+  assert.equal(store.get("fiat_balance:BANK_CUP"), "3050");
+  assert.equal(store.get("fiat_balance:BANDECPREPAGO"), "121.2");
+});
+
+test("USD Prepago inicia en 110 y usa sus propios umbrales", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-usd-market-")));
+  const qva = {
+    listOffersPage: async (params: { coin: string }) => ({
+      offers:
+        params.coin === "BANDECPREPAGO"
+          ? [
+              {
+                uuid: "usd-buy",
+                type: "sell",
+                coin: "BANDECPREPAGO",
+                amount: 10,
+                receive: 10.6,
+                status: "open",
+              },
+            ]
+          : [
+              {
+                uuid: "cup-too-large",
+                type: "sell",
+                coin: "BANK_CUP",
+                amount: 36,
+                receive: 34_920,
+                status: "open",
+              },
+            ],
+      total: 1,
+      currentPage: 1,
+      perPage: 20,
+    }),
+    p2pAverages: async () => ({
+      BANDECPREPAGO: { average_sell: 1.1 },
+      BANK_CUP: { average_sell: 980 },
+    }),
+  };
+  const config = {
+    initialUsdFiatBalance: 110,
+    buyQusdMaxRate: 970,
+    sellQusdMinRate: 1010,
+    buyQusdUsdMaxRate: 1.06,
+    sellQusdUsdMinRate: 1.12,
+    cupPurchaseMaxQusd: 35,
+    priceGuardPercent: 15,
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    config as never,
+    async () => undefined,
+  );
+
+  assert.equal(trading.fiatBalance("BANDECPREPAGO"), 110);
+  assert.equal(
+    (await trading.inspectMarket("BANDECPREPAGO")).items[0]?.decision,
+    "auto_buy",
+  );
+  assert.match(
+    (await trading.inspectMarket("BANK_CUP")).items[0]?.reason ?? "",
+    /25 QUSD/,
+  );
+});
+
+test("Clásica no usa el saldo de Prepago aunque ambas operen en USD", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-classic-isolation-")),
+  );
+  const qva = {
+    listOffersPage: async (params: { coin: string }) => ({
+      offers: [
+        {
+          uuid: "classic-sale",
+          type: "sell",
+          coin: params.coin,
+          amount: 10,
+          receive: 10,
+          status: "open",
+        },
+      ],
+      total: 1,
+      currentPage: 1,
+      perPage: 20,
+    }),
+    p2pAverages: async () => ({ CLASICA: { average_sell: 1 } }),
+  };
+  const config = {
+    initialUsdFiatBalance: 110,
+    buyQusdUsdMaxRate: 1.06,
+    sellQusdUsdMinRate: 1.12,
+    priceGuardPercent: 15,
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    config as never,
+    async () => undefined,
+  );
+  trading.setFiatBalance("BANDECPREPAGO", 110);
+  trading.setFiatBalance("CLASICA", 0);
+
+  assert.equal(
+    (await trading.inspectMarket("CLASICA")).items[0]?.reason,
+    "Saldo fiat declarado insuficiente",
+  );
+});
+
+test("permite hasta el límite configurado de ofertas propias abiertas", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-own-offer-limit-")),
+  );
+  store.set("mode", "real");
+  let openOffers = 9;
+  let created = 0;
+  const qva = {
+    listOffers: async () =>
+      Array.from({ length: openOffers }, (_, index) => ({
+        uuid: `open-${index}`,
+        type: "buy",
+        coin: "BANK_CUP",
+        amount: 10,
+        receive: 9700,
+        status: "open",
+      })),
+    createOffer: async () => {
+      created += 1;
+      openOffers += 1;
+      return {
+        uuid: "new-offer",
+        type: "buy",
+        coin: "BANK_CUP",
+        amount: 10,
+        receive: 9700,
+        status: "open",
+      };
+    },
+  };
+  const config = {
+    initialUsdFiatBalance: 110,
+    maxOpenOwnOffers: 10,
+    cupPurchaseMaxQusd: 35,
+    paymentDetails: {
+      BANK_CUP: [{ name: "transfermovil", value: "123" }],
+      BANDECPREPAGO: [],
+    },
+    realTradingAllowed: true,
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    config as never,
+    async () => undefined,
+  );
+
+  await trading.createOwnOffer("BANK_CUP", "sell", 10, 970);
+  assert.equal(created, 1);
+  await assert.rejects(
+    () => trading.createOwnOffer("BANK_CUP", "sell", 10, 970),
+    /máximo de 10 ofertas abiertas/,
+  );
+});
+
+test("una ronda de refresco actualiza todas las ofertas vencidas", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-refresh-round-")),
+  );
+  store.set("paused", "false");
+  store.set("mode", "real");
+  store.set("refresh_enabled", "true");
+  const refreshed: string[] = [];
+  const qva = {
+    listOffers: async () =>
+      ["one", "two", "three"].map((uuid) => ({
+        uuid,
+        type: "buy",
+        coin: "BANK_CUP",
+        amount: 10,
+        receive: 9700,
+        status: "open",
+      })),
+    editOffer: async (uuid: string) => {
+      refreshed.push(uuid);
+      return { updated_at: new Date().toISOString() };
+    },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    { initialUsdFiatBalance: 110, offerRefreshIntervalMs: 5 * 60_000 } as never,
+    async () => undefined,
+  );
+
+  await trading.refreshOwnOffers();
+  assert.deepEqual(refreshed, ["one", "two", "three"]);
+});
+
+test("no inicia una segunda ronda mientras la primera está editando", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-refresh-lock-")),
+  );
+  store.set("paused", "false");
+  store.set("mode", "real");
+  store.set("refresh_enabled", "true");
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const qva = {
+    listOffers: async () => [
+      {
+        uuid: "one",
+        type: "buy",
+        coin: "BANK_CUP",
+        amount: 10,
+        receive: 9700,
+        status: "open",
+      },
+    ],
+    editOffer: async () => {
+      calls += 1;
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { updated_at: new Date().toISOString() };
+    },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    { initialUsdFiatBalance: 110, offerRefreshIntervalMs: 5 * 60_000 } as never,
+    async () => undefined,
+  );
+
+  const firstRound = trading.refreshOwnOffers();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await trading.refreshOwnOffers();
+  assert.equal(calls, 1);
+  release?.();
+  await firstRound;
+});
+
+test("conserva la operación local si falla el mensaje de chat después de aplicar", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-chat-after-apply-")),
+  );
+  store.set("mode", "real");
+  store.set("fiat_balance:BANK_CUP", "10000");
+  const notifications: string[] = [];
+  const qva = {
+    getOffer: async () => ({
+      uuid: "applied",
+      type: "sell",
+      coin: "BANK_CUP",
+      amount: 5,
+      receive: 4_500,
+      status: "open",
+    }),
+    apply: async () => undefined,
+    sendChat: async () => {
+      throw new Error("chat temporalmente indisponible");
+    },
+  };
+  const config = {
+    dataDir: mkdtempSync(join(tmpdir(), "qvaapply-chat-config-")),
+    realTradingAllowed: true,
+    priceGuardPercent: 15,
+    autoCancelMs: 600_000,
+    welcomeMessage: "Hola",
+    paymentDetails: { BANK_CUP: [], BANDECPREPAGO: [] },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    config as never,
+    async (message) => {
+      notifications.push(message);
+    },
+  );
+
+  await trading.applyManually("applied");
+
+  assert.equal(store.getOperation("applied")?.state, "applied");
+  assert.equal(store.recentMutationIntents(1)[0]?.state, "confirmed");
+  assert.ok(
+    notifications.some((message) => message.includes("no se pudo enviar")),
+  );
+});
+
+test("marca como incierta una creación sin respuesta remota", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-uncertain-create-")),
+  );
+  store.set("mode", "real");
+  const qva = {
+    listOffers: async () => [],
+    createOffer: async () => {
+      throw new QvaMutationUncertainError(
+        "create",
+        new Error("socket cerrado"),
+      );
+    },
+  };
+  const config = {
+    dataDir: mkdtempSync(join(tmpdir(), "qvaapply-uncertain-config-")),
+    realTradingAllowed: true,
+    maxOpenOwnOffers: 10,
+    welcomeMessage: "Hola",
+    paymentDetails: {
+      BANK_CUP: [{ name: "cuenta", value: "123" }],
+      BANDECPREPAGO: [],
+    },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    config as never,
+    async () => undefined,
+  );
+
+  await assert.rejects(
+    () => trading.createOwnOffer("BANK_CUP", "sell", 5, 980),
+    /requiere conciliación/,
+  );
+  assert.equal(store.recentMutationIntents(1)[0]?.state, "uncertain");
+});
+
+test("no reintenta automáticamente una cancelación cuyo resultado remoto es incierto", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-uncertain-cancel-")),
+  );
+  store.set("mode", "real");
+  store.createOperation({
+    uuid: "uncertain-cancel",
+    offerType: "sell",
+    coin: "BANK_CUP",
+    amount: 5,
+    receive: 4_900,
+    rate: 980,
+    state: "applied",
+    autoApplied: true,
+    cancelAt: Date.now() - 1,
+    createdAt: Date.now() - 600_000,
+  });
+  let cancelCalls = 0;
+  const qva = {
+    getOffer: async () => ({ uuid: "uncertain-cancel", status: "open" }),
+    cancel: async () => {
+      cancelCalls += 1;
+      throw new QvaMutationUncertainError(
+        "cancel",
+        new Error("socket cerrado"),
+      );
+    },
+  };
+  const notifications: string[] = [];
+  const trading = new TradingService(
+    store,
+    qva as never,
+    { autoCancelMs: 600_000 } as never,
+    async (message) => {
+      notifications.push(message);
+    },
+  );
+
+  await trading.expireOperations();
+  await trading.expireOperations();
+
+  assert.equal(cancelCalls, 1);
+  assert.equal(store.getOperation("uncertain-cancel")?.state, "applied");
+  assert.equal(store.getOperation("uncertain-cancel")?.cancelAt, null);
+  assert.equal(store.recentMutationIntents(1)[0]?.state, "uncertain");
+  assert.equal(store.countAudit("auto_cancel_reconciliation_required"), 1);
+  assert.ok(
+    notifications.some((message) => message.includes("conciliación manual")),
+  );
+});

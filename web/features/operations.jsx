@@ -1,0 +1,105 @@
+import React, { useCallback, useState } from "react";
+import { AlertTriangle, CheckCircle2, RefreshCcw } from "lucide-react";
+import { Empty, Panel } from "../components/common.jsx";
+import { money } from "../lib/format.js";
+import { requestJson } from "../lib/http.js";
+import { useDialog } from "../hooks/use-dialog.js";
+
+const terminalWorkflow = new Set(["applied", "restored", "blocked"]);
+
+export function Operations({ data, label, unit, onChanged }) {
+  const [pending, setPending] = useState();
+  const [reference, setReference] = useState("");
+  const [status, setStatus] = useState("");
+  const closePending = useCallback(() => setPending(undefined), []);
+  const dialogRef = useDialog(Boolean(pending), closePending);
+  const run = async (path, body = {}) => {
+    setStatus("Enviando acción…");
+    try {
+      await requestJson(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      setPending(undefined);
+      setReference("");
+      setStatus("Acción confirmada y auditada.");
+      await onChanged();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "La acción falló.");
+    }
+  };
+  return (
+    <div className="operations-stack">
+      {data.risk.usage.unresolvedMutation ? (
+        <div className="alert" role="alert">
+          <AlertTriangle aria-hidden="true" />
+          Hay una mutación remota sin confirmar. El motor no abrirá otra operación.
+        </div>
+      ) : null}
+      <div className="dashboard-grid">
+        <Panel title="Operaciones con dinero" wide>
+          {data.operations?.length ? (
+            <div className="table-scroll">
+              <table>
+                <thead><tr><th>Estado</th><th>Flujo</th><th>Mercado</th><th>Importe</th><th>Acción humana</th></tr></thead>
+                <tbody>
+                  {data.operations.map((operation) => (
+                    <tr key={operation.uuid}>
+                      <td><State value={operation.state} /></td>
+                      <td>{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}<small>{operation.uuid}</small></td>
+                      <td>{label(operation.coin)}</td>
+                      <td>{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}</small></td>
+                      <td className="row-actions">
+                        {operation.state === "applied" && operation.offerType === "sell" ? <button onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</button> : null}
+                        {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <button onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</button> : null}
+                        {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <button onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</button> : null}
+                        {["applied", "acknowledged"].includes(operation.state) ? <button className="danger-button" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</button> : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : <Empty>No hay operaciones registradas.</Empty>}
+        </Panel>
+        <Panel title="Flujos automáticos y compensación" wide>
+          {data.workflows?.length ? (
+            <ol className="workflow-list">
+              {data.workflows.map((workflow) => (
+                <li key={workflow.id}>
+                  <State value={workflow.state} />
+                  <span><strong>{money(workflow.targetOffer.amount)} QUSD · {label(workflow.targetOffer.coin)}</strong><small>{workflow.error || workflow.riskDecision.reasons.join(" · ")}</small></span>
+                  {!terminalWorkflow.has(workflow.state) ? <button onClick={() => run(`/api/workflows/${workflow.id}/reconcile`)}><RefreshCcw aria-hidden="true" /> Conciliar</button> : <CheckCircle2 aria-hidden="true" />}
+                </li>
+              ))}
+            </ol>
+          ) : <Empty>No se han ejecutado flujos automáticos.</Empty>}
+        </Panel>
+      </div>
+      <p className="detail" role="status" aria-live="polite">{status}</p>
+      {pending ? (
+        <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="operation-review-title">
+          <div>
+            <p className="eyebrow">ACCIÓN FINANCIERA</p>
+            <h2 id="operation-review-title">{actionTitle(pending.action)}</h2>
+            <p>{money(pending.operation.amount)} QUSD · {label(pending.operation.coin)}. QvaApply registrará la acción, pero nunca realizará la transferencia fiat.</p>
+            {pending.action === "paid" ? <label>Referencia del pago<input autoFocus value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
+            <div className="review-actions">
+              <button onClick={closePending}>Volver</button>
+              <button className="refresh" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, { reference })}>Confirmar acción</button>
+            </div>
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function State({ value }) {
+  return <span className={`state state-${value}`}>{value.replaceAll("_", " ")}</span>;
+}
+
+function actionTitle(action) {
+  return ({ ack: "Confirmar que harás el pago", paid: "Registrar pago ya realizado", received: "Confirmar fiat recibido", cancel: "Cancelar la operación" })[action];
+}

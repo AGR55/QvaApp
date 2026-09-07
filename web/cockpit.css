@@ -1,0 +1,154 @@
+.decision-strip {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 32px;
+  margin: 24px 0 14px;
+  padding: 28px 32px;
+  background: #173a3d;
+  color: #f6f2ea;
+  border-left: 6px solid #d6a44d;
+  box-shadow: 0 16px 30px #17333c1c;
+}
+.decision-strip span {
+  display: block;
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.16em;
+  color: #cfddd8;
+}
+.decision-strip strong {
+  display: block;
+  font:
+    34px "Instrument Serif",
+    serif;
+  letter-spacing: -0.035em;
+  margin: 5px 0;
+  overflow-wrap: anywhere;
+}
+.decision-strip p {
+  margin: 0;
+  color: #d7e2de;
+  font-size: 12px;
+}
+.decision-strip > b {
+  font:
+    44px "Instrument Serif",
+    serif;
+  white-space: nowrap;
+}
+.decision-strip small {
+  font:
+    12px Manrope,
+    sans-serif;
+}
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.market-card {
+  position: relative;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.market-card:before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--accent);
+}
+.market-card > span {
+  display: block;
+  color: var(--muted);
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.market-card > strong {
+  display: block;
+  margin: 9px 0 4px;
+  font:
+    31px "Instrument Serif",
+    serif;
+  letter-spacing: -0.03em;
+}
+.market-card p {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.market-card p b {
+  color: var(--accent);
+}
+.market-card small {
+  display: block;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font:
+    10px "DM Mono",
+    monospace;
+  color: var(--muted);
+}
+.decision-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.decision-list li {
+  padding: 14px 3px;
+  border-top: 1px solid var(--line);
+  font:
+    13px Manrope,
+    sans-serif;
+  line-height: 1.5;
+}
+.decision-list li:first-child {
+  border-top: 0;
+}
+.skeleton {
+  display: grid;
+  gap: 12px;
+  padding: 22px;
+  min-width: 280px;
+}
+.skeleton i {
+  display: block;
+  height: 17px;
+  background: linear-gradient(
+    100deg,
+    var(--surface-alt) 20%,
+    var(--surface) 40%,
+    var(--surface-alt) 60%
+  );
+  background-size: 220% 100%;
+  animation: shimmer 1.3s infinite;
+}
+.skeleton i:nth-child(2) {
+  width: 75%;
+}
+.skeleton i:nth-child(3) {
+  width: 58%;
+}
+@keyframes shimmer {
+  to {
+    background-position: -220% 0;
+  }
+}
+@media (max-width: 640px) {
+  .decision-strip {
+    grid-template-columns: 1fr;
+    padding: 22px;
+  }
+  .decision-strip > b {
+    font-size: 36px;
+  }
+}

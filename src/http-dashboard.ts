@@ -1,0 +1,335 @@
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import Fastify, {
+  type FastifyInstance,
+  type FastifyRequest,
+} from "fastify";
+import { DashboardReadModel, offerView } from "./dashboard.js";
+import { DashboardAuth, DashboardAuthError } from "./dashboard-auth.js";
+import type { TradingConfig } from "./market-config.js";
+import { QvaApiError } from "./qvapay.js";
+import type { TradingEngine } from "./trading.js";
+import type { FiatMarket } from "./types.js";
+
+type Snapshot = Awaited<ReturnType<DashboardReadModel["snapshot"]>>;
+type AuthOptions = {
+  password: string;
+  trustedOrigin: string;
+  secureCookies?: boolean;
+};
+
+export async function startDashboard(
+  readModel: DashboardReadModel,
+  port = 3000,
+  authOptions: AuthOptions,
+): Promise<FastifyInstance> {
+  const app = buildDashboard(readModel, authOptions);
+  await app.listen({ port, host: "127.0.0.1" });
+  console.log(`Panel web: http://127.0.0.1:${port}`);
+  return app;
+}
+
+export function buildDashboard(
+  readModel: DashboardReadModel,
+  authOptions: AuthOptions,
+): FastifyInstance {
+  const app = Fastify({
+    logger: false,
+    bodyLimit: 10_000,
+    requestTimeout: 15_000,
+    connectionTimeout: 10_000,
+    maxRequestsPerSocket: 100,
+  });
+  const auth = new DashboardAuth(authOptions);
+  const publicRoot = resolve("public/dashboard");
+  let lastSnapshot: Snapshot | undefined;
+
+  app.addHook("onSend", async (_request, reply, payload) => {
+    reply
+      .header("cache-control", "no-store")
+      .header(
+        "content-security-policy",
+        "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+      )
+      .header("referrer-policy", "no-referrer")
+      .header("x-content-type-options", "nosniff")
+      .header("x-frame-options", "DENY")
+      .header("permissions-policy", "camera=(), microphone=(), geolocation=(), payment=()")
+      .header("cross-origin-opener-policy", "same-origin");
+    return payload;
+  });
+
+  app.addHook("preHandler", async (request) => {
+    const path = request.url.split("?", 1)[0]!;
+    const publicSession = path === "/api/session" && request.method !== "DELETE";
+    if (!path.startsWith("/api/") || publicSession) return;
+    if (!auth.session(request.headers.cookie))
+      throw new DashboardAuthError(401, "Autenticación requerida.");
+    if (!["GET", "HEAD"].includes(request.method)) {
+      auth.assertOrigin(request.headers.origin);
+      requireJson(request);
+      auth.assertCsrf(request.headers.cookie, headerValue(request, "x-csrf-token"));
+    }
+  });
+
+  app.setErrorHandler((error, _request, reply) => {
+    const normalized = error instanceof Error ? error : new Error(String(error));
+    const status = httpStatus(normalized, 500);
+    if (status >= 500) console.error("Error HTTP local:", normalized);
+    void reply.status(status).send({
+      error: status >= 500 ? "No se pudo completar la solicitud." : normalized.message,
+    });
+  });
+
+  app.get("/", async (_request, reply) =>
+    reply.type("text/html; charset=utf-8").send(reactPage()),
+  );
+  app.get<{ Params: { "*": string } }>("/dashboard/*", async (request, reply) => {
+    const relative = request.params["*"];
+    const file = resolve(publicRoot, relative);
+    if (!file.startsWith(`${publicRoot}/`) || !existsSync(file))
+      return reply.status(404).type("text/plain").send("Panel no compilado. Ejecuta pnpm build.");
+    return reply
+      .type(relative.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
+      .send(readFileSync(file));
+  });
+
+  app.get("/api/session", async (request) => {
+    const session = auth.session(request.headers.cookie);
+    return {
+      data: session
+        ? { authenticated: true, csrfToken: session.csrfToken, expiresAt: session.expiresAt }
+        : { authenticated: false },
+    };
+  });
+  app.post<{ Body: { password: string } }>("/api/session", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["password"],
+        properties: { password: { type: "string", minLength: 1, maxLength: 256 } },
+      },
+    },
+  }, async (request, reply) => {
+    auth.assertOrigin(request.headers.origin);
+    const session = auth.login(request.body.password, request.ip);
+    reply.header("set-cookie", session.cookie).status(201);
+    return { data: { authenticated: true, csrfToken: session.csrfToken, expiresAt: session.expiresAt } };
+  });
+  app.delete("/api/session", async (request, reply) => {
+    reply.header("set-cookie", auth.logout(request.headers.cookie)).status(204);
+  });
+
+  app.get("/api/dashboard", async (_request, reply) => {
+    try {
+      lastSnapshot = await readModel.snapshot();
+      return { data: lastSnapshot, stale: false };
+    } catch (error) {
+      if (!lastSnapshot) throw error;
+      reply.status(200);
+      return { data: lastSnapshot, stale: true, error: message(error) };
+    }
+  });
+  app.get("/api/config", async () => ({ data: readModel.config() }));
+  app.get("/api/config-revisions", async () => ({ data: readModel.configRevisions() }));
+  app.put<{ Body: TradingConfig | { config: TradingConfig; reason?: string } }>("/api/config", async (request, reply) => {
+    await clientAction(async () => {
+      const payload = request.body;
+      if (!isRecord(payload)) throw new ClientInputError("Configuración inválida.");
+      const wrapped = "config" in payload;
+      const next = wrapped ? payload.config as TradingConfig : payload as TradingConfig;
+      if (!isRecord(next) || !isRecord(next.risk))
+        throw new ClientInputError("Configuración inválida.");
+      next.risk.reviewedAt = Date.now();
+      readModel.saveConfig(next, wrapped && typeof payload.reason === "string" ? payload.reason : undefined);
+    });
+    reply.status(204);
+  });
+  app.put<{ Body: Parameters<TradingEngine["updateStrategy"]>[0] }>("/api/strategy", async (request, reply) => {
+    await clientAction(() => readModel.updateStrategy(request.body));
+    reply.status(204);
+  });
+  app.put<{ Body: { paused?: boolean; mode?: "simulation" | "real"; refresh?: boolean; emergencyStop?: boolean } }>("/api/control", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          paused: { type: "boolean" },
+          mode: { type: "string", enum: ["simulation", "real"] },
+          refresh: { type: "boolean" },
+          emergencyStop: { type: "boolean" },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const body = request.body;
+    const supplied = Object.values(body).filter((value) => value !== undefined).length;
+    if (body.emergencyStop !== undefined && supplied > 1)
+      throw new ClientInputError("La parada de emergencia debe enviarse como una acción independiente.");
+    await clientAction(async () => {
+      if (body.emergencyStop !== undefined) readModel.setEmergencyStop(body.emergencyStop);
+      if (body.mode !== undefined) readModel.setMode(body.mode);
+      if (body.refresh !== undefined) readModel.setRefresh(body.refresh);
+      if (body.paused !== undefined) await readModel.setPaused(body.paused);
+    });
+    reply.status(204);
+  });
+  app.get<{ Querystring: { coin?: string } }>("/api/market-analytics", async (request) => {
+    const coin = request.query.coin?.trim();
+    if (!coin || !/^[A-Z0-9_]{2,40}$/.test(coin))
+      throw new ClientInputError("Mercado inválido.");
+    return { data: await readModel.marketAnalytics(coin) };
+  });
+  app.post<{ Body: { coin: FiatMarket; type: "buy" | "sell"; amount: number; rate: number } }>("/api/offers", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["coin", "type", "amount", "rate"],
+        properties: {
+          coin: { type: "string", pattern: "^[A-Z0-9_]{2,40}$" },
+          type: { type: "string", enum: ["buy", "sell"] },
+          amount: { type: "number", exclusiveMinimum: 0 },
+          rate: { type: "number", exclusiveMinimum: 0 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const body = request.body;
+    if (!readModel.config().markets.some((market) => market.code === body.coin))
+      throw new ClientInputError("Mercado inválido.");
+    const offer = await clientAction(() =>
+      readModel.createOwnOffer(body.coin, body.type, body.amount, body.rate));
+    reply.status(201);
+    return { data: offerView(offer) };
+  });
+  app.put<{ Params: { uuid: string }; Body: { amount: number; rate: number } }>("/api/offers/:uuid", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["amount", "rate"],
+        properties: {
+          amount: { type: "number", exclusiveMinimum: 0 },
+          rate: { type: "number", exclusiveMinimum: 0 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    await clientAction(() =>
+      readModel.editOwnOffer(request.params.uuid, request.body.amount, request.body.rate));
+    reply.status(204);
+  });
+  app.delete<{ Params: { uuid: string } }>("/api/offers/:uuid", async (request, reply) => {
+    await clientAction(() => readModel.cancelOwnOffer(request.params.uuid));
+    reply.status(204);
+  });
+  app.post<{ Params: { workflowId: string } }>("/api/workflows/:workflowId/reconcile", async (request) => ({
+    data: await clientAction(() => readModel.reconcileWorkflow(request.params.workflowId)),
+  }));
+  app.post<{ Params: { uuid: string; action: string }; Body: { reference?: string } }>("/api/operations/:uuid/:action", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["uuid", "action"],
+        properties: {
+          uuid: { type: "string", minLength: 1, maxLength: 100 },
+          action: { type: "string", enum: ["ack", "paid", "received", "cancel"] },
+        },
+      },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: { reference: { type: "string", minLength: 1, maxLength: 200 } },
+      },
+    },
+  }, async (request, reply) => {
+    const { uuid, action } = request.params;
+    if (action === "ack") await clientAction(() => readModel.acknowledge(uuid));
+    else if (action === "paid") {
+      const reference = request.body.reference?.trim();
+      if (!reference) throw new ClientInputError("La referencia del pago es obligatoria.");
+      await clientAction(() => readModel.markPaid(uuid, reference));
+    } else if (action === "received") await clientAction(() => readModel.confirmReceived(uuid));
+    else if (action === "cancel") await clientAction(() => readModel.cancelOperation(uuid));
+    else throw new ClientInputError("Acción de operación inválida.");
+    reply.status(204);
+  });
+  app.get("/api/audit", async () => ({ data: readModel.auditLog() }));
+  app.get("/api/openapi.json", async () => openApiDocument());
+  return app;
+}
+
+class ClientInputError extends Error {}
+
+async function clientAction<T>(action: () => T | Promise<T>): Promise<T> {
+  try {
+    return await action();
+  } catch (error) {
+    if (
+      error instanceof ClientInputError ||
+      error instanceof DashboardAuthError ||
+      error instanceof QvaApiError
+    ) throw error;
+    throw new ClientInputError(message(error));
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requireJson(request: FastifyRequest): void {
+  if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json"))
+    throw new DashboardAuthError(403, "Se requiere contenido JSON.");
+}
+
+function headerValue(request: FastifyRequest, name: string): string | undefined {
+  const value = request.headers[name];
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function httpStatus(error: Error, fallback: number): number {
+  if (error instanceof DashboardAuthError) return error.status;
+  if (error instanceof ClientInputError) return 400;
+  if (error instanceof QvaApiError)
+    return [400, 401, 403, 404, 409, 429].includes(error.status) ? error.status : 502;
+  const validation = error as Error & { validation?: unknown };
+  if (validation.validation) return 400;
+  return fallback;
+}
+
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : "No se pudo actualizar QvaPay.";
+}
+
+function reactPage(): string {
+  return "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>QvaApply · Mesa de trading</title><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>";
+}
+
+function openApiDocument() {
+  return {
+    openapi: "3.1.0",
+    info: { title: "QvaApply Local Operations API", version: "1.0.0" },
+    servers: [{ url: "/" }],
+    security: [{ sessionCookie: [], csrfToken: [] }],
+    paths: {
+      "/api/dashboard": { get: { summary: "Estado analítico completo" } },
+      "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },
+      "/api/control": { put: { summary: "Pausa, modo, refresco y emergencia" } },
+      "/api/offers": { post: { summary: "Crear oferta propia" } },
+      "/api/offers/{uuid}": { put: { summary: "Editar oferta propia" }, delete: { summary: "Cancelar oferta propia" } },
+      "/api/workflows/{workflowId}/reconcile": { post: { summary: "Conciliar un resultado remoto ambiguo" } },
+      "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
+      "/api/audit": { get: { summary: "Exportar auditoría" } },
+    },
+    components: {
+      securitySchemes: {
+        sessionCookie: { type: "apiKey", in: "cookie", name: "qvaapply_session" },
+        csrfToken: { type: "apiKey", in: "header", name: "x-csrf-token" },
+      },
+    },
+  };
+}

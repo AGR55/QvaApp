@@ -1,0 +1,23 @@
+.offer-actions {
+  display: flex;
+  gap: 7px;
+}
+.offer-actions button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  padding: 6px 9px;
+  font:
+    600 11px Manrope,
+    sans-serif;
+  color: var(--ink);
+}
+.offer-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.offer-actions .danger-action {
+  color: var(--danger);
+}
+.offer-actions .danger-action:hover {
+  border-color: var(--danger);
+}

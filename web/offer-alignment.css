@@ -1,0 +1,14 @@
+.panel .settings-form input,
+.panel .settings-form select {
+  height: 43px !important;
+  box-sizing: border-box;
+  line-height: 43px;
+}
+.panel .settings-form input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.panel .settings-form input[type="number"]::-webkit-inner-spin-button {
+  height: 41px;
+  opacity: 0.75;
+}
