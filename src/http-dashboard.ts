@@ -197,6 +197,34 @@ export function buildDashboard(
     await clientAction(() => readModel.updateStrategy(request.body));
     reply.status(204);
   });
+  app.put<{ Body: Parameters<TradingEngine["updateHunting"]>[0] }>("/api/hunting", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          buyRunning: { type: "boolean" },
+          sellRunning: { type: "boolean" },
+          market: {
+            type: "object",
+            additionalProperties: false,
+            required: ["code"],
+            properties: {
+              code: { type: "string", pattern: "^[A-Z0-9_]{2,40}$" },
+              huntBuyEnabled: { type: "boolean" },
+              huntSellEnabled: { type: "boolean" },
+              buyMaxRate: { type: "number", exclusiveMinimum: 0 },
+              sellMinRate: { type: "number", exclusiveMinimum: 0 },
+            },
+          },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    await clientAction(() => readModel.updateHunting(request.body));
+    reply.status(204);
+  });
   app.put<{ Body: { paused?: boolean; mode?: "simulation" | "real"; refresh?: boolean; emergencyStop?: boolean } }>("/api/control", {
     schema: {
       body: {
@@ -388,6 +416,7 @@ function openApiDocument() {
       "/api/offers/{uuid}": { put: { summary: "Editar oferta propia" }, delete: { summary: "Cancelar oferta propia" } },
       "/api/workflows/{workflowId}/reconcile": { post: { summary: "Conciliar un resultado remoto ambiguo" } },
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
+      "/api/hunting": { put: { summary: "Controlar cacerías y precios por mercado" } },
       "/api/audit": { get: { summary: "Exportar auditoría" } },
     },
     components: {

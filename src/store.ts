@@ -13,7 +13,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 7;
+const LATEST_SCHEMA_VERSION = 8;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -85,6 +85,7 @@ export interface Operation {
   cancelAt: number | null;
   createdAt: number;
   counterpartyId?: string;
+  referenceRate?: number;
 }
 
 export interface TradingAlert {
@@ -364,6 +365,39 @@ export class Store {
           )
           .run(Date.now());
       }
+      if (this.currentSchemaVersion() < 8) {
+        this.ensureColumn(
+          "market_config",
+          "hunt_buy_enabled",
+          "INTEGER NOT NULL DEFAULT 1",
+        );
+        this.ensureColumn(
+          "market_config",
+          "hunt_sell_enabled",
+          "INTEGER NOT NULL DEFAULT 1",
+        );
+        this.ensureColumn(
+          "operations",
+          "reference_rate",
+          "REAL",
+        );
+        this.ensureColumn(
+          "bot_config",
+          "hunt_buy_running",
+          "INTEGER NOT NULL DEFAULT 1",
+        );
+        this.ensureColumn(
+          "bot_config",
+          "hunt_sell_running",
+          "INTEGER NOT NULL DEFAULT 1",
+        );
+        this.db.prepare(
+          "UPDATE market_config SET hunt_buy_enabled = active, hunt_sell_enabled = active",
+        ).run();
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (8, ?)",
+        ).run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -382,7 +416,7 @@ export class Store {
   }
 
   private ensureColumn(
-    table: "operations" | "fiat_ledger" | "market_observations" | "market_config",
+    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config",
     column: string,
     definition: string,
   ): void {
@@ -413,7 +447,7 @@ export class Store {
       .get() as Record<string, unknown> | undefined;
     const marketRows = this.db
       .prepare(
-        "SELECT code, label, currency, active, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee FROM market_config ORDER BY rowid",
+        "SELECT code, label, currency, active, hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee FROM market_config ORDER BY rowid",
       )
       .all() as Record<string, unknown>[];
     const details = this.db
@@ -428,6 +462,10 @@ export class Store {
       version: 3,
       qusdReserve: Number(root.qusd_reserve),
       maxOpenOffers: Number(root.max_open_offers),
+      hunting: {
+        buyRunning: automation ? Boolean(automation.hunt_buy_running) : true,
+        sellRunning: automation ? Boolean(automation.hunt_sell_running) : true,
+      },
       automation: automation
         ? {
             scanIntervalSeconds: Number(automation.scan_interval_seconds),
@@ -474,6 +512,8 @@ export class Store {
         label: String(row.label),
         currency: String(row.currency),
         active: Boolean(row.active),
+        huntBuyEnabled: Boolean(row.hunt_buy_enabled),
+        huntSellEnabled: Boolean(row.hunt_sell_enabled),
         fiatBalance: Number(row.fiat_balance),
         buyMaxRate: Number(row.buy_max_rate),
         sellMinRate: Number(row.sell_min_rate),
@@ -511,14 +551,17 @@ export class Store {
         .prepare(
           `INSERT INTO bot_config(
             id, scan_interval_seconds, auto_cancel_minutes,
-            offer_refresh_interval_minutes, price_guard_percent, welcome_message
-          ) VALUES (1, ?, ?, ?, ?, ?)
+            offer_refresh_interval_minutes, price_guard_percent, welcome_message,
+            hunt_buy_running, hunt_sell_running
+          ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             scan_interval_seconds = excluded.scan_interval_seconds,
             auto_cancel_minutes = excluded.auto_cancel_minutes,
             offer_refresh_interval_minutes = excluded.offer_refresh_interval_minutes,
             price_guard_percent = excluded.price_guard_percent,
-            welcome_message = excluded.welcome_message`,
+            welcome_message = excluded.welcome_message,
+            hunt_buy_running = excluded.hunt_buy_running,
+            hunt_sell_running = excluded.hunt_sell_running`,
         )
         .run(
           config.automation.scanIntervalSeconds,
@@ -526,6 +569,8 @@ export class Store {
           config.automation.offerRefreshIntervalMinutes,
           config.automation.priceGuardPercent,
           config.automation.welcomeMessage,
+          Number(config.hunting.buyRunning),
+          Number(config.hunting.sellRunning),
         );
       this.db
         .prepare(
@@ -568,7 +613,7 @@ export class Store {
       this.db.prepare("DELETE FROM fiat_accounts").run();
       this.db.prepare("DELETE FROM market_config").run();
       const insertMarket = this.db.prepare(
-        "INSERT INTO market_config(code, label, currency, active, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO market_config(code, label, currency, active, hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const insertDetail = this.db.prepare(
         "INSERT INTO payment_details(market_code, position, name, value) VALUES (?, ?, ?, ?)",
@@ -583,6 +628,8 @@ export class Store {
           market.label,
           market.currency,
           Number(market.active),
+          Number(market.huntBuyEnabled),
+          Number(market.huntSellEnabled),
           balance,
           market.buyMaxRate,
           market.sellMinRate,
@@ -1143,8 +1190,8 @@ export class Store {
   createOperation(operation: Operation): void {
     this.db
       .prepare(
-        `INSERT INTO operations(uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, updated_at, counterparty_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO operations(uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, updated_at, counterparty_id, reference_rate)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(uuid) DO NOTHING`,
       )
       .run(
@@ -1160,13 +1207,14 @@ export class Store {
         operation.createdAt,
         operation.createdAt,
         operation.counterpartyId ?? null,
+        operation.referenceRate ?? null,
       );
   }
 
   getOperation(uuid: string): Operation | undefined {
     const row = this.db
       .prepare(
-        "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id FROM operations WHERE uuid = ?",
+        "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE uuid = ?",
       )
       .get(uuid) as Record<string, unknown> | undefined;
     return row ? this.operationFromRow(row) : undefined;
@@ -1176,7 +1224,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id FROM operations WHERE state = 'applied' AND cancel_at <= ?",
+          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE state = 'applied' AND cancel_at <= ?",
         )
         .all(now) as Record<string, unknown>[]
     ).map((row) => this.operationFromRow(row));
@@ -1186,7 +1234,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id FROM operations WHERE state IN ('applied','acknowledged','paid') ORDER BY created_at DESC",
+          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE state IN ('applied','acknowledged','paid') ORDER BY created_at DESC",
         )
         .all() as Record<string, unknown>[]
     ).map((row) => this.operationFromRow(row));
@@ -1197,7 +1245,7 @@ export class Store {
       this.db
         .prepare(
           `SELECT uuid, offer_type, coin, amount, receive, rate, state,
-                  auto_applied, cancel_at, created_at, counterparty_id
+                  auto_applied, cancel_at, created_at, counterparty_id, reference_rate
            FROM operations ORDER BY created_at DESC LIMIT ?`,
         )
         .all(limit) as Record<string, unknown>[]
@@ -1240,9 +1288,6 @@ export class Store {
         .all(limit) as Record<string, unknown>[]
     ).map((row) => ({
       createdAt: Number(row.created_at),
-      ...(row.counterparty_id === null || row.counterparty_id === undefined
-        ? {}
-        : { counterpartyId: String(row.counterparty_id) }),
       action: String(row.action),
       uuid: row.offer_uuid === null ? null : String(row.offer_uuid),
       detail: String(row.detail),
@@ -1466,6 +1511,10 @@ export class Store {
       autoApplied: Boolean(row.auto_applied),
       cancelAt: row.cancel_at === null ? null : Number(row.cancel_at),
       createdAt: Number(row.created_at),
+      ...(row.counterparty_id === null || row.counterparty_id === undefined
+        ? {}
+        : { counterpartyId: String(row.counterparty_id) }),
+      ...optionalNumber("referenceRate", row.reference_rate),
     };
   }
 }

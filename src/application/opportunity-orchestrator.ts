@@ -20,6 +20,7 @@ export interface OpportunityInput {
   expectedMarginPercent: number;
   priceDecision: "eligible" | "manual_review" | "blocked" | "ignored";
   priceReason: string;
+  canApply?: () => boolean;
 }
 
 export interface OpportunityResult {
@@ -254,9 +255,13 @@ export class OpportunityOrchestrator {
     }
     this.store.updateWorkflowState(workflowId, "capital_reserved");
     try {
+      if (input.canApply && !input.canApply())
+        throw new Error("La cacería de venta fue detenida antes de aplicar.");
       await this.cancelOwnOffers(workflowId);
       this.store.updateWorkflowState(workflowId, "own_offers_cancelled");
       this.store.updateWorkflowState(workflowId, "applying_external");
+      if (input.canApply && !input.canApply())
+        throw new Error("La cacería de venta fue detenida antes de aplicar.");
       await this.mutation("apply", input.target.uuid, { workflowId }, () =>
         this.qva.apply(input.target.uuid),
       );
@@ -274,6 +279,7 @@ export class OpportunityOrchestrator {
         ...(input.target.User?.uuid
           ? { counterpartyId: input.target.User.uuid }
           : {}),
+        referenceRate: input.referenceRate,
       });
       this.store.updateWorkflowState(workflowId, "applied");
       this.store.releaseCapitalReservation(workflowId);

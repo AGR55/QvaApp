@@ -19,9 +19,9 @@ const risk = {
   reviewedAt: null,
 };
 const markets = [
-  { code: "BANK_CUP", label: "Transferencia CUP", currency: "CUP", active: true, fiatBalance: 45000, buyMaxRate: 930, sellMinRate: 1010, purchaseMaxQusd: 25, sellFeePercent: 0, outgoingTransferFee: 0, paymentDetails: [{ name: "Cuenta", value: "•••• 1234" }] },
-  { code: "BANDECPREPAGO", label: "USD Prepago", currency: "USD", active: true, fiatBalance: 110, buyMaxRate: 1.06, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0.25, outgoingTransferFee: 0, paymentDetails: [] },
-  { code: "CLASICA", label: "Tarjeta Clásica", currency: "USD", active: true, fiatBalance: 40, buyMaxRate: 1.04, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0, outgoingTransferFee: 0.08, paymentDetails: [{ name: "Tarjeta", value: "•••• 9876" }] },
+  { code: "BANK_CUP", label: "Transferencia CUP", currency: "CUP", active: true, huntBuyEnabled: true, huntSellEnabled: true, fiatBalance: 45000, buyMaxRate: 930, sellMinRate: 1010, purchaseMaxQusd: 25, sellFeePercent: 0, outgoingTransferFee: 0, paymentDetails: [{ name: "Cuenta", value: "•••• 1234" }] },
+  { code: "BANDECPREPAGO", label: "USD Prepago", currency: "USD", active: true, huntBuyEnabled: false, huntSellEnabled: false, fiatBalance: 110, buyMaxRate: 1.06, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0.25, outgoingTransferFee: 0, paymentDetails: [] },
+  { code: "CLASICA", label: "Tarjeta Clásica", currency: "USD", active: true, huntBuyEnabled: true, huntSellEnabled: true, fiatBalance: 40, buyMaxRate: 1.04, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0, outgoingTransferFee: 0.08, paymentDetails: [{ name: "Tarjeta", value: "•••• 9876" }] },
 ];
 const marketHistory = Array.from({ length: 12 }, (_, index) => ({
   coin: "BANK_CUP",
@@ -30,8 +30,9 @@ const marketHistory = Array.from({ length: 12 }, (_, index) => ({
   createdAt: now - (11 - index) * 5 * 60_000,
 }));
 const automation = { scanIntervalSeconds: 15, autoCancelMinutes: 10, offerRefreshIntervalMinutes: 5, priceGuardPercent: 15, welcomeMessage: "Oferta aplicada por un bot. El pago fiat lo realiza manualmente el usuario." };
-const config = { version: 3, qusdReserve: 10, maxOpenOffers: 10, automation, risk, markets };
-const operation = { uuid: "op-demo-01", offerType: "buy", coin: "BANK_CUP", amount: 20, receive: 20400, rate: 1020, state: "applied", autoApplied: true, cancelAt: null, createdAt: now - 120000 };
+const hunting = { buyRunning: true, sellRunning: true };
+const config = { version: 3, qusdReserve: 10, maxOpenOffers: 10, hunting, automation, risk, markets };
+const operation = { uuid: "op-demo-01", offerType: "buy", coin: "BANK_CUP", amount: 20, receive: 20400, rate: 1020, referenceRate: 1012, state: "applied", autoApplied: true, cancelAt: null, createdAt: now - 120000 };
 const workflow = { id: "workflow-demo-01", targetOffer: { ...operation, type: "buy", status: "processing" }, riskDecision: { kind: "apply", reasons: ["Todos los límites pasaron."], checks: [] }, state: "applied", error: null, createdAt: now - 120000, updatedAt: now - 90000 };
 const snapshot = {
   generatedAt: now,
@@ -60,6 +61,7 @@ const snapshot = {
     CLASICA: { total: 12, offers: [{ uuid: "market-03", type: "sell", coin: "CLASICA", amount: 12, receive: 12.48, rate: 1.04, status: "open", decision: "auto_buy", reason: "Compra automática elegible" }] },
   },
   averages: { BANK_CUP: { average_buy: 1015, average_sell: 930, median_buy: 1012, median_sell: 932 }, BANDECPREPAGO: { average_buy: 1.12, average_sell: 1.05, median_buy: 1.115, median_sell: 1.047 }, CLASICA: { average_buy: 1.12, average_sell: 1.04, median_buy: 1.11, median_sell: 1.04 } },
+  hunting, automation,
   transactions: [], strategy: { buyMax: { BANK_CUP: 930, BANDECPREPAGO: 1.06 }, sellMin: { BANK_CUP: 1010, BANDECPREPAGO: 1.12 }, reserve: 10, maxOpenOffers: 10 },
   markets: markets.map(({ paymentDetails, ...market }) => ({ ...market, paymentDetailsCount: paymentDetails.length })),
   availability: { qusd: { reported: 68.5, reserve: 10, available: 58.5, committedSell: 0 }, fiat: { BANK_CUP: { declared: 45000, committed: 0, available: 45000 }, BANDECPREPAGO: { declared: 110, committed: 0, available: 110 }, CLASICA: { declared: 40, committed: 10.48, available: 29.52 } } },
@@ -70,7 +72,7 @@ const snapshot = {
   recoverableWorkflows: [], workflows: [workflow], workflowOffers: {},
   capitalReservations: [{ workflowId: workflow.id, market: "BANK_CUP", amount: 20, state: "released", createdAt: now - 120000, releasedAt: now - 90000 }],
   mutationIntents: [{ intentId: "intent-demo", operationUuid: operation.uuid, kind: "apply", state: "confirmed", request: {}, createdAt: now - 100000, updatedAt: now - 90000 }],
-  operations: [operation], integrity: { schemaVersion: 7, configRevisionChainValid: true },
+  operations: [operation], integrity: { schemaVersion: 8, configRevisionChainValid: true },
   freshness: { balance: now, ownOffers: now, transactions: now, markets: { BANK_CUP: now, BANDECPREPAGO: now } },
 };
 
@@ -89,6 +91,12 @@ const model = {
   setMode: (value) => { snapshot.state.mode = value; },
   setRefresh: (value) => { snapshot.state.refresh = value; },
   setEmergencyStop: (value) => { snapshot.risk.usage.emergencyStop = value; snapshot.state.paused ||= value; },
+  updateHunting: (values) => {
+    if (values.buyRunning !== undefined) hunting.buyRunning = values.buyRunning;
+    if (values.sellRunning !== undefined) hunting.sellRunning = values.sellRunning;
+    if (values.market) Object.assign(markets.find((item) => item.code === values.market.code), values.market);
+    snapshot.markets = markets.map(({ paymentDetails, ...market }) => ({ ...market, paymentDetailsCount: paymentDetails.length }));
+  },
   createOwnOffer: async () => snapshot.ownOffers[0],
   editOwnOffer: async () => undefined,
   cancelOwnOffer: async () => undefined,

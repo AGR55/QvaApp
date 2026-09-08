@@ -145,6 +145,9 @@ export class DashboardReadModel {
   cancelOperation(uuid: string): Promise<void> {
     return this.trading.cancel(uuid);
   }
+  updateHunting(values: Parameters<TradingService["updateHunting"]>[0]): void {
+    this.trading.updateHunting(values);
+  }
 
   localSnapshot() {
     const state = this.trading.operationalState();
@@ -201,6 +204,8 @@ export class DashboardReadModel {
       ownOffers: ownOfferViews,
       market,
       averages,
+      hunting: this.marketConfig.current().hunting,
+      automation: this.marketConfig.current().automation,
       transactions: transactionResource?.data ?? [],
       strategy,
       markets: this.marketConfig.publicMarkets(),

@@ -135,6 +135,45 @@ export class TradingEngine {
     );
   }
 
+  updateHunting(values: {
+    buyRunning?: boolean;
+    sellRunning?: boolean;
+    market?: {
+      code: FiatMarket;
+      huntBuyEnabled?: boolean;
+      huntSellEnabled?: boolean;
+      buyMaxRate?: number;
+      sellMinRate?: number;
+    };
+  }): void {
+    const next = this.marketConfig.current();
+    if (values.buyRunning !== undefined) next.hunting.buyRunning = values.buyRunning;
+    if (values.sellRunning !== undefined) next.hunting.sellRunning = values.sellRunning;
+    if (values.market) {
+      const market = next.markets.find((item) => item.code === values.market!.code);
+      if (!market) throw new Error("Mercado de cacería inválido.");
+      if (values.market.huntBuyEnabled !== undefined)
+        market.huntBuyEnabled = values.market.huntBuyEnabled;
+      if (values.market.huntSellEnabled !== undefined)
+        market.huntSellEnabled = values.market.huntSellEnabled;
+      if (values.market.buyMaxRate !== undefined)
+        market.buyMaxRate = values.market.buyMaxRate;
+      if (values.market.sellMinRate !== undefined)
+        market.sellMinRate = values.market.sellMinRate;
+    }
+    this.saveConfig(next, "panel", "Controles de cacería actualizados");
+    this.store.audit("hunting_control", huntingChangeDetail(values));
+  }
+
+  huntEnabled(code: FiatMarket, side: "buy" | "sell"): boolean {
+    const config = this.marketConfig.current();
+    const market = config.markets.find((item) => item.code === code);
+    if (!market?.active) return false;
+    return side === "buy"
+      ? config.hunting.buyRunning && market.huntBuyEnabled
+      : config.hunting.sellRunning && market.huntSellEnabled;
+  }
+
   isPaused(): boolean {
     return this.store.get("paused") !== "false";
   }
@@ -339,10 +378,13 @@ export class TradingEngine {
       return { inspected: 0, candidates: 0, action: "pausado" };
     try {
       const round = Number(this.store.get("market_scan_round") ?? 0);
-      const includeBuySide = round % 2 === 0;
+      const includeBuySide = round % 2 === 0 && this.marketConfig.current().hunting.sellRunning;
       this.store.set("market_scan_round", String(round + 1));
       const snapshots: Array<MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }> = [];
-      for (const market of this.activeMarkets()) {
+      const activeMarkets = this.activeMarkets();
+      const buyHuntMarkets = activeMarkets.filter((market) => this.huntEnabled(market.code, "buy"));
+      const sellHuntMarkets = activeMarkets.filter((market) => this.huntEnabled(market.code, "sell"));
+      for (const market of buyHuntMarkets) {
         snapshots.push({
           ...(await this.inspectMarketSide(market.code, "sell")),
           coin: market.code,
@@ -350,7 +392,7 @@ export class TradingEngine {
         });
       }
       if (includeBuySide) {
-        for (const market of this.activeMarkets()) {
+        for (const market of sellHuntMarkets) {
           snapshots.push({
             ...(await this.inspectMarketSide(market.code, "buy")),
             coin: market.code,
@@ -380,7 +422,10 @@ export class TradingEngine {
         )
         .map((item) => item.offer);
 
-      this.syncWebAlerts(items, includeBuySide ? ["sell", "buy"] : ["sell"]);
+      const synchronizedOfferTypes: Array<"buy" | "sell"> = ["sell"];
+      if (includeBuySide || sellHuntMarkets.length === 0)
+        synchronizedOfferTypes.push("buy");
+      this.syncWebAlerts(items, synchronizedOfferTypes);
       this.persistScanCoverage(snapshots, items, includeBuySide);
 
       for (const item of items.filter(
@@ -403,6 +448,7 @@ export class TradingEngine {
       let blockedUuid: string | undefined;
       for (const best of rankedSells) {
         const bestCoin = this.offerMarket(best);
+        if (!this.huntEnabled(bestCoin, "buy")) continue;
         if (this.mode() === "real") {
           const reference = median(
             items
@@ -419,7 +465,7 @@ export class TradingEngine {
             await this.notifyRiskBlock(best.uuid, `🛡️ Compra automática bloqueada: ${risk.reasons.join(" · ")}`);
             continue;
           }
-          await this.applyBuyQusd(best, true);
+          await this.applyBuyQusd(best, true, reference);
           this.store.markSeen(best.uuid);
           this.recordScan(
             offers.length,
@@ -459,6 +505,7 @@ export class TradingEngine {
       for (const bestExternalBuy of rankedBuys) {
         if (this.mode() !== "real") break;
         const coin = this.offerMarket(bestExternalBuy);
+        if (!this.huntEnabled(coin, "sell")) continue;
         const configured = this.market(coin)!;
         const reference = median(
           items
@@ -482,6 +529,7 @@ export class TradingEngine {
           priceReason: reference
             ? "La tasa supera el mínimo configurado y tiene referencia de mercado."
             : "No existe una referencia de mercado válida.",
+          canApply: () => this.huntEnabled(coin, "sell"),
         });
         if (result.workflow?.state === "applied") {
           this.store.markSeen(bestExternalBuy.uuid);
@@ -1187,6 +1235,15 @@ export class TradingEngine {
       };
     const coin = this.offerMarket(offer);
     const configured = this.market(coin)!;
+    if (
+      (offer.type === "sell" && !this.huntEnabled(coin, "buy")) ||
+      (offer.type === "buy" && !this.huntEnabled(coin, "sell"))
+    ) return {
+      offer,
+      rate: value,
+      decision: "ignored",
+      reason: `Cacería de ${offer.type === "sell" ? "compra" : "venta"} detenida`,
+    };
     const buyMax = configured.buyMaxRate;
     const sellMin = configured.sellMinRate;
     if (offer.type === "sell") {
@@ -1480,7 +1537,10 @@ export class TradingEngine {
   private async applyBuyQusd(
     offer: P2pOffer,
     automatic: boolean,
+    referenceRate?: number,
   ): Promise<void> {
+    if (automatic && !this.huntEnabled(this.offerMarket(offer), "buy"))
+      throw new Error("La cacería de compra fue detenida antes de aplicar.");
     await this.executeMutation(
       "apply",
       offer.uuid,
@@ -1501,6 +1561,7 @@ export class TradingEngine {
         : null,
       createdAt: Date.now(),
       ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
+      ...(referenceRate === undefined ? {} : { referenceRate }),
     });
     await this.sendChatBestEffort(offer.uuid);
     this.store.audit(
@@ -1720,6 +1781,15 @@ const isTerminal = (status: string): boolean =>
   ["cancelled", "canceled", "completed", "revision"].includes(
     status.toLowerCase(),
   );
+
+function huntingChangeDetail(values: Parameters<TradingEngine["updateHunting"]>[0]): string {
+  const changes = [
+    values.buyRunning === undefined ? undefined : `compra general=${values.buyRunning ? "activa" : "detenida"}`,
+    values.sellRunning === undefined ? undefined : `venta general=${values.sellRunning ? "activa" : "detenida"}`,
+    values.market ? `mercado=${values.market.code}` : undefined,
+  ].filter(Boolean);
+  return changes.join(" · ") || "Sin cambios";
+}
 
 function dayStart(now: number): number {
   const date = new Date(now);

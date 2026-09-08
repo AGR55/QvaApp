@@ -44,12 +44,16 @@ test("persiste la configuración nueva únicamente en SQLite", () => {
   next.risk.minQusdReserve = 7;
   next.automation.scanIntervalSeconds = 33;
   next.automation.welcomeMessage = "Pago fiat manual; el bot solo aplica la oferta.";
+  next.hunting.buyRunning = false;
+  next.markets[0]!.huntSellEnabled = false;
   config.save(next);
 
   assert.equal(existsSync(join(dataDir, "trading-config.json")), false);
   assert.equal(store.loadTradingConfig()?.qusdReserve, 7);
   assert.equal(store.loadTradingConfig()?.automation.scanIntervalSeconds, 33);
   assert.match(store.loadTradingConfig()?.automation.welcomeMessage ?? "", /manual/);
+  assert.equal(store.loadTradingConfig()?.hunting.buyRunning, false);
+  assert.equal(store.loadTradingConfig()?.markets[0]?.huntSellEnabled, false);
   assert.ok(store.hasBotConfig());
   assert.equal(
     store.loadTradingConfig()?.risk.maxQusdPerOperation,
@@ -158,7 +162,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v7-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v8-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });

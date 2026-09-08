@@ -14,6 +14,8 @@ export interface MarketConfig {
   label: string;
   currency: string;
   active: boolean;
+  huntBuyEnabled: boolean;
+  huntSellEnabled: boolean;
   fiatBalance: number;
   buyMaxRate: number;
   sellMinRate: number;
@@ -27,6 +29,10 @@ export interface TradingConfig {
   version: 3;
   qusdReserve: number;
   maxOpenOffers: number;
+  hunting: {
+    buyRunning: boolean;
+    sellRunning: boolean;
+  };
   automation: {
     scanIntervalSeconds: number;
     autoCancelMinutes: number;
@@ -154,6 +160,8 @@ export class MarketConfigService {
           label: "Transferencia CUP",
           currency: "CUP",
           active: true,
+          huntBuyEnabled: true,
+          huntSellEnabled: true,
           fiatBalance: 0,
           buyMaxRate: numberOr(cfg.buyQusdMaxRate, 930),
           sellMinRate: numberOr(cfg.sellQusdMinRate, 980),
@@ -170,6 +178,8 @@ export class MarketConfigService {
           label: "USD Prepago",
           currency: "USD",
           active: true,
+          huntBuyEnabled: true,
+          huntSellEnabled: true,
           fiatBalance: numberOr(cfg.initialUsdFiatBalance, 110),
           buyMaxRate: numberOr(cfg.buyQusdUsdMaxRate, 1.06),
           sellMinRate: numberOr(cfg.sellQusdUsdMinRate, 1.12),
@@ -183,6 +193,8 @@ export class MarketConfigService {
           label: "Tarjeta Clásica",
           currency: "USD",
           active: true,
+          huntBuyEnabled: true,
+          huntSellEnabled: true,
           fiatBalance: 40,
           buyMaxRate: 1.04,
           sellMinRate: 1.12,
@@ -192,6 +204,7 @@ export class MarketConfigService {
           paymentDetails: [],
         },
       ],
+      hunting: { buyRunning: true, sellRunning: true },
     };
   }
 }
@@ -210,6 +223,7 @@ function validate(value: unknown): asserts value is TradingConfig {
   finite(config.maxOpenOffers, "Máximo de ofertas", 1);
   validateRisk(config.risk);
   validateAutomation(config.automation);
+  validateHunting(config.hunting);
   const codes = new Set<string>();
   for (const market of config.markets) {
     if (!market || typeof market !== "object")
@@ -225,6 +239,10 @@ function validate(value: unknown): asserts value is TradingConfig {
       throw new Error(`Nombre o moneda inválidos para ${market.code}.`);
     if (typeof market.active !== "boolean")
       throw new Error(`Estado inválido para ${market.code}.`);
+    if (
+      typeof market.huntBuyEnabled !== "boolean" ||
+      typeof market.huntSellEnabled !== "boolean"
+    ) throw new Error(`Control de cacería inválido para ${market.code}.`);
     finite(market.fiatBalance, `Saldo de ${market.code}`);
     finite(market.buyMaxRate, `Máximo de compra de ${market.code}`, 0.0000001);
     finite(market.sellMinRate, `Mínimo de venta de ${market.code}`, 0.0000001);
@@ -266,7 +284,8 @@ function normalize(value: unknown): TradingConfig {
   const raw = value as Partial<TradingConfig> & { version?: number };
   if (raw.version === 3) {
     const config = structuredClone(raw) as TradingConfig;
-    config.markets = withOutgoingFees(config.markets);
+    config.markets = withMarketDefaults(config.markets);
+    config.hunting = withHuntingDefaults(config.hunting);
     return config;
   }
   if (raw.version !== 1 && raw.version !== 2)
@@ -283,18 +302,28 @@ function normalize(value: unknown): TradingConfig {
           reviewedAt: null,
         },
   } as TradingConfig;
-  config.markets = withOutgoingFees(config.markets);
+  config.markets = withMarketDefaults(config.markets);
+  config.hunting = withHuntingDefaults(config.hunting);
   return config;
 }
 
-function withOutgoingFees(markets: MarketConfig[]): MarketConfig[] {
+function withMarketDefaults(markets: MarketConfig[]): MarketConfig[] {
   return markets.map((market) => ({
     ...market,
+    huntBuyEnabled: booleanOr(market.huntBuyEnabled, market.active),
+    huntSellEnabled: booleanOr(market.huntSellEnabled, market.active),
     outgoingTransferFee: numberOr(
       market.outgoingTransferFee,
       market.code === "CLASICA" ? 0.08 : 0,
     ),
   }));
+}
+
+function withHuntingDefaults(value: TradingConfig["hunting"] | undefined): TradingConfig["hunting"] {
+  return {
+    buyRunning: booleanOr(value?.buyRunning, true),
+    sellRunning: booleanOr(value?.sellRunning, true),
+  };
 }
 
 function automationFromRuntime(cfg: LegacyConfig): TradingConfig["automation"] {
@@ -339,6 +368,15 @@ function validateAutomation(value: unknown): asserts value is TradingConfig["aut
   ) throw new Error("El mensaje P2P debe tener como máximo 79 caracteres.");
 }
 
+function validateHunting(value: unknown): asserts value is TradingConfig["hunting"] {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    typeof (value as Record<string, unknown>).buyRunning !== "boolean" ||
+    typeof (value as Record<string, unknown>).sellRunning !== "boolean"
+  ) throw new Error("Los controles generales de cacería son inválidos.");
+}
+
 function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {
   if (!value || typeof value !== "object")
     throw new Error("Los límites globales de riesgo son obligatorios.");
@@ -369,12 +407,19 @@ function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {
 function harmonize(config: TradingConfig): TradingConfig {
   const normalized = structuredClone(config);
   normalized.qusdReserve = normalized.risk.minQusdReserve;
+  normalized.hunting = withHuntingDefaults(normalized.hunting);
   for (const market of normalized.markets) {
+    market.huntBuyEnabled = booleanOr(market.huntBuyEnabled, market.active);
+    market.huntSellEnabled = booleanOr(market.huntSellEnabled, market.active);
     market.outgoingTransferFee = numberOr(market.outgoingTransferFee, 0);
     if (market.purchaseMaxQusd > normalized.risk.maxQusdPerOperation)
       market.purchaseMaxQusd = normalized.risk.maxQusdPerOperation;
   }
   return normalized;
+}
+
+function booleanOr(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
 }
 
 function finite(value: unknown, label: string, minimum = 0): void {

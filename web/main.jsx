@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BarChart3,
+  Crosshair,
   CandlestickChart,
   LayoutDashboard,
   RefreshCw,
@@ -19,6 +20,7 @@ import { Market } from "./features/market.jsx";
 import { Settings } from "./features/settings.jsx";
 import { Login } from "./features/login.jsx";
 import { Operations } from "./features/operations.jsx";
+import { Hunting } from "./features/hunting.jsx";
 import { Audit } from "./features/audit.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
 import "./styles.css";
@@ -28,6 +30,7 @@ import "./cockpit.css";
 import "./offer-actions.css";
 import "./offer-modal.css";
 import "./capital.css";
+import "./hunting.css";
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({
@@ -38,6 +41,7 @@ const navigation = [
   ["resumen", "Cockpit", LayoutDashboard],
   ["mercado", "Mercados", CandlestickChart],
   ["ofertas", "Capital", WalletCards],
+  ["caceria", "Cacería", Crosshair],
   ["operaciones", "Operaciones", Workflow],
   ["graficas", "Gráficas", BarChart3],
   ["configuracion", "Estrategia", SlidersHorizontal],
@@ -170,6 +174,9 @@ function App() {
             unit={unit}
             onChanged={refresh}
           />
+        ) : null}
+        {view === "caceria" ? (
+          <Hunting data={data} label={label} unit={unit} onChanged={refresh} />
         ) : null}
         {view === "graficas" ? (
           <Suspense fallback={<Empty>Cargando gráficas…</Empty>}>

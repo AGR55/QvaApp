@@ -49,6 +49,26 @@ try {
   await waitFor(() => execute("return document.body.innerText.includes('Operaciones con dinero')"));
   await screenshot("/tmp/qvaapply-operations-desktop.png");
 
+  const hunting = await find("xpath", "//button[contains(normalize-space(.), 'Cacería')]");
+  await command("POST", `/session/${sessionId}/element/${hunting}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Cazar solo donde tú decidas')"));
+  const huntSwitches = await execute("return document.querySelectorAll('[role=switch]').length");
+  if (huntSwitches !== 6)
+    throw new Error(`Se esperaban 6 controles de mercado y lado; aparecieron ${huntSwitches}.`);
+  const huntingAccessibility = await accessibilityAudit();
+  if (huntingAccessibility.serious.length > 0)
+    throw new Error(`WCAG Cacería: ${JSON.stringify(huntingAccessibility.serious)}`);
+  await screenshot("/tmp/qvaapply-hunting-desktop.png");
+  await execute("window.scrollTo(0, document.documentElement.scrollHeight); return true");
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await screenshot("/tmp/qvaapply-hunting-log-desktop.png");
+  const cancelCapture = await find("xpath", "//button[normalize-space(.)='Cancelar aplicación']");
+  await command("POST", `/session/${sessionId}/element/${cancelCapture}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Cancelar esta aplicación')"));
+  await screenshot("/tmp/qvaapply-hunting-cancel-desktop.png");
+  const keepCapture = await find("xpath", "//button[normalize-space(.)='Mantener aplicación']");
+  await command("POST", `/session/${sessionId}/element/${keepCapture}/click`, {});
+
   const capital = await find("xpath", "//button[contains(normalize-space(.), 'Capital')]");
   await command("POST", `/session/${sessionId}/element/${capital}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Capital disponible')"));
@@ -92,7 +112,14 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 500));
   await screenshot("/tmp/qvaapply-dashboard-mobile.png");
   const mobile = await metrics();
-  console.log(JSON.stringify({ desktop, mobile, accessibility, settingsAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-dashboard-mobile.png"] }, null, 2));
+  const huntingMobile = await find("xpath", "//button[contains(normalize-space(.), 'Cacería')]");
+  await command("POST", `/session/${sessionId}/element/${huntingMobile}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Cazar solo donde tú decidas')"));
+  await screenshot("/tmp/qvaapply-hunting-mobile.png");
+  const huntingMobileMetrics = await metrics();
+  if (huntingMobileMetrics.horizontalOverflow)
+    throw new Error(`Cacería desborda horizontalmente en móvil: ${JSON.stringify(huntingMobileMetrics)}`);
+  console.log(JSON.stringify({ desktop, mobile, huntingMobileMetrics, accessibility, huntingAccessibility, settingsAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-hunting-desktop.png", "/tmp/qvaapply-hunting-log-desktop.png", "/tmp/qvaapply-hunting-cancel-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-dashboard-mobile.png", "/tmp/qvaapply-hunting-mobile.png"] }, null, 2));
 } finally {
   if (sessionId) await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
   driver.kill("SIGTERM");

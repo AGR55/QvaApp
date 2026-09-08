@@ -76,6 +76,29 @@ test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () =
   await app.close();
 });
 
+test("Fastify valida y aplica controles de cacería por mercado", async () => {
+  const updates: unknown[] = [];
+  const app = buildDashboard({ updateHunting: (value: unknown) => updates.push(value) } as never, { password, trustedOrigin: origin });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const response = await app.inject({
+    method: "PUT",
+    url: "/api/hunting",
+    headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf },
+    payload: { market: { code: "BANDECPREPAGO", huntSellEnabled: false, sellMinRate: 1.13 } },
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(updates, [{ market: { code: "BANDECPREPAGO", huntSellEnabled: false, sellMinRate: 1.13 } }]);
+  await app.close();
+});
+
 test("Fastify permite iniciar sesión desde localhost cuando se configuró loopback", async () => {
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const login = await app.inject({

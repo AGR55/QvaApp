@@ -40,6 +40,8 @@ Cada mercado incorporará dos propiedades persistentes:
 - `huntBuyEnabled`: permite aplicar a ofertas externas de venta para comprar QUSD.
 - `huntSellEnabled`: permite aplicar a ofertas externas de compra para vender QUSD.
 
+La raíz de la configuración incorpora además `hunting.buyRunning` y `hunting.sellRunning`. Estos interruptores inician o detienen cada lado sin perder la selección de mercados preparada por el administrador.
+
 Los precios de caza reutilizan `buyMaxRate` y `sellMinRate`. Así, Cacería y Estrategia no crean valores divergentes. Los cambios se guardan mediante la configuración versionada y quedan incluidos en la cadena de revisiones.
 
 La migración asignará ambos interruptores según el estado activo actual del mercado. Esto conserva el comportamiento de instalaciones existentes. Un mercado globalmente inactivo nunca se escanea aunque uno de sus interruptores de cacería estuviera activo.

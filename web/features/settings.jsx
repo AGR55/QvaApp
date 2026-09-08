@@ -96,7 +96,7 @@ export function Settings({ onChanged }) {
     ...current,
     markets: current.markets.map((market, index) => index === marketIndex ? { ...market, paymentDetails: market.paymentDetails.filter((_, position) => position !== detailIndex) } : market),
   }));
-  const addMarket = () => setDraft((current) => ({ ...current, markets: [...current.markets, { code: "NUEVO", label: "Nuevo mercado", currency: "", active: false, fiatBalance: 0, buyMaxRate: 1, sellMinRate: 1, purchaseMaxQusd: 0, sellFeePercent: 0, outgoingTransferFee: 0, paymentDetails: [] }] }));
+  const addMarket = () => setDraft((current) => ({ ...current, markets: [...current.markets, { code: "NUEVO", label: "Nuevo mercado", currency: "", active: false, huntBuyEnabled: false, huntSellEnabled: false, fiatBalance: 0, buyMaxRate: 1, sellMinRate: 1, purchaseMaxQusd: 0, sellFeePercent: 0, outgoingTransferFee: 0, paymentDetails: [] }] }));
   const removeMarket = (index) => setDraft((current) => ({ ...current, markets: current.markets.filter((_, position) => position !== index) }));
   const save = async () => {
     setStatus("Guardando revisión…");
@@ -404,7 +404,7 @@ function diffConfig(saved, draft) {
   const marketChanges = draft.markets.flatMap((market, index) => {
     const before = saved.markets[index];
     if (!before) return [{ key: `market:${market.code}`, label: market.label, before: "Nuevo", after: "Activo" }];
-    return ["code", "label", "currency", "active", "fiatBalance", "buyMaxRate", "sellMinRate", "purchaseMaxQusd", "sellFeePercent", "outgoingTransferFee", "paymentDetails"].flatMap(
+    return ["code", "label", "currency", "active", "huntBuyEnabled", "huntSellEnabled", "fiatBalance", "buyMaxRate", "sellMinRate", "purchaseMaxQusd", "sellFeePercent", "outgoingTransferFee", "paymentDetails"].flatMap(
       (key) =>
         JSON.stringify(before[key]) === JSON.stringify(market[key])
           ? []

@@ -61,7 +61,87 @@ test("el escaneo real cancela liquidez peor y aplica a la mejor compra externa",
   assert.equal(result.action, "venta aplicada target-buy");
   assert.deepEqual(calls, ["cancel:own-sell", "apply:target-buy"]);
   assert.equal(store.getOperation(target.uuid)?.autoApplied, true);
+  assert.equal(store.getOperation(target.uuid)?.referenceRate, 1_020);
   assert.equal(store.getTradeWorkflow(store.tradeWorkflows()[0]!.id)?.state, "applied");
+  store.close();
+});
+
+test("detiene compra y venta por separado sin consultar el lado deshabilitado", async () => {
+  const { store, cfg, markets } = setup();
+  const queries: string[] = [];
+  const qva = {
+    listOffersPage: async (params: { type: string }) => {
+      queries.push(params.type);
+      return { offers: [], total: 0, currentPage: 1, perPage: 100 };
+    },
+    p2pAverages: async () => ({}),
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  trading.updateHunting({ buyRunning: false, sellRunning: true });
+  await trading.scan();
+  assert.deepEqual(queries, ["buy"]);
+
+  queries.length = 0;
+  trading.updateHunting({ buyRunning: true, sellRunning: false });
+  store.set("market_scan_round", "0");
+  await trading.scan();
+  assert.deepEqual(queries, ["sell"]);
+
+  queries.length = 0;
+  trading.updateHunting({
+    sellRunning: true,
+    market: { code: "BANK_CUP", huntBuyEnabled: false, huntSellEnabled: false },
+  });
+  store.set("market_scan_round", "0");
+  await trading.scan();
+  assert.deepEqual(queries, []);
+  store.close();
+});
+
+test("conserva la selección y los precios de cacería por mercado", () => {
+  const { store, cfg, markets, dataDir } = setup();
+  const trading = new TradingEngine(store, {} as never, cfg as never, markets, async () => undefined);
+  trading.updateHunting({
+    market: {
+      code: "BANK_CUP",
+      huntBuyEnabled: false,
+      huntSellEnabled: true,
+      buyMaxRate: 925,
+      sellMinRate: 1_025,
+    },
+  });
+
+  const reopened = new MarketConfigService(dataDir, cfg as never, store);
+  assert.equal(reopened.find("BANK_CUP")?.huntBuyEnabled, false);
+  assert.equal(reopened.find("BANK_CUP")?.huntSellEnabled, true);
+  assert.equal(reopened.find("BANK_CUP")?.buyMaxRate, 925);
+  assert.equal(reopened.find("BANK_CUP")?.sellMinRate, 1_025);
+  assert.ok(store.countAudit("hunting_control") > 0);
+  store.close();
+});
+
+test("revalida la cacería de compra después de evaluar el riesgo", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = { uuid: "stopped-before-apply", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open", User: { uuid: "peer" } };
+  let applications = 0;
+  let trading: TradingEngine;
+  const qva = {
+    listOffersPage: async (params: { type?: string }) => ({ offers: params.type === "sell" ? [target] : [], total: 1, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => {
+      trading.updateHunting({ buyRunning: false });
+      return 100;
+    },
+    apply: async () => void (applications += 1),
+  };
+  trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const result = await trading.scan();
+
+  assert.equal(result.action, "error");
+  assert.equal(applications, 0);
+  assert.equal(store.getOperation(target.uuid), undefined);
   store.close();
 });
 

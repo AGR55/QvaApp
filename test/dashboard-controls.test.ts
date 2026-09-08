@@ -21,3 +21,22 @@ test("el panel valida QvaPay al reanudar y pausa localmente", async () => {
 
   assert.deepEqual(calls, ["pause:true:panel web", "activate"]);
 });
+
+test("el panel delega controles de cacería al motor", () => {
+  const calls: unknown[] = [];
+  const dashboard = new DashboardReadModel(
+    { updateHunting: (value: unknown) => calls.push(value) } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  dashboard.updateHunting({
+    sellRunning: false,
+    market: { code: "CLASICA", huntBuyEnabled: true, buyMaxRate: 1.04 },
+  });
+  assert.deepEqual(calls, [{
+    sellRunning: false,
+    market: { code: "CLASICA", huntBuyEnabled: true, buyMaxRate: 1.04 },
+  }]);
+});

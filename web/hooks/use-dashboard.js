@@ -78,6 +78,13 @@ export function useDashboard(view, market, setMarket) {
         ["balance", "/api/live/balance"],
         ["ownOffers", "/api/live/own-offers"],
       ];
+    if (view === "caceria")
+      return snapshot.markets
+        .filter((item) => item.active && (item.huntBuyEnabled || item.huntSellEnabled))
+        .map((item) => [
+          `market:${item.code}`,
+          `/api/live/markets/${encodeURIComponent(item.code)}`,
+        ]);
     return [];
   }, [market, view]);
 
