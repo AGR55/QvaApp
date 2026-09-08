@@ -10,6 +10,12 @@ test("calcula margen neto y punto de equilibrio incluyendo comisión", () => {
   assert.ok(result.breakEvenRate > 970);
 });
 
+test("el margen incorpora la comisión fija de la transferencia saliente", () => {
+  const result = marginCalculation(1.04, 1.12, 10, 0, 0.08);
+  assert.ok(Math.abs(result.cost - 10.48) < 0.000001);
+  assert.ok(Math.abs(result.breakEvenRate - 1.048) < 0.000001);
+});
+
 test("distribuye presupuesto por mejores tasas sin exceder la reserva", () => {
   const allocation = allocateBudget(35_000, 1_000, 35, [
     { rate: 980, amount: 20 },

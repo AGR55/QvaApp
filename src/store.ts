@@ -13,7 +13,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 6;
+const LATEST_SCHEMA_VERSION = 7;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -347,6 +347,23 @@ export class Store {
           )
           .run(Date.now());
       }
+      if (this.currentSchemaVersion() < 7) {
+        this.ensureColumn(
+          "market_config",
+          "outgoing_transfer_fee",
+          "REAL NOT NULL DEFAULT 0",
+        );
+        this.db
+          .prepare(
+            "UPDATE market_config SET outgoing_transfer_fee = 0.08 WHERE code = 'CLASICA' AND outgoing_transfer_fee = 0",
+          )
+          .run();
+        this.db
+          .prepare(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (7, ?)",
+          )
+          .run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -365,7 +382,7 @@ export class Store {
   }
 
   private ensureColumn(
-    table: "operations" | "fiat_ledger" | "market_observations",
+    table: "operations" | "fiat_ledger" | "market_observations" | "market_config",
     column: string,
     definition: string,
   ): void {
@@ -396,7 +413,7 @@ export class Store {
       .get() as Record<string, unknown> | undefined;
     const marketRows = this.db
       .prepare(
-        "SELECT code, label, currency, active, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent FROM market_config ORDER BY rowid",
+        "SELECT code, label, currency, active, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee FROM market_config ORDER BY rowid",
       )
       .all() as Record<string, unknown>[];
     const details = this.db
@@ -462,6 +479,7 @@ export class Store {
         sellMinRate: Number(row.sell_min_rate),
         purchaseMaxQusd: Number(row.purchase_max_qusd),
         sellFeePercent: Number(row.sell_fee_percent),
+        outgoingTransferFee: Number(row.outgoing_transfer_fee),
         paymentDetails: details
           .filter((detail) => detail.market_code === row.code)
           .map((detail) => ({
@@ -550,7 +568,7 @@ export class Store {
       this.db.prepare("DELETE FROM fiat_accounts").run();
       this.db.prepare("DELETE FROM market_config").run();
       const insertMarket = this.db.prepare(
-        "INSERT INTO market_config(code, label, currency, active, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO market_config(code, label, currency, active, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const insertDetail = this.db.prepare(
         "INSERT INTO payment_details(market_code, position, name, value) VALUES (?, ?, ?, ?)",
@@ -570,6 +588,7 @@ export class Store {
           market.sellMinRate,
           market.purchaseMaxQusd,
           market.sellFeePercent,
+          market.outgoingTransferFee,
         );
         insertAccount.run(market.code, balance, Date.now());
         this.set(`fiat_balance:${market.code}`, String(balance));

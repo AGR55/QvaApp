@@ -19,6 +19,7 @@ export interface MarketConfig {
   sellMinRate: number;
   purchaseMaxQusd: number;
   sellFeePercent: number;
+  outgoingTransferFee: number;
   paymentDetails: PaymentDetail[];
 }
 
@@ -161,6 +162,7 @@ export class MarketConfigService {
             conservativeRiskLimits.maxQusdPerOperation,
           ),
           sellFeePercent: 0,
+          outgoingTransferFee: 0,
           paymentDetails: cfg.paymentDetails?.BANK_CUP ?? [],
         },
         {
@@ -173,6 +175,7 @@ export class MarketConfigService {
           sellMinRate: numberOr(cfg.sellQusdUsdMinRate, 1.12),
           purchaseMaxQusd: 0,
           sellFeePercent: 0,
+          outgoingTransferFee: 0,
           paymentDetails: cfg.paymentDetails?.BANDECPREPAGO ?? [],
         },
         {
@@ -185,6 +188,7 @@ export class MarketConfigService {
           sellMinRate: 1.12,
           purchaseMaxQusd: 0,
           sellFeePercent: 0,
+          outgoingTransferFee: 0.08,
           paymentDetails: [],
         },
       ],
@@ -226,6 +230,7 @@ function validate(value: unknown): asserts value is TradingConfig {
     finite(market.sellMinRate, `Mínimo de venta de ${market.code}`, 0.0000001);
     finite(market.purchaseMaxQusd, `Límite por compra de ${market.code}`);
     finite(market.sellFeePercent, `Comisión de venta de ${market.code}`);
+    finite(market.outgoingTransferFee, `Comisión fija de salida de ${market.code}`);
     if (market.sellFeePercent >= 100)
       throw new Error(`La comisión de ${market.code} debe ser menor de 100%.`);
     if (
@@ -259,10 +264,14 @@ function normalize(value: unknown): TradingConfig {
   if (!value || typeof value !== "object")
     throw new Error("La configuración debe ser un objeto.");
   const raw = value as Partial<TradingConfig> & { version?: number };
-  if (raw.version === 3) return raw as TradingConfig;
+  if (raw.version === 3) {
+    const config = structuredClone(raw) as TradingConfig;
+    config.markets = withOutgoingFees(config.markets);
+    return config;
+  }
   if (raw.version !== 1 && raw.version !== 2)
     throw new Error("Versión de configuración no compatible.");
-  return {
+  const config = {
     ...(raw as Omit<TradingConfig, "version" | "risk" | "automation">),
     version: 3,
     automation: defaultAutomation(),
@@ -273,7 +282,19 @@ function normalize(value: unknown): TradingConfig {
           minQusdReserve: numberOr(raw.qusdReserve, conservativeRiskLimits.minQusdReserve),
           reviewedAt: null,
         },
-  };
+  } as TradingConfig;
+  config.markets = withOutgoingFees(config.markets);
+  return config;
+}
+
+function withOutgoingFees(markets: MarketConfig[]): MarketConfig[] {
+  return markets.map((market) => ({
+    ...market,
+    outgoingTransferFee: numberOr(
+      market.outgoingTransferFee,
+      market.code === "CLASICA" ? 0.08 : 0,
+    ),
+  }));
 }
 
 function automationFromRuntime(cfg: LegacyConfig): TradingConfig["automation"] {
@@ -348,9 +369,11 @@ function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {
 function harmonize(config: TradingConfig): TradingConfig {
   const normalized = structuredClone(config);
   normalized.qusdReserve = normalized.risk.minQusdReserve;
-  for (const market of normalized.markets)
+  for (const market of normalized.markets) {
+    market.outgoingTransferFee = numberOr(market.outgoingTransferFee, 0);
     if (market.purchaseMaxQusd > normalized.risk.maxQusdPerOperation)
       market.purchaseMaxQusd = normalized.risk.maxQusdPerOperation;
+  }
   return normalized;
 }
 

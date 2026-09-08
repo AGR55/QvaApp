@@ -160,4 +160,5 @@ test("el dashboard persiste una sola observación completa por mercado", async (
   assert.equal(history.length, 1);
   assert.equal(history[0]?.openOffers, 1);
   assert.equal(history[0]?.eligible, 1);
+  assert.equal(history[0]?.medianSell, 930);
 });

@@ -35,6 +35,7 @@ export function proportionalBudgetPlan(
   coin: FiatMarket,
   available: number,
   maximumRate: number,
+  outgoingTransferFee = 0,
 ): BudgetPlan {
   const invalid: string[] = [];
   const candidates = offers.filter((offer) => {
@@ -58,8 +59,11 @@ export function proportionalBudgetPlan(
   });
   const safeAvailable =
     Number.isFinite(available) && available > 0 ? available : 0;
+  const safeFee = Number.isFinite(outgoingTransferFee) && outgoingTransferFee > 0
+    ? outgoingTransferFee
+    : 0;
   const committed = candidates.reduce(
-    (sum, offer) => sum + offer.amount * offer.rate,
+    (sum, offer) => sum + offer.amount * offer.rate + safeFee,
     0,
   );
   if (committed <= safeAvailable)
@@ -71,7 +75,13 @@ export function proportionalBudgetPlan(
       adjustments: [],
       invalid,
     };
-  const factor = safeAvailable / committed;
+  const variableCommitted = candidates.reduce(
+    (sum, offer) => sum + offer.amount * offer.rate,
+    0,
+  );
+  const factor = variableCommitted > 0
+    ? Math.max(0, safeAvailable - candidates.length * safeFee) / variableCommitted
+    : 0;
   return {
     coin,
     available: safeAvailable,
@@ -81,8 +91,10 @@ export function proportionalBudgetPlan(
     adjustments: candidates
       .map((offer) => {
         const proposedQusd = precision(offer.amount * factor);
-        const currentFiat = offer.amount * offer.rate;
-        const proposedFiat = proposedQusd * offer.rate;
+        const currentFiat = offer.amount * offer.rate + safeFee;
+        const proposedFiat = proposedQusd > 0
+          ? proposedQusd * offer.rate + safeFee
+          : 0;
         return {
           uuid: offer.uuid,
           coin,

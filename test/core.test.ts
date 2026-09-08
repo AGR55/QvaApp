@@ -131,6 +131,53 @@ test("la conciliación USD actualiza únicamente Bandec Prepago", async () => {
   assert.equal(store.get("fiat_balance:BANDECPREPAGO"), "121.2");
 });
 
+test("Clásica descuenta 0.08 USD solo cuando sale fiat y no duplica la comisión", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-classic-fee-")));
+  store.set("fiat_balance:CLASICA", "20");
+  store.set("fiat_ledger_started_at:CLASICA", String(Date.now() - 1_000));
+  const qva = {
+    profile: async () => ({ uuid: "me" }),
+    listOffersPage: async () => ({
+      offers: [
+        {
+          uuid: "classic-outgoing",
+          type: "buy",
+          coin: "CLASICA",
+          amount: 10,
+          receive: 10.4,
+          status: "paid",
+          updated_at: new Date().toISOString(),
+          User: { uuid: "me" },
+        },
+        {
+          uuid: "classic-incoming",
+          type: "sell",
+          coin: "CLASICA",
+          amount: 5,
+          receive: 5,
+          status: "completed",
+          updated_at: new Date().toISOString(),
+          User: { uuid: "me" },
+        },
+      ],
+      total: 2,
+      currentPage: 1,
+      perPage: 50,
+    }),
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.syncFiatFromQva(), 2);
+  assert.ok(Math.abs(Number(store.get("fiat_balance:CLASICA")) - 14.52) < 0.000001);
+  assert.equal(await trading.syncFiatFromQva(), 0);
+  assert.ok(Math.abs(Number(store.get("fiat_balance:CLASICA")) - 14.52) < 0.000001);
+});
+
 test("USD Prepago inicia en 110 y usa sus propios umbrales", async () => {
   const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-usd-market-")));
   const qva = {
@@ -233,6 +280,27 @@ test("Clásica no usa el saldo de Prepago aunque ambas operen en USD", async () 
   assert.equal(
     (await trading.inspectMarket("CLASICA")).items[0]?.reason,
     "Saldo fiat declarado insuficiente",
+  );
+});
+
+test("Clásica exige saldo para el importe y la comisión antes de crear una compra", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-classic-create-fee-")));
+  const qva = {
+    listOffers: async () => [],
+    createOffer: async () => { throw new Error("no debe crear"); },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    { realTradingAllowed: true } as never,
+    async () => undefined,
+  );
+  store.set("mode", "real");
+  trading.setFiatBalance("CLASICA", 10.4);
+
+  await assert.rejects(
+    () => trading.createOwnOffer("CLASICA", "buy", 10, 1.04),
+    /Saldo Tarjeta Clásica insuficiente/,
   );
 });
 

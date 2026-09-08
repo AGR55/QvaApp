@@ -55,3 +55,18 @@ test("ignora importes o tasas inválidas para que no inflen el presupuesto", () 
   assert.equal(plan.deficit, 0);
   assert.deepEqual(plan.invalid, ["bad"]);
 });
+
+test("reserva una comisión fija por cada oferta de compra", () => {
+  const plan = proportionalBudgetPlan(
+    [
+      { uuid: "a", coin: "CLASICA", type: "buy", status: "open", amount: 10, rate: 1.04 },
+      { uuid: "b", coin: "CLASICA", type: "buy", status: "open", amount: 5, rate: 1.03 },
+    ],
+    "CLASICA",
+    20,
+    1.1,
+    0.08,
+  );
+  assert.ok(Math.abs(plan.committed - 15.71) < 0.000001);
+  assert.equal(plan.available, 20);
+});

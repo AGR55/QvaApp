@@ -21,7 +21,7 @@ const automationFields = [
   ["scanIntervalSeconds", "Intervalo de escaneo", "segundos", 5],
   ["autoCancelMinutes", "Cancelación automática", "minutos", 1],
   ["offerRefreshIntervalMinutes", "Refresco de ofertas propias", "minutos", 1],
-  ["priceGuardPercent", "Cortafuegos frente al promedio", "%", 1],
+  ["priceGuardPercent", "Cortafuegos frente a la mediana", "%", 1],
 ];
 
 export function Settings({ onChanged }) {
@@ -96,7 +96,7 @@ export function Settings({ onChanged }) {
     ...current,
     markets: current.markets.map((market, index) => index === marketIndex ? { ...market, paymentDetails: market.paymentDetails.filter((_, position) => position !== detailIndex) } : market),
   }));
-  const addMarket = () => setDraft((current) => ({ ...current, markets: [...current.markets, { code: "NUEVO", label: "Nuevo mercado", currency: "", active: false, fiatBalance: 0, buyMaxRate: 1, sellMinRate: 1, purchaseMaxQusd: 0, sellFeePercent: 0, paymentDetails: [] }] }));
+  const addMarket = () => setDraft((current) => ({ ...current, markets: [...current.markets, { code: "NUEVO", label: "Nuevo mercado", currency: "", active: false, fiatBalance: 0, buyMaxRate: 1, sellMinRate: 1, purchaseMaxQusd: 0, sellFeePercent: 0, outgoingTransferFee: 0, paymentDetails: [] }] }));
   const removeMarket = (index) => setDraft((current) => ({ ...current, markets: current.markets.filter((_, position) => position !== index) }));
   const save = async () => {
     setStatus("Guardando revisión…");
@@ -291,6 +291,21 @@ export function Settings({ onChanged }) {
                   }
                 />
               </label>
+              <label>
+                Comisión fija de salida
+                <span className="input-unit">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={market.outgoingTransferFee}
+                    onChange={(event) =>
+                      updateMarket(index, "outgoingTransferFee", event.target.value)
+                    }
+                  />
+                  <small>{market.currency}</small>
+                </span>
+              </label>
               <div className="payment-details">
                 <strong>Datos de cobro</strong>
                 {market.paymentDetails.map((detail, detailIndex) => (
@@ -389,7 +404,7 @@ function diffConfig(saved, draft) {
   const marketChanges = draft.markets.flatMap((market, index) => {
     const before = saved.markets[index];
     if (!before) return [{ key: `market:${market.code}`, label: market.label, before: "Nuevo", after: "Activo" }];
-    return ["code", "label", "currency", "active", "fiatBalance", "buyMaxRate", "sellMinRate", "purchaseMaxQusd", "sellFeePercent", "paymentDetails"].flatMap(
+    return ["code", "label", "currency", "active", "fiatBalance", "buyMaxRate", "sellMinRate", "purchaseMaxQusd", "sellFeePercent", "outgoingTransferFee", "paymentDetails"].flatMap(
       (key) =>
         JSON.stringify(before[key]) === JSON.stringify(market[key])
           ? []

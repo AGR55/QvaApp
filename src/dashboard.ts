@@ -27,8 +27,9 @@ export function marginCalculation(
   sellRate: number,
   amount: number,
   sellFeePercent: number,
+  outgoingTransferFee = 0,
 ) {
-  const cost = buyRate * amount;
+  const cost = buyRate * amount + outgoingTransferFee;
   const grossRevenue = sellRate * amount;
   const netRevenue = grossRevenue * (1 - sellFeePercent / 100);
   return {
@@ -38,7 +39,9 @@ export function marginCalculation(
     netProfit: netRevenue - cost,
     marginPercent: cost ? ((netRevenue - cost) / cost) * 100 : 0,
     breakEvenRate:
-      1 - sellFeePercent / 100 > 0 ? buyRate / (1 - sellFeePercent / 100) : 0,
+      amount > 0 && 1 - sellFeePercent / 100 > 0
+        ? cost / amount / (1 - sellFeePercent / 100)
+        : 0,
   };
 }
 
@@ -175,6 +178,7 @@ export class DashboardReadModel {
             configured.code,
             state.fiat[configured.code] ?? 0,
             strategy.buyMax[configured.code] ?? configured.buyMaxRate,
+            configured.outgoingTransferFee,
           ),
         ]),
     );
@@ -342,6 +346,8 @@ export class DashboardReadModel {
       coin,
       ...maybeNumber("averageBuy", numeric(current.average?.average_buy)),
       ...maybeNumber("averageSell", numeric(current.average?.average_sell)),
+      ...maybeNumber("medianBuy", numeric(current.average?.median_buy)),
+      ...maybeNumber("medianSell", numeric(current.average?.median_sell)),
       ...maybeNumber("bestBuy", bestRate(current.items, "buy")),
       ...maybeNumber("bestSell", bestRate(current.items, "sell")),
       openOffers: current.total,
@@ -458,10 +464,12 @@ function rankings(
             )
             .sort((a, b) => b.rate - a.rate)[0];
           if (!target) return undefined;
-          const amount = Math.min(source.amount, buy.fiatBalance / source.rate);
+          const spendableFiat = Math.max(0, buy.fiatBalance - buy.outgoingTransferFee);
+          const amount = Math.min(source.amount, spendableFiat / source.rate);
           const profit =
             target.rate * amount * (1 - sell.sellFeePercent / 100) -
-            source.rate * amount;
+            source.rate * amount -
+            buy.outgoingTransferFee;
           return {
             buy: buy.code,
             sell: sell.code,

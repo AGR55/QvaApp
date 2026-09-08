@@ -9,9 +9,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Panel, Skeleton } from "../components/common.jsx";
+import { Empty, Panel, Skeleton } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
+import { chartDomain } from "../lib/chart-domain.js";
 
 export function Charts({ markets }) {
   const [coin, setCoin] = useState(markets[0]?.code || ""),
@@ -35,8 +36,6 @@ export function Charts({ markets }) {
     () =>
       data?.history.map((item) => ({
         t: new Date(item.createdAt).toLocaleTimeString("es-CU"),
-        compra: item.averageBuy ?? null,
-        venta: item.averageSell ?? null,
         medianaCompra: item.medianBuy ?? null,
         medianaVenta: item.medianSell ?? null,
       })) || [],
@@ -44,19 +43,12 @@ export function Charts({ markets }) {
   );
   const values = rows
       .flatMap((item) => [
-        item.compra,
-        item.venta,
         item.medianaCompra,
         item.medianaVenta,
       ])
       .filter(Number.isFinite),
-    minimum = values.length ? Math.min(...values) : 0,
-    maximum = values.length ? Math.max(...values) : 1,
-    padding = Math.max(
-      (maximum - minimum) * 0.16,
-      Math.abs(maximum || 1) * 0.008,
-      0.0001,
-    );
+    domain = chartDomain(values),
+    digits = markets.find((market) => market.code === coin)?.currency === "USD" ? 4 : 2;
   return (
     <Panel title="Fluctuación de precios" wide>
       <div className="tabs">
@@ -70,50 +62,38 @@ export function Charts({ markets }) {
           </button>
         ))}
       </div>
-      {data ? (
+      {data && values.length ? (
         <ResponsiveContainer width="100%" height={400}>
           <AreaChart data={rows} margin={{ left: 18, right: 18 }}>
             <CartesianGrid vertical={false} />
             <XAxis dataKey="t" />
             <YAxis
               width={96}
-              domain={[minimum - padding, maximum + padding]}
-              tickFormatter={(value) => money(value, 4)}
+              domain={domain}
+              tickFormatter={(value) => money(value, digits)}
             />
-            <Tooltip />
+            <Tooltip formatter={(value) => money(value, digits)} />
             <Legend />
-            <Area
-              connectNulls
-              dataKey="compra"
-              name="Media compra"
-              stroke="#15745f"
-              fill="#15745f18"
-            />
             <Area
               connectNulls
               dataKey="medianaCompra"
               name="Mediana compra"
               stroke="#15745f"
-              strokeDasharray="6 4"
-              fill="none"
-            />
-            <Area
-              connectNulls
-              dataKey="venta"
-              name="Media venta"
-              stroke="#b15c2e"
-              fill="#b15c2e12"
+              fill="#15745f18"
+              isAnimationActive={false}
             />
             <Area
               connectNulls
               dataKey="medianaVenta"
               name="Mediana venta"
               stroke="#b15c2e"
-              strokeDasharray="6 4"
-              fill="none"
+              fill="#b15c2e12"
+              isAnimationActive={false}
             />
           </AreaChart>
         </ResponsiveContainer>
+      ) : data ? (
+        <Empty>La próxima lectura del mercado añadirá las medianas necesarias para esta gráfica.</Empty>
       ) : (
         <Skeleton rows={4} label="Leyendo histórico local" />
       )}

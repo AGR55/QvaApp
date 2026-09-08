@@ -15,7 +15,7 @@ Hacer que QvaApply represente con precisión el costo de las transferencias sali
 
 ## Modelo y datos
 
-`MarketConfig` incorpora `outgoingTransferFee`, con valor inicial 0.08 para `CLASICA` y 0 para los demás mercados. La configuración persistida se armoniza para que las revisiones existentes reciban 0 cuando el campo no exista y Clásica reciba el valor inicial solo en una instalación nueva.
+`MarketConfig` incorpora `outgoingTransferFee`, con valor 0.08 para `CLASICA` y 0 para los demás mercados. La configuración persistida y los JSON heredados se migran con esos valores cuando el campo todavía no existe.
 
 Las funciones monetarias del dominio calcularán:
 

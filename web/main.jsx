@@ -25,11 +25,9 @@ import "./styles.css";
 import "./settings.css";
 import "./layout.css";
 import "./cockpit.css";
-import "./offer-controls.css";
-import "./offer-alignment.css";
 import "./offer-actions.css";
-import "./offer-field-fix.css";
 import "./offer-modal.css";
+import "./capital.css";
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({

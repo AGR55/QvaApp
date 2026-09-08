@@ -49,6 +49,8 @@ export interface P2pAverage {
   average?: number;
   average_buy?: number;
   average_sell?: number;
+  median_buy?: number;
+  median_sell?: number;
   count?: number;
   updated_at?: string;
 }

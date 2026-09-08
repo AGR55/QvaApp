@@ -49,6 +49,33 @@ try {
   await waitFor(() => execute("return document.body.innerText.includes('Operaciones con dinero')"));
   await screenshot("/tmp/qvaapply-operations-desktop.png");
 
+  const capital = await find("xpath", "//button[contains(normalize-space(.), 'Capital')]");
+  await command("POST", `/session/${sessionId}/element/${capital}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Capital disponible')"));
+  const editOffer = await find("xpath", "//button[normalize-space(.)='Editar']");
+  await command("POST", `/session/${sessionId}/element/${editOffer}/click`, {});
+  await waitFor(() => execute("return document.querySelector('.offer-workbench') !== null")).catch(async () => {
+    const visibleText = await execute("return document.body.innerText.slice(-1200)");
+    throw new Error(`El editor de Capital no apareció. Texto visible: ${visibleText}`);
+  });
+  const capitalCalculation = await execute(`return document.querySelector('.offer-calculation')?.innerText || ''`);
+  if (!/0[.,]08/.test(capitalCalculation) || !/1[.,]0400/.test(capitalCalculation))
+    throw new Error(`El editor no muestra comisión y mediana de Clásica: ${capitalCalculation}`);
+  await screenshot("/tmp/qvaapply-capital-editor-desktop.png");
+  const closeEditor = await find("css selector", ".offer-workbench .icon-action");
+  await command("POST", `/session/${sessionId}/element/${closeEditor}/click`, {});
+  const cancelOffer = await find("xpath", "//button[normalize-space(.)='Cancelar']");
+  await command("POST", `/session/${sessionId}/element/${cancelOffer}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Eliminar esta oferta')"));
+  await screenshot("/tmp/qvaapply-capital-cancel-desktop.png");
+  const keepOffer = await find("xpath", "//button[normalize-space(.)='Conservar oferta']");
+  await command("POST", `/session/${sessionId}/element/${keepOffer}/click`, {});
+
+  const charts = await find("xpath", "//button[contains(normalize-space(.), 'Gráficas')]");
+  await command("POST", `/session/${sessionId}/element/${charts}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Fluctuación de precios')"));
+  await screenshot("/tmp/qvaapply-charts-desktop.png");
+
   const settings = await find("xpath", "//button[contains(normalize-space(.), 'Estrategia')]");
   await command("POST", `/session/${sessionId}/element/${settings}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Comportamiento del bot')"));
@@ -65,7 +92,7 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 500));
   await screenshot("/tmp/qvaapply-dashboard-mobile.png");
   const mobile = await metrics();
-  console.log(JSON.stringify({ desktop, mobile, accessibility, settingsAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-dashboard-mobile.png"] }, null, 2));
+  console.log(JSON.stringify({ desktop, mobile, accessibility, settingsAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-dashboard-mobile.png"] }, null, 2));
 } finally {
   if (sessionId) await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
   driver.kill("SIGTERM");

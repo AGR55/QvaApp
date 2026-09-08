@@ -158,7 +158,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v6-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v7-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });

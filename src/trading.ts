@@ -14,6 +14,7 @@ import type { FiatMarket, P2pAverage, P2pOffer } from "./types.js";
 import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
+import { median, outgoingFiatCost } from "./market-math.js";
 
 type RuntimeConfig = typeof Config;
 type Notify = (message: string, operationUuid?: string) => Promise<void>;
@@ -268,7 +269,9 @@ export class TradingEngine {
       items: [...sell.items, ...buy.items],
       total: sell.total + buy.total,
       scannedAt: Math.max(sell.scannedAt, buy.scannedAt),
-      ...(sell.average ? { average: sell.average } : buy.average ? { average: buy.average } : {}),
+      ...(sell.average || buy.average
+        ? { average: { ...sell.average, ...buy.average } }
+        : {}),
     };
   }
 
@@ -290,16 +293,25 @@ export class TradingEngine {
     const matchingOffers = page.offers.filter(
       (offer) => offer.type === type && offer.coin === coin,
     );
+    const marketMedian = median(matchingOffers.map(rate));
+    const reference: P2pAverage = {
+      ...averages?.[coin],
+      ...(marketMedian === undefined
+        ? {}
+        : type === "buy"
+          ? { median_buy: marketMedian }
+          : { median_sell: marketMedian }),
+    };
     return {
       items: matchingOffers.map((offer) =>
-        this.classifyOffer(offer, averages?.[offer.coin]),
+        this.classifyOffer(offer, reference),
       ),
       total:
         matchingOffers.length === page.offers.length
           ? page.total
           : matchingOffers.length,
       scannedAt: Date.now(),
-      ...(averages?.[coin] ? { average: averages[coin] } : {}),
+      ...(Object.keys(reference).length ? { average: reference } : {}),
     };
   }
 
@@ -392,7 +404,15 @@ export class TradingEngine {
       for (const best of rankedSells) {
         const bestCoin = this.offerMarket(best);
         if (this.mode() === "real") {
-          const risk = await this.evaluateAutomaticBuy(best);
+          const reference = median(
+            items
+              .filter(
+                (item) =>
+                  item.offer.coin === best.coin && item.offer.type === "sell",
+              )
+              .map((item) => item.rate),
+          );
+          const risk = await this.evaluateAutomaticBuy(best, reference);
           if (risk.kind !== "apply") {
             blockedUuid ??= best.uuid;
             this.store.audit("risk_block", risk.reasons.join(" · "), best.uuid);
@@ -440,8 +460,14 @@ export class TradingEngine {
         if (this.mode() !== "real") break;
         const coin = this.offerMarket(bestExternalBuy);
         const configured = this.market(coin)!;
-        const averages = await this.getAverages();
-        const reference = numeric(averages?.[coin]?.average_buy);
+        const reference = median(
+          items
+            .filter(
+              (item) =>
+                item.offer.coin === coin && item.offer.type === "buy",
+            )
+            .map((item) => item.rate),
+        );
         const expectedMargin = configured.buyMaxRate
           ? ((rate(bestExternalBuy) * (1 - configured.sellFeePercent / 100) -
               configured.buyMaxRate) /
@@ -782,7 +808,7 @@ export class TradingEngine {
           offer.uuid,
           coin,
           "debit",
-          fiatAmount,
+          fiatAmount + (this.market(coin)?.outgoingTransferFee ?? 0),
           "QvaPay reconciliado",
         )
       )
@@ -869,9 +895,17 @@ export class TradingEngine {
             offer.coin === coin &&
             offer.status === "open",
         )
-        .reduce((sum, offer) => sum + offer.receive, 0);
+        .reduce(
+          (sum, offer) => sum + offer.receive + market.outgoingTransferFee,
+          0,
+        );
       const available = this.fiatBalance(coin) - committed;
-      if (amount * fiatPerQusd > available + 0.000001)
+      const required = outgoingFiatCost(
+        amount,
+        fiatPerQusd,
+        market.outgoingTransferFee,
+      ).total;
+      if (required > available + 0.000001)
         throw new Error(
           `Saldo ${this.marketLabel(coin)} insuficiente. Disponible para nuevas compras: ${available.toFixed(2)} ${this.marketCurrency(coin)}.`,
         );
@@ -942,9 +976,18 @@ export class TradingEngine {
             candidate.coin === offer.coin &&
             candidate.status === "open",
         )
-        .reduce((sum, candidate) => sum + candidate.receive, 0);
+        .reduce(
+          (sum, candidate) =>
+            sum + candidate.receive + (market?.outgoingTransferFee ?? 0),
+          0,
+        );
       const available = this.fiatBalance(offer.coin) - committed;
-      if (amount * fiatPerQusd > available + 0.000001)
+      const required = outgoingFiatCost(
+        amount,
+        fiatPerQusd,
+        market?.outgoingTransferFee ?? 0,
+      ).total;
+      if (required > available + 0.000001)
         throw new Error(
           `Saldo ${this.marketLabel(offer.coin)} insuficiente. Disponible para esta oferta: ${available.toFixed(2)} ${this.marketCurrency(offer.coin)}.`,
         );
@@ -1128,7 +1171,7 @@ export class TradingEngine {
     ].join("\n");
   }
 
-  private classifyOffer(offer: P2pOffer, average?: P2pAverage): MarketItem {
+  private classifyOffer(offer: P2pOffer, statistics?: P2pAverage): MarketItem {
     const value = rate(offer);
     if (
       offer.status !== "open" ||
@@ -1162,22 +1205,22 @@ export class TradingEngine {
           decision: "ignored",
           reason: `Supera máximo de compra (${buyMax} ${this.marketCurrency(coin)}/QUSD)`,
         };
-      const marketAverage = numeric(average?.average_sell);
-      if (!marketAverage)
+      const marketMedian = numeric(statistics?.median_sell);
+      if (!marketMedian)
         return {
           offer,
           rate: value,
           decision: "blocked",
-          reason: "Promedio P2P no disponible; compra automática bloqueada",
+          reason: "Mediana P2P no disponible; compra automática bloqueada",
         };
       const priceGuardPercent = this.automationConfig().priceGuardPercent;
-      const floor = marketAverage * (1 - priceGuardPercent / 100);
+      const floor = marketMedian * (1 - priceGuardPercent / 100);
       if (value < floor)
         return {
           offer,
           rate: value,
           decision: "blocked",
-          reason: `${priceGuardPercent}% por debajo del promedio de venta (${marketAverage.toFixed(2)})`,
+          reason: `${priceGuardPercent}% por debajo de la mediana de venta (${marketMedian.toFixed(2)})`,
         };
       if (!this.canFund(offer))
         return {
@@ -1200,22 +1243,22 @@ export class TradingEngine {
         decision: "ignored",
         reason: `No alcanza mínimo de venta (${sellMin} ${this.marketCurrency(coin)}/QUSD)`,
       };
-    const marketAverage = numeric(average?.average_buy);
-    if (!marketAverage)
+    const marketMedian = numeric(statistics?.median_buy);
+    if (!marketMedian)
       return {
         offer,
         rate: value,
         decision: "blocked",
-        reason: "Promedio P2P no disponible; venta bloqueada",
+        reason: "Mediana P2P no disponible; venta bloqueada",
       };
     const priceGuardPercent = this.automationConfig().priceGuardPercent;
-    const ceiling = marketAverage * (1 + priceGuardPercent / 100);
+    const ceiling = marketMedian * (1 + priceGuardPercent / 100);
     if (value > ceiling)
       return {
         offer,
         rate: value,
         decision: "blocked",
-        reason: `${priceGuardPercent}% por encima del promedio de compra (${marketAverage.toFixed(2)})`,
+        reason: `${priceGuardPercent}% por encima de la mediana de compra (${marketMedian.toFixed(2)})`,
       };
     return {
       offer,
@@ -1231,23 +1274,35 @@ export class TradingEngine {
       .filter(
         (op) => op.offerType === "sell" && op.coin === this.offerMarket(offer),
       )
-      .reduce((sum, op) => sum + op.receive, 0);
+      .reduce(
+        (sum, op) =>
+          sum + op.receive + (this.market(op.coin)?.outgoingTransferFee ?? 0),
+        0,
+      );
     return (
-      this.fiatBalance(this.offerMarket(offer)) - committed >= offer.receive
+      this.fiatBalance(this.offerMarket(offer)) - committed >=
+      offer.receive +
+        (this.market(this.offerMarket(offer))?.outgoingTransferFee ?? 0)
     );
   }
 
-  private async evaluateAutomaticBuy(offer: P2pOffer): Promise<RiskDecision> {
+  private async evaluateAutomaticBuy(
+    offer: P2pOffer,
+    reference?: number,
+  ): Promise<RiskDecision> {
     const store = this.store as Store;
     const config = this.marketConfig.current();
     const market = this.market(this.offerMarket(offer))!;
-    const averages = await this.getAverages();
-    const reference = numeric(averages?.[offer.coin]?.average_sell);
     const currentRate = rate(offer);
-    const expectedMargin = currentRate
-      ? ((market.sellMinRate * (1 - market.sellFeePercent / 100) - currentRate) /
-          currentRate) *
-        100
+    const transfer = outgoingFiatCost(
+      offer.amount,
+      currentRate,
+      market.outgoingTransferFee,
+    );
+    const expectedRevenue =
+      market.sellMinRate * offer.amount * (1 - market.sellFeePercent / 100);
+    const expectedMargin = transfer.total
+      ? ((expectedRevenue - transfer.total) / transfer.total) * 100
       : 0;
     const now = Date.now();
     return evaluateRisk({
@@ -1257,7 +1312,7 @@ export class TradingEngine {
         market: offer.coin,
         side: "buy_qusd",
         qusdAmount: offer.amount,
-        requiredFiat: offer.receive,
+        requiredFiat: transfer.total,
         quotedRate: currentRate,
         referenceRate: reference ?? currentRate,
         observedAt: now,
@@ -1328,8 +1383,17 @@ export class TradingEngine {
     const quoted = rate(offer);
     if (offer.type === "sell")
       return quoted
-        ? ((market.sellMinRate * (1 - market.sellFeePercent / 100) - quoted) /
-            quoted) *
+        ? ((market.sellMinRate * offer.amount * (1 - market.sellFeePercent / 100) -
+            outgoingFiatCost(
+              offer.amount,
+              quoted,
+              market.outgoingTransferFee,
+            ).total) /
+            outgoingFiatCost(
+              offer.amount,
+              quoted,
+              market.outgoingTransferFee,
+            ).total) *
             100
         : Number.NEGATIVE_INFINITY;
     return market.buyMaxRate
@@ -1353,7 +1417,12 @@ export class TradingEngine {
       const total = snapshots
         .filter((snapshot) => snapshot.coin === market.code)
         .reduce((sum, snapshot) => sum + snapshot.total, 0);
-      const average = snapshots.find((snapshot) => snapshot.coin === market.code)?.average;
+      const statistics = snapshots
+        .filter((snapshot) => snapshot.coin === market.code)
+        .reduce<P2pAverage>(
+          (combined, snapshot) => ({ ...combined, ...snapshot.average }),
+          {},
+        );
       const previousOffers =
         this.store.loadRemoteResource<{
           offers?: Array<P2pOffer & { rate?: number; decision?: string; reason?: string }>;
@@ -1378,9 +1447,13 @@ export class TradingEngine {
         },
         scannedAt,
       );
-      if (average) {
+      if (Object.keys(statistics).length) {
         const previous = this.store.loadRemoteResource<Record<string, P2pAverage>>("averages")?.data ?? {};
-        this.store.saveRemoteResource("averages", { ...previous, [market.code]: average }, scannedAt);
+        this.store.saveRemoteResource(
+          "averages",
+          { ...previous, [market.code]: statistics },
+          scannedAt,
+        );
       }
       return {
         coin: market.code,

@@ -1,9 +1,8 @@
 import React from "react";
 import { Empty } from "./common.jsx";
 import { money } from "../lib/format.js";
-import { requestJson } from "../lib/http.js";
 
-export function Offers({ offers, label, unit, editable = false, onChanged }) {
+export function Offers({ offers, label, unit, editable = false, onEdit, onCancel }) {
   if (!offers?.length) return <Empty>Sin ofertas.</Empty>;
   return (
     <div className="table-wrap">
@@ -29,12 +28,12 @@ export function Offers({ offers, label, unit, editable = false, onChanged }) {
               </td>
               {editable ? (
                 <td className="offer-actions">
-                  <button onClick={() => editOffer(offer, onChanged)}>
+                  <button onClick={() => onEdit?.(offer)}>
                     Editar
                   </button>
                   <button
                     className="danger-action"
-                    onClick={() => cancelOffer(offer, onChanged)}
+                    onClick={() => onCancel?.(offer)}
                   >
                     Cancelar
                   </button>
@@ -46,35 +45,4 @@ export function Offers({ offers, label, unit, editable = false, onChanged }) {
       </table>
     </div>
   );
-}
-
-async function editOffer(offer, onChanged) {
-  const amount = prompt("QUSD", offer.amount),
-    rate = prompt("Tasa", offer.rate);
-  if (amount === null || rate === null || !confirm("¿Guardar cambios?")) return;
-  try {
-    await requestJson(`/api/offers/${encodeURIComponent(offer.uuid)}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ amount: Number(amount), rate: Number(rate) }),
-    });
-    await onChanged?.();
-  } catch (error) {
-    alert(
-      error instanceof Error ? error.message : "No se pudo editar la oferta.",
-    );
-  }
-}
-async function cancelOffer(offer, onChanged) {
-  if (!confirm("¿Cancelar esta oferta?")) return;
-  try {
-    await requestJson(`/api/offers/${encodeURIComponent(offer.uuid)}`, {
-      method: "DELETE",
-    });
-    await onChanged?.();
-  } catch (error) {
-    alert(
-      error instanceof Error ? error.message : "No se pudo cancelar la oferta.",
-    );
-  }
 }
