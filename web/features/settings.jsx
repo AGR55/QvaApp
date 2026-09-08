@@ -53,6 +53,7 @@ export function Settings({ onChanged }) {
   useEffect(() => void load(), []);
 
   const changes = useMemo(() => diffConfig(saved, draft), [saved, draft]);
+  const requiresInitialReview = draft?.risk.reviewedAt === null;
   if (!draft)
     return (
       <Panel title="Estrategia y riesgo" wide>
@@ -155,10 +156,12 @@ export function Settings({ onChanged }) {
             <button
               type="button"
               className="refresh"
-              disabled={!changes.length}
+              disabled={!changes.length && !requiresInitialReview}
               onClick={() => setReviewing(true)}
             >
-              <Save aria-hidden="true" /> Revisar {changes.length} cambio(s)
+              <Save aria-hidden="true" /> {requiresInitialReview && !changes.length
+                ? "Revisar y aprobar límites"
+                : `Revisar ${changes.length} cambio(s)`}
             </button>
             <span>{status}</span>
           </div>
@@ -312,6 +315,13 @@ export function Settings({ onChanged }) {
             <p className="eyebrow">CONFIRMACIÓN CRÍTICA</p>
             <h2 id="review-title">Revisa el impacto antes de activar</h2>
             <ul className="change-list">
+              {requiresInitialReview && !changes.length ? (
+                <li>
+                  <span>Política de riesgo inicial</span>
+                  <del>Sin revisar</del>
+                  <strong>Aprobada</strong>
+                </li>
+              ) : null}
               {changes.map((change) => (
                 <li key={change.key}>
                   <span>{change.label}</span>

@@ -52,6 +52,9 @@ try {
   const settings = await find("xpath", "//button[contains(normalize-space(.), 'Estrategia')]");
   await command("POST", `/session/${sessionId}/element/${settings}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Comportamiento del bot')"));
+  const initialReviewAvailable = await execute(`return Array.from(document.querySelectorAll('button')).some(button => button.textContent.includes('Revisar y aprobar límites') && !button.disabled)`);
+  if (!initialReviewAvailable)
+    throw new Error("La aprobación inicial de límites no está disponible sin cambios artificiales.");
   await screenshot("/tmp/qvaapply-settings-desktop.png");
   const settingsAccessibility = await accessibilityAudit();
   if (settingsAccessibility.serious.length > 0)

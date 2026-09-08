@@ -65,6 +65,69 @@ test("el escaneo real cancela liquidez peor y aplica a la mejor compra externa",
   store.close();
 });
 
+test("consulta hasta cien ofertas por lado y ordena por mejor tasa", async () => {
+  const { store, cfg, markets } = setup();
+  const queries: Record<string, unknown>[] = [];
+  const qva = {
+    listOffersPage: async (params: Record<string, unknown>) => {
+      queries.push(params);
+      return { offers: [], total: 0, currentPage: 1, perPage: 100 };
+    },
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  await trading.scan();
+  await trading.scan();
+
+  assert.deepEqual(queries.map(({ take, type, orderBy, orderType }) => ({ take, type, orderBy, orderType })), [
+    { take: 100, type: "sell", orderBy: "best_rate", orderType: "desc" },
+    { take: 100, type: "buy", orderBy: "best_rate", orderType: "desc" },
+    { take: 100, type: "sell", orderBy: "best_rate", orderType: "desc" },
+  ]);
+  store.close();
+});
+
+test("si la mejor compra queda bloqueada intenta la siguiente elegible", async () => {
+  const { store, cfg, markets } = setup();
+  const next = markets.current();
+  next.risk.marketCooldownSeconds = 0;
+  next.risk.counterpartyCooldownSeconds = 3_600;
+  markets.save(next);
+  store.createOperation({
+    uuid: "previous-peer",
+    offerType: "sell",
+    coin: "BANK_CUP",
+    amount: 1,
+    receive: 925,
+    rate: 925,
+    state: "completed",
+    autoApplied: true,
+    cancelAt: null,
+    createdAt: Date.now(),
+    counterpartyId: "blocked-peer",
+  });
+  const offers: P2pOffer[] = [
+    { uuid: "blocked-best", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open", User: { uuid: "blocked-peer" } },
+    { uuid: "eligible-next", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_250, status: "open", User: { uuid: "new-peer" } },
+  ];
+  const applied: string[] = [];
+  const qva = {
+    listOffersPage: async (params: { type?: string }) => ({ offers: params.type === "sell" ? offers : [], total: offers.length, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+    qusdBalance: async () => 100,
+    apply: async (uuid: string) => void applied.push(uuid),
+    sendChat: async () => undefined,
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const result = await trading.scan();
+
+  assert.equal(result.action, "aplicada eligible-next");
+  assert.deepEqual(applied, ["eligible-next"]);
+  store.close();
+});
+
 test("el escaneo no muta si un límite global bloquea la compra automática", async () => {
   const { store, cfg, markets } = setup();
   const next = markets.current();

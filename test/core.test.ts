@@ -291,7 +291,7 @@ test("permite hasta el límite configurado de ofertas propias abiertas", async (
   );
 });
 
-test("una ronda de refresco actualiza todas las ofertas vencidas", async () => {
+test("cada turno de refresco actualiza como máximo una oferta vencida", async () => {
   const store = new Store(
     mkdtempSync(join(tmpdir(), "qvaapply-refresh-round-")),
   );
@@ -322,7 +322,12 @@ test("una ronda de refresco actualiza todas las ofertas vencidas", async () => {
   );
 
   await trading.refreshOwnOffers();
-  assert.deepEqual(refreshed, ["one", "two", "three"]);
+  assert.deepEqual(refreshed, ["one"]);
+
+  // Simula que ya transcurrió la separación global exigida por QvaPay.
+  store.set("last_offer_edit_at", String(Date.now() - 20_001));
+  await trading.refreshOwnOffers();
+  assert.deepEqual(refreshed, ["one", "two"]);
 });
 
 test("no inicia una segunda ronda mientras la primera está editando", async () => {

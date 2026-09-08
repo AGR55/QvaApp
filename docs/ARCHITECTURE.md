@@ -46,6 +46,12 @@ abrir vista ──► GET /api/dashboard ──► SQLite ──► render inmed
 
 `/api/dashboard` no realiza I/O de red. Los endpoints `/api/live/*` tienen destinos de fallo independientes y devuelven la copia persistida como `stale` cuando existe. El navegador pausa el polling si está oculto o sin conexión y reintenta con espera creciente.
 
+## Presupuesto de mercado y mutaciones
+
+El scheduler inicia una ronda de mercado cada 15 segundos sin solaparlas. Cada ronda consulta primero `sell` para todos los mercados activos con `take=100` y `best_rate`; `buy` se consulta en rondas alternas. La cola única del adaptador mantiene como máximo 30 listados por minuto aunque sincronización y panel coincidan con el escáner.
+
+El escáner compara márgenes porcentuales entre mercados, prueba candidatas ordenadas hasta encontrar una que pase toda la política y ejecuta como máximo una aplicación por ronda. Las marcas temporales de `apply`, `edit` y `cancel` se escriben antes de enviar la petición, por lo que un reinicio no reinicia el presupuesto remoto. El refresco comprueba la cola cada cinco segundos, pero edita una sola oferta vencida por turno y deja al menos 20 segundos entre ediciones.
+
 ## Cómo añadir una feature
 
 1. Añade vocabulario estable a `CONTEXT.md` si introduce un concepto de dominio.
@@ -70,4 +76,6 @@ abrir vista ──► GET /api/dashboard ──► SQLite ──► render inmed
 - Al alcanzar el límite configurado de errores consecutivos, la automatización se pausa de forma persistente.
 - El mínimo de venta neto por mercado debe superar el máximo de compra.
 - Una lectura remota fallida nunca borra ni presenta como actual la última lectura válida.
+- Ninguna ronda aplica a más de una oportunidad y una candidata bloqueada no impide evaluar la siguiente.
+- El refresco automático nunca edita más de una oferta por ejecución.
 - Secretos e interruptores de despliegue no son configuración operativa editable.

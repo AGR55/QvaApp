@@ -262,20 +262,42 @@ export class TradingEngine {
 
   async inspectMarket(coin: FiatMarket): Promise<MarketSnapshot> {
     if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
+    const sell = await this.inspectMarketSide(coin, "sell");
+    const buy = await this.inspectMarketSide(coin, "buy");
+    return {
+      items: [...sell.items, ...buy.items],
+      total: sell.total + buy.total,
+      scannedAt: Math.max(sell.scannedAt, buy.scannedAt),
+      ...(sell.average ? { average: sell.average } : buy.average ? { average: buy.average } : {}),
+    };
+  }
+
+  async inspectMarketSide(
+    coin: FiatMarket,
+    type: "buy" | "sell",
+  ): Promise<MarketSnapshot> {
+    if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
     const page = await this.qva.listOffersPage({
-      take: 20,
+      take: 100,
       page: 1,
+      type,
       coin,
       status: "open",
-      orderBy: "updated_at",
+      orderBy: "best_rate",
       orderType: "desc",
     });
     const averages = await this.getAverages();
+    const matchingOffers = page.offers.filter(
+      (offer) => offer.type === type && offer.coin === coin,
+    );
     return {
-      items: page.offers.map((offer) =>
+      items: matchingOffers.map((offer) =>
         this.classifyOffer(offer, averages?.[offer.coin]),
       ),
-      total: page.total,
+      total:
+        matchingOffers.length === page.offers.length
+          ? page.total
+          : matchingOffers.length,
       scannedAt: Date.now(),
       ...(averages?.[coin] ? { average: averages[coin] } : {}),
     };
@@ -304,9 +326,26 @@ export class TradingEngine {
     if (this.isPaused())
       return { inspected: 0, candidates: 0, action: "pausado" };
     try {
-      const snapshots = await Promise.all(
-        this.activeMarkets().map((market) => this.inspectMarket(market.code)),
-      );
+      const round = Number(this.store.get("market_scan_round") ?? 0);
+      const includeBuySide = round % 2 === 0;
+      this.store.set("market_scan_round", String(round + 1));
+      const snapshots: Array<MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }> = [];
+      for (const market of this.activeMarkets()) {
+        snapshots.push({
+          ...(await this.inspectMarketSide(market.code, "sell")),
+          coin: market.code,
+          side: "sell",
+        });
+      }
+      if (includeBuySide) {
+        for (const market of this.activeMarkets()) {
+          snapshots.push({
+            ...(await this.inspectMarketSide(market.code, "buy")),
+            coin: market.code,
+            side: "buy",
+          });
+        }
+      }
       const items = snapshots.flatMap((market) => market.items);
       const offers = items.map((item) => item.offer);
       const candidates = items
@@ -329,7 +368,8 @@ export class TradingEngine {
         )
         .map((item) => item.offer);
 
-      this.syncWebAlerts(items);
+      this.syncWebAlerts(items, includeBuySide ? ["sell", "buy"] : ["sell"]);
+      this.persistScanCoverage(snapshots, items, includeBuySide);
 
       for (const item of items.filter(
         (candidate) =>
@@ -343,31 +383,21 @@ export class TradingEngine {
         );
       }
 
-      // Las compras automáticas solo se ejecutan para ofertas sell: pagas el fiat del mercado y recibes QUSD.
-      const bestByMarket = this.activeMarkets()
-        .map(
-          (market) =>
-            sellCandidates
-              .filter((offer) => offer.coin === market.code)
-              .sort((a, b) => rate(a) - rate(b))[0],
-        )
-        .filter((offer): offer is P2pOffer => Boolean(offer));
-      const best = bestByMarket.find((offer) => this.canFund(offer));
-      if (best) {
+      // Una sola mutación por ronda. Se comparan márgenes porcentuales para no
+      // mezclar directamente tasas de mercados con monedas distintas.
+      const rankedSells = sellCandidates
+        .filter((offer) => this.canFund(offer))
+        .sort((left, right) => this.opportunityScore(right) - this.opportunityScore(left));
+      let blockedUuid: string | undefined;
+      for (const best of rankedSells) {
         const bestCoin = this.offerMarket(best);
         if (this.mode() === "real") {
           const risk = await this.evaluateAutomaticBuy(best);
           if (risk.kind !== "apply") {
+            blockedUuid ??= best.uuid;
             this.store.audit("risk_block", risk.reasons.join(" · "), best.uuid);
-            await this.notify(
-              `🛡️ Compra automática bloqueada: ${risk.reasons.join(" · ")}`,
-            );
-            this.recordScan(offers.length, candidates.length, `Bloqueada ${best.uuid}`);
-            return {
-              inspected: offers.length,
-              candidates: candidates.length,
-              action: `bloqueada ${best.uuid}`,
-            };
+            await this.notifyRiskBlock(best.uuid, `🛡️ Compra automática bloqueada: ${risk.reasons.join(" · ")}`);
+            continue;
           }
           await this.applyBuyQusd(best, true);
           this.store.markSeen(best.uuid);
@@ -403,10 +433,11 @@ export class TradingEngine {
         };
       }
 
-      const bestExternalBuy = buyCandidates
+      const rankedBuys = buyCandidates
         .slice()
-        .sort((left, right) => rate(right) - rate(left))[0];
-      if (bestExternalBuy && this.mode() === "real") {
+        .sort((left, right) => this.opportunityScore(right) - this.opportunityScore(left));
+      for (const bestExternalBuy of rankedBuys) {
+        if (this.mode() !== "real") break;
         const coin = this.offerMarket(bestExternalBuy);
         const configured = this.market(coin)!;
         const averages = await this.getAverages();
@@ -444,6 +475,7 @@ export class TradingEngine {
           result.decision.reasons.join(" · "),
           bestExternalBuy.uuid,
         );
+        blockedUuid ??= bestExternalBuy.uuid;
       }
 
       for (const offer of buyCandidates) {
@@ -458,8 +490,13 @@ export class TradingEngine {
           offer.uuid,
         );
       }
-      this.recordScan(offers.length, candidates.length, "Sin aplicación");
-      return { inspected: offers.length, candidates: candidates.length };
+      const result = blockedUuid ? `Bloqueada ${blockedUuid}` : "Sin aplicación";
+      this.recordScan(offers.length, candidates.length, result);
+      return {
+        inspected: offers.length,
+        candidates: candidates.length,
+        ...(blockedUuid ? { action: `bloqueada ${blockedUuid}` } : {}),
+      };
     } catch (error) {
       await this.handleError("scan", error);
       return { inspected: 0, candidates: 0, action: "error" };
@@ -970,6 +1007,22 @@ export class TradingEngine {
       candidates: number;
       result: string;
     };
+    scanCoverage?: {
+      at: number;
+      includedBuySide: boolean;
+      markets: Array<{
+        coin: FiatMarket;
+        sides: Array<"buy" | "sell">;
+        total: number;
+        eligible: number;
+        blocked: number;
+      }>;
+    };
+    mutationBudget: {
+      applyReadyAt: number;
+      editReadyAt: number;
+      cancelReadyAt: number;
+    };
   } {
     const raw = this.store.get("last_scan");
     let lastScan:
@@ -980,6 +1033,15 @@ export class TradingEngine {
     } catch {
       /* Ignora datos antiguos */
     }
+    let scanCoverage: ReturnType<TradingEngine["operationalState"]>["scanCoverage"];
+    try {
+      const coverageRaw = this.store.get("last_scan_coverage");
+      if (coverageRaw) scanCoverage = JSON.parse(coverageRaw) as typeof scanCoverage;
+    } catch {
+      /* Ignora una instantánea de cobertura antigua o incompleta. */
+    }
+    const throttleAt = (policy: "apply" | "edit" | "cancel") =>
+      Number(this.store.get(`qva_throttle:${policy}`) ?? 0);
     return {
       paused: this.isPaused(),
       mode: this.mode(),
@@ -992,6 +1054,12 @@ export class TradingEngine {
       refresh: this.refreshEnabled(),
       active: this.store.activeOperations().length,
       ...(lastScan ? { lastScan } : {}),
+      ...(scanCoverage ? { scanCoverage } : {}),
+      mutationBudget: {
+        applyReadyAt: throttleAt("apply") + 30_001,
+        editReadyAt: throttleAt("edit") + 20_000,
+        cancelReadyAt: throttleAt("cancel") + 20_000,
+      },
     };
   }
 
@@ -1001,31 +1069,48 @@ export class TradingEngine {
     if (this.refreshRoundInFlight) return;
     this.refreshRoundInFlight = true;
     try {
-      for (const offer of await this.listOwnOffers()) {
-        const now = Date.now();
-        const key = `last_refresh:${offer.uuid}`;
+      const now = Date.now();
+      const lastGlobalEdit = Number(this.store.get("last_offer_edit_at") ?? 0);
+      if (now - lastGlobalEdit < 20_000) return;
+      const due = (await this.listOwnOffers())
+        .map((offer) => {
+          const remoteUpdatedAt = offer.updated_at
+            ? Date.parse(offer.updated_at)
+            : Number.NaN;
+          const localUpdatedAt = Number(
+            this.store.get(`last_refresh:${offer.uuid}`) ?? 0,
+          );
+          return {
+            offer,
+            lastUpdatedAt: Math.max(
+              localUpdatedAt,
+              Number.isFinite(remoteUpdatedAt) ? remoteUpdatedAt : 0,
+            ),
+          };
+        })
+        .filter(({ offer, lastUpdatedAt }) => {
         const retryAt = Number(
           this.store.get(`refresh_retry:${offer.uuid}`) ?? 0,
         );
-        if (retryAt > now) continue;
-        if (
-          now - Number(this.store.get(key) ?? 0) <
-          this.automationConfig().offerRefreshIntervalMinutes * 60_000
-        )
-          continue;
-        try {
-          const refreshed = await this.qva.editOffer(offer.uuid, {
-            message: offer.message ?? "",
-          });
-          this.recordRefresh(offer.uuid, refreshed?.updated_at);
-          this.store.audit(
-            "refresh_offer",
-            "Oferta propia actualizada en ronda automática",
-            offer.uuid,
-          );
-        } catch (error) {
-          this.scheduleRefreshRetry(offer.uuid, error);
-        }
+          return retryAt <= now &&
+            now - lastUpdatedAt >=
+              this.automationConfig().offerRefreshIntervalMinutes * 60_000;
+        })
+        .sort((left, right) => left.lastUpdatedAt - right.lastUpdatedAt);
+      const next = due[0]?.offer;
+      if (!next) return;
+      try {
+        const refreshed = await this.qva.editOffer(next.uuid, {
+          message: next.message ?? "",
+        });
+        this.recordRefresh(next.uuid, refreshed?.updated_at);
+        this.store.audit(
+          "refresh_offer",
+          "Oferta propia actualizada en turno automático",
+          next.uuid,
+        );
+      } catch (error) {
+        this.scheduleRefreshRetry(next.uuid, error);
       }
     } finally {
       this.refreshRoundInFlight = false;
@@ -1209,7 +1294,10 @@ export class TradingEngine {
     });
   }
 
-  private syncWebAlerts(items: MarketItem[]): void {
+  private syncWebAlerts(
+    items: MarketItem[],
+    scannedOfferTypes?: Array<"buy" | "sell">,
+  ): void {
     if (this.isPaused() || this.mode() !== "real") {
       this.store.syncTradingAlerts([]);
       return;
@@ -1231,7 +1319,89 @@ export class TradingEngine {
           },
         ];
       }),
+      scannedOfferTypes,
     );
+  }
+
+  private opportunityScore(offer: P2pOffer): number {
+    const market = this.market(this.offerMarket(offer))!;
+    const quoted = rate(offer);
+    if (offer.type === "sell")
+      return quoted
+        ? ((market.sellMinRate * (1 - market.sellFeePercent / 100) - quoted) /
+            quoted) *
+            100
+        : Number.NEGATIVE_INFINITY;
+    return market.buyMaxRate
+      ? ((quoted * (1 - market.sellFeePercent / 100) - market.buyMaxRate) /
+          market.buyMaxRate) *
+          100
+      : Number.NEGATIVE_INFINITY;
+  }
+
+  private persistScanCoverage(
+    snapshots: Array<MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }>,
+    items: MarketItem[],
+    includedBuySide: boolean,
+  ): void {
+    const scannedAt = Date.now();
+    const coverage = this.activeMarkets().map((market) => {
+      const marketItems = items.filter((item) => item.offer.coin === market.code);
+      const sides = snapshots
+        .filter((snapshot) => snapshot.coin === market.code)
+        .map((snapshot) => snapshot.side);
+      const total = snapshots
+        .filter((snapshot) => snapshot.coin === market.code)
+        .reduce((sum, snapshot) => sum + snapshot.total, 0);
+      const average = snapshots.find((snapshot) => snapshot.coin === market.code)?.average;
+      const previousOffers =
+        this.store.loadRemoteResource<{
+          offers?: Array<P2pOffer & { rate?: number; decision?: string; reason?: string }>;
+        }>(`market:${market.code}`)?.data.offers ?? [];
+      const retainedOffers = includedBuySide
+        ? []
+        : previousOffers.filter((offer) => offer.type === "buy");
+      const visibleItems = [
+        ...marketItems.map((item) => ({
+          ...item.offer,
+          rate: item.rate,
+          decision: item.decision,
+          reason: item.reason,
+        })),
+        ...retainedOffers,
+      ];
+      this.store.saveRemoteResource(
+        `market:${market.code}`,
+        {
+          total: Math.max(total, visibleItems.length),
+          offers: visibleItems,
+        },
+        scannedAt,
+      );
+      if (average) {
+        const previous = this.store.loadRemoteResource<Record<string, P2pAverage>>("averages")?.data ?? {};
+        this.store.saveRemoteResource("averages", { ...previous, [market.code]: average }, scannedAt);
+      }
+      return {
+        coin: market.code,
+        sides,
+        total,
+        eligible: marketItems.filter((item) => item.decision === "auto_buy" || item.decision === "manual_sell").length,
+        blocked: marketItems.filter((item) => item.decision === "blocked").length,
+      };
+    });
+    this.store.set(
+      "last_scan_coverage",
+      JSON.stringify({ at: scannedAt, includedBuySide, markets: coverage }),
+    );
+  }
+
+  private async notifyRiskBlock(uuid: string, message: string): Promise<void> {
+    const key = `risk_notice_at:${uuid}`;
+    const now = Date.now();
+    if (now - Number(this.store.get(key) ?? 0) < 5 * 60_000) return;
+    this.store.set(key, String(now));
+    await this.notify(message);
   }
 
   private async applyBuyQusd(
@@ -1426,6 +1596,7 @@ export class TradingEngine {
       `last_refresh:${uuid}`,
       String(Number.isFinite(timestamp) ? timestamp : Date.now()),
     );
+    this.store.set("last_offer_edit_at", String(Date.now()));
     this.store.set(`refresh_retry:${uuid}`, "0");
     this.store.set(`refresh_attempts:${uuid}`, "0");
   }

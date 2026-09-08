@@ -7,6 +7,7 @@ import { useDialog } from "../hooks/use-dialog.js";
 
 export function Cockpit({ data, label, unit, onChanged, resources }) {
   const first = data.rankings.potential?.[0];
+  const applyReadyAt = data.state.mutationBudget?.applyReadyAt ?? 0;
   const [confirmReal, setConfirmReal] = useState(false);
   const [status, setStatus] = useState("");
   const closeReal = useCallback(() => setConfirmReal(false), []);
@@ -83,6 +84,27 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
           <RiskMeter label="Volumen aplicado hoy" value={data.risk.usage.dailyAppliedQusd} maximum={data.risk.limits.maxDailyAppliedQusd} unit="QUSD" />
           <RiskMeter label="Operaciones activas" value={data.risk.usage.activeOperations} maximum={data.risk.limits.maxConcurrentOperations} unit="" />
           <RiskMeter label="Reserva mínima" value={data.availability.qusd.reported} maximum={data.risk.limits.minQusdReserve} unit="QUSD" inverse />
+        </div>
+      </Panel>
+      <Panel title="Cobertura del escáner" wide>
+        <div className="market-grid">
+          {(data.state.scanCoverage?.markets || []).map((market) => (
+            <article className="market-card" key={market.coin}>
+              <span>{label(market.coin)} · {market.sides.map((side) => side === "sell" ? "compras" : "ventas").join(" + ")}</span>
+              <strong>{market.total} ofertas revisadas</strong>
+              <p><b>{market.eligible} elegibles</b> · {market.blocked} bloqueadas</p>
+              <small>Última cobertura {new Date(data.state.scanCoverage.at).toLocaleTimeString("es-CU")}</small>
+            </article>
+          ))}
+          {!data.state.scanCoverage?.markets?.length ? (
+            <article className="market-card"><span>Sin ronda registrada</span><strong>Esperando al escáner</strong><small>Se conservará aquí la última lectura completa.</small></article>
+          ) : null}
+          <article className="market-card">
+            <span>PRESUPUESTO DE APLICACIÓN</span>
+            <strong>{Date.now() >= applyReadyAt ? "Disponible" : "En espera segura"}</strong>
+            <p>{Date.now() >= applyReadyAt ? "Puede aplicar a una oportunidad" : `Disponible en ${Math.ceil((applyReadyAt - Date.now()) / 1000)} s`}</p>
+            <small>Máximo 2 aplicaciones por minuto</small>
+          </article>
         </div>
       </Panel>
       <div className="dashboard-grid">

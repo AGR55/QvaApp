@@ -24,6 +24,35 @@ test("serializa mutaciones distintas bajo un único límite global", async () =>
   assert.ok(calls[1]!.at - calls[0]!.at >= 1_600);
 });
 
+test("conserva entre reinicios la separación de aplicaciones", async () => {
+  let now = 1_000;
+  const state = new Map<string, string>();
+  const waits: number[] = [];
+  const calls: number[] = [];
+  const runtime = {
+    now: () => now,
+    sleep: async (milliseconds: number) => {
+      waits.push(milliseconds);
+      now += milliseconds;
+    },
+    throttleState: {
+      get: (key: string) => state.get(key),
+      set: (key: string, value: string) => void state.set(key, value),
+    },
+    fetch: async () => {
+      calls.push(now);
+      return new Response(JSON.stringify({ message: "ok" }), { status: 200 });
+    },
+  };
+
+  await new QvaPayClient(() => "token", runtime).apply("one");
+  await new QvaPayClient(() => "token", runtime).apply("two");
+  await new QvaPayClient(() => "token", runtime).apply("three");
+
+  assert.ok(waits.some((milliseconds) => milliseconds >= 30_000));
+  assert.ok(calls[2]! - calls[0]! > 60_000);
+});
+
 test("incluye una clave de idempotencia al crear ofertas", async () => {
   let sent: Record<string, unknown> | undefined;
   const client = new QvaPayClient(() => "token", {

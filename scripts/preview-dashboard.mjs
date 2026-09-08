@@ -16,7 +16,7 @@ const risk = {
   maxConsecutiveErrors: 3,
   marketCooldownSeconds: 60,
   counterpartyCooldownSeconds: 300,
-  reviewedAt: now,
+  reviewedAt: null,
 };
 const markets = [
   { code: "BANK_CUP", label: "Transferencia CUP", currency: "CUP", active: true, fiatBalance: 45000, buyMaxRate: 930, sellMinRate: 1010, purchaseMaxQusd: 25, sellFeePercent: 0, paymentDetails: [{ name: "Cuenta", value: "•••• 1234" }] },
@@ -29,7 +29,23 @@ const workflow = { id: "workflow-demo-01", targetOffer: { ...operation, type: "b
 const snapshot = {
   generatedAt: now,
   balance: 68.5,
-  state: { paused: true, mode: "simulation", fiat: { BANK_CUP: 45000, BANDECPREPAGO: 110 }, refresh: false, active: 1, lastScan: { at: now - 30000, inspected: 38, candidates: 3, result: "Sin aplicación" } },
+  state: {
+    paused: true,
+    mode: "simulation",
+    fiat: { BANK_CUP: 45000, BANDECPREPAGO: 110 },
+    refresh: false,
+    active: 1,
+    lastScan: { at: now - 30000, inspected: 38, candidates: 3, result: "Sin aplicación" },
+    scanCoverage: {
+      at: now - 30000,
+      includedBuySide: true,
+      markets: [
+        { coin: "BANK_CUP", sides: ["sell", "buy"], total: 28, eligible: 2, blocked: 1 },
+        { coin: "BANDECPREPAGO", sides: ["sell", "buy"], total: 10, eligible: 1, blocked: 0 },
+      ],
+    },
+    mutationBudget: { applyReadyAt: now - 1, editReadyAt: now - 1, cancelReadyAt: now - 1 },
+  },
   ownOffers: [{ uuid: "own-01", type: "sell", coin: "BANK_CUP", amount: 25, receive: 25000, rate: 1000, status: "open", updatedAt: new Date(now).toISOString() }],
   market: {
     BANK_CUP: { total: 28, offers: [{ uuid: "market-01", type: "buy", coin: "BANK_CUP", amount: 20, receive: 20400, rate: 1020, status: "open", decision: "manual_sell", reason: "Venta elegible" }] },

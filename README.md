@@ -7,6 +7,7 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 - El modo inicial es simulación y la automatización permanece pausada.
 - El modo real requiere `CONFIRM_REAL_TRADING=true`, límites revisados en el panel y activación humana.
 - Toda mutación se registra antes de enviarse a QvaPay.
+- Las aplicaciones, cancelaciones y ediciones pasan por una cola única; sus separaciones se conservan en SQLite incluso tras reiniciar.
 - Un timeout de una mutación bloquea nuevas operaciones hasta conciliar por lectura.
 - Las reservas de capital, workflows, configuración, revisiones y auditoría viven en SQLite.
 - La última lectura válida de cada recurso QvaPay vive en SQLite y se muestra con su fecha cuando la conexión falla.
@@ -33,6 +34,8 @@ En operación local también puedes entrar mediante [http://localhost:3000](http
 
 La primera revisión de límites debe hacerse en **Estrategia**. Empieza en simulación, revisa Mercados, Capital, Operaciones y Auditoría, y solo después considera el modo real.
 
+El escáner revisa cada 15 segundos hasta 100 ofertas de venta por mercado ordenadas por la mejor tasa. El lado de compra se intercala cada dos rondas para respetar la cuota de lectura. Ejecuta como máximo una oportunidad por ronda, con prioridad a comprar QUSD barato; si va a vender y necesita liberar QUSD, el workflow compensable puede cancelar ofertas propias peores y restaurarlas ante un rechazo confirmado. Los pagos y las confirmaciones de recepción siguen siendo manuales.
+
 Precios, límites, mercados, saldos declarados, intervalos, autocancelación, refresco, cortafuegos y mensaje P2P se administran en **Estrategia** y se versionan en SQLite. Los antiguos valores de entorno o `trading-config.json` solo pueden inicializar una base vacía; después SQLite es la fuente de verdad. Credenciales, claves y `CONFIRM_REAL_TRADING` permanecen fuera del panel.
 
 El panel abre primero con SQLite y actualiza únicamente los recursos de la vista activa. Si QvaPay tarda o no responde, conserva los datos anteriores, muestra su fecha y permite navegar, auditar o cambiar configuración local sin quedar atrapado en una pantalla de carga.
@@ -43,7 +46,7 @@ El panel abre primero con SQLite y actualiza únicamente los recursos de la vist
 pnpm typecheck       # análisis estático estricto
 pnpm test            # suite unitaria, contractual e integrada
 pnpm build           # servidor + panel de producción
-pnpm check           # tipos, 86 pruebas, builds y escáner de secretos
+pnpm check           # tipos, 89 pruebas, builds y escáner de secretos
 pnpm check:ui        # build + recorrido Chromium, responsive y WCAG automatizado
 pnpm start           # ejecuta dist/index.js
 ```

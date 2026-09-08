@@ -15,7 +15,9 @@ import { Scheduler } from "./scheduler.js";
 const store = new Store(config.dataDir);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
 const session = new Session(store, new Vault(config.encryptionKey));
-const qva = new QvaPayClient(() => session.token());
+const qva = new QvaPayClient(() => session.token(), {
+  throttleState: store,
+});
 const bot = new Bot(config.telegramToken);
 const trading = new TradingEngine(
   store,
@@ -237,7 +239,7 @@ scheduler.register("scan", () => marketConfig.current().automation.scanIntervalS
   if (!trading.isPaused()) await trading.scan();
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
-scheduler.register("refresh", 60_000, () => trading.refreshOwnOffers());
+scheduler.register("refresh", 5_000, () => trading.refreshOwnOffers());
 scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),
 );

@@ -8,6 +8,8 @@
 4. Ejecuta primero en simulación y comprueba las decisiones explicadas.
 5. Para operar: selecciona modo real; el sistema seguirá pausado. Reanuda en una acción separada.
 
+En **Cockpit → Cobertura del escáner** comprueba que aparezcan los mercados activos, los lados consultados, las ofertas elegibles/bloqueadas y el presupuesto de aplicación. Una ronda que muestre solo compras de QUSD es normal: las ventas de QUSD se consultan en la ronda alterna.
+
 No habilites modo real si `pnpm check` falla, la documentación de QvaPay cambió, existe una conciliación pendiente o los saldos declarados no coinciden.
 
 Para el panel local se aceptan `http://127.0.0.1:3000`, `http://localhost:3000` y el loopback IPv6 equivalente. Deben conservar el protocolo y puerto de `DASHBOARD_TRUSTED_ORIGIN`; IPs LAN, dominios y otros puertos se rechazan.
@@ -29,6 +31,14 @@ Ejecuta `pnpm login`, introduce el correo, la contraseña oculta y después el c
 - Compra de QUSD: pulsa **Voy a pagar**, transfiere fuera de QvaApply y luego **Registrar pago** con referencia.
 - Venta de QUSD: espera y verifica el fiat en tu cuenta; solo después pulsa **Confirmar recepción**.
 - QvaApply nunca abre una banca, firma una transferencia ni inventa una referencia.
+
+## Automatización del libro P2P
+
+- Las ofertas propias vencen cinco minutos después de su última actualización conocida.
+- El proceso comprueba cada cinco segundos, refresca solo una oferta por vez y respeta 20 segundos entre ediciones.
+- Se intenta como máximo una aplicación por ronda y se conserva una separación superior a 30 segundos entre intentos, incluso después de reiniciar.
+- Un rechazo confirmado después de liberar QUSD activa la restauración de las ofertas propias originales.
+- Un timeout o respuesta incierta no activa restauración ni reintento: exige conciliación.
 
 ## Resultado incierto
 

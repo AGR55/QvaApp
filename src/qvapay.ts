@@ -54,6 +54,10 @@ export interface QvaPayRuntime {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   authTimeoutMs?: number;
+  throttleState?: {
+    get(key: string): string | undefined;
+    set(key: string, value: string): void;
+  };
 }
 
 type RequestPolicy =
@@ -69,9 +73,9 @@ type RequestPolicy =
 
 const POLICY_INTERVAL_MS: Record<RequestPolicy, number> = {
   read: 1_667,
-  list: 2_000,
+  list: 2_001,
   create: 5_000,
-  apply: 30_000,
+  apply: 30_001,
   edit: 20_000,
   cancel: 20_000,
   paid: 10_000,
@@ -84,6 +88,7 @@ export class QvaPayClient {
   private readonly now: () => number;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly authTimeoutMs: number;
+  private readonly throttleState?: QvaPayRuntime["throttleState"];
   private queue = Promise.resolve();
   private lastRequestAt = 0;
   private readonly lastPolicyAt = new Map<RequestPolicy, number>();
@@ -96,6 +101,7 @@ export class QvaPayClient {
     this.now = runtime.now ?? Date.now;
     this.sleep = runtime.sleep ?? sleep;
     this.authTimeoutMs = runtime.authTimeoutMs ?? 20_000;
+    this.throttleState = runtime.throttleState;
   }
 
   async login(
@@ -435,19 +441,27 @@ export class QvaPayClient {
       .catch(() => undefined)
       .then(async () => {
         const current = this.now();
+        const persistedAt = this.persistedPolicyAt(policy);
         const generalDelay = this.lastRequestAt
           ? this.lastRequestAt + POLICY_INTERVAL_MS.read - current
           : 0;
-        const policyDelay = this.lastPolicyAt.has(policy)
-          ? this.lastPolicyAt.get(policy)! +
-            POLICY_INTERVAL_MS[policy] -
-            current
+        const policyAt = Math.max(
+          this.lastPolicyAt.get(policy) ?? 0,
+          persistedAt,
+        );
+        const policyDelay = policyAt
+          ? policyAt + POLICY_INTERVAL_MS[policy] - current
           : 0;
         const delay = Math.max(0, generalDelay, policyDelay);
         if (delay) await this.sleep(delay);
         const startedAt = this.now();
         this.lastRequestAt = startedAt;
         this.lastPolicyAt.set(policy, startedAt);
+        if (isPersistentThrottle(policy))
+          this.throttleState?.set(
+            `qva_throttle:${policy}`,
+            String(startedAt),
+          );
         return task();
       });
     this.queue = run.then(
@@ -456,7 +470,18 @@ export class QvaPayClient {
     );
     return run;
   }
+
+  private persistedPolicyAt(policy: RequestPolicy): number {
+    if (!isPersistentThrottle(policy)) return 0;
+    const value = Number(
+      this.throttleState?.get(`qva_throttle:${policy}`) ?? 0,
+    );
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  }
 }
+
+const isPersistentThrottle = (policy: RequestPolicy): boolean =>
+  ["create", "apply", "edit", "cancel", "paid", "received"].includes(policy);
 
 const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));

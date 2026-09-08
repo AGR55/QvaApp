@@ -1232,14 +1232,23 @@ export class Store {
 
   syncTradingAlerts(
     alerts: Omit<TradingAlert, "createdAt" | "updatedAt" | "resolvedAt">[],
+    offerTypes?: P2pType[],
   ): void {
     const now = Date.now();
-    const active = new Set(alerts.map((alert) => alert.uuid));
-    this.db
-      .prepare(
-        "UPDATE trading_alerts SET resolved_at = ? WHERE resolved_at IS NULL",
-      )
-      .run(now);
+    if (offerTypes?.length) {
+      const placeholders = offerTypes.map(() => "?").join(", ");
+      this.db
+        .prepare(
+          `UPDATE trading_alerts SET resolved_at = ? WHERE resolved_at IS NULL AND offer_type IN (${placeholders})`,
+        )
+        .run(now, ...offerTypes);
+    } else {
+      this.db
+        .prepare(
+          "UPDATE trading_alerts SET resolved_at = ? WHERE resolved_at IS NULL",
+        )
+        .run(now);
+    }
     const upsert = this.db
       .prepare(`INSERT INTO trading_alerts(offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, created_at, updated_at, resolved_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
@@ -1257,7 +1266,6 @@ export class Store {
         now,
         now,
       );
-    if (!active.size) return;
   }
 
   recentTradingAlerts(limit = 12): TradingAlert[] {
