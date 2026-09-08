@@ -19,6 +19,26 @@ export function Empty({ children }) {
     </div>
   );
 }
+export function Skeleton({ rows = 3, label = "Cargando datos" }) {
+  return (
+    <div className="skeleton" role="status" aria-label={label}>
+      {Array.from({ length: rows }, (_, index) => <i key={index} />)}
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+export function Freshness({ state, cachedAt }) {
+  const updatedAt = state?.updatedAt ?? cachedAt;
+  if (state?.loading && !updatedAt)
+    return <span className="freshness loading">Actualizando…</span>;
+  if (!updatedAt)
+    return <span className="freshness stale">Sin datos guardados</span>;
+  return (
+    <span className={`freshness ${state?.stale || state?.error ? "stale" : ""}`}>
+      {state?.stale || state?.error ? "Dato guardado" : "Actualizado"} · {new Date(updatedAt).toLocaleString("es-CU")}
+    </span>
+  );
+}
 export function List({ rows, render }) {
   return rows?.length ? (
     <ol className="decision-list">

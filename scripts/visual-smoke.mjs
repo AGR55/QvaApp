@@ -6,6 +6,7 @@ const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve("axe-core/axe.min.js"), "utf8");
 const previewPort = 31_000 + (process.pid % 1_000);
 const previewOrigin = `http://127.0.0.1:${previewPort}`;
+const browserOrigin = `http://localhost:${previewPort}`;
 const preview = spawn(process.execPath, ["scripts/preview-dashboard.mjs"], {
   env: { ...process.env, QVAAPPLY_PREVIEW_PORT: String(previewPort) },
   stdio: ["ignore", "pipe", "pipe"],
@@ -30,12 +31,13 @@ try {
     },
   });
   sessionId = created.value.sessionId;
-  await command("POST", `/session/${sessionId}/url`, { url: previewOrigin });
+  await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
   const password = await find("css selector", "#dashboard-password");
   await command("POST", `/session/${sessionId}/element/${password}/value`, { text: "preview-segura-2026" });
   const submit = await find("css selector", "button[type='submit']");
   await command("POST", `/session/${sessionId}/element/${submit}/click`, {});
   await waitFor(() => execute("return document.querySelector('.app-shell') !== null"));
+  await waitFor(() => execute("return document.body.innerText.includes('Dato guardado')"));
   await screenshot("/tmp/qvaapply-dashboard-desktop.png");
   const desktop = await metrics();
   const accessibility = await accessibilityAudit();
@@ -47,12 +49,20 @@ try {
   await waitFor(() => execute("return document.body.innerText.includes('Operaciones con dinero')"));
   await screenshot("/tmp/qvaapply-operations-desktop.png");
 
+  const settings = await find("xpath", "//button[contains(normalize-space(.), 'Estrategia')]");
+  await command("POST", `/session/${sessionId}/element/${settings}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Comportamiento del bot')"));
+  await screenshot("/tmp/qvaapply-settings-desktop.png");
+  const settingsAccessibility = await accessibilityAudit();
+  if (settingsAccessibility.serious.length > 0)
+    throw new Error(`WCAG Estrategia: ${JSON.stringify(settingsAccessibility.serious)}`);
+
   await command("POST", `/session/${sessionId}/window/rect`, { width: 390, height: 844, x: 0, y: 0 });
-  await command("POST", `/session/${sessionId}/url`, { url: previewOrigin });
+  await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
   await new Promise((resolve) => setTimeout(resolve, 500));
   await screenshot("/tmp/qvaapply-dashboard-mobile.png");
   const mobile = await metrics();
-  console.log(JSON.stringify({ desktop, mobile, accessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-dashboard-mobile.png"] }, null, 2));
+  console.log(JSON.stringify({ desktop, mobile, accessibility, settingsAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-dashboard-mobile.png"] }, null, 2));
 } finally {
   if (sessionId) await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
   driver.kill("SIGTERM");

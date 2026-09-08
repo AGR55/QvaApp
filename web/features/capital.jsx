@@ -1,10 +1,10 @@
 import React, { useState } from "react";
 import { Offers } from "../components/offers.jsx";
-import { Panel } from "../components/common.jsx";
+import { Freshness, Panel, Skeleton } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 
-export function Capital({ data, label, unit, onChanged }) {
+export function Capital({ data, label, unit, onChanged, resources }) {
   const [form, setForm] = useState(),
     [message, setMessage] = useState("");
   const submit = async () => {
@@ -32,6 +32,8 @@ export function Capital({ data, label, unit, onChanged }) {
   return (
     <>
       <Panel title="Capital disponible" wide>
+        <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
+        {resources.balance?.loading && !data.freshness?.balance ? <Skeleton label="Consultando saldo QUSD" /> : null}
         <div className="market-grid">
           {data.markets.map((market) => {
             const availability = data.availability.fiat[market.code] || {};
@@ -51,6 +53,7 @@ export function Capital({ data, label, unit, onChanged }) {
         </div>
       </Panel>
       <Panel title="Mis ofertas" wide>
+        <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
         <button
           className="refresh"
           onClick={() =>
@@ -65,7 +68,7 @@ export function Capital({ data, label, unit, onChanged }) {
           Nueva oferta
         </button>
         {form ? (
-          <div className="settings-form">
+          <div className="settings-form offer-form">
             <label>
               Mercado
               <select
@@ -131,13 +134,14 @@ export function Capital({ data, label, unit, onChanged }) {
             <span>{message}</span>
           </div>
         ) : null}
-        <Offers
+        {resources.ownOffers?.loading && !data.freshness?.ownOffers ? <Skeleton rows={5} label="Consultando ofertas propias" /> : <Offers
           offers={data.ownOffers}
           label={label}
           unit={unit}
           editable
           onChanged={onChanged}
-        />
+        />}
+        {resources.ownOffers?.error ? <p className="inline-error">{resources.ownOffers.error}</p> : null}
       </Panel>
     </>
   );

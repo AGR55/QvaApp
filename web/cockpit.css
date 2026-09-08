@@ -138,6 +138,7 @@
 .skeleton i:nth-child(3) {
   width: 58%;
 }
+.skeleton i:nth-child(n + 4) { width: 86%; }
 @keyframes shimmer {
   to {
     background-position: -220% 0;

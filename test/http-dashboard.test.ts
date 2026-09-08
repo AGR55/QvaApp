@@ -76,6 +76,20 @@ test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () =
   await app.close();
 });
 
+test("Fastify permite iniciar sesión desde localhost cuando se configuró loopback", async () => {
+  const app = buildDashboard({} as never, { password, trustedOrigin: origin });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin: "http://localhost:3000", "content-type": "application/json" },
+    payload: { password },
+  });
+
+  assert.equal(login.statusCode, 201);
+  assert.match(String(login.headers["set-cookie"]), /HttpOnly; SameSite=Strict/);
+  await app.close();
+});
+
 test("Fastify devuelve un rechazo de dominio como error de cliente seguro", async () => {
   const readModel = {
     setPaused: async () => {
@@ -127,5 +141,80 @@ test("Fastify exige que la parada de emergencia sea atómica", async () => {
 
   assert.equal(response.statusCode, 400);
   assert.equal(mutations, 0);
+  await app.close();
+});
+
+test("el arranque del panel responde solo con SQLite y no consulta QvaPay", async () => {
+  let remoteCalls = 0;
+  const readModel = {
+    localSnapshot: () => ({ generatedAt: 123, markets: [], freshness: {} }),
+    snapshot: async () => {
+      remoteCalls += 1;
+      throw new Error("no debe ejecutarse");
+    },
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/dashboard",
+    headers: { cookie },
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json<{ source: string }>().source, "sqlite");
+  assert.equal(remoteCalls, 0);
+  await app.close();
+});
+
+test("una lectura remota fallida conserva la copia SQLite y marca su antigüedad", async () => {
+  const cachedAt = Date.now() - 60_000;
+  const readModel = {
+    refreshBalance: async () => {
+      throw new Error("conexión inestable");
+    },
+    localSnapshot: () => ({
+      balance: 18.5,
+      freshness: {
+        balance: cachedAt,
+        ownOffers: null,
+        transactions: null,
+        markets: {},
+      },
+    }),
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/live/balance",
+    headers: { cookie },
+  });
+  const payload = response.json<{
+    data: number;
+    updatedAt: number;
+    stale: boolean;
+    error: string;
+  }>();
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.data, 18.5);
+  assert.equal(payload.updatedAt, cachedAt);
+  assert.equal(payload.stale, true);
+  assert.match(payload.error, /inestable/);
   await app.close();
 });

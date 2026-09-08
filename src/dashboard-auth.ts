@@ -26,6 +26,7 @@ export class DashboardAuth {
   private readonly attempts = new Map<string, number[]>();
   private readonly now: () => number;
   private readonly duration: number;
+  private readonly trustedOriginUrl: URL;
   readonly trustedOrigin: string;
   readonly secureCookies: boolean;
 
@@ -33,7 +34,8 @@ export class DashboardAuth {
     if (options.password.length < 14)
       throw new Error("DASHBOARD_ADMIN_PASSWORD debe tener al menos 14 caracteres.");
     this.passwordDigest = digest(options.password);
-    this.trustedOrigin = new URL(options.trustedOrigin).origin;
+    this.trustedOriginUrl = new URL(options.trustedOrigin);
+    this.trustedOrigin = this.trustedOriginUrl.origin;
     this.secureCookies = options.secureCookies ?? false;
     this.now = options.now ?? Date.now;
     this.duration = options.sessionDurationMs ?? 8 * 60 * 60 * 1_000;
@@ -77,7 +79,20 @@ export class DashboardAuth {
   }
 
   assertOrigin(origin?: string): void {
-    if (!origin || origin !== this.trustedOrigin)
+    if (!origin) throw new DashboardAuthError(403, "Origen de solicitud no autorizado.");
+    let candidate: URL;
+    try {
+      candidate = new URL(origin);
+    } catch {
+      throw new DashboardAuthError(403, "Origen de solicitud no autorizado.");
+    }
+    const exact = candidate.origin === this.trustedOrigin;
+    const equivalentLoopback =
+      isLoopback(this.trustedOriginUrl.hostname) &&
+      isLoopback(candidate.hostname) &&
+      candidate.protocol === this.trustedOriginUrl.protocol &&
+      candidate.port === this.trustedOriginUrl.port;
+    if (!exact && !equivalentLoopback)
       throw new DashboardAuthError(403, "Origen de solicitud no autorizado.");
   }
 
@@ -97,6 +112,12 @@ export class DashboardAuth {
     for (const [key, session] of this.sessions)
       if (session.expiresAt <= now) this.sessions.delete(key);
   }
+}
+
+function isLoopback(hostname: string): boolean {
+  return ["127.0.0.1", "localhost", "[::1]", "::1"].includes(
+    hostname.toLowerCase(),
+  );
 }
 
 export class DashboardAuthError extends Error {

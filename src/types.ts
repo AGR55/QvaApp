@@ -1,5 +1,5 @@
 export type P2pType = "buy" | "sell";
-/** Código de mercado fiat de QvaPay, configurable desde trading-config.json. */
+/** Código de mercado fiat de QvaPay, configurable desde SQLite y el panel local. */
 export type FiatMarket = string;
 export type P2pStatus =
   | "open"

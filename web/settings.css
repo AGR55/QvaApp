@@ -81,3 +81,17 @@ button:disabled { opacity: .45; cursor: not-allowed; }
     grid-template-columns: 1fr;
   }
 }
+.message-setting { grid-column: 1 / -1; }
+.message-setting textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 82px;
+  padding: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.message-setting > small,
+.settings-note-inline { color: var(--muted); font-size: 11px; }
+.settings-note-inline { grid-column: 1 / -1; margin: 0; line-height: 1.6; }

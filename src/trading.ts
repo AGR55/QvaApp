@@ -29,6 +29,7 @@ export interface MarketSnapshot {
   items: MarketItem[];
   total: number;
   scannedAt: number;
+  average?: P2pAverage;
 }
 
 export const marketLabel = (coin: FiatMarket): string => coin;
@@ -98,6 +99,9 @@ export class TradingEngine {
   }
   activeMarkets(): MarketConfig[] {
     return this.marketConfig.activeMarkets();
+  }
+  automationConfig(): TradingConfig["automation"] {
+    return this.marketConfig.current().automation;
   }
   market(code: FiatMarket): MarketConfig | undefined {
     return this.marketConfig.find(code);
@@ -273,6 +277,7 @@ export class TradingEngine {
       ),
       total: page.total,
       scannedAt: Date.now(),
+      ...(averages?.[coin] ? { average: averages[coin] } : {}),
     };
   }
 
@@ -612,11 +617,11 @@ export class TradingEngine {
         this.store.updateOperation(operation.uuid, "cancelled");
         this.store.audit(
           "auto_cancel",
-          `Venció el plazo de ${this.cfg.autoCancelMs / 60_000} min`,
+          `Venció el plazo de ${this.automationConfig().autoCancelMinutes} min`,
           operation.uuid,
         );
         await this.notify(
-          `Operación ${operation.uuid} cancelada automáticamente: no respondiste en ${this.cfg.autoCancelMs / 60_000} min.`,
+          `Operación ${operation.uuid} cancelada automáticamente: no respondiste en ${this.automationConfig().autoCancelMinutes} min.`,
         );
       } catch (error) {
         if (
@@ -784,7 +789,7 @@ export class TradingEngine {
       { uuid, refresh: true },
       () =>
         this.qva.editOffer(uuid, {
-          message: (offer.message ?? this.cfg.welcomeMessage).slice(0, 79),
+          message: (offer.message ?? this.automationConfig().welcomeMessage).slice(0, 79),
         }),
     );
     this.recordRefresh(uuid, refreshed?.updated_at);
@@ -842,7 +847,7 @@ export class TradingEngine {
         `Configura los datos de pago de ${this.marketLabel(coin)} antes de crear ofertas.`,
       );
     const idempotencyKey = randomUUID();
-    const message = (this.cfg.welcomeMessage ?? "").slice(0, 79);
+    const message = this.automationConfig().welcomeMessage.slice(0, 79);
     const request = {
       type,
       coin,
@@ -1005,7 +1010,7 @@ export class TradingEngine {
         if (retryAt > now) continue;
         if (
           now - Number(this.store.get(key) ?? 0) <
-          this.cfg.offerRefreshIntervalMs
+          this.automationConfig().offerRefreshIntervalMinutes * 60_000
         )
           continue;
         try {
@@ -1080,13 +1085,14 @@ export class TradingEngine {
           decision: "blocked",
           reason: "Promedio P2P no disponible; compra automática bloqueada",
         };
-      const floor = marketAverage * (1 - this.cfg.priceGuardPercent / 100);
+      const priceGuardPercent = this.automationConfig().priceGuardPercent;
+      const floor = marketAverage * (1 - priceGuardPercent / 100);
       if (value < floor)
         return {
           offer,
           rate: value,
           decision: "blocked",
-          reason: `${this.cfg.priceGuardPercent}% por debajo del promedio de venta (${marketAverage.toFixed(2)})`,
+          reason: `${priceGuardPercent}% por debajo del promedio de venta (${marketAverage.toFixed(2)})`,
         };
       if (!this.canFund(offer))
         return {
@@ -1117,13 +1123,14 @@ export class TradingEngine {
         decision: "blocked",
         reason: "Promedio P2P no disponible; venta bloqueada",
       };
-    const ceiling = marketAverage * (1 + this.cfg.priceGuardPercent / 100);
+    const priceGuardPercent = this.automationConfig().priceGuardPercent;
+    const ceiling = marketAverage * (1 + priceGuardPercent / 100);
     if (value > ceiling)
       return {
         offer,
         rate: value,
         decision: "blocked",
-        reason: `${this.cfg.priceGuardPercent}% por encima del promedio de compra (${marketAverage.toFixed(2)})`,
+        reason: `${priceGuardPercent}% por encima del promedio de compra (${marketAverage.toFixed(2)})`,
       };
     return {
       offer,
@@ -1246,7 +1253,9 @@ export class TradingEngine {
       rate: rate(offer),
       state: "applied",
       autoApplied: automatic,
-      cancelAt: automatic ? Date.now() + this.cfg.autoCancelMs : null,
+      cancelAt: automatic
+        ? Date.now() + this.automationConfig().autoCancelMinutes * 60_000
+        : null,
       createdAt: Date.now(),
       ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
     });
@@ -1257,7 +1266,7 @@ export class TradingEngine {
       offer.uuid,
     );
     await this.notify(
-      `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} (${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD) en ${this.marketLabel(this.offerMarket(offer))}.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? "Cancelaré automáticamente en 10 min si no indicas que pagarás: /ack " + offer.uuid : ""}`,
+      `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} (${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD) en ${this.marketLabel(this.offerMarket(offer))}.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? `Cancelaré automáticamente en ${this.automationConfig().autoCancelMinutes} min si no indicas que pagarás: /ack ${offer.uuid}` : ""}`,
       offer.uuid,
     );
   }
@@ -1306,7 +1315,7 @@ export class TradingEngine {
   }
   private async sendChatBestEffort(uuid: string): Promise<void> {
     try {
-      await this.qva.sendChat(uuid, this.cfg.welcomeMessage);
+      await this.qva.sendChat(uuid, this.automationConfig().welcomeMessage);
     } catch (error) {
       this.store.audit(
         "chat_warning",

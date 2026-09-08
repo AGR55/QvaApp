@@ -11,7 +11,6 @@ import { QvaApiError } from "./qvapay.js";
 import type { TradingEngine } from "./trading.js";
 import type { FiatMarket } from "./types.js";
 
-type Snapshot = Awaited<ReturnType<DashboardReadModel["snapshot"]>>;
 type AuthOptions = {
   password: string;
   trustedOrigin: string;
@@ -42,7 +41,6 @@ export function buildDashboard(
   });
   const auth = new DashboardAuth(authOptions);
   const publicRoot = resolve("public/dashboard");
-  let lastSnapshot: Snapshot | undefined;
 
   app.addHook("onSend", async (_request, reply, payload) => {
     reply
@@ -121,16 +119,65 @@ export function buildDashboard(
     reply.header("set-cookie", auth.logout(request.headers.cookie)).status(204);
   });
 
-  app.get("/api/dashboard", async (_request, reply) => {
-    try {
-      lastSnapshot = await readModel.snapshot();
-      return { data: lastSnapshot, stale: false };
-    } catch (error) {
-      if (!lastSnapshot) throw error;
-      reply.status(200);
-      return { data: lastSnapshot, stale: true, error: message(error) };
-    }
-  });
+  // Esta ruta es deliberadamente local: debe responder aunque QvaPay esté caído.
+  app.get("/api/dashboard", async () => ({
+    data: readModel.localSnapshot(),
+    source: "sqlite",
+  }));
+  app.get("/api/live/balance", async () =>
+    resilientResource(
+      () => readModel.refreshBalance(),
+      () => {
+        const local = readModel.localSnapshot();
+        return {
+          data: local.balance,
+          updatedAt: local.freshness.balance,
+        };
+      },
+    ),
+  );
+  app.get("/api/live/own-offers", async () =>
+    resilientResource(
+      () => readModel.refreshOwnOffers(),
+      () => {
+        const local = readModel.localSnapshot();
+        return {
+          data: local.ownOffers,
+          updatedAt: local.freshness.ownOffers,
+        };
+      },
+    ),
+  );
+  app.get("/api/live/transactions", async () =>
+    resilientResource(
+      () => readModel.refreshTransactions(),
+      () => {
+        const local = readModel.localSnapshot();
+        return {
+          data: local.transactions,
+          updatedAt: local.freshness.transactions,
+        };
+      },
+    ),
+  );
+  app.get<{ Params: { coin: string } }>(
+    "/api/live/markets/:coin",
+    async (request) => {
+      const coin = request.params.coin.trim();
+      if (!/^[A-Z0-9_]{2,40}$/.test(coin) || !readModel.config().markets.some((item) => item.code === coin))
+        throw new ClientInputError("Mercado inválido.");
+      return resilientResource(
+        () => readModel.refreshMarket(coin),
+        () => {
+          const local = readModel.localSnapshot();
+          return {
+            data: local.market[coin],
+            updatedAt: local.freshness.markets[coin] ?? null,
+          };
+        },
+      );
+    },
+  );
   app.get("/api/config", async () => ({ data: readModel.config() }));
   app.get("/api/config-revisions", async () => ({ data: readModel.configRevisions() }));
   app.put<{ Body: TradingConfig | { config: TradingConfig; reason?: string } }>("/api/config", async (request, reply) => {
@@ -180,7 +227,7 @@ export function buildDashboard(
     const coin = request.query.coin?.trim();
     if (!coin || !/^[A-Z0-9_]{2,40}$/.test(coin))
       throw new ClientInputError("Mercado inválido.");
-    return { data: await readModel.marketAnalytics(coin) };
+    return { data: readModel.marketAnalytics(coin), source: "sqlite" };
   });
   app.post<{ Body: { coin: FiatMarket; type: "buy" | "sell"; amount: number; rate: number } }>("/api/offers", {
     schema: {
@@ -277,6 +324,20 @@ async function clientAction<T>(action: () => T | Promise<T>): Promise<T> {
   }
 }
 
+async function resilientResource<T>(
+  refresh: () => Promise<{ data: T; updatedAt: number }>,
+  fallback: () => { data: T; updatedAt: number | null },
+) {
+  try {
+    const current = await refresh();
+    return { ...current, stale: false };
+  } catch (error) {
+    const cached = fallback();
+    if (cached.updatedAt === null) throw error;
+    return { ...cached, stale: true, error: message(error) };
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -316,7 +377,11 @@ function openApiDocument() {
     servers: [{ url: "/" }],
     security: [{ sessionCookie: [], csrfToken: [] }],
     paths: {
-      "/api/dashboard": { get: { summary: "Estado analítico completo" } },
+      "/api/dashboard": { get: { summary: "Estado local y última caché persistida" } },
+      "/api/live/balance": { get: { summary: "Actualizar saldo QUSD" } },
+      "/api/live/own-offers": { get: { summary: "Actualizar ofertas propias" } },
+      "/api/live/transactions": { get: { summary: "Actualizar transacciones" } },
+      "/api/live/markets/{coin}": { get: { summary: "Actualizar un mercado" } },
       "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },
       "/api/control": { put: { summary: "Pausa, modo, refresco y emergencia" } },
       "/api/offers": { post: { summary: "Crear oferta propia" } },

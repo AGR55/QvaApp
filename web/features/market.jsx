@@ -1,8 +1,8 @@
 import React from "react";
-import { Panel } from "../components/common.jsx";
+import { Freshness, Panel, Skeleton } from "../components/common.jsx";
 import { Offers } from "../components/offers.jsx";
 
-export function Market({ data, market, setMarket, selected, label, unit }) {
+export function Market({ data, market, setMarket, selected, label, unit, resource }) {
   return (
     <Panel title={`Libro · ${selected.total} abiertas`} wide>
       <div className="tabs">
@@ -16,7 +16,11 @@ export function Market({ data, market, setMarket, selected, label, unit }) {
           </button>
         ))}
       </div>
-      <Offers offers={selected.offers} label={label} unit={unit} />
+      <Freshness state={resource} cachedAt={data.freshness?.markets?.[market]} />
+      {resource?.loading && !data.freshness?.markets?.[market]
+        ? <Skeleton rows={6} label={`Cargando ofertas de ${label(market)}`} />
+        : <Offers offers={selected.offers} label={label} unit={unit} />}
+      {resource?.error ? <p className="inline-error">{resource.error}</p> : null}
     </Panel>
   );
 }

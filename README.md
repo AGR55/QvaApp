@@ -9,6 +9,7 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 - Toda mutación se registra antes de enviarse a QvaPay.
 - Un timeout de una mutación bloquea nuevas operaciones hasta conciliar por lectura.
 - Las reservas de capital, workflows, configuración, revisiones y auditoría viven en SQLite.
+- La última lectura válida de cada recurso QvaPay vive en SQLite y se muestra con su fecha cuando la conexión falla.
 - El panel escucha solo en `127.0.0.1`, usa contraseña, sesión `HttpOnly`, `SameSite=Strict`, CSRF y origen exacto.
 - Los pagos y confirmaciones finales siempre requieren intervención humana.
 
@@ -26,9 +27,15 @@ pnpm dev
 
 Configura en `.env` una `LOCAL_ENCRYPTION_KEY` aleatoria y una `DASHBOARD_ADMIN_PASSWORD` distinta, de al menos 14 caracteres. No reutilices la contraseña de QvaPay. Abre [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
+En operación local también puedes entrar mediante [http://localhost:3000](http://localhost:3000). La protección de origen considera equivalentes únicamente `127.0.0.1`, `localhost` e IPv6 loopback cuando protocolo y puerto coinciden; cualquier dirección externa continúa bloqueada.
+
 `pnpm login` admite el TOTP de seis dígitos de una aplicación autenticadora. La contraseña y el código se introducen ocultos; ante fallos transitorios de conexión se hacen tres intentos y el token solo se guarda cifrado después de validarlo con `GET /user`.
 
 La primera revisión de límites debe hacerse en **Estrategia**. Empieza en simulación, revisa Mercados, Capital, Operaciones y Auditoría, y solo después considera el modo real.
+
+Precios, límites, mercados, saldos declarados, intervalos, autocancelación, refresco, cortafuegos y mensaje P2P se administran en **Estrategia** y se versionan en SQLite. Los antiguos valores de entorno o `trading-config.json` solo pueden inicializar una base vacía; después SQLite es la fuente de verdad. Credenciales, claves y `CONFIRM_REAL_TRADING` permanecen fuera del panel.
+
+El panel abre primero con SQLite y actualiza únicamente los recursos de la vista activa. Si QvaPay tarda o no responde, conserva los datos anteriores, muestra su fecha y permite navegar, auditar o cambiar configuración local sin quedar atrapado en una pantalla de carga.
 
 ## Comandos
 
@@ -36,7 +43,7 @@ La primera revisión de límites debe hacerse en **Estrategia**. Empieza en simu
 pnpm typecheck       # análisis estático estricto
 pnpm test            # suite unitaria, contractual e integrada
 pnpm build           # servidor + panel de producción
-pnpm check           # tipos, 81 pruebas, builds y escáner de secretos
+pnpm check           # tipos, 86 pruebas, builds y escáner de secretos
 pnpm check:ui        # build + recorrido Chromium, responsive y WCAG automatizado
 pnpm start           # ejecuta dist/index.js
 ```

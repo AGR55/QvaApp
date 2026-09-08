@@ -5,7 +5,7 @@ export type SchedulerErrorHandler = (
 ) => void | Promise<void>;
 
 interface Registration {
-  intervalMs: number;
+  intervalMs: number | (() => number);
   task: ScheduledTask;
   timer: NodeJS.Timeout | undefined;
   running: boolean;
@@ -20,10 +20,14 @@ export class Scheduler {
     private readonly onError: SchedulerErrorHandler = () => undefined,
   ) {}
 
-  register(name: string, intervalMs: number, task: ScheduledTask): void {
+  register(
+    name: string,
+    intervalMs: number | (() => number),
+    task: ScheduledTask,
+  ): void {
     if (this.registrations.has(name))
       throw new Error(`La tarea ${name} ya está registrada.`);
-    if (!Number.isFinite(intervalMs) || intervalMs <= 0)
+    if (typeof intervalMs === "number" && (!Number.isFinite(intervalMs) || intervalMs <= 0))
       throw new Error("El intervalo debe ser positivo.");
     this.registrations.set(name, {
       intervalMs,
@@ -36,12 +40,7 @@ export class Scheduler {
   start(): void {
     if (this.started || this.stopped) return;
     this.started = true;
-    for (const [name, registration] of this.registrations) {
-      registration.timer = setInterval(
-        () => void this.run(name),
-        registration.intervalMs,
-      );
-    }
+    for (const name of this.registrations.keys()) this.schedule(name);
   }
 
   async run(name: string): Promise<boolean> {
@@ -66,5 +65,19 @@ export class Scheduler {
       if (registration.timer) clearInterval(registration.timer);
       registration.timer = undefined;
     }
+  }
+
+  private schedule(name: string): void {
+    const registration = this.registrations.get(name);
+    if (!registration || this.stopped) return;
+    const interval = typeof registration.intervalMs === "function"
+      ? registration.intervalMs()
+      : registration.intervalMs;
+    if (!Number.isFinite(interval) || interval <= 0)
+      throw new Error(`El intervalo de ${name} debe ser positivo.`);
+    registration.timer = setTimeout(async () => {
+      await this.run(name);
+      this.schedule(name);
+    }, interval);
   }
 }

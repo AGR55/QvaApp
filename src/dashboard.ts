@@ -7,6 +7,20 @@ import type { Store } from "./store.js";
 import { proportionalBudgetPlan } from "./budget.js";
 
 type RuntimeConfig = typeof Config;
+type OfferView = ReturnType<typeof offerView>;
+type MarketView = {
+  offers: (OfferView & { decision: string; reason: string })[];
+  total: number;
+};
+type TransactionView = {
+  uuid: string;
+  amount: number;
+  description: string;
+  status: string;
+  createdAt?: string;
+  coin: string;
+  p2p?: { amount?: number; receive?: number; status?: string };
+};
 
 export function marginCalculation(
   buyRate: number,
@@ -129,64 +143,28 @@ export class DashboardReadModel {
     return this.trading.cancel(uuid);
   }
 
-  async snapshot() {
+  localSnapshot() {
     const state = this.trading.operationalState();
-    const ownOffers = await this.trading.listOwnOffers();
-    const averages = await this.qva.p2pAverages();
-    const market = {} as Record<
-      FiatMarket,
-      {
-        offers: (ReturnType<typeof offerView> & {
-          decision: string;
-          reason: string;
-        })[];
-        total: number;
-      }
-    >;
-    const readings = await Promise.all(
-      this.trading
-        .activeMarkets()
-        .map(async (configured) => ({
-          configured,
-          current: await this.trading.inspectMarket(configured.code),
-        })),
-    );
-    for (const { configured, current } of readings) {
-      market[configured.code] = {
-        total: current.total,
-        offers: current.items.map((item) => ({
-          ...offerView(item.offer),
-          decision: item.decision,
-          reason: item.reason,
-        })),
-      };
-      const average = averages[configured.code];
-      this.store.recordMarketObservation({
-        coin: configured.code,
-        ...maybeNumber("averageBuy", numeric(average?.average_buy)),
-        ...maybeNumber("averageSell", numeric(average?.average_sell)),
-        ...maybeNumber("bestBuy", bestRate(current.items, "buy")),
-        ...maybeNumber("bestSell", bestRate(current.items, "sell")),
-        openOffers: current.total,
-        eligible: current.items.filter(
-          (item) =>
-            item.decision === "auto_buy" || item.decision === "manual_sell",
-        ).length,
-      });
-    }
-    const [balance, transactions] = await Promise.all([
-      this.trading.qusdBalance(),
-      this.qva.listTransactions(),
-    ]);
-    this.store.recordDashboardSnapshot({
-      qusdBalance: balance,
-      cupBalance: state.fiat.BANK_CUP ?? 0,
-      prepagoBalance: state.fiat.BANDECPREPAGO ?? 0,
-      openOffers: ownOffers.length,
-      activeOperations: state.active,
-    });
+    const balanceResource = this.store.loadRemoteResource<number>("balance");
+    const ownOffersResource =
+      this.store.loadRemoteResource<OfferView[]>("own-offers");
+    const transactionResource =
+      this.store.loadRemoteResource<TransactionView[]>("transactions");
+    const averagesResource = this.store.loadRemoteResource<
+      Record<string, unknown>
+    >("averages");
+    const balance = balanceResource?.data ?? 0;
+    const ownOfferViews = ownOffersResource?.data ?? [];
+    const averages = averagesResource?.data ?? {};
+    const market = Object.fromEntries(
+      this.trading.markets().map((configured) => [
+        configured.code,
+        this.store.loadRemoteResource<MarketView>(
+          `market:${configured.code}`,
+        )?.data ?? { offers: [], total: 0 },
+      ]),
+    ) as Record<FiatMarket, MarketView>;
     const strategy = this.trading.strategy();
-    const ownOfferViews = ownOffers.map(offerView);
     const budget = Object.fromEntries(
       this.trading
         .markets()
@@ -202,28 +180,24 @@ export class DashboardReadModel {
     );
     return {
       generatedAt: Date.now(),
+      freshness: {
+        balance: balanceResource?.updatedAt ?? null,
+        ownOffers: ownOffersResource?.updatedAt ?? null,
+        transactions: transactionResource?.updatedAt ?? null,
+        markets: Object.fromEntries(
+          this.trading.markets().map((configured) => [
+            configured.code,
+            this.store.loadRemoteResource(`market:${configured.code}`)
+              ?.updatedAt ?? null,
+          ]),
+        ),
+      },
       balance,
       state,
       ownOffers: ownOfferViews,
       market,
       averages,
-      transactions: transactions
-        .slice(0, 12)
-        .map((tx) => ({
-          uuid: tx.uuid,
-          amount: tx.amount,
-          description: tx.description ?? "Transacción",
-          status: tx.status,
-          createdAt: tx.created_at,
-          coin: tx.Wallet?.Coin?.tick ?? tx.P2P?.coin ?? "QUSD",
-          p2p: tx.P2P
-            ? {
-                amount: tx.P2P.amount,
-                receive: tx.P2P.receive,
-                status: tx.P2P.status,
-              }
-            : undefined,
-        })),
+      transactions: transactionResource?.data ?? [],
       strategy,
       markets: this.marketConfig.publicMarkets(),
       availability: {
@@ -296,44 +270,120 @@ export class DashboardReadModel {
     };
   }
 
-  async marketAnalytics(coin: string) {
-    const [averageMap, page] = await Promise.all([
-      this.qva.p2pAverages(),
-      this.qva.listOffersPage({ coin, status: "open", take: 100, page: 1 }),
-    ]);
-    const offers = page.offers.filter(
-      (offer) => offer.amount > 0 && offer.receive > 0,
-    );
-    const rates = (type: "buy" | "sell") =>
-      offers.filter((offer) => offer.type === type).map((offer) => rate(offer));
-    const average = averageMap[coin];
+  async refreshBalance() {
+    const data = await this.trading.qusdBalance();
+    const updatedAt = Date.now();
+    this.store.saveRemoteResource("balance", data, updatedAt);
+    this.recordDashboardPoint();
+    return { data, updatedAt };
+  }
+
+  async refreshOwnOffers() {
+    const data = (await this.trading.listOwnOffers()).map(offerView);
+    const updatedAt = Date.now();
+    this.store.saveRemoteResource("own-offers", data, updatedAt);
+    this.recordDashboardPoint();
+    return { data, updatedAt };
+  }
+
+  async refreshTransactions() {
+    const data: TransactionView[] = (await this.qva.listTransactions())
+      .slice(0, 12)
+      .map((tx) => ({
+        uuid: tx.uuid,
+        amount: tx.amount,
+        description: tx.description ?? "Transacción",
+        status: tx.status,
+        ...(tx.created_at ? { createdAt: tx.created_at } : {}),
+        coin: tx.Wallet?.Coin?.tick ?? tx.P2P?.coin ?? "QUSD",
+        ...(tx.P2P
+          ? {
+              p2p: {
+                ...(tx.P2P.amount === undefined
+                  ? {}
+                  : { amount: tx.P2P.amount }),
+                ...(tx.P2P.receive === undefined
+                  ? {}
+                  : { receive: tx.P2P.receive }),
+                ...(tx.P2P.status === undefined
+                  ? {}
+                  : { status: tx.P2P.status }),
+              },
+            }
+          : {}),
+      }));
+    const updatedAt = Date.now();
+    this.store.saveRemoteResource("transactions", data, updatedAt);
+    return { data, updatedAt };
+  }
+
+  async refreshMarket(coin: string) {
+    if (!this.marketConfig.find(coin)) throw new Error("Mercado inválido.");
+    const current = await this.trading.inspectMarket(coin);
+    const data: MarketView = {
+      total: current.total,
+      offers: current.items.map((item) => ({
+        ...offerView(item.offer),
+        decision: item.decision,
+        reason: item.reason,
+      })),
+    };
+    const updatedAt = current.scannedAt;
+    this.store.saveRemoteResource(`market:${coin}`, data, updatedAt);
+    const previousAverages =
+      this.store.loadRemoteResource<Record<string, unknown>>("averages")?.data ??
+      {};
+    const averages = {
+      ...previousAverages,
+      ...(current.average ? { [coin]: current.average } : {}),
+    };
+    this.store.saveRemoteResource("averages", averages, updatedAt);
     this.store.recordMarketObservation({
       coin,
-      ...maybeNumber("averageBuy", numeric(average?.average_buy)),
-      ...maybeNumber("averageSell", numeric(average?.average_sell)),
-      ...maybeNumber("medianBuy", median(rates("buy"))),
-      ...maybeNumber("medianSell", median(rates("sell"))),
-      ...maybeNumber(
-        "bestBuy",
-        bestRate(offers.map((offer) => ({ offer, rate: rate(offer) })), "buy"),
-      ),
-      ...maybeNumber(
-        "bestSell",
-        bestRate(offers.map((offer) => ({ offer, rate: rate(offer) })), "sell"),
-      ),
-      openOffers: page.total,
-      eligible: 0,
+      ...maybeNumber("averageBuy", numeric(current.average?.average_buy)),
+      ...maybeNumber("averageSell", numeric(current.average?.average_sell)),
+      ...maybeNumber("bestBuy", bestRate(current.items, "buy")),
+      ...maybeNumber("bestSell", bestRate(current.items, "sell")),
+      openOffers: current.total,
+      eligible: current.items.filter(
+        (item) =>
+          item.decision === "auto_buy" || item.decision === "manual_sell",
+      ).length,
     });
+    return { data, updatedAt, average: current.average };
+  }
+
+  async snapshot() {
+    await Promise.all([
+      this.refreshBalance(),
+      this.refreshOwnOffers(),
+      this.refreshTransactions(),
+      ...this.trading.activeMarkets().map((market) =>
+        this.refreshMarket(market.code),
+      ),
+    ]);
+    return this.localSnapshot();
+  }
+
+  private recordDashboardPoint(): void {
+    const state = this.trading.operationalState();
+    const balance = this.store.loadRemoteResource<number>("balance")?.data;
+    const ownOffers =
+      this.store.loadRemoteResource<OfferView[]>("own-offers")?.data;
+    if (balance === undefined || ownOffers === undefined) return;
+    this.store.recordDashboardSnapshot({
+      qusdBalance: balance,
+      cupBalance: state.fiat.BANK_CUP ?? 0,
+      prepagoBalance: state.fiat.BANDECPREPAGO ?? 0,
+      openOffers: ownOffers.length,
+      activeOperations: state.active,
+    });
+  }
+
+  marketAnalytics(coin: string) {
     return {
       coin,
       history: this.store.marketHistory(startOfDay(), coin),
-      latest: {
-        averageBuy: numeric(average?.average_buy),
-        averageSell: numeric(average?.average_sell),
-        medianBuy: median(rates("buy")),
-        medianSell: median(rates("sell")),
-        points: page.total,
-      },
     };
   }
 }
@@ -342,15 +392,6 @@ function numeric(value: unknown): number | undefined {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
-function median(values: number[]): number | undefined {
-  if (!values.length) return undefined;
-  const sorted = values.slice().sort((a, b) => a - b),
-    middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2
-    ? sorted[middle]
-    : (sorted[middle - 1]! + sorted[middle]!) / 2;
-}
-
 function maybeNumber<K extends string>(
   key: K,
   value: number | undefined,

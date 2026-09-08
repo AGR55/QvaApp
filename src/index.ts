@@ -233,7 +233,7 @@ const scheduler = new Scheduler((name, error) => {
   store.audit(`${name}_background_error`, message);
   console.error(`Error de tarea ${name}:`, message);
 });
-scheduler.register("scan", config.scanIntervalMs, async () => {
+scheduler.register("scan", () => marketConfig.current().automation.scanIntervalSeconds * 1_000, async () => {
   if (!trading.isPaused()) await trading.scan();
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
@@ -387,7 +387,7 @@ async function showStrategy(ctx: Context): Promise<void> {
     "━━━━━━━━━━━━━━━━━━━━",
     ...markets,
     `🛡 Reserva QUSD: <b>${money(trading.strategy().reserve)} QUSD</b>`,
-    `⏱ Autocancelación: <b>${config.autoCancelMs / 60_000} min</b>`,
+    `⏱ Autocancelación: <b>${marketConfig.current().automation.autoCancelMinutes} min</b>`,
     `🔄 Refresco de propias: <b>${state.refresh ? "activo" : "apagado"}</b>`,
     "\nUsa /fiat cup|prepago|clasica, /mode y /refresh para modificar la estrategia.",
   ].join("\n");

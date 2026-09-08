@@ -1,11 +1,11 @@
 import React, { useCallback, useState } from "react";
 import { AlertOctagon, Pause, Play, Radio, ShieldCheck } from "lucide-react";
-import { List, Panel } from "../components/common.jsx";
+import { Freshness, List, Panel, Skeleton } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
 
-export function Cockpit({ data, label, unit, onChanged }) {
+export function Cockpit({ data, label, unit, onChanged, resources }) {
   const first = data.rankings.potential?.[0];
   const [confirmReal, setConfirmReal] = useState(false);
   const [status, setStatus] = useState("");
@@ -48,6 +48,11 @@ export function Cockpit({ data, label, unit, onChanged }) {
           <small> QUSD libres</small>
         </b>
       </section>
+      <div className="freshness-row">
+        <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
+        <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
+      </div>
+      {resources.balance?.loading && !data.freshness?.balance ? <Skeleton label="Consultando balance" /> : null}
       <div className="market-grid">
         {data.markets.map((market) => {
           const availability = data.availability.fiat[market.code] || {},

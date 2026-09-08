@@ -10,6 +10,16 @@
 
 No habilites modo real si `pnpm check` falla, la documentación de QvaPay cambió, existe una conciliación pendiente o los saldos declarados no coinciden.
 
+Para el panel local se aceptan `http://127.0.0.1:3000`, `http://localhost:3000` y el loopback IPv6 equivalente. Deben conservar el protocolo y puerto de `DASHBOARD_TRUSTED_ORIGIN`; IPs LAN, dominios y otros puertos se rechazan.
+
+## Conexión lenta o caída
+
+- El indicador superior distingue el estado local; cada bloque remoto muestra la fecha de su última lectura.
+- **Dato guardado** significa que SQLite conserva una lectura anterior: sirve para contexto, no como cotización actual para tomar una decisión financiera nueva.
+- **Actualizar** consulta solo los recursos necesarios para la vista abierta y los envía secuencialmente.
+- Si no hay conexión, siguen disponibles Estrategia, Operaciones, Auditoría e históricos locales.
+- No actives ni repitas una acción financiera basándote únicamente en un dato marcado como guardado. Espera una lectura actual o comprueba directamente en QvaPay.
+
 ## Inicio de sesión QvaPay con TOTP
 
 Ejecuta `pnpm login`, introduce el correo, la contraseña oculta y después el código vigente de seis dígitos de la aplicación autenticadora. El comando usa `remember: true`, verifica el token mediante `GET /user` y solo entonces lo cifra en SQLite. Un timeout de transporte se reintenta hasta tres veces; un TOTP rechazado, bloqueo o rate limit requiere intervención humana y nunca se reintenta automáticamente.
@@ -39,6 +49,8 @@ systemctl --user start qvaapply
 ```
 
 Las migraciones crean automáticamente una copia previa en `data/backups`. Para restaurar, mantén el proceso detenido, conserva primero la base dañada con otro nombre, copia el backup como `data/qvaapply.sqlite`, verifica permisos `600` y arranca en simulación/pausa. Comprueba Auditoría antes de modo real.
+
+La migración v6 añade configuración operativa y cachés remotas. En una base anterior crea automáticamente `qvaapply-before-v6-*.sqlite` antes de modificar el esquema.
 
 ## Rotación de secretos
 

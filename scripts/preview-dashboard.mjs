@@ -22,7 +22,8 @@ const markets = [
   { code: "BANK_CUP", label: "Transferencia CUP", currency: "CUP", active: true, fiatBalance: 45000, buyMaxRate: 930, sellMinRate: 1010, purchaseMaxQusd: 25, sellFeePercent: 0, paymentDetails: [{ name: "Cuenta", value: "•••• 1234" }] },
   { code: "BANDECPREPAGO", label: "USD Prepago", currency: "USD", active: true, fiatBalance: 110, buyMaxRate: 1.06, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0.25, paymentDetails: [] },
 ];
-const config = { version: 2, qusdReserve: 10, maxOpenOffers: 10, risk, markets };
+const automation = { scanIntervalSeconds: 15, autoCancelMinutes: 10, offerRefreshIntervalMinutes: 5, priceGuardPercent: 15, welcomeMessage: "Oferta aplicada por un bot. El pago fiat lo realiza manualmente el usuario." };
+const config = { version: 3, qusdReserve: 10, maxOpenOffers: 10, automation, risk, markets };
 const operation = { uuid: "op-demo-01", offerType: "buy", coin: "BANK_CUP", amount: 20, receive: 20400, rate: 1020, state: "applied", autoApplied: true, cancelAt: null, createdAt: now - 120000 };
 const workflow = { id: "workflow-demo-01", targetOffer: { ...operation, type: "buy", status: "processing" }, riskDecision: { kind: "apply", reasons: ["Todos los límites pasaron."], checks: [] }, state: "applied", error: null, createdAt: now - 120000, updatedAt: now - 90000 };
 const snapshot = {
@@ -45,11 +46,18 @@ const snapshot = {
   recoverableWorkflows: [], workflows: [workflow], workflowOffers: {},
   capitalReservations: [{ workflowId: workflow.id, market: "BANK_CUP", amount: 20, state: "released", createdAt: now - 120000, releasedAt: now - 90000 }],
   mutationIntents: [{ intentId: "intent-demo", operationUuid: operation.uuid, kind: "apply", state: "confirmed", request: {}, createdAt: now - 100000, updatedAt: now - 90000 }],
-  operations: [operation], integrity: { schemaVersion: 5, configRevisionChainValid: true },
+  operations: [operation], integrity: { schemaVersion: 6, configRevisionChainValid: true },
+  freshness: { balance: now, ownOffers: now, transactions: now, markets: { BANK_CUP: now, BANDECPREPAGO: now } },
 };
 
 const model = {
   snapshot: async () => snapshot,
+  localSnapshot: () => snapshot,
+  refreshBalance: async () => { throw new Error("QvaPay no respondió en la simulación de red lenta"); },
+  refreshOwnOffers: async () => ({ data: snapshot.ownOffers, updatedAt: Date.now() }),
+  refreshTransactions: async () => ({ data: snapshot.transactions, updatedAt: Date.now() }),
+  refreshMarket: async (coin) => ({ data: snapshot.market[coin], updatedAt: Date.now() }),
+  marketAnalytics: (coin) => ({ coin, history: snapshot.marketHistory }),
   config: () => config,
   configRevisions: () => [{ id: 1, createdAt: now, source: "preview", reason: "Datos de demostración", config, previousHash: null, hash: "0123456789abcdef" }],
   auditLog: () => snapshot.activity,

@@ -8,7 +8,7 @@
   --accent: #15745f;
   --accent-soft: #e3f0eb;
   --danger: #ad3f47;
-  --warning: #9d6526;
+  --warning: #7f4f19;
   --shadow: 0 12px 30px #17333c0d;
 }
 
@@ -107,6 +107,17 @@ td small { display: block; margin-top: 5px; color: var(--muted); max-width: 220p
 }
 * {
   box-sizing: border-box;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 :focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent), white 20%);
@@ -299,6 +310,54 @@ body {
   color: var(--danger);
   width: 18px;
 }
+.connection-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  color: var(--muted);
+  font: 11px "DM Mono";
+}
+.connection-state > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent), transparent 88%);
+}
+.connection-state.offline > span {
+  background: var(--warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning), transparent 88%);
+}
+.connection-state p { margin: 0; }
+.freshness-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.freshness {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0 0 12px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface-alt);
+  font: 9px "DM Mono";
+  letter-spacing: .03em;
+}
+.freshness-row .freshness { margin: 0; }
+.freshness.stale { color: var(--warning); border-color: color-mix(in srgb, var(--warning), var(--line) 70%); }
+.freshness.loading:before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  margin: 2px 6px 0 0;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.inline-error { color: var(--warning); font-size: 11px; line-height: 1.5; }
+.spinning { animation: spin .9s linear infinite; }
+.refresh:disabled { cursor: wait; opacity: .62; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: .3; transform: scale(.75); } }
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -549,6 +608,14 @@ td {
 }
 .boot .mark {
   margin: auto;
+}
+.boot .refresh { margin: auto; }
+@media (prefers-reduced-motion: reduce) {
+  .skeleton i,
+  .spinning,
+  .freshness.loading:before {
+    animation: none !important;
+  }
 }
 @media (max-width: 920px) {
   .app-shell {

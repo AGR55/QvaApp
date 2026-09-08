@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Panel } from "../components/common.jsx";
+import { Panel, Skeleton } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 
@@ -115,11 +115,7 @@ export function Charts({ markets }) {
           </AreaChart>
         </ResponsiveContainer>
       ) : (
-        <div className="skeleton">
-          <i />
-          <i />
-          <i />
-        </div>
+        <Skeleton rows={4} label="Leyendo histórico local" />
       )}
     </Panel>
   );

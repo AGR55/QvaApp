@@ -42,10 +42,15 @@ test("persiste la configuración nueva únicamente en SQLite", () => {
   );
   const next = config.current();
   next.risk.minQusdReserve = 7;
+  next.automation.scanIntervalSeconds = 33;
+  next.automation.welcomeMessage = "Pago fiat manual; el bot solo aplica la oferta.";
   config.save(next);
 
   assert.equal(existsSync(join(dataDir, "trading-config.json")), false);
   assert.equal(store.loadTradingConfig()?.qusdReserve, 7);
+  assert.equal(store.loadTradingConfig()?.automation.scanIntervalSeconds, 33);
+  assert.match(store.loadTradingConfig()?.automation.welcomeMessage ?? "", /manual/);
+  assert.ok(store.hasBotConfig());
   assert.equal(
     store.loadTradingConfig()?.risk.maxQusdPerOperation,
     25,
@@ -153,9 +158,25 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v5-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v6-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
+});
+
+test("conserva recursos QvaPay independientes después de reiniciar", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-remote-cache-"));
+  const first = new Store(dataDir);
+  first.saveRemoteResource("balance", { balance: 17.25 }, 123456);
+  first.close();
+
+  const reopened = new Store(dataDir);
+  assert.deepEqual(reopened.loadRemoteResource("balance"), {
+    key: "balance",
+    data: { balance: 17.25 },
+    updatedAt: 123456,
+  });
+  assert.equal(reopened.loadRemoteResource("missing"), undefined);
+  reopened.close();
 });
 
 test("persiste workflow, snapshots y una reserva QUSD exclusiva", () => {

@@ -11,7 +11,7 @@ import {
   Workflow,
   ShieldCheck,
 } from "lucide-react";
-import { Empty } from "./components/common.jsx";
+import { Empty, Skeleton } from "./components/common.jsx";
 import { useDashboard } from "./hooks/use-dashboard.js";
 import { Capital } from "./features/capital.jsx";
 import { Cockpit } from "./features/cockpit.jsx";
@@ -50,7 +50,7 @@ function App() {
   const [session, setSession] = useState();
   const [view, setView] = useState("resumen");
   const [market, setMarket] = useState("");
-  const { data, status, refresh } = useDashboard(setMarket);
+  const { data, status, resources, online, refresh } = useDashboard(view, market, setMarket);
   useEffect(() => {
     void requestJson("/api/session")
       .then((payload) => {
@@ -88,11 +88,8 @@ function App() {
       <main className="boot">
         <div className="mark">Q</div>
         <p>{status}</p>
-        <div className="skeleton">
-          <i />
-          <i />
-          <i />
-        </div>
+        <Skeleton label="Leyendo la base de datos local" />
+        <button className="refresh" onClick={refresh}>Reintentar lectura local</button>
       </main>
     );
   const metadata = new Map(data.markets.map((item) => [item.code, item]));
@@ -133,8 +130,8 @@ function App() {
             <h1>{title}</h1>
           </div>
           <div className="top-actions">
-            <button className="refresh" onClick={refresh}>
-              <RefreshCw aria-hidden="true" />
+            <button className="refresh" onClick={refresh} disabled={Object.values(resources).some((item) => item.loading)}>
+              <RefreshCw className={Object.values(resources).some((item) => item.loading) ? "spinning" : ""} aria-hidden="true" />
               Actualizar
             </button>
             <button
@@ -147,9 +144,12 @@ function App() {
             </button>
           </div>
         </header>
-        <p className="detail">{status}</p>
+        <div className={`connection-state ${online ? "" : "offline"}`} role="status" aria-live="polite">
+          <span />
+          <p>{status}</p>
+        </div>
         {view === "resumen" ? (
-          <Cockpit data={data} label={label} unit={unit} onChanged={refresh} />
+          <Cockpit data={data} label={label} unit={unit} onChanged={refresh} resources={resources} />
         ) : null}
         {view === "mercado" ? (
           <Market
@@ -159,10 +159,11 @@ function App() {
             selected={selected}
             label={label}
             unit={unit}
+            resource={resources[`market:${market}`]}
           />
         ) : null}
         {view === "ofertas" ? (
-          <Capital data={data} label={label} unit={unit} onChanged={refresh} />
+          <Capital data={data} label={label} unit={unit} onChanged={refresh} resources={resources} />
         ) : null}
         {view === "operaciones" ? (
           <Operations

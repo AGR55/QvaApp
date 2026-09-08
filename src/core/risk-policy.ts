@@ -223,8 +223,7 @@ export function evaluateRisk(context: RiskContext): RiskDecision {
     kind,
     opportunityUuid: opportunity.uuid,
     evaluatedAt: context.now,
-    requiredQusd:
-      opportunity.side === "sell_qusd" ? opportunity.qusdAmount : 0,
+    requiredQusd: opportunity.side === "sell_qusd" ? opportunity.qusdAmount : 0,
     requiredFiat:
       opportunity.side === "buy_qusd" ? opportunity.requiredFiat : 0,
     projectedExposureQusd:
@@ -374,7 +373,9 @@ function validateRiskContext(context: RiskContext): void {
     context.limits.counterpartyCooldownSeconds,
   ];
   if (nonNegative.some((value) => !Number.isFinite(value) || value < 0))
-    throw new Error("El contexto y los límites de riesgo deben ser finitos y no negativos.");
+    throw new Error(
+      "El contexto y los límites de riesgo deben ser finitos y no negativos.",
+    );
   if (context.opportunity.qusdAmount === 0)
     throw new Error("La oportunidad debe tener un importe QUSD positivo.");
   if (context.opportunity.quotedRate === 0)

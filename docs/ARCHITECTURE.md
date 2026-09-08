@@ -24,10 +24,27 @@ web / Telegram / scheduler
 - `src/application`: workflows durables; decide el orden de reservar, cancelar, aplicar, compensar y conciliar.
 - `src/trading.ts`: fachada de casos de uso compartida por web, Telegram y scheduler.
 - `src/qvapay.ts`: transporte, rate limits, idempotencia disponible, decodificación y clasificación de errores.
-- `src/store.ts`: única frontera SQLite, migraciones, transacciones y reconstrucción de modelos.
+- `src/store.ts`: única frontera SQLite, migraciones, configuración normalizada, caché remota por recurso, transacciones y reconstrucción de modelos.
 - `src/http-dashboard.ts`: adaptador Fastify; autenticación, CSRF, límites, schemas y OpenAPI.
-- `src/dashboard.ts`: modelo de lectura analítico, sin decisiones de mutación propias.
-- `web`: interfaz React dividida por feature; carga las gráficas de forma diferida.
+- `src/dashboard.ts`: modelo de lectura local-first; compone el estado SQLite y actualiza balance, ofertas, transacciones o un mercado por separado.
+- `web`: interfaz React dividida por feature; carga solo los recursos de la vista activa y las gráficas de forma diferida.
+
+## Lectura con conexión inestable
+
+```text
+abrir vista ──► GET /api/dashboard ──► SQLite ──► render inmediato
+                     │
+                     └─► cola remota secuencial de la vista
+                            balance | ofertas | mercado concreto
+                                  │
+                         éxito ───┴─── fallo
+                           │             │
+                    persiste caché   conserva caché
+                           └──────┬──────┘
+                            fecha y estado UI
+```
+
+`/api/dashboard` no realiza I/O de red. Los endpoints `/api/live/*` tienen destinos de fallo independientes y devuelven la copia persistida como `stale` cuando existe. El navegador pausa el polling si está oculto o sin conexión y reintenta con espera creciente.
 
 ## Cómo añadir una feature
 
@@ -52,3 +69,5 @@ web / Telegram / scheduler
 - Los cooldowns por mercado y contraparte se calculan desde operaciones persistidas, incluso tras reiniciar.
 - Al alcanzar el límite configurado de errores consecutivos, la automatización se pausa de forma persistente.
 - El mínimo de venta neto por mercado debe superar el máximo de compra.
+- Una lectura remota fallida nunca borra ni presenta como actual la última lectura válida.
+- Secretos e interruptores de despliegue no son configuración operativa editable.

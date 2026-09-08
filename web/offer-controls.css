@@ -1,4 +1,4 @@
-.panel .settings-form {
+.panel .offer-form {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr auto;
   gap: 14px;
@@ -9,7 +9,7 @@
   border: 1px solid #285457;
   box-shadow: inset 0 1px #ffffff12;
 }
-.panel .settings-form label {
+.panel .offer-form label {
   display: grid;
   gap: 7px;
   color: #bdd0cd;
@@ -18,8 +18,8 @@
     monospace;
   letter-spacing: 0.1em;
 }
-.panel .settings-form input,
-.panel .settings-form select {
+.panel .offer-form input,
+.panel .offer-form select {
   height: 43px;
   background: #fdfbf5;
   border: 0;
@@ -29,7 +29,7 @@
     13px Manrope,
     sans-serif;
 }
-.panel .settings-form button {
+.panel .offer-form button {
   height: 43px;
   background: #57cba5;
   color: #092421;
@@ -37,12 +37,12 @@
   padding: 0 18px;
   font-weight: 800;
 }
-.panel .settings-form span {
+.panel .offer-form span {
   grid-column: 1/-1;
   color: #ffb4a5;
   font-size: 12px;
 }
-.panel .settings-form:before {
+.panel .offer-form:before {
   content: "CONFIGURAR OFERTA · el servidor valida el saldo al guardar";
   grid-column: 1/-1;
   color: #d6e4e0;
@@ -52,10 +52,10 @@
   letter-spacing: 0.12em;
 }
 @media (max-width: 850px) {
-  .panel .settings-form {
+  .panel .offer-form {
     grid-template-columns: 1fr 1fr;
   }
-  .panel .settings-form button {
+  .panel .offer-form button {
     grid-column: span 2;
   }
 }

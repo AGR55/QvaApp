@@ -25,7 +25,7 @@ export const config = {
   buyQusdMaxRate: numberValue("BUY_QUSD_MAX_RATE", 930),
   sellQusdMinRate: numberValue("SELL_QUSD_MIN_RATE", 980),
   buyQusdUsdMaxRate: numberValue("BUY_QUSD_USD_MAX_RATE", 1.06),
-  sellQusdUsdMinRate: numberValue("SELL_QUSD_USD_MIN_RATE", 1.12),
+  sellQusdUsdMinRate: numberValue("SELL_QUSD_USD_MIN_RATE", 1.13),
   cupPurchaseMaxQusd: numberValue("CUP_PURCHASE_MAX_QUSD", 150, 0.01),
   initialUsdFiatBalance: numberValue("INITIAL_USD_FIAT_BALANCE", 110),
   scanIntervalMs:

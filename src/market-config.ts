@@ -23,9 +23,16 @@ export interface MarketConfig {
 }
 
 export interface TradingConfig {
-  version: 2;
+  version: 3;
   qusdReserve: number;
   maxOpenOffers: number;
+  automation: {
+    scanIntervalSeconds: number;
+    autoCancelMinutes: number;
+    offerRefreshIntervalMinutes: number;
+    priceGuardPercent: number;
+    welcomeMessage: string;
+  };
   risk: RiskLimits & { reviewedAt: number | null };
   markets: MarketConfig[];
 }
@@ -46,12 +53,21 @@ export class MarketConfigService {
     private readonly store: Store,
   ) {
     this.path = join(dataDir, "trading-config.json");
+    const hadBotConfig = this.store.hasBotConfig();
     const persisted = this.store.loadTradingConfig();
     const loaded =
       persisted ??
       (existsSync(this.path) ? this.read() : this.createInitial(legacy));
     this.value = harmonize(loaded);
-    if (persisted && JSON.stringify(persisted) !== JSON.stringify(this.value))
+    if (persisted && !hadBotConfig) {
+      this.value.automation = automationFromRuntime(legacy);
+      this.store.saveTradingConfig(
+        this.value,
+        "migration",
+        "Configuración operativa importada a SQLite",
+      );
+    }
+    else if (persisted && JSON.stringify(persisted) !== JSON.stringify(this.value))
       this.store.saveTradingConfig(
         this.value,
         "migration",
@@ -126,9 +142,10 @@ export class MarketConfigService {
 
   private createInitial(cfg: LegacyConfig): TradingConfig {
     return {
-      version: 2,
+      version: 3,
       qusdReserve: conservativeRiskLimits.minQusdReserve,
       maxOpenOffers: numberOr(cfg.maxOpenOwnOffers, 10),
+      automation: automationFromRuntime(cfg),
       risk: { ...conservativeRiskLimits, reviewedAt: null },
       markets: [
         {
@@ -183,11 +200,12 @@ function validate(value: unknown): asserts value is TradingConfig {
   if (!value || typeof value !== "object")
     throw new Error("La configuración debe ser un objeto.");
   const config = value as Partial<TradingConfig>;
-  if (config.version !== 2 || !Array.isArray(config.markets))
+  if (config.version !== 3 || !Array.isArray(config.markets))
     throw new Error("Versión o lista de mercados inválida.");
   finite(config.qusdReserve, "Reserva QUSD");
   finite(config.maxOpenOffers, "Máximo de ofertas", 1);
   validateRisk(config.risk);
+  validateAutomation(config.automation);
   const codes = new Set<string>();
   for (const market of config.markets) {
     if (!market || typeof market !== "object")
@@ -241,18 +259,63 @@ function normalize(value: unknown): TradingConfig {
   if (!value || typeof value !== "object")
     throw new Error("La configuración debe ser un objeto.");
   const raw = value as Partial<TradingConfig> & { version?: number };
-  if (raw.version === 2) return raw as TradingConfig;
-  if (raw.version !== 1)
+  if (raw.version === 3) return raw as TradingConfig;
+  if (raw.version !== 1 && raw.version !== 2)
     throw new Error("Versión de configuración no compatible.");
   return {
-    ...(raw as Omit<TradingConfig, "version" | "risk">),
-    version: 2,
-    risk: {
-      ...conservativeRiskLimits,
-      minQusdReserve: numberOr(raw.qusdReserve, conservativeRiskLimits.minQusdReserve),
-      reviewedAt: null,
-    },
+    ...(raw as Omit<TradingConfig, "version" | "risk" | "automation">),
+    version: 3,
+    automation: defaultAutomation(),
+    risk: raw.version === 2 && raw.risk
+      ? raw.risk
+      : {
+          ...conservativeRiskLimits,
+          minQusdReserve: numberOr(raw.qusdReserve, conservativeRiskLimits.minQusdReserve),
+          reviewedAt: null,
+        },
   };
+}
+
+function automationFromRuntime(cfg: LegacyConfig): TradingConfig["automation"] {
+  return {
+    scanIntervalSeconds: numberOr(cfg.scanIntervalMs, 15_000) / 1_000,
+    autoCancelMinutes: numberOr(cfg.autoCancelMs, 600_000) / 60_000,
+    offerRefreshIntervalMinutes:
+      numberOr(cfg.offerRefreshIntervalMs, 300_000) / 60_000,
+    priceGuardPercent: numberOr(cfg.priceGuardPercent, 15),
+    welcomeMessage: (
+      typeof cfg.welcomeMessage === "string"
+        ? cfg.welcomeMessage
+        : defaultAutomation().welcomeMessage
+    ).slice(0, 79),
+  };
+}
+
+function defaultAutomation(): TradingConfig["automation"] {
+  return {
+    scanIntervalSeconds: 15,
+    autoCancelMinutes: 10,
+    offerRefreshIntervalMinutes: 5,
+    priceGuardPercent: 15,
+    welcomeMessage:
+      "Oferta aplicada por bot. El usuario atenderá y realizará el pago manualmente.",
+  };
+}
+
+function validateAutomation(value: unknown): asserts value is TradingConfig["automation"] {
+  if (!value || typeof value !== "object")
+    throw new Error("La configuración de automatización es obligatoria.");
+  const automation = value as Record<string, unknown>;
+  finite(automation.scanIntervalSeconds, "Intervalo de escaneo", 5);
+  finite(automation.autoCancelMinutes, "Plazo de cancelación", 1);
+  finite(automation.offerRefreshIntervalMinutes, "Intervalo de refresco", 1);
+  finite(automation.priceGuardPercent, "Cortafuegos de precio", 1);
+  if (Number(automation.priceGuardPercent) > 100)
+    throw new Error("El cortafuegos de precio no puede superar 100%.");
+  if (
+    typeof automation.welcomeMessage !== "string" ||
+    automation.welcomeMessage.length > 79
+  ) throw new Error("El mensaje P2P debe tener como máximo 79 caracteres.");
 }
 
 function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {

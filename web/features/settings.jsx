@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, History, Plus, Save, ShieldAlert, Trash2 } from "lucide-react";
-import { Empty, Panel } from "../components/common.jsx";
+import { Empty, Panel, Skeleton } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
 
@@ -17,6 +17,12 @@ const riskFields = [
   ["marketCooldownSeconds", "Enfriamiento por mercado", "segundos"],
   ["counterpartyCooldownSeconds", "Enfriamiento por contraparte", "segundos"],
 ];
+const automationFields = [
+  ["scanIntervalSeconds", "Intervalo de escaneo", "segundos", 5],
+  ["autoCancelMinutes", "Cancelación automática", "minutos", 1],
+  ["offerRefreshIntervalMinutes", "Refresco de ofertas propias", "minutos", 1],
+  ["priceGuardPercent", "Cortafuegos frente al promedio", "%", 1],
+];
 
 export function Settings({ onChanged }) {
   const [saved, setSaved] = useState();
@@ -30,14 +36,16 @@ export function Settings({ onChanged }) {
 
   const load = async () => {
     try {
-      const [configPayload, revisionPayload] = await Promise.all([
-        requestJson("/api/config"),
-        requestJson("/api/config-revisions"),
-      ]);
+      const configPayload = await requestJson("/api/config");
       setSaved(configPayload.data);
       setDraft(structuredClone(configPayload.data));
-      setRevisions(revisionPayload.data || []);
       setStatus("");
+      try {
+        const revisionPayload = await requestJson("/api/config-revisions");
+        setRevisions(revisionPayload.data || []);
+      } catch {
+        setStatus("Configuración disponible; el historial se reintentará después.");
+      }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "No se pudo cargar.");
     }
@@ -48,7 +56,7 @@ export function Settings({ onChanged }) {
   if (!draft)
     return (
       <Panel title="Estrategia y riesgo" wide>
-        <Empty>{status}</Empty>
+        <Skeleton rows={7} label={status || "Leyendo configuración SQLite"} />
       </Panel>
     );
 
@@ -154,6 +162,49 @@ export function Settings({ onChanged }) {
             </button>
             <span>{status}</span>
           </div>
+        </form>
+      </Panel>
+
+      <Panel title="Comportamiento del bot" wide>
+        <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
+          {automationFields.map(([key, label, unit, minimum]) => (
+            <label key={key}>
+              {label}
+              <span className="input-unit">
+                <input
+                  type="number"
+                  min={minimum}
+                  step="1"
+                  value={draft.automation[key]}
+                  onChange={(event) => setDraft((current) => ({
+                    ...current,
+                    automation: {
+                      ...current.automation,
+                      [key]: Number(event.target.value),
+                    },
+                  }))}
+                />
+                <small>{unit}</small>
+              </span>
+            </label>
+          ))}
+          <label className="message-setting">
+            Mensaje automático en el chat P2P
+            <textarea
+              maxLength="79"
+              rows="3"
+              value={draft.automation.welcomeMessage}
+              onChange={(event) => setDraft((current) => ({
+                ...current,
+                automation: {
+                  ...current.automation,
+                  welcomeMessage: event.target.value,
+                },
+              }))}
+            />
+            <small>{draft.automation.welcomeMessage.length}/79 caracteres</small>
+          </label>
+          <p className="settings-note-inline">Estos valores están en SQLite y se aplican sin editar archivos. El interruptor de despliegue para permitir dinero real permanece protegido en el entorno.</p>
         </form>
       </Panel>
 
@@ -312,6 +363,19 @@ function diffConfig(saved, draft) {
       ? []
       : [{ key, label, before: saved.risk[key], after: draft.risk[key] }],
   );
+  const automationChanges = [
+    ...automationFields.map(([key, label]) => [key, label]),
+    ["welcomeMessage", "Mensaje automático P2P"],
+  ].flatMap(([key, label]) =>
+    saved.automation?.[key] === draft.automation?.[key]
+      ? []
+      : [{
+          key: `automation:${key}`,
+          label,
+          before: saved.automation?.[key] ?? "",
+          after: draft.automation?.[key] ?? "",
+        }],
+  );
   const marketChanges = draft.markets.flatMap((market, index) => {
     const before = saved.markets[index];
     if (!before) return [{ key: `market:${market.code}`, label: market.label, before: "Nuevo", after: "Activo" }];
@@ -327,5 +391,5 @@ function diffConfig(saved, draft) {
             }],
     );
   });
-  return [...rootChanges, ...riskChanges, ...marketChanges];
+  return [...rootChanges, ...automationChanges, ...riskChanges, ...marketChanges];
 }

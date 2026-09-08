@@ -1,15 +1,15 @@
 # Evidencia de verificación
 
-Última ejecución completa: 2026-09-07. Entorno local, Node.js 25.9.0 y pnpm 11.26.0.
+Última ejecución completa: 2026-09-08. Entorno local, Node.js 25.9.0 y pnpm 11.26.0.
 
 ## Puertas automáticas
 
 | Puerta | Resultado | Evidencia |
 | --- | --- | --- |
 | TypeScript estricto | Correcto | `pnpm typecheck`; sin errores |
-| Pruebas | Correcto | 81 ejecutadas, 81 aprobadas, 0 omitidas |
+| Pruebas | Correcto | 86 ejecutadas, 86 aprobadas, 0 omitidas |
 | Servidor | Correcto | `tsc -p tsconfig.build.json` |
-| Panel | Correcto | Vite; JS principal 231.57 kB (72.63 kB gzip), gráficas diferidas 377.68 kB (110.42 kB gzip), CSS 21.50 kB (5.12 kB gzip) |
+| Panel | Correcto | Vite; JS principal 237.58 kB (74.43 kB gzip), gráficas diferidas 377.65 kB (110.44 kB gzip), CSS 23.36 kB (5.57 kB gzip) |
 | Secretos literales | Correcto | `pnpm check:secrets`; ninguno detectado |
 | Dependencias de producción | Correcto | `pnpm audit --prod`; ninguna vulnerabilidad conocida |
 | Accesibilidad automática | Correcto | axe-core: 0 violaciones en el cockpit autenticado |
@@ -28,9 +28,15 @@ pnpm check:ui
 
 `pnpm check:ui` compila, levanta un panel de demostración aislado, ejecuta Chromium mediante WebDriver, inyecta axe-core, guarda capturas en `/tmp` y termina los procesos temporales. No necesita credenciales ni toca QvaPay.
 
+El panel de demostración fuerza además un fallo del saldo remoto. Chromium exige que aparezca **Dato guardado**, que el resto del cockpit continúe renderizado y que tanto Cockpit como Estrategia mantengan cero violaciones serias de axe-core.
+
+El recorrido Chromium accede mediante `localhost` a un panel cuyo origen configurado es `127.0.0.1`; confirma que la equivalencia loopback funciona sin desactivar la validación CSRF. Las pruebas adicionales rechazan cambios de protocolo/puerto, IPs LAN y dominios externos.
+
 ## Cobertura financiera relevante
 
 La suite cubre política de riesgo y números no finitos, reserva QUSD, límites por operación/día/exposición/concurrencia, cooldown persistente por mercado y contraparte, pausa por errores, serialización de mutaciones, idempotencia, resultado remoto incierto, compensación, migraciones con backup, reinicio y conciliación. También comprueba el flujo TOTP, los timeouts de autenticación, la verificación previa del token y que el pago fiat queda como acción humana.
+
+La cobertura local-first prueba que el arranque de `/api/dashboard` no llama a QvaPay, que cada recurso persiste en SQLite tras reiniciar y que un fallo remoto devuelve el último valor con `stale: true` y su fecha. La configuración operativa del bot también se reabre desde sus tablas SQLite.
 
 La normalización decimal de `GET /p2p` también se comprobó mediante una lectura autenticada y no mutante de 50 ofertas reales: todas entregaron `amount` y `receive` como números positivos al dominio. No se imprimieron importes, UUID ni datos personales.
 

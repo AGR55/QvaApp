@@ -13,7 +13,13 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 5;
+const LATEST_SCHEMA_VERSION = 6;
+
+export interface CachedRemoteResource<T = unknown> {
+  key: string;
+  data: T;
+  updatedAt: number;
+}
 
 export type WorkflowState =
   | "planned"
@@ -317,6 +323,30 @@ export class Store {
           )
           .run(Date.now());
       }
+      if (this.currentSchemaVersion() < 6) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS remote_resource_cache (
+            resource_key TEXT PRIMARY KEY,
+            payload_json TEXT NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_remote_resource_cache_updated
+            ON remote_resource_cache(updated_at);
+          CREATE TABLE IF NOT EXISTS bot_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            scan_interval_seconds REAL NOT NULL,
+            auto_cancel_minutes REAL NOT NULL,
+            offer_refresh_interval_minutes REAL NOT NULL,
+            price_guard_percent REAL NOT NULL,
+            welcome_message TEXT NOT NULL
+          );
+        `);
+        this.db
+          .prepare(
+            "INSERT INTO schema_migrations(version, applied_at) VALUES (6, ?)",
+          )
+          .run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -374,10 +404,31 @@ export class Store {
         "SELECT market_code, name, value FROM payment_details ORDER BY market_code, position",
       )
       .all() as Record<string, unknown>[];
+    const automation = this.db
+      .prepare("SELECT * FROM bot_config WHERE id = 1")
+      .get() as Record<string, unknown> | undefined;
     return {
-      version: 2,
+      version: 3,
       qusdReserve: Number(root.qusd_reserve),
       maxOpenOffers: Number(root.max_open_offers),
+      automation: automation
+        ? {
+            scanIntervalSeconds: Number(automation.scan_interval_seconds),
+            autoCancelMinutes: Number(automation.auto_cancel_minutes),
+            offerRefreshIntervalMinutes: Number(
+              automation.offer_refresh_interval_minutes,
+            ),
+            priceGuardPercent: Number(automation.price_guard_percent),
+            welcomeMessage: String(automation.welcome_message),
+          }
+        : {
+            scanIntervalSeconds: 15,
+            autoCancelMinutes: 10,
+            offerRefreshIntervalMinutes: 5,
+            priceGuardPercent: 15,
+            welcomeMessage:
+              "Oferta aplicada por bot. El usuario atenderá y realizará el pago manualmente.",
+          },
       risk: risk
         ? {
             maxQusdPerOperation: Number(risk.max_qusd_per_operation),
@@ -421,6 +472,12 @@ export class Store {
     };
   }
 
+  hasBotConfig(): boolean {
+    return Boolean(
+      this.db.prepare("SELECT 1 FROM bot_config WHERE id = 1").get(),
+    );
+  }
+
   saveTradingConfig(
     config: TradingConfig,
     source = "system",
@@ -432,6 +489,26 @@ export class Store {
           "INSERT INTO trading_config(id, qusd_reserve, max_open_offers) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET qusd_reserve = excluded.qusd_reserve, max_open_offers = excluded.max_open_offers",
         )
         .run(config.qusdReserve, config.maxOpenOffers);
+      this.db
+        .prepare(
+          `INSERT INTO bot_config(
+            id, scan_interval_seconds, auto_cancel_minutes,
+            offer_refresh_interval_minutes, price_guard_percent, welcome_message
+          ) VALUES (1, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            scan_interval_seconds = excluded.scan_interval_seconds,
+            auto_cancel_minutes = excluded.auto_cancel_minutes,
+            offer_refresh_interval_minutes = excluded.offer_refresh_interval_minutes,
+            price_guard_percent = excluded.price_guard_percent,
+            welcome_message = excluded.welcome_message`,
+        )
+        .run(
+          config.automation.scanIntervalSeconds,
+          config.automation.autoCancelMinutes,
+          config.automation.offerRefreshIntervalMinutes,
+          config.automation.priceGuardPercent,
+          config.automation.welcomeMessage,
+        );
       this.db
         .prepare(
           `INSERT INTO risk_config(
@@ -944,6 +1021,39 @@ export class Store {
         "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(key, value);
+  }
+
+  saveRemoteResource<T>(key: string, data: T, updatedAt = Date.now()): void {
+    if (!/^[a-z0-9:_-]{1,100}$/i.test(key))
+      throw new Error("Clave de recurso remoto inválida.");
+    this.db
+      .prepare(
+        `INSERT INTO remote_resource_cache(resource_key, payload_json, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(resource_key) DO UPDATE SET
+           payload_json = excluded.payload_json,
+           updated_at = excluded.updated_at`,
+      )
+      .run(key, JSON.stringify(data), updatedAt);
+  }
+
+  loadRemoteResource<T>(key: string): CachedRemoteResource<T> | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT resource_key, payload_json, updated_at FROM remote_resource_cache WHERE resource_key = ?",
+      )
+      .get(key) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    try {
+      return {
+        key: String(row.resource_key),
+        data: JSON.parse(String(row.payload_json)) as T,
+        updatedAt: Number(row.updated_at),
+      };
+    } catch {
+      // Una entrada corrupta no debe impedir abrir el panel local.
+      return undefined;
+    }
   }
 
   recordFiatMovement(
