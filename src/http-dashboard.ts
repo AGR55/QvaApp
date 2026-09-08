@@ -255,7 +255,7 @@ export function buildDashboard(
     const coin = request.query.coin?.trim();
     if (!coin || !/^[A-Z0-9_]{2,40}$/.test(coin))
       throw new ClientInputError("Mercado inválido.");
-    return { data: readModel.marketAnalytics(coin), source: "sqlite" };
+    return { data: await readModel.marketAnalytics(coin), source: "sqlite" };
   });
   app.post<{ Body: { coin: FiatMarket; type: "buy" | "sell"; amount: number; rate: number } }>("/api/offers", {
     schema: {

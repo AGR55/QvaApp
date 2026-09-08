@@ -32,6 +32,9 @@ try {
   });
   sessionId = created.value.sessionId;
   await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
+  await waitFor(() => execute("return document.querySelector('#dashboard-password') !== null"));
+  await screenshot("/tmp/qvaapply-login-desktop.png");
+  const loginAccessibility = await assertPageQuality("Acceso");
   const password = await find("css selector", "#dashboard-password");
   await command("POST", `/session/${sessionId}/element/${password}/value`, { text: "preview-segura-2026" });
   const submit = await find("css selector", "button[type='submit']");
@@ -39,15 +42,19 @@ try {
   await waitFor(() => execute("return document.querySelector('.app-shell') !== null"));
   await waitFor(() => execute("return document.body.innerText.includes('Dato guardado')"));
   await screenshot("/tmp/qvaapply-dashboard-desktop.png");
-  const desktop = await metrics();
-  const accessibility = await accessibilityAudit();
-  if (accessibility.serious.length > 0)
-    throw new Error(`WCAG: ${JSON.stringify(accessibility.serious)}`);
+  const desktop = await assertPageQuality("Cockpit");
+
+  const markets = await find("xpath", "//button[contains(normalize-space(.), 'Mercados')]");
+  await command("POST", `/session/${sessionId}/element/${markets}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Libro ·')"));
+  await screenshot("/tmp/qvaapply-markets-desktop.png");
+  const marketsDesktop = await assertPageQuality("Mercados");
 
   const operations = await find("xpath", "//button[contains(normalize-space(.), 'Operaciones')]");
   await command("POST", `/session/${sessionId}/element/${operations}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Operaciones con dinero')"));
   await screenshot("/tmp/qvaapply-operations-desktop.png");
+  const operationsDesktop = await assertPageQuality("Operaciones");
 
   const hunting = await find("xpath", "//button[contains(normalize-space(.), 'Cacería')]");
   await command("POST", `/session/${sessionId}/element/${hunting}/click`, {});
@@ -55,9 +62,7 @@ try {
   const huntSwitches = await execute("return document.querySelectorAll('[role=switch]').length");
   if (huntSwitches !== 6)
     throw new Error(`Se esperaban 6 controles de mercado y lado; aparecieron ${huntSwitches}.`);
-  const huntingAccessibility = await accessibilityAudit();
-  if (huntingAccessibility.serious.length > 0)
-    throw new Error(`WCAG Cacería: ${JSON.stringify(huntingAccessibility.serious)}`);
+  const huntingDesktop = await assertPageQuality("Cacería");
   await screenshot("/tmp/qvaapply-hunting-desktop.png");
   await execute("window.scrollTo(0, document.documentElement.scrollHeight); return true");
   await new Promise((resolve) => setTimeout(resolve, 250));
@@ -72,6 +77,7 @@ try {
   const capital = await find("xpath", "//button[contains(normalize-space(.), 'Capital')]");
   await command("POST", `/session/${sessionId}/element/${capital}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Capital disponible')"));
+  const capitalDesktop = await assertPageQuality("Capital");
   const editOffer = await find("xpath", "//button[normalize-space(.)='Editar']");
   await command("POST", `/session/${sessionId}/element/${editOffer}/click`, {});
   await waitFor(() => execute("return document.querySelector('.offer-workbench') !== null")).catch(async () => {
@@ -94,7 +100,41 @@ try {
   const charts = await find("xpath", "//button[contains(normalize-space(.), 'Gráficas')]");
   await command("POST", `/session/${sessionId}/element/${charts}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Fluctuación de precios')"));
+  await command("POST", `/session/${sessionId}/window/rect`, { width: 1440, height: 540, x: 0, y: 0 });
+  await execute(`window.__chartLayoutSamples = []; window.__chartLayoutFrames = 0;
+    (function sample() {
+      window.__chartLayoutSamples.push({
+        viewport: document.documentElement.clientWidth,
+        scroll: document.documentElement.scrollWidth,
+        content: document.querySelector('#main-content')?.getBoundingClientRect().width || 0,
+        chart: document.querySelector('.recharts-responsive-container')?.getBoundingClientRect().width || 0
+      });
+      window.__chartLayoutFrames += 1;
+      if (window.__chartLayoutFrames < 120) requestAnimationFrame(sample);
+    })(); return true;`);
+  const usdChart = await find("xpath", "//button[normalize-space(.)='USD Prepago']");
+  await command("POST", `/session/${sessionId}/element/${usdChart}/click`, {});
+  await new Promise((resolve) => setTimeout(resolve, 2_100));
+  const chartLayoutSamples = await execute("return window.__chartLayoutSamples");
+  const chartOverflowFrames = chartLayoutSamples.filter((sample) => sample.scroll > sample.viewport);
+  const chartContentWidths = chartLayoutSamples.map((sample) => sample.content);
+  const chartWidths = chartLayoutSamples.map((sample) => sample.chart);
+  if (chartOverflowFrames.length || Math.max(...chartContentWidths) - Math.min(...chartContentWidths) > 1 || Math.min(...chartWidths) <= 0 || Math.max(...chartWidths) - Math.min(...chartWidths) > 1)
+    throw new Error(`Gráfica inestable durante actualización: ${JSON.stringify({ overflowFrames: chartOverflowFrames.length, minContent: Math.min(...chartContentWidths), maxContent: Math.max(...chartContentWidths), minChart: Math.min(...chartWidths), maxChart: Math.max(...chartWidths) })}`);
+  await command("POST", `/session/${sessionId}/window/rect`, { width: 1440, height: 1000, x: 0, y: 0 });
+  await waitFor(() => execute("return Array.from(document.querySelectorAll('.recharts-area-curve')).filter(path => path.getAttribute('d')).length >= 2"));
+  const chartRender = await execute(`return {
+    surface: document.querySelector('.recharts-surface')?.getBoundingClientRect().toJSON(),
+    axes: document.querySelectorAll('.recharts-cartesian-axis-tick').length,
+    curves: Array.from(document.querySelectorAll('.recharts-area-curve')).map(path => ({
+      d: path.getAttribute('d'), stroke: getComputedStyle(path).stroke,
+      box: path.getBoundingClientRect().toJSON()
+    }))
+  }`);
+  if (chartRender.axes === 0 || chartRender.curves.some((curve) => !curve.d || curve.box.width <= 0 || curve.box.height <= 0))
+    throw new Error(`La gráfica no dibujó sus ejes o curvas: ${JSON.stringify(chartRender)}`);
   await screenshot("/tmp/qvaapply-charts-desktop.png");
+  const chartsDesktop = await assertPageQuality("Gráficas");
 
   const settings = await find("xpath", "//button[contains(normalize-space(.), 'Estrategia')]");
   await command("POST", `/session/${sessionId}/element/${settings}/click`, {});
@@ -103,16 +143,12 @@ try {
   if (!initialReviewAvailable)
     throw new Error("La aprobación inicial de límites no está disponible sin cambios artificiales.");
   await screenshot("/tmp/qvaapply-settings-desktop.png");
-  const settingsAccessibility = await accessibilityAudit();
-  if (settingsAccessibility.serious.length > 0)
-    throw new Error(`WCAG Estrategia: ${JSON.stringify(settingsAccessibility.serious)}`);
+  const settingsDesktop = await assertPageQuality("Estrategia");
 
   const audit = await find("xpath", "//button[contains(normalize-space(.), 'Auditoría')]");
   await command("POST", `/session/${sessionId}/element/${audit}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('Ofertas bloqueadas')"));
-  const auditAccessibility = await accessibilityAudit();
-  if (auditAccessibility.serious.length > 0)
-    throw new Error(`WCAG Auditoría: ${JSON.stringify(auditAccessibility.serious)}`);
+  const auditDesktop = await assertPageQuality("Auditoría");
   await screenshot("/tmp/qvaapply-audit-desktop.png");
   const reviewBlocked = await find("xpath", "//button[normalize-space(.)='Revisar y aplicar']");
   await command("POST", `/session/${sessionId}/element/${reviewBlocked}/click`, {});
@@ -125,22 +161,26 @@ try {
   await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
   await new Promise((resolve) => setTimeout(resolve, 500));
   await screenshot("/tmp/qvaapply-dashboard-mobile.png");
-  const mobile = await metrics();
-  const huntingMobile = await find("xpath", "//button[contains(normalize-space(.), 'Cacería')]");
-  await command("POST", `/session/${sessionId}/element/${huntingMobile}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Cazar solo donde tú decidas')"));
-  await screenshot("/tmp/qvaapply-hunting-mobile.png");
-  const huntingMobileMetrics = await metrics();
-  if (huntingMobileMetrics.horizontalOverflow)
-    throw new Error(`Cacería desborda horizontalmente en móvil: ${JSON.stringify(huntingMobileMetrics)}`);
-  const auditMobile = await find("xpath", "//button[contains(normalize-space(.), 'Auditoría')]");
-  await command("POST", `/session/${sessionId}/element/${auditMobile}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Ofertas bloqueadas')"));
-  await screenshot("/tmp/qvaapply-audit-mobile.png");
-  const auditMobileMetrics = await metrics();
-  if (auditMobileMetrics.horizontalOverflow)
-    throw new Error(`Auditoría desborda horizontalmente en móvil: ${JSON.stringify(auditMobileMetrics)}`);
-  console.log(JSON.stringify({ desktop, mobile, huntingMobileMetrics, auditMobileMetrics, accessibility, huntingAccessibility, settingsAccessibility, auditAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-hunting-desktop.png", "/tmp/qvaapply-hunting-log-desktop.png", "/tmp/qvaapply-hunting-cancel-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-audit-desktop.png", "/tmp/qvaapply-audit-review-desktop.png", "/tmp/qvaapply-dashboard-mobile.png", "/tmp/qvaapply-hunting-mobile.png", "/tmp/qvaapply-audit-mobile.png"] }, null, 2));
+  const mobile = { Cockpit: await assertPageQuality("Cockpit móvil") };
+  const mobileViews = [
+    ["Mercados", "Libro ·", "/tmp/qvaapply-markets-mobile.png"],
+    ["Capital", "Capital disponible", "/tmp/qvaapply-capital-mobile.png"],
+    ["Cacería", "Cazar solo donde tú decidas", "/tmp/qvaapply-hunting-mobile.png"],
+    ["Operaciones", "Operaciones con dinero", "/tmp/qvaapply-operations-mobile.png"],
+    ["Gráficas", "Fluctuación de precios", "/tmp/qvaapply-charts-mobile.png"],
+    ["Estrategia", "Comportamiento del bot", "/tmp/qvaapply-settings-mobile.png"],
+    ["Auditoría", "Ofertas bloqueadas", "/tmp/qvaapply-audit-mobile.png"],
+  ];
+  for (const [navLabel, visibleText, imagePath] of mobileViews) {
+    const navigationButton = await find("xpath", `//button[contains(normalize-space(.), '${navLabel}')]`);
+    await command("POST", `/session/${sessionId}/element/${navigationButton}/click`, {});
+    await waitFor(() => execute(`return document.body.innerText.includes(${JSON.stringify(visibleText)})`));
+    if (navLabel === "Gráficas")
+      await waitFor(() => execute("return document.querySelectorAll('.recharts-area-curve').length >= 2"));
+    await screenshot(imagePath);
+    mobile[navLabel] = await assertPageQuality(`${navLabel} móvil`);
+  }
+  console.log(JSON.stringify({ loginAccessibility, chartRender, desktop: { Cockpit: desktop, Mercados: marketsDesktop, Operaciones: operationsDesktop, Cacería: huntingDesktop, Capital: capitalDesktop, Gráficas: chartsDesktop, Estrategia: settingsDesktop, Auditoría: auditDesktop }, mobile, screenshots: ["/tmp/qvaapply-login-desktop.png", "/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-markets-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-hunting-desktop.png", "/tmp/qvaapply-hunting-log-desktop.png", "/tmp/qvaapply-hunting-cancel-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-audit-desktop.png", "/tmp/qvaapply-audit-review-desktop.png", "/tmp/qvaapply-dashboard-mobile.png", ...mobileViews.map(([, , path]) => path)] }, null, 2));
 } finally {
   if (sessionId) await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
   driver.kill("SIGTERM");
@@ -157,6 +197,16 @@ async function metrics() {
     unlabeledIconButtons: Array.from(document.querySelectorAll('button')).filter(b => !b.textContent.trim() && !b.getAttribute('aria-label')).length,
     headings: Array.from(document.querySelectorAll('h1,h2')).map(h => h.textContent.trim()).slice(0, 12)
   }`);
+}
+
+async function assertPageQuality(name) {
+  const pageMetrics = await metrics();
+  if (pageMetrics.horizontalOverflow)
+    throw new Error(`${name} desborda horizontalmente: ${JSON.stringify(pageMetrics)}`);
+  const accessibility = await accessibilityAudit();
+  if (accessibility.serious.length > 0)
+    throw new Error(`WCAG ${name}: ${JSON.stringify(accessibility.serious)}`);
+  return { ...pageMetrics, accessibility };
 }
 
 async function accessibilityAudit() {

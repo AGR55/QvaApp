@@ -5,7 +5,7 @@ import { money } from "../lib/format.js";
 export function Offers({ offers, label, unit, editable = false, onEdit, onCancel }) {
   if (!offers?.length) return <Empty>Sin ofertas.</Empty>;
   return (
-    <div className="table-wrap">
+    <div className="table-wrap" tabIndex="0" role="region" aria-label="Ofertas del mercado, tabla desplazable">
       <table>
         <thead>
           <tr>

@@ -23,12 +23,18 @@ const markets = [
   { code: "BANDECPREPAGO", label: "USD Prepago", currency: "USD", active: true, huntBuyEnabled: false, huntSellEnabled: false, fiatBalance: 110, buyMaxRate: 1.06, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0.25, outgoingTransferFee: 0, paymentDetails: [] },
   { code: "CLASICA", label: "Tarjeta Clásica", currency: "USD", active: true, huntBuyEnabled: true, huntSellEnabled: true, fiatBalance: 40, buyMaxRate: 1.04, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0, outgoingTransferFee: 0.08, paymentDetails: [{ name: "Tarjeta", value: "•••• 9876" }] },
 ];
-const marketHistory = Array.from({ length: 12 }, (_, index) => ({
-  coin: "BANK_CUP",
-  medianBuy: 64_180 + index * 3 + (index % 3) * 2,
-  medianSell: 64_214 + index * 2 - (index % 2) * 3,
-  createdAt: now - (11 - index) * 5 * 60_000,
-}));
+const marketHistory = markets.flatMap((market, marketIndex) =>
+  Array.from({ length: 12 }, (_, index) => {
+    const base = market.currency === "CUP" ? 64_180 : 1.04 + marketIndex * .01;
+    const increment = market.currency === "CUP" ? 3 : .0004;
+    return {
+      coin: market.code,
+      medianBuy: base + index * increment + (index % 3) * increment * .5,
+      medianSell: base + increment * 8 + index * increment * .7 - (index % 2) * increment,
+      createdAt: now - (11 - index) * 5 * 60_000,
+    };
+  }),
+);
 const automation = { scanIntervalSeconds: 15, autoCancelMinutes: 10, offerRefreshIntervalMinutes: 5, priceGuardPercent: 15, welcomeMessage: "Oferta aplicada por un bot. El pago fiat lo realiza manualmente el usuario." };
 const hunting = { buyRunning: true, sellRunning: true };
 const config = { version: 3, qusdReserve: 10, maxOpenOffers: 10, hunting, automation, risk, markets };
@@ -84,7 +90,10 @@ const model = {
   refreshOwnOffers: async () => ({ data: snapshot.ownOffers, updatedAt: Date.now() }),
   refreshTransactions: async () => ({ data: snapshot.transactions, updatedAt: Date.now() }),
   refreshMarket: async (coin) => ({ data: snapshot.market[coin], updatedAt: Date.now() }),
-  marketAnalytics: (coin) => ({ coin, history: snapshot.marketHistory.filter((point) => point.coin === coin) }),
+  marketAnalytics: async (coin) => {
+    if (coin !== "BANK_CUP") await new Promise((resolve) => setTimeout(resolve, 350));
+    return { coin, history: snapshot.marketHistory.filter((point) => point.coin === coin) };
+  },
   config: () => config,
   configRevisions: () => [{ id: 1, createdAt: now, source: "preview", reason: "Datos de demostración", config, previousHash: null, hash: "0123456789abcdef" }],
   auditLog: () => snapshot.activity,

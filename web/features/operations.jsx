@@ -40,7 +40,7 @@ export function Operations({ data, label, unit, onChanged }) {
       <div className="dashboard-grid">
         <Panel title="Operaciones con dinero" wide>
           {data.operations?.length ? (
-            <div className="table-scroll">
+            <div className="table-scroll" tabIndex="0" role="region" aria-label="Operaciones con dinero, tabla desplazable">
               <table>
                 <thead><tr><th>Estado</th><th>Flujo</th><th>Mercado</th><th>Importe</th><th>Acción humana</th></tr></thead>
                 <tbody>

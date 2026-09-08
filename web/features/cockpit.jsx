@@ -22,7 +22,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
     } catch (error) { setStatus(error instanceof Error ? error.message : "No se pudo aplicar."); }
   };
   return (
-    <>
+    <div className="page-stack">
       <section className="control-deck" aria-label="Controles operativos">
         <div><span className={`live ${data.state.paused ? "offline" : ""}`} /> <strong>{data.state.paused ? "Automatización pausada" : "Automatización activa"}</strong><small>Modo {data.state.mode}</small></div>
         <button onClick={() => control({ paused: !data.state.paused })}>{data.state.paused ? <Play /> : <Pause />}{data.state.paused ? "Reanudar" : "Pausar"}</button>
@@ -132,7 +132,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         </Panel>
       </div>
       {confirmReal ? <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="real-mode-title"><div><ShieldCheck aria-hidden="true" /><p className="eyebrow">CAMBIO CRÍTICO</p><h2 id="real-mode-title">Activar capacidad de operar con dinero real</h2><p>El modo real habilita aplicaciones automáticas dentro de todos los límites configurados. Los pagos fiat seguirán siendo manuales.</p><div className="review-actions"><button onClick={closeReal}>Volver</button><button className="refresh" onClick={() => control({ mode: "real", paused: true })}>Confirmar modo real, aún pausado</button></div></div></section> : null}
-    </>
+    </div>
   );
 }
 
