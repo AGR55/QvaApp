@@ -31,6 +31,8 @@ import "./offer-actions.css";
 import "./offer-modal.css";
 import "./capital.css";
 import "./hunting.css";
+import "./audit.css";
+import "./theme-refresh.css";
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({
@@ -184,7 +186,7 @@ function App() {
           </Suspense>
         ) : null}
         {view === "configuracion" ? <Settings onChanged={refresh} /> : null}
-        {view === "auditoria" ? <Audit data={data} /> : null}
+        {view === "auditoria" ? <Audit data={data} onChanged={refresh} /> : null}
       </main>
     </div>
   );

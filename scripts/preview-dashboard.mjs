@@ -67,12 +67,13 @@ const snapshot = {
   availability: { qusd: { reported: 68.5, reserve: 10, available: 58.5, committedSell: 0 }, fiat: { BANK_CUP: { declared: 45000, committed: 0, available: 45000 }, BANDECPREPAGO: { declared: 110, committed: 0, available: 110 }, CLASICA: { declared: 40, committed: 10.48, available: 29.52 } } },
   discoveredMarkets: [], budget: {}, history: [], marketHistory,
   rankings: { rotation: [{ code: "BANK_CUP", label: "Transferencia CUP", observed: 210, eligible: 12 }], potential: [{ buy: "BANDECPREPAGO", sell: "BANK_CUP", amount: 15, profit: 450, marginPercent: 2.1 }] },
-  activity: [{ createdAt: now - 30000, action: "scan", uuid: null, detail: "38 ofertas revisadas; sin mutaciones." }], alerts: [],
+  activity: [{ createdAt: now - 30000, action: "price_guard_block", uuid: "blocked-demo-01", detail: "4.2% por encima de la mediana de compra." }],
+  alerts: [{ uuid: "blocked-demo-01", coin: "BANK_CUP", offerType: "buy", amount: 20, receive: 21080, rate: 1054, referenceRate: 1012, decision: "blocked", reason: "4.2% por encima de la mediana de compra", createdAt: now - 60000, updatedAt: now - 30000, resolvedAt: null }],
   risk: { limits: risk, usage: { exposureQusd: 20, dailyAppliedQusd: 35, activeOperations: 1, unresolvedMutation: false, emergencyStop: false } },
   recoverableWorkflows: [], workflows: [workflow], workflowOffers: {},
   capitalReservations: [{ workflowId: workflow.id, market: "BANK_CUP", amount: 20, state: "released", createdAt: now - 120000, releasedAt: now - 90000 }],
   mutationIntents: [{ intentId: "intent-demo", operationUuid: operation.uuid, kind: "apply", state: "confirmed", request: {}, createdAt: now - 100000, updatedAt: now - 90000 }],
-  operations: [operation], integrity: { schemaVersion: 8, configRevisionChainValid: true },
+  operations: [operation], integrity: { schemaVersion: 9, configRevisionChainValid: true },
   freshness: { balance: now, ownOffers: now, transactions: now, markets: { BANK_CUP: now, BANDECPREPAGO: now } },
 };
 
@@ -100,6 +101,9 @@ const model = {
   createOwnOffer: async () => snapshot.ownOffers[0],
   editOwnOffer: async () => undefined,
   cancelOwnOffer: async () => undefined,
+  previewBlockedOffer: async (uuid) => ({ uuid, coin: "BANK_CUP", offerType: "buy", amount: 20, receive: 21080, rate: 1054, referenceRate: 1012, deviationPercent: 4.15, plannedCancellations: [{ uuid: "own-01", amount: 10, rate: 1040 }], liquidityReason: "Se liberarán 10 QUSD de una oferta propia." }),
+  applyBlockedOffer: async () => "Aplicación de demostración confirmada.",
+  dismissBlockedOffer: () => undefined,
 };
 const origin = `http://127.0.0.1:${port}`;
 const app = buildDashboard(model, { password: "preview-segura-2026", trustedOrigin: origin });

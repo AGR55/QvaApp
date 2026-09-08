@@ -15,6 +15,7 @@ import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
 import { median, outgoingFiatCost } from "./market-math.js";
+import { planLiquidity } from "./core/liquidity-plan.js";
 
 type RuntimeConfig = typeof Config;
 type Notify = (message: string, operationUuid?: string) => Promise<void>;
@@ -425,7 +426,7 @@ export class TradingEngine {
       const synchronizedOfferTypes: Array<"buy" | "sell"> = ["sell"];
       if (includeBuySide || sellHuntMarkets.length === 0)
         synchronizedOfferTypes.push("buy");
-      this.syncWebAlerts(items, synchronizedOfferTypes);
+      this.syncWebAlerts(items, synchronizedOfferTypes, snapshots);
       this.persistScanCoverage(snapshots, items, includeBuySide);
 
       for (const item of items.filter(
@@ -627,6 +628,114 @@ export class TradingEngine {
       uuid,
     );
     return "Aplicaste como vendedor de QUSD. Espera el pago fiat y usa /received solo después de verificarlo.";
+  }
+
+  dismissBlockedOffer(uuid: string): void {
+    const store = this.store as Store;
+    const alert = store.tradingAlert(uuid);
+    if (!alert || alert.decision !== "blocked" || alert.resolvedAt !== null)
+      throw new Error("La oferta bloqueada ya no está pendiente de revisión.");
+    store.resolveTradingAlert(uuid, "dismissed");
+    store.audit("blocked_offer_dismissed", "Oferta bloqueada descartada por el usuario.", uuid);
+  }
+
+  async previewBlockedOffer(uuid: string) {
+    const store = this.store as Store;
+    const alert = store.tradingAlert(uuid);
+    if (!alert || alert.decision !== "blocked" || alert.resolvedAt !== null)
+      throw new Error("La oferta bloqueada ya no está pendiente de revisión.");
+    const offer = await this.qva.getOffer(uuid);
+    if (offer.status !== "open" || !this.isMarket(offer.coin)) {
+      store.resolveTradingAlert(uuid, "expired");
+      store.audit("blocked_offer_expired", "La oferta dejó de estar abierta durante la revisión.", uuid);
+      throw new Error("La oferta ya no está abierta.");
+    }
+    const referenceRate = alert.referenceRate ?? rate(offer);
+    const deviationPercent = referenceRate
+      ? ((rate(offer) - referenceRate) / referenceRate) * 100
+      : 0;
+    let plannedCancellations: Array<{ uuid: string; amount: number; rate: number }> = [];
+    let liquidityReason = "No requiere cancelar ofertas propias.";
+    if (offer.type === "buy") {
+      const [balance, ownOffers] = await Promise.all([
+        this.qva.qusdBalance(),
+        this.qva.listOffers({ my: true, take: 100, page: 1, status: "open" }),
+      ]);
+      const liquidity = planLiquidity({
+        target: offer,
+        availableQusd: balance,
+        reserveQusd: this.marketConfig.current().risk.minQusdReserve,
+        ownOffers,
+      });
+      plannedCancellations = liquidity.cancel.map(({ uuid: ownUuid, amount, rate: ownRate }) => ({
+        uuid: ownUuid,
+        amount,
+        rate: ownRate,
+      }));
+      liquidityReason = liquidity.reason;
+    }
+    store.audit("blocked_offer_reviewed", "Se generó una previsualización sin mutaciones remotas.", uuid);
+    return {
+      uuid,
+      coin: offer.coin,
+      offerType: offer.type,
+      amount: offer.amount,
+      receive: offer.receive,
+      rate: rate(offer),
+      referenceRate,
+      deviationPercent,
+      plannedCancellations,
+      liquidityReason,
+    };
+  }
+
+  async applyBlockedOffer(uuid: string): Promise<string> {
+    const store = this.store as Store;
+    const alert = store.tradingAlert(uuid);
+    if (!alert || alert.decision !== "blocked" || alert.resolvedAt !== null)
+      throw new Error("La oferta bloqueada ya no está pendiente de revisión.");
+    this.requireRealMode();
+    const offer = await this.qva.getOffer(uuid);
+    if (offer.status !== "open" || !this.isMarket(offer.coin)) {
+      store.resolveTradingAlert(uuid, "expired");
+      throw new Error("La oferta ya no está abierta o el mercado no es compatible.");
+    }
+    const referenceRate = alert.referenceRate ?? rate(offer);
+    store.audit(
+      "price_guard_override_requested",
+      "El usuario autorizó omitir únicamente el bloqueo de precio/mediana; se mantienen todos los límites de riesgo.",
+      uuid,
+    );
+    if (offer.type === "sell") {
+      const decision = await this.evaluateAutomaticBuy(offer, referenceRate);
+      if (decision.kind !== "apply") {
+        store.audit("blocked_offer_safety_rejected", decision.reasons.join(" · "), uuid);
+        throw new Error(decision.reasons.join(" · "));
+      }
+      await this.applyBuyQusd(offer, false, referenceRate);
+      store.resolveTradingAlert(uuid, "applied");
+      store.audit("blocked_offer_applied", "Oferta aplicada tras revisión manual segura.", uuid);
+      return "Aplicación confirmada. Realiza el pago fiat solo después de verificar los datos.";
+    }
+    const market = this.market(offer.coin)!;
+    const expectedMargin = market.buyMaxRate
+      ? ((rate(offer) * (1 - market.sellFeePercent / 100) - market.buyMaxRate) /
+          market.buyMaxRate) * 100
+      : 0;
+    const result = await this.opportunityOrchestrator.execute({
+      target: offer,
+      referenceRate,
+      expectedMarginPercent: expectedMargin,
+      priceDecision: "eligible",
+      priceReason: "Bloqueo de precio/mediana revisado y autorizado manualmente.",
+    });
+    if (result.workflow?.state !== "applied") {
+      store.audit("blocked_offer_safety_rejected", result.decision.reasons.join(" · "), uuid);
+      throw new Error(result.decision.reasons.join(" · "));
+    }
+    store.resolveTradingAlert(uuid, "applied");
+    store.audit("blocked_offer_applied", "Oferta aplicada mediante el workflow compensable.", uuid);
+    return "Aplicación confirmada. Verifica el pago fiat recibido antes de confirmar la operación.";
   }
 
   async acknowledge(uuid: string): Promise<void> {
@@ -1409,6 +1518,7 @@ export class TradingEngine {
   private syncWebAlerts(
     items: MarketItem[],
     scannedOfferTypes?: Array<"buy" | "sell">,
+    snapshots: Array<MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }> = [],
   ): void {
     if (this.isPaused() || this.mode() !== "real") {
       this.store.syncTradingAlerts([]);
@@ -1416,8 +1526,16 @@ export class TradingEngine {
     }
     this.store.syncTradingAlerts(
       items.flatMap((item) => {
-        if (item.decision !== "auto_buy" && item.decision !== "manual_sell")
+        if (item.decision === "ignored")
           return [];
+        const snapshot = snapshots.find(
+          (entry) => entry.coin === item.offer.coin && entry.side === item.offer.type,
+        );
+        const referenceRate = numeric(
+          item.offer.type === "sell"
+            ? snapshot?.average?.median_sell
+            : snapshot?.average?.median_buy,
+        );
         return [
           {
             uuid: item.offer.uuid,
@@ -1428,6 +1546,7 @@ export class TradingEngine {
             rate: item.rate,
             decision: item.decision,
             reason: item.reason,
+            ...(referenceRate ? { referenceRate } : {}),
           },
         ];
       }),

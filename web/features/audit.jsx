@@ -1,32 +1,100 @@
-import React from "react";
-import { CheckCircle2, ShieldAlert, XCircle } from "lucide-react";
+import React, { useCallback, useMemo, useState } from "react";
+import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, X, XCircle } from "lucide-react";
 import { Empty, Panel } from "../components/common.jsx";
+import { useDialog } from "../hooks/use-dialog.js";
+import { requestJson } from "../lib/http.js";
 
-export function Audit({ data }) {
+export function Audit({ data, onChanged }) {
   const integrity = data.integrity?.configRevisionChainValid;
-  return (
-    <div className="dashboard-grid audit-grid">
-      <Panel title="Salud e integridad">
-        <dl className="health-list">
-          <Health label="Cadena de configuración" ok={integrity} value={integrity ? "Íntegra" : "Alterada"} />
-          <Health label="Esquema de datos" ok value={`v${data.integrity?.schemaVersion}`} />
-          <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "Bloqueo activo" : "Ninguna"} />
-          <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
-        </dl>
-      </Panel>
-      <Panel title="Reservas de capital">
-        {data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}
-      </Panel>
-      <Panel title="Intenciones remotas" wide>
-        {data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}
-      </Panel>
-      <Panel title="Registro de auditoría" wide>
-        {data.activity?.length ? <ol className="audit-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")} {item.uuid ? `· ${item.uuid}` : ""}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}
-      </Panel>
+  const blocked = useMemo(() => (data.alerts || []).filter((item) => item.decision === "blocked" && item.resolvedAt === null), [data.alerts]);
+  const [dialog, setDialog] = useState(null);
+  const [preview, setPreview] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const close = useCallback(() => { if (!busy) { setDialog(null); setPreview(null); setMessage(""); } }, [busy]);
+  const dialogRef = useDialog(Boolean(dialog), close);
+
+  const review = async (offer) => {
+    setDialog({ kind: "review", offer }); setBusy(true); setMessage("Comprobando la oferta y calculando la liquidez…");
+    try {
+      const payload = await requestJson(`/api/blocked-offers/${encodeURIComponent(offer.uuid)}/preview`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      setPreview(payload.data); setMessage("");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo revisar la oferta."); await onChanged(); }
+    finally { setBusy(false); }
+  };
+  const apply = async () => {
+    if (!dialog?.offer) return;
+    setBusy(true); setMessage("Aplicando con todas las protecciones activas…");
+    try {
+      const payload = await requestJson(`/api/blocked-offers/${encodeURIComponent(dialog.offer.uuid)}/apply`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ overridePriceGuard: true }) });
+      setMessage(payload.data.message); setPreview(null); await onChanged();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "La protección de riesgo rechazó la aplicación."); await onChanged(); }
+    finally { setBusy(false); }
+  };
+  const dismiss = async () => {
+    if (!dialog?.offer) return;
+    setBusy(true);
+    try {
+      await requestJson(`/api/blocked-offers/${encodeURIComponent(dialog.offer.uuid)}/dismiss`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      await onChanged(); setDialog(null);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo descartar la oferta."); }
+    finally { setBusy(false); }
+  };
+
+  return <>
+    <div className="audit-layout">
+      <div className="audit-main">
+        <div className="dashboard-grid audit-health-grid">
+          <Panel title="Salud e integridad"><dl className="health-list">
+            <Health label="Cadena de configuración" ok={integrity} value={integrity ? "Íntegra" : "Alterada"} />
+            <Health label="Esquema de datos" ok value={`v${data.integrity?.schemaVersion}`} />
+            <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "Bloqueo activo" : "Ninguna"} />
+            <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
+          </dl></Panel>
+          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
+        </div>
+        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
+        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")} {item.uuid ? `· ${item.uuid}` : ""}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
+      </div>
+      <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
+        <div className="blocked-rail-head"><div><span className="section-kicker">Revisión manual</span><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{blocked.length}</span></div>
+        {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : <Empty>No hay ofertas esperando tu decisión.</Empty>}
+      </aside>
     </div>
-  );
+    {dialog ? <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section ref={dialogRef} className="decision-dialog" role="dialog" aria-modal="true" aria-labelledby="blocked-dialog-title">
+        <button className="dialog-close" onClick={close} disabled={busy} aria-label="Cerrar"><X /></button>
+        {dialog.kind === "dismiss" ? <>
+          <span className="dialog-icon muted"><X /></span><p className="section-kicker">Descartar revisión</p><h2 id="blocked-dialog-title">¿Ocultar esta oferta?</h2>
+          <p>Quedará constancia en Auditoría. Volverá a aparecer únicamente si cambia su precio o su motivo de bloqueo.</p>
+          {message ? <p className="dialog-message danger" role="status">{message}</p> : null}
+          <div className="dialog-actions"><button className="button secondary" onClick={close} disabled={busy}>Conservar</button><button className="button filled-danger" onClick={() => void dismiss()} disabled={busy}>{busy ? "Descartando…" : "Descartar oferta"}</button></div>
+        </> : <>
+          <span className="dialog-icon warning"><ShieldAlert /></span><p className="section-kicker">Confirmación protegida</p><h2 id="blocked-dialog-title">Revisar antes de aplicar</h2>
+          {preview ? <PreviewDetails preview={preview} /> : null}{message ? <p className="dialog-message" role="status">{message}</p> : null}
+          {preview ? <p className="safety-note"><ShieldAlert /> Solo se omitirá el bloqueo de precio/mediana. Saldo, reserva, exposición, límites y estado remoto se comprobarán nuevamente.</p> : null}
+          <div className="dialog-actions"><button className="button secondary" onClick={close} disabled={busy}>Cancelar</button><button className="button primary" onClick={() => void apply()} disabled={busy || !preview}>{busy ? "Comprobando…" : "Aplicar con protecciones"}</button></div>
+        </>}
+      </section>
+    </div> : null}
+  </>;
 }
 
-function Health({ label, ok, value }) {
-  return <div><dt>{ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}{label}</dt><dd className={ok ? "" : "danger"}>{value}</dd></div>;
+function BlockedCard({ offer, onReview, onDismiss }) {
+  const reference = offer.referenceRate;
+  const deviation = reference ? ((offer.rate - reference) / reference) * 100 : null;
+  const buying = offer.offerType === "sell";
+  const Trend = buying ? TrendingDown : TrendingUp;
+  return <article className="blocked-card"><header><span className={`offer-side ${buying ? "buy" : "sell"}`}><Trend />{buying ? "Comprar QUSD" : "Vender QUSD"}</span><time><Clock3 />{relativeTime(offer.updatedAt)}</time></header>
+    <div className="blocked-value"><strong>{offer.amount.toFixed(2)} QUSD</strong><span>{offer.receive.toLocaleString("es-CU")} · {offer.coin}</span></div>
+    <dl className="offer-comparison"><div><dt>Tasa</dt><dd>{offer.rate.toFixed(2)}</dd></div><div><dt>Mediana</dt><dd>{reference ? reference.toFixed(2) : "No disponible"}</dd></div><div><dt>Diferencia</dt><dd className={deviation === null ? "" : Math.abs(deviation) > 1 ? "warning-text" : ""}>{deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(2)}%`}</dd></div></dl>
+    <p className="blocked-reason"><ShieldAlert />{offer.reason}</p><div className="blocked-actions"><button className="button text-button" onClick={onDismiss}>Descartar</button><button className="button primary" onClick={onReview}>Revisar y aplicar</button></div></article>;
 }
+
+function PreviewDetails({ preview }) {
+  return <div className="preview-details"><dl><div><dt>Operación</dt><dd>{preview.offerType === "sell" ? "Comprar" : "Vender"} {preview.amount.toFixed(2)} QUSD</dd></div><div><dt>Fiat</dt><dd>{preview.receive.toLocaleString("es-CU")} · {preview.coin}</dd></div><div><dt>Tasa / mediana</dt><dd>{preview.rate.toFixed(2)} / {preview.referenceRate.toFixed(2)}</dd></div><div><dt>Desviación</dt><dd>{preview.deviationPercent > 0 ? "+" : ""}{preview.deviationPercent.toFixed(2)}%</dd></div></dl>
+    <div className="liquidity-preview"><strong>Plan de liquidez</strong><p>{preview.liquidityReason}</p>{preview.plannedCancellations.length ? <ul>{preview.plannedCancellations.map((item) => <li key={item.uuid}>{item.amount.toFixed(2)} QUSD · tasa {item.rate.toFixed(2)}<small>{item.uuid}</small></li>)}</ul> : null}</div></div>;
+}
+
+function Health({ label, ok, value }) { return <div><dt>{ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}{label}</dt><dd className={ok ? "" : "danger"}>{value}</dd></div>; }
+function relativeTime(timestamp) { const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000)); return minutes < 1 ? "ahora" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h`; }

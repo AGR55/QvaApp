@@ -107,6 +107,20 @@ try {
   if (settingsAccessibility.serious.length > 0)
     throw new Error(`WCAG Estrategia: ${JSON.stringify(settingsAccessibility.serious)}`);
 
+  const audit = await find("xpath", "//button[contains(normalize-space(.), 'Auditoría')]");
+  await command("POST", `/session/${sessionId}/element/${audit}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Ofertas bloqueadas')"));
+  const auditAccessibility = await accessibilityAudit();
+  if (auditAccessibility.serious.length > 0)
+    throw new Error(`WCAG Auditoría: ${JSON.stringify(auditAccessibility.serious)}`);
+  await screenshot("/tmp/qvaapply-audit-desktop.png");
+  const reviewBlocked = await find("xpath", "//button[normalize-space(.)='Revisar y aplicar']");
+  await command("POST", `/session/${sessionId}/element/${reviewBlocked}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Plan de liquidez')"));
+  await screenshot("/tmp/qvaapply-audit-review-desktop.png");
+  const closeAuditDialog = await find("css selector", ".decision-dialog .dialog-close");
+  await command("POST", `/session/${sessionId}/element/${closeAuditDialog}/click`, {});
+
   await command("POST", `/session/${sessionId}/window/rect`, { width: 390, height: 844, x: 0, y: 0 });
   await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
   await new Promise((resolve) => setTimeout(resolve, 500));
@@ -119,7 +133,14 @@ try {
   const huntingMobileMetrics = await metrics();
   if (huntingMobileMetrics.horizontalOverflow)
     throw new Error(`Cacería desborda horizontalmente en móvil: ${JSON.stringify(huntingMobileMetrics)}`);
-  console.log(JSON.stringify({ desktop, mobile, huntingMobileMetrics, accessibility, huntingAccessibility, settingsAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-hunting-desktop.png", "/tmp/qvaapply-hunting-log-desktop.png", "/tmp/qvaapply-hunting-cancel-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-dashboard-mobile.png", "/tmp/qvaapply-hunting-mobile.png"] }, null, 2));
+  const auditMobile = await find("xpath", "//button[contains(normalize-space(.), 'Auditoría')]");
+  await command("POST", `/session/${sessionId}/element/${auditMobile}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Ofertas bloqueadas')"));
+  await screenshot("/tmp/qvaapply-audit-mobile.png");
+  const auditMobileMetrics = await metrics();
+  if (auditMobileMetrics.horizontalOverflow)
+    throw new Error(`Auditoría desborda horizontalmente en móvil: ${JSON.stringify(auditMobileMetrics)}`);
+  console.log(JSON.stringify({ desktop, mobile, huntingMobileMetrics, auditMobileMetrics, accessibility, huntingAccessibility, settingsAccessibility, auditAccessibility, screenshots: ["/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-hunting-desktop.png", "/tmp/qvaapply-hunting-log-desktop.png", "/tmp/qvaapply-hunting-cancel-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-audit-desktop.png", "/tmp/qvaapply-audit-review-desktop.png", "/tmp/qvaapply-dashboard-mobile.png", "/tmp/qvaapply-hunting-mobile.png", "/tmp/qvaapply-audit-mobile.png"] }, null, 2));
 } finally {
   if (sessionId) await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
   driver.kill("SIGTERM");

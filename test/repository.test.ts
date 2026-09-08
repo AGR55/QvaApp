@@ -162,8 +162,34 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v8-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v9-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
+  store.close();
+});
+
+test("mantiene ofertas bloqueadas accionables y respeta un descarte sin cambios", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-blocked-alert-"));
+  const store = new Store(dataDir);
+  const alert = {
+    uuid: "blocked-1",
+    coin: "BANK_CUP",
+    offerType: "buy" as const,
+    amount: 12,
+    receive: 12_240,
+    rate: 1_020,
+    decision: "blocked" as const,
+    reason: "3% por encima de la mediana",
+    referenceRate: 990,
+  };
+  store.syncTradingAlerts([alert]);
+  assert.equal(store.tradingAlert("blocked-1")?.referenceRate, 990);
+  assert.equal(store.resolveTradingAlert("blocked-1", "dismissed"), true);
+  store.syncTradingAlerts([alert]);
+  assert.equal(store.tradingAlert("blocked-1")?.resolution, "dismissed");
+
+  store.syncTradingAlerts([{ ...alert, rate: 1_021 }]);
+  assert.equal(store.tradingAlert("blocked-1")?.resolvedAt, null);
+  assert.equal(store.tradingAlert("blocked-1")?.resolution, undefined);
   store.close();
 });
 

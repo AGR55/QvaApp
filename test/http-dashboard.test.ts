@@ -99,6 +99,32 @@ test("Fastify valida y aplica controles de cacería por mercado", async () => {
   await app.close();
 });
 
+test("Fastify previsualiza, aplica y descarta ofertas bloqueadas con confirmación explícita", async () => {
+  const calls: string[] = [];
+  const readModel = {
+    previewBlockedOffer: async (uuid: string) => ({ uuid, rate: 1_010 }),
+    applyBlockedOffer: async (uuid: string) => { calls.push(`apply:${uuid}`); return "confirmada"; },
+    dismissBlockedOffer: (uuid: string) => void calls.push(`dismiss:${uuid}`),
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const headers = { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf };
+
+  const preview = await app.inject({ method: "POST", url: "/api/blocked-offers/blocked-1/preview", headers, payload: {} });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.json<{ data: { uuid: string } }>().data.uuid, "blocked-1");
+  const rejected = await app.inject({ method: "POST", url: "/api/blocked-offers/blocked-1/apply", headers, payload: { overridePriceGuard: false } });
+  assert.equal(rejected.statusCode, 400);
+  const applied = await app.inject({ method: "POST", url: "/api/blocked-offers/blocked-1/apply", headers, payload: { overridePriceGuard: true } });
+  assert.equal(applied.statusCode, 200);
+  const dismissed = await app.inject({ method: "POST", url: "/api/blocked-offers/blocked-2/dismiss", headers, payload: {} });
+  assert.equal(dismissed.statusCode, 204);
+  assert.deepEqual(calls, ["apply:blocked-1", "dismiss:blocked-2"]);
+  await app.close();
+});
+
 test("Fastify permite iniciar sesión desde localhost cuando se configuró loopback", async () => {
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const login = await app.inject({

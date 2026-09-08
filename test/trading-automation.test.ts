@@ -244,6 +244,35 @@ test("el escaneo no muta si un límite global bloquea la compra automática", as
   store.close();
 });
 
+test("la revisión manual omite precio pero nunca la parada de emergencia", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = { uuid: "manual-blocked", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open", User: { uuid: "peer" } };
+  store.syncTradingAlerts([{
+    uuid: target.uuid, coin: target.coin, offerType: target.type, amount: target.amount,
+    receive: target.receive, rate: 920, decision: "blocked", reason: "Bloqueo de mediana", referenceRate: 920,
+  }]);
+  let applications = 0;
+  const qva = {
+    getOffer: async () => target,
+    qusdBalance: async () => 100,
+    apply: async () => void (applications += 1),
+    sendChat: async () => undefined,
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  trading.setEmergencyStop(true, "prueba");
+
+  await assert.rejects(() => trading.applyBlockedOffer(target.uuid), /emergencia/);
+  assert.equal(applications, 0);
+  assert.equal(store.tradingAlert(target.uuid)?.resolvedAt, null);
+
+  trading.setEmergencyStop(false, "prueba");
+  store.set("paused", "false");
+  await trading.applyBlockedOffer(target.uuid);
+  assert.equal(applications, 1);
+  assert.equal(store.tradingAlert(target.uuid)?.resolution, "applied");
+  store.close();
+});
+
 test("el cooldown persistido bloquea una segunda operación inmediata del mercado", async () => {
   const { store, cfg, markets } = setup();
   store.createOperation({

@@ -333,8 +333,44 @@ export function buildDashboard(
     reply.status(204);
   });
   app.get("/api/audit", async () => ({ data: readModel.auditLog() }));
+  app.post<{ Params: { uuid: string } }>("/api/blocked-offers/:uuid/preview", {
+    schema: { params: uuidParamsSchema() },
+  }, async (request) => ({
+    data: await clientAction(() => readModel.previewBlockedOffer(request.params.uuid)),
+  }));
+  app.post<{ Params: { uuid: string }; Body: { overridePriceGuard: boolean } }>(
+    "/api/blocked-offers/:uuid/apply",
+    {
+      schema: {
+        params: uuidParamsSchema(),
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["overridePriceGuard"],
+          properties: { overridePriceGuard: { const: true } },
+        },
+      },
+    },
+    async (request) => ({
+      data: { message: await clientAction(() => readModel.applyBlockedOffer(request.params.uuid)) },
+    }),
+  );
+  app.post<{ Params: { uuid: string } }>("/api/blocked-offers/:uuid/dismiss", {
+    schema: { params: uuidParamsSchema() },
+  }, async (request, reply) => {
+    await clientAction(() => readModel.dismissBlockedOffer(request.params.uuid));
+    reply.status(204);
+  });
   app.get("/api/openapi.json", async () => openApiDocument());
   return app;
+}
+
+function uuidParamsSchema() {
+  return {
+    type: "object",
+    required: ["uuid"],
+    properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } },
+  } as const;
 }
 
 class ClientInputError extends Error {}
@@ -418,6 +454,9 @@ function openApiDocument() {
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
       "/api/hunting": { put: { summary: "Controlar cacerías y precios por mercado" } },
       "/api/audit": { get: { summary: "Exportar auditoría" } },
+      "/api/blocked-offers/{uuid}/preview": { post: { summary: "Previsualizar una oferta bloqueada sin mutaciones" } },
+      "/api/blocked-offers/{uuid}/apply": { post: { summary: "Aplicar tras omitir solo el bloqueo de precio" } },
+      "/api/blocked-offers/{uuid}/dismiss": { post: { summary: "Descartar una oferta bloqueada" } },
     },
     components: {
       securitySchemes: {

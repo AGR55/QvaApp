@@ -13,7 +13,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 8;
+const LATEST_SCHEMA_VERSION = 9;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -95,8 +95,10 @@ export interface TradingAlert {
   amount: number;
   receive: number;
   rate: number;
-  decision: "auto_buy" | "manual_sell";
+  decision: "auto_buy" | "manual_sell" | "blocked";
   reason: string;
+  referenceRate?: number;
+  resolution?: "dismissed" | "applied" | "expired" | "resolved";
   createdAt: number;
   updatedAt: number;
   resolvedAt: number | null;
@@ -398,6 +400,13 @@ export class Store {
           "INSERT INTO schema_migrations(version, applied_at) VALUES (8, ?)",
         ).run(Date.now());
       }
+      if (this.currentSchemaVersion() < 9) {
+        this.ensureColumn("trading_alerts", "reference_rate", "REAL");
+        this.ensureColumn("trading_alerts", "resolution", "TEXT");
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (9, ?)",
+        ).run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -416,7 +425,7 @@ export class Store {
   }
 
   private ensureColumn(
-    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config",
+    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts",
     column: string,
     definition: string,
   ): void {
@@ -1314,9 +1323,23 @@ export class Store {
         .run(now);
     }
     const upsert = this.db
-      .prepare(`INSERT INTO trading_alerts(offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, created_at, updated_at, resolved_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-      ON CONFLICT(offer_uuid) DO UPDATE SET coin = excluded.coin, offer_type = excluded.offer_type, amount = excluded.amount, receive = excluded.receive, rate = excluded.rate, decision = excluded.decision, reason = excluded.reason, updated_at = excluded.updated_at, resolved_at = NULL`);
+      .prepare(`INSERT INTO trading_alerts(offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, reference_rate, created_at, updated_at, resolved_at, resolution)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+      ON CONFLICT(offer_uuid) DO UPDATE SET
+        coin = excluded.coin, offer_type = excluded.offer_type, amount = excluded.amount,
+        receive = excluded.receive, rate = excluded.rate, decision = excluded.decision,
+        reason = excluded.reason, reference_rate = excluded.reference_rate,
+        updated_at = excluded.updated_at,
+        resolved_at = CASE
+          WHEN trading_alerts.resolution = 'dismissed'
+            AND trading_alerts.rate = excluded.rate
+            AND trading_alerts.reason = excluded.reason
+          THEN trading_alerts.resolved_at ELSE NULL END,
+        resolution = CASE
+          WHEN trading_alerts.resolution = 'dismissed'
+            AND trading_alerts.rate = excluded.rate
+            AND trading_alerts.reason = excluded.reason
+          THEN trading_alerts.resolution ELSE NULL END`);
     for (const alert of alerts)
       upsert.run(
         alert.uuid,
@@ -1327,19 +1350,43 @@ export class Store {
         alert.rate,
         alert.decision,
         alert.reason,
+        alert.referenceRate ?? null,
         now,
         now,
       );
+  }
+
+  tradingAlert(uuid: string): TradingAlert | undefined {
+    return this.readTradingAlert(
+      this.db.prepare(
+        "SELECT offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, reference_rate, created_at, updated_at, resolved_at, resolution FROM trading_alerts WHERE offer_uuid = ?",
+      ).get(uuid) as Record<string, unknown> | undefined,
+    );
+  }
+
+  resolveTradingAlert(
+    uuid: string,
+    resolution: NonNullable<TradingAlert["resolution"]>,
+  ): boolean {
+    const result = this.db.prepare(
+      "UPDATE trading_alerts SET resolved_at = ?, resolution = ?, updated_at = ? WHERE offer_uuid = ? AND resolved_at IS NULL",
+    ).run(Date.now(), resolution, Date.now(), uuid);
+    return result.changes > 0;
   }
 
   recentTradingAlerts(limit = 12): TradingAlert[] {
     return (
       this.db
         .prepare(
-          "SELECT offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, created_at, updated_at, resolved_at FROM trading_alerts ORDER BY resolved_at IS NULL DESC, updated_at DESC LIMIT ?",
+          "SELECT offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, reference_rate, created_at, updated_at, resolved_at, resolution FROM trading_alerts ORDER BY resolved_at IS NULL DESC, updated_at DESC LIMIT ?",
         )
         .all(limit) as Record<string, unknown>[]
-    ).map((row) => ({
+    ).map((row) => this.readTradingAlert(row)!);
+  }
+
+  private readTradingAlert(row?: Record<string, unknown>): TradingAlert | undefined {
+    if (!row) return undefined;
+    return {
       uuid: String(row.offer_uuid),
       coin: String(row.coin),
       offerType: String(row.offer_type) as P2pType,
@@ -1348,10 +1395,16 @@ export class Store {
       rate: Number(row.rate),
       decision: String(row.decision) as TradingAlert["decision"],
       reason: String(row.reason),
+      ...(row.reference_rate === null || row.reference_rate === undefined
+        ? {}
+        : { referenceRate: Number(row.reference_rate) }),
+      ...(row.resolution === null || row.resolution === undefined
+        ? {}
+        : { resolution: String(row.resolution) as NonNullable<TradingAlert["resolution"]> }),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
       resolvedAt: row.resolved_at === null ? null : Number(row.resolved_at),
-    }));
+    };
   }
 
   recordDashboardSnapshot(snapshot: {

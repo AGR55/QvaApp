@@ -148,6 +148,15 @@ export class DashboardReadModel {
   updateHunting(values: Parameters<TradingService["updateHunting"]>[0]): void {
     this.trading.updateHunting(values);
   }
+  previewBlockedOffer(uuid: string) {
+    return this.trading.previewBlockedOffer(uuid);
+  }
+  applyBlockedOffer(uuid: string) {
+    return this.trading.applyBlockedOffer(uuid);
+  }
+  dismissBlockedOffer(uuid: string): void {
+    this.trading.dismissBlockedOffer(uuid);
+  }
 
   localSnapshot() {
     const state = this.trading.operationalState();
