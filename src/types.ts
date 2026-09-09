@@ -82,6 +82,7 @@ export type OperationState =
   | "applied"
   | "acknowledged"
   | "paid"
+  | "revision"
   | "cancelled"
   | "completed"
   | "failed";

@@ -1305,7 +1305,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE state IN ('applied','acknowledged','paid') ORDER BY created_at DESC",
+          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE state IN ('applied','acknowledged','paid','revision') ORDER BY created_at DESC",
         )
         .all() as Record<string, unknown>[]
     ).map((row) => this.operationFromRow(row));
@@ -1329,7 +1329,7 @@ export class Store {
         .prepare(
           `SELECT uuid, offer_type, coin, amount, receive, rate, state,
                   auto_applied, cancel_at, created_at, counterparty_id, reference_rate
-           FROM operations WHERE state <> 'cancelled'
+           FROM operations WHERE state IN ('applied','acknowledged','paid','revision')
            ORDER BY created_at DESC LIMIT ?`,
         )
         .all(limit) as Record<string, unknown>[]

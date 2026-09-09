@@ -85,6 +85,8 @@ export function useDashboard(view, market, setMarket) {
           `market:${item.code}`,
           `/api/live/markets/${encodeURIComponent(item.code)}`,
         ]);
+    if (view === "operaciones")
+      return [["operations", "/api/live/operations"]];
     return [];
   }, [market, view]);
 
@@ -124,6 +126,14 @@ export function useDashboard(view, market, setMarket) {
     // `data` no se incluye: cada fusión local no debe reiniciar la cola remota.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, market, Boolean(data)]);
+
+  useEffect(() => {
+    if (view !== "operaciones") return;
+    const timer = window.setInterval(() => {
+      void loadLocal(generation.current).catch(() => undefined);
+    }, 10_000);
+    return () => window.clearInterval(timer);
+  }, [loadLocal, view]);
 
   useEffect(() => {
     const updateConnection = () => {

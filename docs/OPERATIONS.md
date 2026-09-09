@@ -21,6 +21,7 @@ Para el panel local se aceptan `http://127.0.0.1:3000`, `http://localhost:3000` 
 - **Actualizar** consulta solo los recursos necesarios para la vista abierta y los envía secuencialmente.
 - Si no hay conexión, siguen disponibles Estrategia, Operaciones, Auditoría e históricos locales.
 - No actives ni repitas una acción financiera basándote únicamente en un dato marcado como guardado. Espera una lectura actual o comprueba directamente en QvaPay.
+- Las operaciones activas se concilian periódicamente mediante `GET /p2p/:uuid`. Los estados remotos `completed` y `cancelled` salen de la vista operativa, pero se conservan en SQLite y en la auditoría. Si una aplicación vuelve a `open`, significa que ya no tiene contraparte y también se cierra localmente. `revision` permanece visible porque requiere seguimiento y no es un estado terminal.
 
 ## Inicio de sesión QvaPay con TOTP
 

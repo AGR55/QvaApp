@@ -10,7 +10,7 @@ import {
 } from "./market-config.js";
 import { QvaApiError, QvaMutationUncertainError } from "./qvapay.js";
 import type { Store } from "./store.js";
-import type { FiatMarket, P2pAverage, P2pOffer } from "./types.js";
+import type { FiatMarket, OperationState, P2pAverage, P2pOffer } from "./types.js";
 import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
@@ -1016,6 +1016,42 @@ export class TradingEngine {
         this.store.audit("chat_poll_warning", error instanceof Error ? error.message : String(error), operation.uuid);
       }
     }
+  }
+
+  async syncRemoteOperations(): Promise<number> {
+    let changed = 0;
+    for (const operation of this.store.activeOperations()) {
+      try {
+        const remote = await this.qva.getOffer(operation.uuid);
+        const next = operationStateFromRemote(operation.state, remote.status);
+        this.store.set(`operation_sync_error:${operation.uuid}`, "");
+        if (next === operation.state) continue;
+        this.store.updateOperation(operation.uuid, next);
+        if (next === "cancelled" || next === "completed")
+          this.store.set(`retry:auto_cancel:${operation.uuid}`, "0");
+        this.store.audit(
+          "remote_operation_synced",
+          `Estado local ${operation.state} actualizado a ${next}; QvaPay informó ${remote.status}.`,
+          operation.uuid,
+        );
+        changed += 1;
+      } catch (error) {
+        if (error instanceof QvaApiError && error.status === 404) {
+          this.closeRemoteOperation(
+            operation.uuid,
+            "QvaPay ya no encuentra la operación durante la sincronización periódica.",
+          );
+          changed += 1;
+          continue;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        const key = `operation_sync_error:${operation.uuid}`;
+        if (this.store.get(key) === message) continue;
+        this.store.set(key, message);
+        this.store.audit("operation_sync_warning", message, operation.uuid);
+      }
+    }
+    return changed;
   }
 
   async listOwnOffers(): Promise<P2pOffer[]> {
@@ -2128,9 +2164,33 @@ const numeric = (value: unknown): number | undefined =>
       ? Number(value)
       : undefined;
 const isTerminal = (status: string): boolean =>
-  ["cancelled", "canceled", "completed", "revision"].includes(
+  ["cancelled", "canceled", "completed"].includes(
     status.toLowerCase(),
   );
+
+function operationStateFromRemote(
+  current: OperationState,
+  remoteStatus: string,
+): OperationState {
+  switch (remoteStatus.toLowerCase()) {
+    case "completed":
+      return "completed";
+    case "cancelled":
+    case "canceled":
+    case "open":
+      return "cancelled";
+    case "revision":
+      return "revision";
+    case "paid":
+      return "paid";
+    case "processing":
+      return ["acknowledged", "paid", "revision"].includes(current)
+        ? current
+        : "applied";
+    default:
+      return current;
+  }
+}
 
 function optionalPositive<K extends string>(key: K, value: unknown): Partial<Record<K, number>> {
   const parsed = Number(value);

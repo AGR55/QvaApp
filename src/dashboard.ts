@@ -345,6 +345,11 @@ export class DashboardReadModel {
     return { data, updatedAt };
   }
 
+  async refreshOperations() {
+    await this.trading.syncRemoteOperations();
+    return { data: this.store.visibleOperations(), updatedAt: Date.now() };
+  }
+
   async refreshMarket(coin: string) {
     if (!this.marketConfig.find(coin)) throw new Error("Mercado inválido.");
     const current = await this.trading.inspectMarket(coin);

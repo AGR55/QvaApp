@@ -167,6 +167,15 @@ export function buildDashboard(
       },
     ),
   );
+  app.get("/api/live/operations", async () =>
+    resilientResource(
+      () => readModel.refreshOperations(),
+      () => ({
+        data: readModel.localSnapshot().operations,
+        updatedAt: null,
+      }),
+    ),
+  );
   app.get<{ Params: { coin: string } }>(
     "/api/live/markets/:coin",
     async (request) => {
@@ -521,6 +530,7 @@ function openApiDocument() {
       "/api/live/balance": { get: { summary: "Actualizar saldo QUSD" } },
       "/api/live/own-offers": { get: { summary: "Actualizar ofertas propias" } },
       "/api/live/transactions": { get: { summary: "Actualizar transacciones" } },
+      "/api/live/operations": { get: { summary: "Conciliar operaciones activas con QvaPay" } },
       "/api/live/markets/{coin}": { get: { summary: "Actualizar un mercado" } },
       "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },
       "/api/control": { put: { summary: "Pausa, modo, refresco y emergencia" } },

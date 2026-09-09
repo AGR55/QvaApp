@@ -228,7 +228,7 @@ test("pagina eventos de decisión y descarta solamente una versión", () => {
   store.close();
 });
 
-test("conserva canceladas en el historial pero las excluye de la proyección operativa", () => {
+test("conserva estados terminales en el historial pero los excluye de la proyección operativa", () => {
   const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-visible-operations-")));
   const base = {
     offerType: "sell" as const,
@@ -242,9 +242,10 @@ test("conserva canceladas en el historial pero las excluye de la proyección ope
   };
   store.createOperation({ ...base, uuid: "active", state: "acknowledged" });
   store.createOperation({ ...base, uuid: "cancelled", state: "cancelled" });
+  store.createOperation({ ...base, uuid: "completed", state: "completed" });
 
   assert.deepEqual(store.visibleOperations().map((item) => item.uuid), ["active"]);
-  assert.deepEqual(new Set(store.operations().map((item) => item.uuid)), new Set(["active", "cancelled"]));
+  assert.deepEqual(new Set(store.operations().map((item) => item.uuid)), new Set(["active", "cancelled", "completed"]));
   store.close();
 });
 

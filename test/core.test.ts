@@ -578,3 +578,50 @@ test("no reintenta automáticamente una cancelación cuyo resultado remoto es in
     notifications.some((message) => message.includes("conciliación manual")),
   );
 });
+
+test("sincroniza estados terminales cambiados directamente en QvaPay", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-remote-operation-sync-")),
+  );
+  store.set("mode", "real");
+  const createdAt = Date.now() - 60_000;
+  for (const [uuid, state] of [
+    ["remote-completed", "paid"],
+    ["remote-cancelled", "acknowledged"],
+    ["remote-open", "applied"],
+    ["remote-paid", "acknowledged"],
+  ] as const)
+    store.createOperation({
+      uuid,
+      offerType: "sell",
+      coin: "BANK_CUP",
+      amount: 5,
+      receive: 4_900,
+      rate: 980,
+      state,
+      autoApplied: true,
+      cancelAt: null,
+      createdAt,
+    });
+  const remoteStates = new Map([
+    ["remote-completed", "completed"],
+    ["remote-cancelled", "cancelled"],
+    ["remote-open", "open"],
+    ["remote-paid", "paid"],
+  ]);
+  const trading = new TradingService(
+    store,
+    {
+      getOffer: async (uuid: string) => ({ uuid, status: remoteStates.get(uuid) }),
+    } as never,
+    { realTradingAllowed: true } as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.syncRemoteOperations(), 4);
+  assert.equal(store.getOperation("remote-completed")?.state, "completed");
+  assert.equal(store.getOperation("remote-cancelled")?.state, "cancelled");
+  assert.equal(store.getOperation("remote-open")?.state, "cancelled");
+  assert.equal(store.getOperation("remote-paid")?.state, "paid");
+  assert.deepEqual(store.visibleOperations().map((item) => item.uuid), ["remote-paid"]);
+});
