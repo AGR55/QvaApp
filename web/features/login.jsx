@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { requestJson, setCsrfToken } from "../lib/http.js";
+import { Button, Field, Input } from "../components/ui.jsx";
 
 export function Login({ onAuthenticated }) {
   const [password, setPassword] = useState("");
@@ -33,10 +34,10 @@ export function Login({ onAuthenticated }) {
         <h1 id="login-title">Mesa de operaciones</h1>
         <p>Introduce la contraseña administrativa. La sesión expira automáticamente.</p>
         <form onSubmit={submit}>
-          <label htmlFor="dashboard-password">Contraseña</label>
+          <Field label="Contraseña" htmlFor="dashboard-password">
           <div className="password-field">
             <LockKeyhole aria-hidden="true" />
-            <input
+            <Input
               id="dashboard-password"
               type="password"
               autoComplete="current-password"
@@ -47,9 +48,10 @@ export function Login({ onAuthenticated }) {
               onChange={(event) => setPassword(event.target.value)}
             />
           </div>
-          <button className="refresh" disabled={busy} type="submit">
+          </Field>
+          <Button variant="primary" disabled={busy} type="submit">
             {busy ? "Verificando…" : "Entrar de forma segura"}
-          </button>
+          </Button>
           <p className="detail" role="status" aria-live="polite">{status}</p>
         </form>
       </section>

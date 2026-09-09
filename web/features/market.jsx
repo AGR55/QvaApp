@@ -1,22 +1,13 @@
 import React from "react";
 import { Freshness, Panel, Skeleton } from "../components/common.jsx";
 import { Offers } from "../components/offers.jsx";
+import { Tabs } from "../components/ui.jsx";
 
 export function Market({ data, market, setMarket, selected, label, unit, resource }) {
   return (
     <div className="page-stack">
       <Panel title={`Libro · ${selected.total} abiertas`} wide>
-        <div className="tabs">
-          {data.markets.map((item) => (
-            <button
-              key={item.code}
-              className={market === item.code ? "selected" : ""}
-              onClick={() => setMarket(item.code)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <Tabs value={market} onChange={setMarket} items={data.markets.map((item) => ({ value: item.code, label: item.label }))} />
         <Freshness state={resource} cachedAt={data.freshness?.markets?.[market]} />
         {resource?.loading && !data.freshness?.markets?.[market]
           ? <Skeleton rows={6} label={`Cargando ofertas de ${label(market)}`} />

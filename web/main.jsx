@@ -17,6 +17,7 @@ import {
   Sun,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
+import { Button, IconButton } from "./components/ui.jsx";
 import { useDashboard } from "./hooks/use-dashboard.js";
 import { Capital } from "./features/capital.jsx";
 import { Cockpit } from "./features/cockpit.jsx";
@@ -111,7 +112,7 @@ function App() {
         <div className="mark">Q</div>
         <p>{status}</p>
         <Skeleton label="Leyendo la base de datos local" />
-        <button className="refresh" onClick={refresh}>Reintentar lectura local</button>
+        <Button variant="primary" onClick={refresh}>Reintentar lectura local</Button>
       </main>
     );
   const metadata = new Map(data.markets.map((item) => [item.code, item]));
@@ -133,15 +134,16 @@ function App() {
         </div>
         <nav>
           {navigation.map(([key, text, Icon]) => (
-            <button
+            <Button
               key={key}
+              variant="ghost"
               className={view === key ? "active" : ""}
               aria-current={view === key ? "page" : undefined}
               onClick={() => navigate(key)}
             >
               <Icon />
               {text}
-            </button>
+            </Button>
           ))}
         </nav>
       </aside>
@@ -153,33 +155,32 @@ function App() {
           </div>
           <div className="top-actions">
             <PushControl onNotification={setNotice} />
-            <button
-              className="icon-action theme-toggle"
+            <IconButton
+              className="theme-toggle"
               onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
               aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
               title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
             >
               {theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
-            </button>
-            <button className="refresh" onClick={refresh} disabled={Object.values(resources).some((item) => item.loading)}>
+            </IconButton>
+            <Button variant="primary" onClick={refresh} disabled={Object.values(resources).some((item) => item.loading)}>
               <RefreshCw className={Object.values(resources).some((item) => item.loading) ? "spinning" : ""} aria-hidden="true" />
               Actualizar
-            </button>
-            <button
-              className="icon-action"
+            </Button>
+            <IconButton
               onClick={logout}
               aria-label="Cerrar sesión"
               title="Cerrar sesión"
             >
               <LogOut aria-hidden="true" />
-            </button>
+            </IconButton>
           </div>
         </header>
         <div className={`connection-state ${online ? "" : "offline"}`} role="status" aria-live="polite">
           <span />
           <p>{status}</p>
         </div>
-        {notice ? <aside className="push-toast" role="status" aria-live="polite"><Bell aria-hidden="true" /><div><strong>{notice.type === "blocked-offer" ? "Oferta requiere revisión" : notice.type === "operation-applied" ? "Aplicación confirmada" : "Conciliación necesaria"}</strong><p>{notice.alert?.coin || "QvaApply"}{notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}{notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}</p><button className="button primary" onClick={() => { const next = new URL(notice.url || "/?view=auditoria", window.location.origin).searchParams.get("view") || "auditoria"; navigate(next); setNotice(null); }}>Abrir detalle</button></div><button className="dialog-close" onClick={() => setNotice(null)} aria-label="Cerrar aviso"><X /></button></aside> : null}
+        {notice ? <aside className="push-toast" role="status" aria-live="polite"><Bell aria-hidden="true" /><div><strong>{notice.type === "blocked-offer" ? "Oferta requiere revisión" : notice.type === "operation-applied" ? "Aplicación confirmada" : "Conciliación necesaria"}</strong><p>{notice.alert?.coin || "QvaApply"}{notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}{notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}</p><Button variant="primary" size="sm" onClick={() => { const next = new URL(notice.url || "/?view=auditoria", window.location.origin).searchParams.get("view") || "auditoria"; navigate(next); setNotice(null); }}>Abrir detalle</Button></div><IconButton variant="ghost" size="icon" className="dialog-close" onClick={() => setNotice(null)} aria-label="Cerrar aviso"><X /></IconButton></aside> : null}
         {view === "resumen" ? (
           <Cockpit data={data} label={label} unit={unit} onChanged={refresh} resources={resources} />
         ) : null}

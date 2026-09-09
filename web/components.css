@@ -1,5 +1,51 @@
 /* Shared primitives. Feature styles should only define layout, never palette. */
 :root {
+  --ui-radius: var(--radius-md, 9px);
+}
+
+.ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: var(--ui-control-height, 44px);
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--ui-radius);
+  background: var(--surface);
+  color: var(--ink);
+  font: 700 12px Manrope, sans-serif;
+  cursor: pointer;
+  transition: background-color .18s ease, border-color .18s ease, color .18s ease, transform .18s ease;
+}
+.ui-button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.ui-button:active:not(:disabled) { transform: translateY(1px); }
+.ui-button:focus-visible, .ui-input:focus-visible { outline: none; box-shadow: var(--ui-focus); }
+.ui-button-primary { border-color: var(--accent-solid, var(--accent)); background: var(--accent-solid, var(--accent)); color: #fff; }
+.ui-button-primary:hover:not(:disabled) { border-color: var(--accent-solid, var(--accent)); background: color-mix(in srgb, var(--accent-solid, var(--accent)), var(--ink) 16%); color: #fff; }
+.ui-button-destructive { color: var(--danger); }
+.ui-button-destructive:hover:not(:disabled) { border-color: var(--danger); background: color-mix(in srgb, var(--danger), transparent 90%); color: var(--danger); }
+.ui-button-ghost { border-color: transparent; background: transparent; }
+.ui-button-sm { min-height: 38px; padding-inline: 10px; font-size: 11px; }
+.ui-button-icon { width: var(--ui-control-height, 44px); padding: 0; }
+.ui-input { width: 100%; min-height: var(--ui-control-height, 44px); padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--ui-radius); background: var(--surface); color: var(--ink); font: 600 13px Manrope, sans-serif; }
+.ui-textarea { min-height: 88px; resize: vertical; }
+.ui-field { display: grid; gap: 8px; min-width: 0; }
+.ui-field > label { color: var(--muted); font-size: 11px; font-weight: 700; }
+.ui-field-description, .ui-field-error { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.ui-field-error { color: var(--danger); }
+.ui-field-invalid .ui-input { border-color: var(--danger); }
+.ui-badge { display: inline-flex; align-items: center; width: fit-content; min-height: 25px; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: var(--surface-alt); font: 750 9px Manrope, sans-serif; letter-spacing: .03em; }
+.ui-badge-buy { color: var(--accent); background: var(--accent-soft); }
+.ui-badge-sell { color: var(--success, var(--accent)); background: var(--success-soft, var(--accent-soft)); }
+.ui-alert { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--ui-radius); background: var(--surface-alt); color: var(--ink); font-size: 12px; }
+.ui-alert-danger { border-color: color-mix(in srgb, var(--danger), var(--line) 65%); color: var(--danger); }
+.ui-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-tabs button { min-height: 38px; padding: 7px 11px; border: 1px solid var(--line); border-radius: var(--ui-radius); background: var(--surface); color: var(--muted); font: 700 11px Manrope, sans-serif; cursor: pointer; }
+.ui-tabs button:hover { border-color: var(--accent); color: var(--accent); }
+.ui-tabs button.selected, .ui-tabs button[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+:root {
   --ui-space-1: 6px;
   --ui-space-2: 10px;
   --ui-space-3: 14px;

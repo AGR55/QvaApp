@@ -1,5 +1,6 @@
 import React from "react";
 import { Empty } from "./common.jsx";
+import { Badge, Button } from "./ui.jsx";
 import { money } from "../lib/format.js";
 
 export function Offers({ offers, label, unit, editable = false, onEdit, onCancel }) {
@@ -20,7 +21,7 @@ export function Offers({ offers, label, unit, editable = false, onEdit, onCancel
           {offers.map((offer) => (
             <tr key={offer.uuid}>
               <td>{label(offer.coin)}</td>
-              <td><span className={`tag ${offer.type === "buy" ? "buy" : "sell"}`}>{offer.type === "buy" ? "Compra" : "Venta"}</span></td>
+              <td><Badge variant={offer.type === "buy" ? "buy" : "sell"}>{offer.type === "buy" ? "Compra" : "Venta"}</Badge></td>
               <td>{money(offer.amount)}</td>
               <td>
                 {money(offer.rate, unit(offer.coin) === "USD" ? 4 : 2)}{" "}
@@ -28,15 +29,15 @@ export function Offers({ offers, label, unit, editable = false, onEdit, onCancel
               </td>
               {editable ? (
                 <td className="offer-actions">
-                  <button onClick={() => onEdit?.(offer)}>
+                  <Button variant="outline" size="sm" onClick={() => onEdit?.(offer)}>
                     Editar
-                  </button>
-                  <button
-                    className="danger-action"
+                  </Button>
+                  <Button
+                    variant="destructive"
                     onClick={() => onCancel?.(offer)}
                   >
                     Cancelar
-                  </button>
+                  </Button>
                 </td>
               ) : null}
             </tr>

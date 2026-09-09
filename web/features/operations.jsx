@@ -5,6 +5,7 @@ import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { operationActionBody } from "../lib/operation-actions.js";
 import { useDialog } from "../hooks/use-dialog.js";
+import { Button, Input } from "../components/ui.jsx";
 
 const terminalWorkflow = new Set(["applied", "restored", "blocked"]);
 
@@ -52,10 +53,10 @@ export function Operations({ data, label, unit, onChanged }) {
                       <td>{label(operation.coin)}</td>
                       <td>{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}</small></td>
                       <td className="row-actions">
-                        {operation.state === "applied" && operation.offerType === "sell" ? <button onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</button> : null}
-                        {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <button onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</button> : null}
-                        {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <button onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</button> : null}
-                        {["applied", "acknowledged"].includes(operation.state) ? <button className="danger-button" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</button> : null}
+                        {operation.state === "applied" && operation.offerType === "sell" ? <Button variant="outline" size="sm" onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</Button> : null}
+                        {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <Button variant="outline" size="sm" onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</Button> : null}
+                        {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <Button variant="outline" size="sm" onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</Button> : null}
+                        {["applied", "acknowledged"].includes(operation.state) ? <Button variant="destructive" size="sm" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</Button> : null}
                       </td>
                     </tr>
                   ))}
@@ -71,7 +72,7 @@ export function Operations({ data, label, unit, onChanged }) {
                 <li key={workflow.id}>
                   <State value={workflow.state} />
                   <span><strong>{money(workflow.targetOffer.amount)} QUSD · {label(workflow.targetOffer.coin)}</strong><small>{workflow.error || workflow.riskDecision.reasons.join(" · ")}</small></span>
-                  {!terminalWorkflow.has(workflow.state) ? <button onClick={() => run(`/api/workflows/${workflow.id}/reconcile`)}><RefreshCcw aria-hidden="true" /> Conciliar</button> : <CheckCircle2 aria-hidden="true" />}
+                  {!terminalWorkflow.has(workflow.state) ? <Button variant="outline" size="sm" onClick={() => run(`/api/workflows/${workflow.id}/reconcile`)}><RefreshCcw aria-hidden="true" /> Conciliar</Button> : <CheckCircle2 aria-hidden="true" />}
                 </li>
               ))}
             </ol>
@@ -85,10 +86,10 @@ export function Operations({ data, label, unit, onChanged }) {
             <p className="eyebrow">ACCIÓN FINANCIERA</p>
             <h2 id="operation-review-title">{actionTitle(pending.action)}</h2>
             <p>{money(pending.operation.amount)} QUSD · {label(pending.operation.coin)}. QvaApply registrará la acción, pero nunca realizará la transferencia fiat.</p>
-            {pending.action === "paid" ? <label>Referencia del pago<input autoFocus value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
+            {pending.action === "paid" ? <label>Referencia del pago<Input autoFocus value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
             <div className="review-actions">
-              <button onClick={closePending}>Volver</button>
-              <button className="refresh" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, operationActionBody(pending.action, reference))}>Confirmar acción</button>
+              <Button variant="ghost" onClick={closePending}>Volver</Button>
+              <Button variant="primary" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, operationActionBody(pending.action, reference))}>Confirmar acción</Button>
             </div>
           </div>
         </section>
