@@ -14,7 +14,11 @@ import type { FiatMarket, OperationState, P2pAverage, P2pOffer } from "./types.j
 import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
-import { median, outgoingFiatCost } from "./market-math.js";
+import {
+  median,
+  outgoingFiatCost,
+  ownOfferFiatTotal,
+} from "./market-math.js";
 import { planLiquidity } from "./core/liquidity-plan.js";
 
 type RuntimeConfig = typeof Config;
@@ -1217,6 +1221,12 @@ export class TradingEngine {
       throw new Error(
         `Ya alcanzaste el máximo de ${this.strategy().maxOpenOffers} ofertas abiertas.`,
       );
+    const receive = ownOfferFiatTotal(
+      amount,
+      fiatPerQusd,
+      type,
+      market.currency,
+    );
     if (type === "buy") {
       const committed = open
         .filter(
@@ -1230,11 +1240,7 @@ export class TradingEngine {
           0,
         );
       const available = this.fiatBalance(coin) - committed;
-      const required = outgoingFiatCost(
-        amount,
-        fiatPerQusd,
-        market.outgoingTransferFee,
-      ).total;
+      const required = receive + market.outgoingTransferFee;
       if (required > available + 0.000001)
         throw new Error(
           `Saldo ${this.marketLabel(coin)} insuficiente. Disponible para nuevas compras: ${available.toFixed(2)} ${this.marketCurrency(coin)}.`,
@@ -1253,7 +1259,7 @@ export class TradingEngine {
       type,
       coin,
       amount,
-      receive: amount * fiatPerQusd,
+      receive,
       details: this.market(coin)!.paymentDetails,
       ...(message ? { message } : {}),
       idempotencyKey,
@@ -1267,7 +1273,7 @@ export class TradingEngine {
     );
     this.store.audit(
       "create_offer",
-      `Oferta propia ${type} en ${coin}: ${amount} QUSD a ${fiatPerQusd}`,
+      `Oferta propia ${type} en ${coin}: ${amount} QUSD a tasa solicitada ${fiatPerQusd}; total fiat ${receive} (tasa efectiva ${receive / amount})`,
       offer.uuid,
     );
     return offer;
@@ -1312,25 +1318,33 @@ export class TradingEngine {
           0,
         );
       const available = this.fiatBalance(offer.coin) - committed;
-      const required = outgoingFiatCost(
+      const receive = ownOfferFiatTotal(
         amount,
         fiatPerQusd,
-        market?.outgoingTransferFee ?? 0,
-      ).total;
+        offer.type,
+        market?.currency ?? "",
+      );
+      const required = receive + (market?.outgoingTransferFee ?? 0);
       if (required > available + 0.000001)
         throw new Error(
           `Saldo ${this.marketLabel(offer.coin)} insuficiente. Disponible para esta oferta: ${available.toFixed(2)} ${this.marketCurrency(offer.coin)}.`,
         );
     }
+    const receive = ownOfferFiatTotal(
+      amount,
+      fiatPerQusd,
+      offer.type,
+      market?.currency ?? "",
+    );
     await this.executeMutation(
       "edit_offer",
       uuid,
-      { uuid, amount, receive: amount * fiatPerQusd },
-      () => this.qva.editOffer(uuid, { amount, receive: amount * fiatPerQusd }),
+      { uuid, amount, receive },
+      () => this.qva.editOffer(uuid, { amount, receive }),
     );
     this.store.audit(
       "edit_offer",
-      `Oferta propia ${offer.coin} actualizada: ${amount} QUSD a ${fiatPerQusd}`,
+      `Oferta propia ${offer.coin} actualizada: ${amount} QUSD a tasa solicitada ${fiatPerQusd}; total fiat ${receive} (tasa efectiva ${receive / amount})`,
       uuid,
     );
   }

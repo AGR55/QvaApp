@@ -359,6 +359,55 @@ test("permite hasta el límite configurado de ofertas propias abiertas", async (
   );
 });
 
+test("crea y edita ofertas CUP usando el total fiat conservador", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-rounded-own-offer-")),
+  );
+  store.set("mode", "real");
+  const ownOffer = {
+    uuid: "own-rounded",
+    type: "sell" as const,
+    coin: "BANK_CUP",
+    amount: 9,
+    receive: 8_770,
+    status: "open",
+    details: { cuenta: "123" },
+  };
+  let createdReceive: number | undefined;
+  let editedReceive: number | undefined;
+  const qva = {
+    listOffers: async () => [ownOffer],
+    createOffer: async (request: { receive: number }) => {
+      createdReceive = request.receive;
+      return ownOffer;
+    },
+    editOffer: async (_uuid: string, request: { receive?: number }) => {
+      editedReceive = request.receive;
+      return ownOffer;
+    },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {
+      realTradingAllowed: true,
+      maxOpenOwnOffers: 10,
+      paymentDetails: {
+        BANK_CUP: [{ name: "cuenta", value: "123" }],
+        BANDECPREPAGO: [],
+      },
+    } as never,
+    async () => undefined,
+  );
+
+  await trading.createOwnOffer("BANK_CUP", "sell", 9, 973.7);
+  await trading.editOwnOffer("own-rounded", 9, 973.7);
+
+  assert.equal(createdReceive, 8_770);
+  assert.equal(editedReceive, 8_770);
+  store.close();
+});
+
 test("cada turno de refresco actualiza como máximo una oferta vencida", async () => {
   const store = new Store(
     mkdtempSync(join(tmpdir(), "qvaapply-refresh-round-")),

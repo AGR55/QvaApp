@@ -51,6 +51,7 @@ test("el escaneo real cancela liquidez peor y aplica a la mejor compra externa",
     p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
     qusdBalance: async () => 10,
     listOffers: async () => [own],
+    getOffer: async () => own,
     cancel: async (uuid: string) => void calls.push(`cancel:${uuid}`),
     apply: async (uuid: string) => void calls.push(`apply:${uuid}`),
   };

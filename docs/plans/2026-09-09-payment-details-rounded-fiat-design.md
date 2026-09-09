@@ -28,9 +28,9 @@ terminados en cero sin empeorar la tasa límite configurada.
 - La recreación y su idempotencia conservarán `details`, mensaje, etiquetas,
   restricciones, privacidad y webhook del snapshot confirmado.
 
-### Totales fiat en múltiplos de diez
+### Totales CUP en múltiplos de diez
 
-Se centralizará el cálculo de `receive` para ofertas propias:
+Se centralizará el cálculo de `receive` para ofertas propias denominadas en CUP:
 
 - Oferta `buy`: el creador paga fiat; se redondea hacia abajo al múltiplo de 10
   para no pagar más que la tasa solicitada.
@@ -39,10 +39,13 @@ Se centralizará el cálculo de `receive` para ofertas propias:
 - Si el producto ya es múltiplo de 10, permanece intacto.
 - El resultado respetará el mínimo positivo admitido por QvaPay; una entrada que
   no pueda producir un total válido se rechazará antes de llamar a la API.
+- Los mercados en otras monedas, como Clásica/USD, conservarán su precisión
+  decimal; redondearlos a decenas alteraría materialmente la tasa.
 
-La misma función se utilizará al crear, editar y recrear ofertas. En una
+La misma función se utilizará al crear, editar y recrear ofertas CUP. En una
 reposición parcial se conserva la tasa del snapshot, pero el nuevo total vuelve
-a redondearse según el lado original.
+a redondearse según el lado original. Las demás monedas usarán el mismo punto
+central de cálculo con precisión de ocho decimales.
 
 ## Seguridad y trazabilidad
 
@@ -60,4 +63,3 @@ a redondearse según el lado original.
 - `GET /p2p/:uuid` devuelve los datos completos y solo muestra `details` al
   creador o peer.
 - `POST /p2p/create` exige `details` como arreglo.
-

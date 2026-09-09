@@ -65,20 +65,29 @@ const input = {
   priceReason: "Supera el mínimo de venta.",
 };
 
-test("cancela, aplica y deja el pago fiat como acción humana", async () => {
+test("hidrata los datos de pago antes de cancelar y los conserva al reponer", async () => {
   const { store, markets } = setup();
   const config = markets.current();
   config.qusdReserve = 0;
   config.risk.minQusdReserve = 0;
   markets.save(config);
   const calls: string[] = [];
-  const restored: Array<{ amount: number; receive: number }> = [];
+  const restored: Array<{
+    amount: number;
+    receive: number;
+    details: Array<{ name: string; value: string }>;
+  }> = [];
   const qva = {
     qusdBalance: async () => 10,
-    listOffers: async () => [own],
+    listOffers: async () => [{ ...own, details: undefined }],
+    getOffer: async () => own,
     cancel: async (uuid: string) => void calls.push(`cancel:${uuid}`),
     apply: async (uuid: string) => void calls.push(`apply:${uuid}`),
-    createOffer: async (request: { amount: number; receive: number }) => {
+    createOffer: async (request: {
+      amount: number;
+      receive: number;
+      details: Array<{ name: string; value: string }>;
+    }) => {
       restored.push(request);
       return { ...own, ...request, uuid: "restored-surplus" };
     },
@@ -98,9 +107,41 @@ test("cancela, aplica y deja el pago fiat como acción humana", async () => {
   assert.equal(restored.length, 1);
   assert.equal(restored[0]?.amount, 10);
   assert.equal(restored[0]?.receive, 9_900);
+  assert.deepEqual(restored[0]?.details, [{ name: "cuenta", value: "123" }]);
   assert.equal(store.getOperation("external")?.state, "applied");
   assert.equal(store.activeReservedQusd(), 0);
   assert.equal(store.workflowOwnOffers(result.workflow!.id)[0]?.state, "restored");
+  store.close();
+});
+
+test("no cancela ninguna oferta si QvaPay no entrega sus datos de pago", async () => {
+  const { store, markets } = setup();
+  const config = markets.current();
+  config.qusdReserve = 0;
+  config.risk.minQusdReserve = 0;
+  markets.save(config);
+  const calls: string[] = [];
+  const qva = {
+    qusdBalance: async () => 10,
+    listOffers: async () => [{ ...own, details: undefined }],
+    getOffer: async () => ({ ...own, details: undefined }),
+    cancel: async () => void calls.push("cancel"),
+    apply: async () => void calls.push("apply"),
+    createOffer: async () => void calls.push("create"),
+  };
+  const orchestrator = new OpportunityOrchestrator(
+    store,
+    qva as never,
+    markets,
+    { now: () => now },
+  );
+
+  const result = await orchestrator.execute(input);
+
+  assert.equal(result.decision.kind, "blocked");
+  assert.match(result.decision.reasons.at(-1) ?? "", /datos de pago/i);
+  assert.deepEqual(calls, []);
+  assert.equal(store.recoverableWorkflows().length, 0);
   store.close();
 });
 
@@ -110,6 +151,7 @@ test("restaura la oferta original cuando aplicar es rechazado", async () => {
   const qva = {
     qusdBalance: async () => 10,
     listOffers: async () => [own],
+    getOffer: async () => own,
     cancel: async () => undefined,
     apply: async () => {
       throw new QvaApiError(409, "La oferta ya no está disponible");
@@ -158,6 +200,7 @@ test("libera QUSD desde otro mercado y repone el excedente proporcional", async 
   const qva = {
     qusdBalance: async () => 0,
     listOffers: async () => [otherMarket],
+    getOffer: async () => otherMarket,
     cancel: async (uuid: string) => void calls.push(`cancel:${uuid}`),
     apply: async (uuid: string) => void calls.push(`apply:${uuid}`),
     createOffer: async (request: { coin: string; amount: number; receive: number }) => {
@@ -180,6 +223,39 @@ test("libera QUSD desde otro mercado y repone el excedente proporcional", async 
   store.close();
 });
 
+test("redondea hacia arriba el total CUP de una reposición parcial", async () => {
+  const { store, markets } = setup();
+  const config = markets.current();
+  config.qusdReserve = 0;
+  config.risk.minQusdReserve = 0;
+  markets.save(config);
+  const unevenOwn: P2pOffer = {
+    ...own,
+    receive: 19_801,
+  };
+  let restoredReceive: number | undefined;
+  const qva = {
+    qusdBalance: async () => 10,
+    listOffers: async () => [{ ...unevenOwn, details: undefined }],
+    getOffer: async () => unevenOwn,
+    cancel: async () => undefined,
+    apply: async () => undefined,
+    createOffer: async (request: { receive: number }) => {
+      restoredReceive = request.receive;
+      return { ...unevenOwn, ...request, uuid: "rounded-restoration" };
+    },
+  };
+  const orchestrator = new OpportunityOrchestrator(store, qva as never, markets, {
+    now: () => now,
+  });
+
+  const result = await orchestrator.execute(input);
+
+  assert.equal(result.applicationConfirmed, true);
+  assert.equal(restoredReceive, 9_910);
+  store.close();
+});
+
 test("conserva la aplicación confirmada si falla la reposición del excedente", async () => {
   const { store, markets } = setup();
   const config = markets.current();
@@ -190,6 +266,7 @@ test("conserva la aplicación confirmada si falla la reposición del excedente",
   const qva = {
     qusdBalance: async () => 10,
     listOffers: async () => [own],
+    getOffer: async () => own,
     cancel: async () => undefined,
     apply: async () => undefined,
     createOffer: async () => {
@@ -217,6 +294,7 @@ test("un resultado incierto no restaura ni libera la reserva", async () => {
   const qva = {
     qusdBalance: async () => 10,
     listOffers: async () => [own],
+    getOffer: async () => own,
     cancel: async () => undefined,
     apply: async () => {
       throw new QvaMutationUncertainError("apply", new Error("timeout"));
@@ -271,6 +349,7 @@ test("concilia tras reinicio una aplicación confirmada sin repetirla", async ()
   const firstQva = {
     qusdBalance: async () => 10,
     listOffers: async () => [own],
+    getOffer: async () => own,
     cancel: async () => undefined,
     apply: async () => {
       throw new QvaMutationUncertainError("apply", new Error("timeout"));
@@ -309,6 +388,7 @@ test("concilia el rechazo remoto restaurando la venta propia", async () => {
     {
       qusdBalance: async () => 10,
       listOffers: async () => [own],
+      getOffer: async () => own,
       cancel: async () => undefined,
       apply: async () => {
         throw new QvaMutationUncertainError("apply", new Error("timeout"));
@@ -352,6 +432,7 @@ test("mantiene reserva y bloqueo cuando la conciliación no es concluyente", asy
     {
       qusdBalance: async () => 10,
       listOffers: async () => [own],
+      getOffer: async () => own,
       cancel: async () => undefined,
       apply: async () => {
         throw new QvaMutationUncertainError("apply", new Error("timeout"));
@@ -385,6 +466,7 @@ test("reconoce una reposición idempotente ya creada después de un 409", async 
     qusdBalance: async () => 10,
     listOffers: async (params: { my?: boolean }) =>
       params.my ? [own] : [],
+    getOffer: async () => own,
     cancel: async () => undefined,
     apply: async () => {
       throw new QvaApiError(409, "La oferta externa ya no está disponible");

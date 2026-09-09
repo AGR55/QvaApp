@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  hydratePlannedOwnOffer,
   planLiquidity,
   type RestorableOwnOffer,
 } from "../core/liquidity-plan.js";
@@ -13,6 +14,7 @@ import type { MarketConfigService } from "../market-config.js";
 import { QvaApiError, QvaMutationUncertainError } from "../qvapay.js";
 import type { Store, TradeWorkflow } from "../store.js";
 import type { P2pOffer } from "../types.js";
+import { ownOfferFiatTotal } from "../market-math.js";
 
 export interface OpportunityInput {
   target: P2pOffer;
@@ -268,10 +270,29 @@ export class OpportunityOrchestrator {
     });
     if (decision.kind !== "apply") return { decision };
 
+    let cancellationPlan = liquidity.cancel;
+    if (cancellationPlan.length) {
+      try {
+        const details = await Promise.all(
+          cancellationPlan.map((offer) => this.qva.getOffer(offer.uuid)),
+        );
+        cancellationPlan = cancellationPlan.map((offer, index) =>
+          hydratePlannedOwnOffer(offer, details[index]!),
+        );
+      } catch (error) {
+        return {
+          decision: this.blockDecision(
+            decision,
+            `No se liberó QUSD: ${errorMessage(error)}`,
+          ),
+        };
+      }
+    }
+
     const workflowId = randomUUID();
     this.store.createTradeWorkflow(
       { id: workflowId, targetOffer: input.target, riskDecision: decision },
-      liquidity.cancel,
+      cancellationPlan,
     );
     if (
       !this.store.reserveQusd(
@@ -474,7 +495,12 @@ export class OpportunityOrchestrator {
     own: ReturnType<Store["workflowOwnOffers"]>[number],
     amount = own.snapshot.amount,
   ): Promise<P2pOffer> {
-    const request = restorationRequest(own.snapshot, own.restoreIdempotencyKey, amount);
+    const request = restorationRequest(
+      own.snapshot,
+      own.restoreIdempotencyKey,
+      amount,
+      this.config.find(own.snapshot.coin)?.currency ?? "",
+    );
     try {
       return await this.mutation(
         "restore_own_offer",
@@ -599,12 +625,13 @@ function restorationRequest(
   offer: RestorableOwnOffer,
   idempotencyKey: string,
   amount = offer.amount,
+  currency = "",
 ) {
   return {
     type: "sell" as const,
     coin: offer.coin,
     amount: roundQusd(amount),
-    receive: roundFiat(amount * offer.rate),
+    receive: ownOfferFiatTotal(amount, offer.rate, "sell", currency),
     details: offer.details,
     ...(offer.message ? { message: offer.message } : {}),
     onlyKyc: offer.onlyKyc,
@@ -625,10 +652,6 @@ function plannedRestoreQusd(
 }
 
 function roundQusd(value: number): number {
-  return Math.round(value * 100_000_000) / 100_000_000;
-}
-
-function roundFiat(value: number): number {
   return Math.round(value * 100_000_000) / 100_000_000;
 }
 

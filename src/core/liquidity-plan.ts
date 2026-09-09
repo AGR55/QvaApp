@@ -48,6 +48,39 @@ export interface LiquidityPlanInput {
   marketEconomics?: Record<string, LiquidityMarketEconomics>;
 }
 
+export function hydratePlannedOwnOffer(
+  planned: PlannedOwnOffer,
+  detailed: P2pOffer,
+): PlannedOwnOffer {
+  if (
+    detailed.uuid !== planned.uuid ||
+    detailed.type !== "sell" ||
+    detailed.status !== "open" ||
+    detailed.coin !== planned.coin ||
+    !nearlyEqual(detailed.amount, planned.amount) ||
+    !nearlyEqual(detailed.receive, planned.receive)
+  )
+    throw new Error(
+      `La oferta propia ${planned.uuid} cambió mientras se preparaba la liberación; no se cancelará ninguna.`,
+    );
+  const hydrated = snapshot(detailed);
+  if (
+    hydrated.details.length === 0 ||
+    hydrated.details.some(
+      ({ name, value }) => !name.trim() || !value.trim(),
+    )
+  )
+    throw new Error(
+      `QvaPay no devolvió los datos de pago completos de la oferta propia ${planned.uuid}; no se cancelará ninguna.`,
+    );
+  return {
+    ...hydrated,
+    profitabilityPercent: planned.profitabilityPercent,
+    consumeQusd: planned.consumeQusd,
+    restoreQusd: planned.restoreQusd,
+  };
+}
+
 /**
  * Selects the least competitive own sell offers first. It never proposes a
  * partial cancellation plan: either the target can be funded or nothing is
@@ -206,6 +239,10 @@ function normalizeDetails(
 ): { name: string; value: string }[] {
   if (!details) return [];
   return Object.entries(details).map(([name, value]) => ({ name, value }));
+}
+
+function nearlyEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) <= 0.0000001;
 }
 
 function infeasible(input: LiquidityPlanInput, reason: string): LiquidityPlan {
