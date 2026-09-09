@@ -158,3 +158,56 @@ body { background: var(--bg); }
 .theme-toggle { color: var(--muted); }
 .theme-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 @media (max-width:900px) { .app-shell { padding-bottom: 82px; }.sidebar { top: auto; height: 64px; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); } }
+
+/* Shared component language: Apple-like clarity with financial-data density. */
+.panel, .metric, .control-deck, .market-card, .hunt-side, .hunt-market, .capture-row,
+.blocked-rail, .blocked-card, .offer-workbench, .hunting-command { background: var(--surface); }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.panel-head h2 { margin: 0; color: var(--ink); font-size: 1rem; letter-spacing: -.02em; }
+.panel p, .panel li, .panel td, .panel dd { line-height: 1.55; }
+.metric { min-height: 112px; display: grid; align-content: center; gap: 5px; }
+.metric span, .setting span, .section-kicker, .offer-fields label, .settings-form label, .market-settings label { color: var(--muted); }
+.metric strong { letter-spacing: -.03em; }
+.button, .refresh, .icon-action, .icon-button, .tabs button, .row-actions button,
+.workflow-list button, .control-deck button, .payment-details button, .market-settings > button,
+.offer-actions button, .pagination button, .dialog-close { min-height: 44px; border-radius: var(--radius-md); border-color: var(--line); box-shadow: none; }
+.button:hover:not(:disabled), .refresh:hover:not(:disabled), .icon-action:hover:not(:disabled),
+.icon-button:hover:not(:disabled), .row-actions button:hover:not(:disabled), .offer-actions button:hover:not(:disabled),
+.pagination button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.button.primary, .offer-workbench footer .refresh, .offer-modal-actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.button.primary:hover:not(:disabled), .offer-workbench footer .refresh:hover:not(:disabled), .offer-modal-actions .primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent), #000 12%); color: #fff; }
+button:disabled { cursor: not-allowed; opacity: .52; }
+.table-wrap, .table-scroll, .table-wrap:focus-within, .table-scroll:focus-within { border-color: var(--line); border-radius: var(--radius-md); box-shadow: none; }
+table { border-spacing: 0; }
+thead th { position: sticky; top: 0; z-index: 1; padding-top: 12px; padding-bottom: 12px; background: var(--surface-alt); color: var(--muted); }
+tbody tr:hover { background: var(--accent-soft); }
+tbody td { border-bottom-color: var(--line); }
+.tag, .state, .freshness { border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; }
+.state-applied, .state-completed, .state-restored, .tag.buy { border-color: color-mix(in srgb, var(--accent), var(--line) 70%); }
+.empty { display: grid; place-items: center; gap: 10px; min-height: 150px; padding: 24px; border: 1px dashed var(--line); border-radius: var(--radius-lg); background: var(--surface-alt); color: var(--muted); text-align: center; }
+.empty svg { width: 22px; color: var(--accent); }
+.skeleton { padding: 8px 0; }
+.skeleton i, .blocked-loading span { border-radius: 6px; background: linear-gradient(90deg, var(--surface-alt), color-mix(in srgb, var(--surface-alt), var(--surface) 55%), var(--surface-alt)); }
+.settings-form label, .market-settings label { border-color: var(--line); border-radius: var(--radius-md); background: var(--surface-alt); }
+.settings-form input, .settings-form textarea, .market-settings input:not([type="checkbox"]),
+.offer-fields input, .offer-fields select, .reason-field input, .password-field, .review-panel input { border-color: var(--line); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); }
+input, select, textarea { accent-color: var(--accent); }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: .72; }
+.password-field:focus-within, .settings-form label:focus-within, .market-settings label:focus-within { border-color: var(--accent); }
+.alert, .resource-error, .dialog-message, .safety-note { border: 1px solid color-mix(in srgb, currentColor, var(--line) 72%); border-radius: var(--radius-md); }
+.blocked-rail { position: sticky; top: 24px; border-color: var(--line); box-shadow: none; backdrop-filter: none; }
+.blocked-card { border: 1px solid var(--line); box-shadow: none; }
+.offer-comparison div, .risk-checks li, .preview-details > dl div, .liquidity-preview { border: 1px solid var(--line); background: var(--surface-alt); }
+.offer-workbench > header { border-bottom-color: var(--line); background: var(--surface-alt); }
+.calculation-lead { background: var(--accent-soft); color: var(--ink); }
+.calculation-lead span { color: var(--muted); }
+.calculation-lead strong { color: var(--accent); }
+.offer-calculation, .offer-summary { border-color: var(--line); background: var(--line); }
+.offer-calculation dl div, .offer-summary div { background: var(--surface); border-color: var(--line); }
+.dialog-backdrop, .offer-modal-backdrop, .review-panel { background: color-mix(in srgb, var(--bg), #000 48%); backdrop-filter: blur(5px); }
+.review-panel > div, .offer-modal, .decision-dialog { border-color: var(--line); border-radius: var(--radius-lg); }
+.dialog-close { background: var(--surface-alt); }
+.dialog-icon { border-radius: var(--radius-md); }
+.chart-stage { border-radius: var(--radius-md); }
+.recharts-default-tooltip { border-color: var(--line) !important; }
+@media (max-width:900px) { .blocked-rail { position: static; } }

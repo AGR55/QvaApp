@@ -20,7 +20,7 @@ export function Offers({ offers, label, unit, editable = false, onEdit, onCancel
           {offers.map((offer) => (
             <tr key={offer.uuid}>
               <td>{label(offer.coin)}</td>
-              <td>{offer.type}</td>
+              <td><span className={`tag ${offer.type === "buy" ? "buy" : "sell"}`}>{offer.type === "buy" ? "Compra" : "Venta"}</span></td>
               <td>{money(offer.amount)}</td>
               <td>
                 {money(offer.rate, unit(offer.coin) === "USD" ? 4 : 2)}{" "}
