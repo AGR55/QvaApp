@@ -4,6 +4,7 @@ import { Freshness, List, Panel, Skeleton } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
+import { Button } from "../components/ui.jsx";
 
 export function Cockpit({ data, label, unit, onChanged, resources }) {
   const first = data.rankings.potential?.[0];
@@ -25,9 +26,9 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
     <div className="page-stack">
       <section className="control-deck" aria-label="Controles operativos">
         <div><span className={`live ${data.state.paused ? "offline" : ""}`} /> <strong>{data.state.paused ? "Automatización pausada" : "Automatización activa"}</strong><small>Modo {data.state.mode}</small></div>
-        <button onClick={() => control({ paused: !data.state.paused })}>{data.state.paused ? <Play /> : <Pause />}{data.state.paused ? "Reanudar" : "Pausar"}</button>
-        <button onClick={() => data.state.mode === "real" ? control({ mode: "simulation", paused: true }) : setConfirmReal(true)}><Radio />{data.state.mode === "real" ? "Pasar a simulación" : "Preparar modo real"}</button>
-        <button className={data.risk.usage.emergencyStop ? "emergency active" : "emergency"} onClick={() => control({ emergencyStop: !data.risk.usage.emergencyStop })}><AlertOctagon />{data.risk.usage.emergencyStop ? "Desbloquear emergencia" : "Parada de emergencia"}</button>
+        <Button variant="outline" onClick={() => control({ paused: !data.state.paused })}>{data.state.paused ? <Play /> : <Pause />}{data.state.paused ? "Reanudar" : "Pausar"}</Button>
+        <Button variant="outline" onClick={() => data.state.mode === "real" ? control({ mode: "simulation", paused: true }) : setConfirmReal(true)}><Radio />{data.state.mode === "real" ? "Pasar a simulación" : "Preparar modo real"}</Button>
+        <Button variant="destructive" className={data.risk.usage.emergencyStop ? "emergency active" : "emergency"} onClick={() => control({ emergencyStop: !data.risk.usage.emergencyStop })}><AlertOctagon />{data.risk.usage.emergencyStop ? "Desbloquear emergencia" : "Parada de emergencia"}</Button>
       </section>
       <p className="detail" role="status" aria-live="polite">{status}</p>
       <section className="decision-strip">
@@ -131,7 +132,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
           />
         </Panel>
       </div>
-      {confirmReal ? <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="real-mode-title"><div><ShieldCheck aria-hidden="true" /><p className="eyebrow">CAMBIO CRÍTICO</p><h2 id="real-mode-title">Activar capacidad de operar con dinero real</h2><p>El modo real habilita aplicaciones automáticas dentro de todos los límites configurados. Los pagos fiat seguirán siendo manuales.</p><div className="review-actions"><button onClick={closeReal}>Volver</button><button className="refresh" onClick={() => control({ mode: "real", paused: true })}>Confirmar modo real, aún pausado</button></div></div></section> : null}
+      {confirmReal ? <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="real-mode-title"><div><ShieldCheck aria-hidden="true" /><p className="eyebrow">CAMBIO CRÍTICO</p><h2 id="real-mode-title">Activar capacidad de operar con dinero real</h2><p>El modo real habilita aplicaciones automáticas dentro de todos los límites configurados. Los pagos fiat seguirán siendo manuales.</p><div className="review-actions"><Button variant="ghost" onClick={closeReal}>Volver</Button><Button variant="primary" onClick={() => control({ mode: "real", paused: true })}>Confirmar modo real, aún pausado</Button></div></div></section> : null}
     </div>
   );
 }

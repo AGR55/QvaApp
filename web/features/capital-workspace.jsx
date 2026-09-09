@@ -5,7 +5,8 @@ import { Freshness, Panel, Skeleton } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
-import { median, outgoingFiatCost } from "../../src/market-math.js";
+import { median, ownOfferFiatTotal } from "../../src/market-math.js";
+import { Button, IconButton, Input, Select } from "../components/ui.jsx";
 
 export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
   const [editor, setEditor] = useState();
@@ -75,7 +76,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
       <Panel title="Mis ofertas" wide>
         <div className="capital-toolbar">
           <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
-          <button className="refresh" onClick={openCreate}><Plus aria-hidden="true" /> Nueva oferta</button>
+          <Button variant="primary" onClick={openCreate}><Plus aria-hidden="true" /> Nueva oferta</Button>
         </div>
         {editor ? (
           <OfferEditor
@@ -118,8 +119,8 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
             </dl>
             {cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}
             <div className="offer-modal-actions">
-              <button type="button" onClick={closeCancel} disabled={cancelling}>Conservar oferta</button>
-              <button type="button" className="danger-confirm" onClick={cancelOffer} disabled={cancelling}>{cancelling ? "Eliminando…" : "Sí, eliminar oferta"}</button>
+              <Button variant="ghost" type="button" onClick={closeCancel} disabled={cancelling}>Conservar oferta</Button>
+              <Button variant="destructive" type="button" onClick={cancelOffer} disabled={cancelling}>{cancelling ? "Eliminando…" : "Sí, eliminar oferta"}</Button>
             </div>
           </div>
         </section>
@@ -137,7 +138,15 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
   const rate = Number(values.rate);
   const validNumbers = Number.isFinite(amount) && amount > 0 && Number.isFinite(rate) && rate > 0;
   const paysFiat = values.type === "buy";
-  const transfer = outgoingFiatCost(validNumbers ? amount : 0, validNumbers ? rate : 0, paysFiat ? market?.outgoingTransferFee || 0 : 0);
+  const roundedReceive = validNumbers
+    ? ownOfferFiatTotal(amount, rate, paysFiat ? "buy" : "sell", market?.currency || "")
+    : 0;
+  const transfer = {
+    nominal: roundedReceive,
+    fee: paysFiat ? market?.outgoingTransferFee || 0 : 0,
+    total: roundedReceive + (paysFiat ? market?.outgoingTransferFee || 0 : 0),
+    effectiveRate: amount > 0 ? (roundedReceive + (paysFiat ? market?.outgoingTransferFee || 0 : 0)) / amount : 0,
+  };
   const marketReference = useMemo(() => referenceMedian(data, values.coin, values.type), [data, values.coin, values.type]);
   const deviation = marketReference && rate > 0 ? ((rate - marketReference) / marketReference) * 100 : undefined;
   const favorableDeviation = deviation === undefined
@@ -173,14 +182,14 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
           <h3 id="offer-editor-title">{initial.mode === "create" ? "Crear oferta" : `Editar ${label(initial.coin)}`}</h3>
           <p>Los cálculos se actualizan antes de enviar cualquier cambio a QvaPay.</p>
         </div>
-        <button type="button" className="icon-action" onClick={onClose} aria-label="Cerrar editor"><X aria-hidden="true" /></button>
+              <IconButton variant="ghost" type="button" onClick={onClose} aria-label="Cerrar editor"><X aria-hidden="true" /></IconButton>
       </header>
       <form onSubmit={submit}>
         <div className="offer-fields">
-          <label><span>Mercado</span><select value={values.coin} disabled={initial.mode === "edit"} onChange={(event) => setField("coin", event.target.value)}>{data.markets.map((item) => <option key={item.code} value={item.code}>{label(item.code)}</option>)}</select></label>
-          <label><span>Movimiento</span><select value={values.type} disabled={initial.mode === "edit"} onChange={(event) => setField("type", event.target.value)}><option value="buy">Comprar QUSD</option><option value="sell">Vender QUSD</option></select></label>
-          <label><span>Importe</span><span className="input-unit"><input type="number" min="0.01" step="0.01" inputMode="decimal" value={values.amount} onChange={(event) => setField("amount", event.target.value)} autoFocus /><small>QUSD</small></span></label>
-          <label><span>Tasa</span><span className="input-unit"><input type="number" min="0.0001" step="0.0001" inputMode="decimal" value={values.rate} onChange={(event) => setField("rate", event.target.value)} /><small>{unit(values.coin)}/QUSD</small></span></label>
+          <label><span>Mercado</span><Select value={values.coin} disabled={initial.mode === "edit"} onChange={(event) => setField("coin", event.target.value)}>{data.markets.map((item) => <option key={item.code} value={item.code}>{label(item.code)}</option>)}</Select></label>
+          <label><span>Movimiento</span><Select value={values.type} disabled={initial.mode === "edit"} onChange={(event) => setField("type", event.target.value)}><option value="buy">Comprar QUSD</option><option value="sell">Vender QUSD</option></Select></label>
+          <label><span>Importe</span><span className="input-unit"><Input type="number" min="0.01" step="0.01" inputMode="decimal" value={values.amount} onChange={(event) => setField("amount", event.target.value)} autoFocus /><small>QUSD</small></span></label>
+          <label><span>Tasa</span><span className="input-unit"><Input type="number" min="0.0001" step="0.0001" inputMode="decimal" value={values.rate} onChange={(event) => setField("rate", event.target.value)} /><small>{unit(values.coin)}/QUSD</small></span></label>
         </div>
         <div className="offer-calculation">
           <div className="calculation-lead">
@@ -199,7 +208,7 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
         </div>
         {exceedsBalance ? <p className="form-error" role="alert">La salida total supera el fiat disponible en {label(values.coin)}.</p> : null}
         {status ? <p className="form-error" role="alert">{status}</p> : null}
-        <footer><button type="button" onClick={onClose}>Descartar</button><button type="submit" className="refresh" disabled={invalid || saving}>{saving ? "Guardando…" : initial.mode === "create" ? "Crear oferta" : "Guardar cambios"}</button></footer>
+        <footer><Button variant="ghost" type="button" onClick={onClose}>Descartar</Button><Button variant="primary" type="submit" disabled={invalid || saving}>{saving ? "Guardando…" : initial.mode === "create" ? "Crear oferta" : "Guardar cambios"}</Button></footer>
       </form>
     </section>
   );

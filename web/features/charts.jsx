@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Empty, Panel, Skeleton } from "../components/common.jsx";
+import { Button, Tabs } from "../components/ui.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { chartDomain } from "../lib/chart-domain.js";
@@ -50,18 +51,8 @@ export function Charts({ markets }) {
   return (
     <div className="page-stack">
       <Panel title="Fluctuación de precios" wide>
-        <div className="tabs">
-          {markets.map((market) => (
-            <button
-              key={market.code}
-              className={coin === market.code ? "selected" : ""}
-              onClick={() => setCoin(market.code)}
-            >
-              {market.label}
-            </button>
-          ))}
-        </div>
-        {error ? <div className="resource-error" role="alert"><p>{error}</p><button className="button secondary" onClick={() => setRetry((value) => value + 1)}>Reintentar</button></div> : null}
+          <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: market.label }))} />
+        {error ? <div className="resource-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((value) => value + 1)}>Reintentar</Button></div> : null}
         {data && values.length ? (
           <>
           <dl className="chart-summary"><div><dt>Última mediana de compra</dt><dd>{Number.isFinite(latest?.medianaCompra) ? money(latest.medianaCompra, digits) : "—"}</dd></div><div><dt>Última mediana de venta</dt><dd>{Number.isFinite(latest?.medianaVenta) ? money(latest.medianaVenta, digits) : "—"}</dd></div><div><dt>Ventana</dt><dd>Últimas 24 h</dd></div></dl>

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, X, XCircle } from "lucide-react";
 import { Empty, Panel } from "../components/common.jsx";
 import { useDialog } from "../hooks/use-dialog.js";
+import { Button, IconButton } from "../components/ui.jsx";
 import { requestJson } from "../lib/http.js";
 
 export function Audit({ data, onChanged }) {
@@ -76,25 +77,25 @@ export function Audit({ data, onChanged }) {
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
         <div className="blocked-rail-head"><div><span className="section-kicker">Revisión manual</span><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
-        {eventsError ? <div className="resource-error" role="alert"><p>{eventsError}</p><button className="button secondary" onClick={() => void loadEvents()}>Reintentar</button></div> : null}
+        {eventsError ? <div className="resource-error" role="alert"><p>{eventsError}</p><Button variant="secondary" size="sm" onClick={() => void loadEvents()}>Reintentar</Button></div> : null}
         {eventsLoading && !events ? <div className="blocked-loading" aria-label="Cargando ofertas bloqueadas"><span /><span /><span /></div> : null}
         {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.id ?? offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : !eventsLoading ? <Empty>No hay ofertas esperando tu decisión.</Empty> : null}
-        {events && events.total > events.pageSize ? <nav className="pagination" aria-label="Páginas de ofertas bloqueadas"><button disabled={page === 1 || eventsLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button><span>{page} / {Math.ceil(events.total / events.pageSize)}</span><button disabled={page * events.pageSize >= events.total || eventsLoading} onClick={() => setPage((value) => value + 1)}>Siguiente</button></nav> : null}
+        {events && events.total > events.pageSize ? <nav className="pagination" aria-label="Páginas de ofertas bloqueadas"><Button variant="outline" size="sm" disabled={page === 1 || eventsLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</Button><span>{page} / {Math.ceil(events.total / events.pageSize)}</span><Button variant="outline" size="sm" disabled={page * events.pageSize >= events.total || eventsLoading} onClick={() => setPage((value) => value + 1)}>Siguiente</Button></nav> : null}
       </aside>
     </div>
     {dialog ? <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
       <section ref={dialogRef} className="decision-dialog" role="dialog" aria-modal="true" aria-labelledby="blocked-dialog-title">
-        <button className="dialog-close" onClick={close} disabled={busy} aria-label="Cerrar"><X /></button>
+        <IconButton variant="ghost" className="dialog-close" onClick={close} disabled={busy} aria-label="Cerrar"><X /></IconButton>
         {dialog.kind === "dismiss" ? <>
           <span className="dialog-icon muted"><X /></span><p className="section-kicker">Descartar revisión</p><h2 id="blocked-dialog-title">¿Ocultar esta oferta?</h2>
           <p>Quedará constancia en Auditoría. Volverá a aparecer únicamente si cambia su precio o su motivo de bloqueo.</p>
           {message ? <p className="dialog-message danger" role="status">{message}</p> : null}
-          <div className="dialog-actions"><button className="button secondary" onClick={close} disabled={busy}>Conservar</button><button className="button filled-danger" onClick={() => void dismiss()} disabled={busy}>{busy ? "Descartando…" : "Descartar oferta"}</button></div>
+          <div className="dialog-actions"><Button variant="secondary" onClick={close} disabled={busy}>Conservar</Button><Button variant="destructive" onClick={() => void dismiss()} disabled={busy}>{busy ? "Descartando…" : "Descartar oferta"}</Button></div>
         </> : <>
           <span className="dialog-icon warning"><ShieldAlert /></span><p className="section-kicker">Confirmación protegida</p><h2 id="blocked-dialog-title">Revisar antes de aplicar</h2>
           {preview ? <PreviewDetails preview={preview} /> : null}{message ? <p className="dialog-message" role="status">{message}</p> : null}
           {preview ? <p className="safety-note"><ShieldAlert /> Solo se omitirá el bloqueo de precio/mediana. Saldo, reserva, exposición, límites y estado remoto se comprobarán nuevamente.</p> : null}
-          <div className="dialog-actions"><button className="button secondary" onClick={close} disabled={busy}>Cancelar</button><button className="button primary" onClick={() => void apply()} disabled={busy || !preview}>{busy ? "Comprobando…" : "Aplicar con protecciones"}</button></div>
+          <div className="dialog-actions"><Button variant="secondary" onClick={close} disabled={busy}>Cancelar</Button><Button variant="primary" onClick={() => void apply()} disabled={busy || !preview}>{busy ? "Comprobando…" : "Aplicar con protecciones"}</Button></div>
         </>}
       </section>
     </div> : null}
@@ -111,7 +112,7 @@ function BlockedCard({ offer, onReview, onDismiss }) {
     <dl className="offer-comparison"><div><dt>Tasa</dt><dd>{offer.rate.toFixed(2)}</dd></div><div><dt>Mediana</dt><dd>{reference ? reference.toFixed(2) : "No disponible"}</dd></div><div><dt>Diferencia</dt><dd className={deviation === null ? "" : Math.abs(deviation) > 1 ? "warning-text" : ""}>{deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(2)}%`}</dd></div></dl>
     <p className="blocked-reason"><ShieldAlert />{offer.reason}</p>
     {offer.checks?.length ? <details className="risk-checks"><summary>Ver {offer.checks.length} comprobaciones</summary><ul>{offer.checks.map((check) => <li key={check.code} className={`check-${check.status}`}><span>{check.label}</span><strong>{check.status === "pass" ? "Correcta" : check.status === "warning" ? "Advertencia" : check.status === "fail" ? "Bloqueo" : "No aplica"}</strong><small>{check.reason}{check.actual !== undefined ? ` · observado: ${String(check.actual)}` : ""}{check.limit !== undefined ? ` · límite: ${String(check.limit)}` : ""}</small></li>)}</ul></details> : null}
-    <div className="blocked-actions"><button className="button text-button" onClick={onDismiss}>Descartar</button><button className="button primary" onClick={onReview}>Revisar y aplicar</button></div></article>;
+    <div className="blocked-actions"><Button variant="ghost" size="sm" onClick={onDismiss}>Descartar</Button><Button variant="primary" size="sm" onClick={onReview}>Revisar y aplicar</Button></div></article>;
 }
 
 function PreviewDetails({ preview }) {

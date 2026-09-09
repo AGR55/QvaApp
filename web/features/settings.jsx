@@ -3,6 +3,7 @@ import { Check, History, Plus, Save, ShieldAlert, Trash2 } from "lucide-react";
 import { Empty, Panel, Skeleton } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
+import { Button, Input, Textarea } from "../components/ui.jsx";
 
 const riskFields = [
   ["maxQusdPerOperation", "Máximo por operación", "QUSD"],
@@ -135,13 +136,13 @@ export function Settings({ onChanged }) {
         <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
           <label>
             Máximo de ofertas propias
-            <span className="input-unit"><input type="number" min="1" step="1" value={draft.maxOpenOffers} onChange={(event) => setDraft((current) => ({ ...current, maxOpenOffers: Number(event.target.value) }))} /><small>ofertas</small></span>
+            <span className="input-unit"><Input type="number" min="1" step="1" value={draft.maxOpenOffers} onChange={(event) => setDraft((current) => ({ ...current, maxOpenOffers: Number(event.target.value) }))} /><small>ofertas</small></span>
           </label>
           {riskFields.map(([key, label, unit]) => (
             <label key={key}>
               {label}
               <span className="input-unit">
-                <input
+                <Input
                   type="number"
                   min="0"
                   step={key.includes("Operations") || key.includes("Errors") ? "1" : "0.01"}
@@ -153,16 +154,16 @@ export function Settings({ onChanged }) {
             </label>
           ))}
           <div className="form-actions" aria-live="polite">
-            <button
+            <Button
               type="button"
-              className="refresh"
+              variant="primary"
               disabled={!changes.length && !requiresInitialReview}
               onClick={() => setReviewing(true)}
             >
               <Save aria-hidden="true" /> {requiresInitialReview && !changes.length
                 ? "Revisar y aprobar límites"
                 : `Revisar ${changes.length} cambio(s)`}
-            </button>
+            </Button>
             <span>{status}</span>
           </div>
         </form>
@@ -174,7 +175,7 @@ export function Settings({ onChanged }) {
             <label key={key}>
               {label}
               <span className="input-unit">
-                <input
+                <Input
                   type="number"
                   min={minimum}
                   step="1"
@@ -193,7 +194,7 @@ export function Settings({ onChanged }) {
           ))}
           <label className="message-setting">
             Mensaje automático en el chat P2P
-            <textarea
+            <Textarea
               maxLength="79"
               rows="3"
               value={draft.automation.welcomeMessage}
@@ -228,23 +229,23 @@ export function Settings({ onChanged }) {
               </label>
               <label>
                 Código QvaPay
-                <input value={market.code} onChange={(event) => updateMarket(index, "code", event.target.value.toUpperCase())} />
+                <Input value={market.code} onChange={(event) => updateMarket(index, "code", event.target.value.toUpperCase())} />
               </label>
               <label>
                 Nombre visible
-                <input value={market.label} onChange={(event) => updateMarket(index, "label", event.target.value)} />
+                <Input value={market.label} onChange={(event) => updateMarket(index, "label", event.target.value)} />
               </label>
               <label>
                 Moneda fiat
-                <input value={market.currency} onChange={(event) => updateMarket(index, "currency", event.target.value.toUpperCase())} />
+                <Input value={market.currency} onChange={(event) => updateMarket(index, "currency", event.target.value.toUpperCase())} />
               </label>
               <label>
                 Saldo fiat declarado
-                <input type="number" min="0" step="0.01" value={market.fiatBalance} onChange={(event) => updateMarket(index, "fiatBalance", event.target.value)} />
+                <Input type="number" min="0" step="0.01" value={market.fiatBalance} onChange={(event) => updateMarket(index, "fiatBalance", event.target.value)} />
               </label>
               <label>
                 Máximo de compra
-                <input
+                <Input
                   type="number"
                   min="0.0000001"
                   step="0.0001"
@@ -256,7 +257,7 @@ export function Settings({ onChanged }) {
               </label>
               <label>
                 Mínimo de venta
-                <input
+                <Input
                   type="number"
                   min="0.0000001"
                   step="0.0001"
@@ -268,7 +269,7 @@ export function Settings({ onChanged }) {
               </label>
               <label>
                 Máximo QUSD por compra
-                <input
+                <Input
                   type="number"
                   min="0"
                   step="0.01"
@@ -280,7 +281,7 @@ export function Settings({ onChanged }) {
               </label>
               <label>
                 Comisión de venta (%)
-                <input
+                <Input
                   type="number"
                   min="0"
                   max="99.99"
@@ -294,7 +295,7 @@ export function Settings({ onChanged }) {
               <label>
                 Comisión fija de salida
                 <span className="input-unit">
-                  <input
+                  <Input
                     type="number"
                     min="0"
                     step="0.01"
@@ -310,18 +311,18 @@ export function Settings({ onChanged }) {
                 <strong>Datos de cobro</strong>
                 {market.paymentDetails.map((detail, detailIndex) => (
                   <div key={detailIndex}>
-                    <input aria-label={`Nombre del dato ${detailIndex + 1}`} placeholder="Campo" value={detail.name} onChange={(event) => updateDetail(index, detailIndex, "name", event.target.value)} />
-                    <input aria-label={`Valor del dato ${detailIndex + 1}`} placeholder="Valor" value={detail.value} onChange={(event) => updateDetail(index, detailIndex, "value", event.target.value)} />
-                    <button type="button" aria-label="Eliminar dato" onClick={() => removeDetail(index, detailIndex)}><Trash2 aria-hidden="true" /></button>
+                    <Input aria-label={`Nombre del dato ${detailIndex + 1}`} placeholder="Campo" value={detail.name} onChange={(event) => updateDetail(index, detailIndex, "name", event.target.value)} />
+                    <Input aria-label={`Valor del dato ${detailIndex + 1}`} placeholder="Valor" value={detail.value} onChange={(event) => updateDetail(index, detailIndex, "value", event.target.value)} />
+                    <Button variant="ghost" size="icon" type="button" aria-label="Eliminar dato" onClick={() => removeDetail(index, detailIndex)}><Trash2 aria-hidden="true" /></Button>
                   </div>
                 ))}
-                <button type="button" onClick={() => addDetail(index)}><Plus aria-hidden="true" /> Añadir dato</button>
+                <Button variant="outline" size="sm" type="button" onClick={() => addDetail(index)}><Plus aria-hidden="true" /> Añadir dato</Button>
               </div>
-              <button type="button" className="danger-button" onClick={() => removeMarket(index)}><Trash2 aria-hidden="true" /> Eliminar mercado</button>
+              <Button variant="destructive" size="sm" type="button" onClick={() => removeMarket(index)}><Trash2 aria-hidden="true" /> Eliminar mercado</Button>
             </fieldset>
           ))}
         </div>
-        <button type="button" className="refresh add-market" onClick={addMarket}><Plus aria-hidden="true" /> Añadir mercado</button>
+        <Button variant="primary" type="button" className="add-market" onClick={addMarket}><Plus aria-hidden="true" /> Añadir mercado</Button>
       </Panel>
 
       {reviewing ? (
@@ -345,12 +346,12 @@ export function Settings({ onChanged }) {
                 </li>
               ))}
             </ul>
-            <label className="reason-field">Motivo de la revisión<input value={reason} minLength="5" required onChange={(event) => setReason(event.target.value)} /></label>
+            <label className="reason-field">Motivo de la revisión<Input value={reason} minLength="5" required onChange={(event) => setReason(event.target.value)} /></label>
             <div className="review-actions">
-              <button type="button" onClick={closeReview}>Volver</button>
-              <button type="button" className="refresh" disabled={reason.trim().length < 5} onClick={save}>
+              <Button variant="ghost" type="button" onClick={closeReview}>Volver</Button>
+              <Button variant="primary" type="button" disabled={reason.trim().length < 5} onClick={save}>
                 <Check aria-hidden="true" /> Confirmar y activar
-              </button>
+              </Button>
             </div>
           </div>
         </section>

@@ -12,6 +12,7 @@ import { Empty, Panel } from "../components/common.jsx";
 import { useDialog } from "../hooks/use-dialog.js";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
+import { Button, Input } from "../components/ui.jsx";
 
 const cancellableStates = new Set(["applied", "acknowledged"]);
 
@@ -153,13 +154,15 @@ export function Hunting({ data, label, unit, onChanged }) {
                 </div>
                 <footer>
                   <span>Los límites de riesgo y el cortafuegos de mediana siguen activos.</span>
-                  <button
+                  <Button
                     type="button"
+                    variant="primary"
+                    size="sm"
                     disabled={!market.active || Boolean(busy) || !validRates(draft) || ratesEqual(draft, market)}
                     onClick={() => update(`rates:${market.code}`, { market: { code: market.code, buyMaxRate: Number(draft.buyMaxRate), sellMinRate: Number(draft.sellMinRate) } }, `Precios de ${label(market.code)} actualizados.`)}
                   >
                     <Save aria-hidden="true" /> {savingRates ? "Guardando…" : "Guardar precios"}
-                  </button>
+                  </Button>
                 </footer>
               </article>
             );
@@ -185,7 +188,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                 <div><span>Tasa capturada</span><strong>{money(operation.rate, unit(operation.coin) === "USD" ? 4 : 2)}</strong><small>Mediana {operation.referenceRate ? money(operation.referenceRate, unit(operation.coin) === "USD" ? 4 : 2) : "no registrada"}</small></div>
                 <div className="capture-action">
                   <OperationState value={operation.state} />
-                  {cancellableStates.has(operation.state) ? <button type="button" className="danger-action" disabled={Boolean(busy)} onClick={() => setPendingCancel(operation)}>Cancelar aplicación</button> : null}
+                  {cancellableStates.has(operation.state) ? <Button type="button" variant="destructive" size="sm" disabled={Boolean(busy)} onClick={() => setPendingCancel(operation)}>Cancelar aplicación</Button> : null}
                 </div>
               </article>
             ))}
@@ -208,8 +211,8 @@ export function Hunting({ data, label, unit, onChanged }) {
               <div><dt>Tasa</dt><dd>{money(pendingCancel.rate, unit(pendingCancel.coin) === "USD" ? 4 : 2)} {unit(pendingCancel.coin)}</dd></div>
             </dl>
             <div className="offer-modal-actions">
-              <button type="button" onClick={closeCancel} disabled={Boolean(busy)}>Mantener aplicación</button>
-              <button type="button" className="danger-confirm" onClick={cancel} disabled={Boolean(busy)}>{busy ? "Cancelando…" : "Sí, cancelar aplicación"}</button>
+              <Button variant="ghost" type="button" onClick={closeCancel} disabled={Boolean(busy)}>Mantener aplicación</Button>
+              <Button variant="destructive" type="button" onClick={cancel} disabled={Boolean(busy)}>{busy ? "Cancelando…" : "Sí, cancelar aplicación"}</Button>
             </div>
           </div>
         </section>
@@ -224,7 +227,7 @@ function MasterControl({ side, running, paused, mode, busy, disabled, onToggle }
   return (
     <article className={`hunt-master ${running && !paused ? "running" : "stopped"}`}>
       <div><span>{buying ? "COMPRA" : "VENTA"}</span><strong>{state}</strong></div>
-      <button type="button" onClick={onToggle} disabled={disabled}>{running ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}{busy ? "Actualizando…" : running ? "Detener" : "Iniciar"}</button>
+      <Button variant={running ? "secondary" : "primary"} type="button" onClick={onToggle} disabled={disabled}>{running ? <Pause aria-hidden="true" /> : <Play aria-hidden="true" />}{busy ? "Actualizando…" : running ? "Detener" : "Iniciar"}</Button>
     </article>
   );
 }
@@ -243,9 +246,9 @@ function HuntSide({ icon: Icon, title, description, enabled, running, paused, mo
   return (
     <section className={`hunt-side ${active ? "active" : ""}`}>
       <div className="hunt-side-title"><Icon aria-hidden="true" /><div><h4>{title}</h4><p>{description}</p></div></div>
-      <button type="button" role="switch" aria-checked={enabled} className="hunt-switch" onClick={onToggle} disabled={disabled}><span />{enabled ? "Seleccionado" : "No cazar"}</button>
+      <Button variant={enabled ? "secondary" : "ghost"} type="button" role="switch" aria-checked={enabled} className="hunt-switch" onClick={onToggle} disabled={disabled}><span />{enabled ? "Seleccionado" : "No cazar"}</Button>
       <dl><div><dt>Mediana actual</dt><dd>{Number.isFinite(Number(median)) ? money(median, unit === "USD" ? 4 : 2) : "Sin muestra"}</dd></div><div><dt>Estado efectivo</dt><dd>{state}</dd></div></dl>
-      <label>{limitLabel}<span className="input-unit"><input type="number" min="0.0001" step="0.0001" value={rate} disabled={disabled} onChange={(event) => onRate(event.target.value)} /><small>{unit}/QUSD</small></span></label>
+      <label>{limitLabel}<span className="input-unit"><Input type="number" min="0.0001" step="0.0001" value={rate} disabled={disabled} onChange={(event) => onRate(event.target.value)} /><small>{unit}/QUSD</small></span></label>
     </section>
   );
 }

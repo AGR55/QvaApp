@@ -270,7 +270,7 @@ function PushControl({ onNotification }) {
     } catch { setState("error"); }
   };
   const labels = { checking: "Comprobando avisos", enabled: "Avisos activados", disabled: "Activar avisos", denied: "Avisos bloqueados", unsupported: "Avisos no compatibles", error: "Reintentar avisos" };
-  return <button className={`icon-action push-control ${state}`} onClick={() => void toggle()} disabled={state === "checking" || state === "unsupported" || state === "denied"} aria-label={labels[state]} title={labels[state]}><Bell aria-hidden="true" /><span className="push-dot" /></button>;
+  return <IconButton className={`push-control ${state}`} onClick={() => void toggle()} disabled={state === "checking" || state === "unsupported" || state === "denied"} aria-label={labels[state]} title={labels[state]}><Bell aria-hidden="true" /><span className="push-dot" /></IconButton>;
 }
 
 function decodeVapidKey(value) {
