@@ -1,4 +1,5 @@
 import type { P2pOffer } from "../types.js";
+import { outgoingFiatCost } from "../market-math.js";
 
 export interface RestorableOwnOffer {
   uuid: string;
@@ -16,13 +17,26 @@ export interface RestorableOwnOffer {
   createdAt?: string;
 }
 
+export interface PlannedOwnOffer extends RestorableOwnOffer {
+  profitabilityPercent: number;
+  consumeQusd: number;
+  restoreQusd: number;
+}
+
+export interface LiquidityMarketEconomics {
+  buyMaxRate: number;
+  sellFeePercent: number;
+  outgoingTransferFee: number;
+}
+
 export interface LiquidityPlan {
   feasible: boolean;
   targetQusd: number;
   immediatelyAvailableQusd: number;
   requiredReleaseQusd: number;
   plannedReleaseQusd: number;
-  cancel: RestorableOwnOffer[];
+  potentialReleaseQusd: number;
+  cancel: PlannedOwnOffer[];
   reason: string;
 }
 
@@ -31,6 +45,7 @@ export interface LiquidityPlanInput {
   availableQusd: number;
   reserveQusd: number;
   ownOffers: P2pOffer[];
+  marketEconomics?: Record<string, LiquidityMarketEconomics>;
 }
 
 /**
@@ -50,7 +65,7 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
   );
   const requiredReleaseQusd = Math.max(
     0,
-    target.amount - immediatelyAvailableQusd,
+    target.amount + input.reserveQusd - input.availableQusd,
   );
   if (requiredReleaseQusd === 0)
     return {
@@ -59,33 +74,47 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
       immediatelyAvailableQusd,
       requiredReleaseQusd: 0,
       plannedReleaseQusd: 0,
+      potentialReleaseQusd: 0,
       cancel: [],
       reason: "El saldo QUSD disponible cubre la oportunidad sin cancelar ofertas propias.",
     };
 
   const externalRate = offerRate(target);
+  const targetProfitability = profitability(target, input.marketEconomics?.[target.coin]);
   const candidates = input.ownOffers
     .filter(
       (offer) =>
         offer.type === "sell" &&
         offer.status === "open" &&
-        offer.coin === target.coin &&
         offer.amount > 0 &&
         offer.receive > 0 &&
-        offerRate(offer) < externalRate,
+        isInferiorLiquidity(
+          offer,
+          target.coin,
+          externalRate,
+          targetProfitability,
+          input.marketEconomics,
+        ),
     )
+    .map((offer) => ({
+      offer,
+      profitabilityPercent:
+        profitability(offer, input.marketEconomics?.[offer.coin]) ??
+        offerRate(offer),
+    }))
     .sort(
       (left, right) =>
-        offerRate(left) - offerRate(right) ||
-        timestamp(left.created_at) - timestamp(right.created_at) ||
-        left.uuid.localeCompare(right.uuid),
+        left.profitabilityPercent - right.profitabilityPercent ||
+        right.offer.amount - left.offer.amount ||
+        timestamp(left.offer.created_at) - timestamp(right.offer.created_at) ||
+        left.offer.uuid.localeCompare(right.offer.uuid),
     );
 
-  const selected: RestorableOwnOffer[] = [];
+  const selected: Array<{ offer: P2pOffer; profitabilityPercent: number }> = [];
   let plannedReleaseQusd = 0;
-  for (const offer of candidates) {
-    selected.push(snapshot(offer));
-    plannedReleaseQusd += offer.amount;
+  for (const candidate of candidates) {
+    selected.push(candidate);
+    plannedReleaseQusd += candidate.offer.amount;
     if (plannedReleaseQusd + 0.0000001 >= requiredReleaseQusd) break;
   }
 
@@ -96,10 +125,23 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
       immediatelyAvailableQusd,
       requiredReleaseQusd,
       plannedReleaseQusd: 0,
+      potentialReleaseQusd: plannedReleaseQusd,
       cancel: [],
       reason:
-        "Las ofertas propias con peor precio no liberan suficiente QUSD; no se cancelará ninguna.",
+        `Las ventas propias menos rentables liberarían ${roundQusd(plannedReleaseQusd)} QUSD, pero se requieren ${roundQusd(requiredReleaseQusd)}; no se cancelará ninguna.`,
     };
+
+  let remainingConsumption = requiredReleaseQusd;
+  const cancel = selected.map(({ offer, profitabilityPercent }) => {
+    const consumeQusd = Math.min(offer.amount, remainingConsumption);
+    remainingConsumption = Math.max(0, remainingConsumption - consumeQusd);
+    return {
+      ...snapshot(offer),
+      profitabilityPercent,
+      consumeQusd: roundQusd(consumeQusd),
+      restoreQusd: roundQusd(offer.amount - consumeQusd),
+    };
+  });
 
   return {
     feasible: true,
@@ -107,9 +149,38 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
     immediatelyAvailableQusd,
     requiredReleaseQusd,
     plannedReleaseQusd,
-    cancel: selected,
-    reason: `Se liberarán ${plannedReleaseQusd} QUSD de ${selected.length} oferta(s) propia(s) con una tasa inferior.`,
+    potentialReleaseQusd: plannedReleaseQusd,
+    cancel,
+    reason: `Se liberarán ${roundQusd(plannedReleaseQusd)} QUSD de ${selected.length} oferta(s) propia(s); ${roundQusd(plannedReleaseQusd - requiredReleaseQusd)} QUSD se repondrán después de aplicar.`,
   };
+}
+
+function isInferiorLiquidity(
+  offer: P2pOffer,
+  targetCoin: string,
+  targetRate: number,
+  targetProfitability: number | undefined,
+  economics: LiquidityPlanInput["marketEconomics"],
+): boolean {
+  const ownProfitability = profitability(offer, economics?.[offer.coin]);
+  if (targetProfitability !== undefined && ownProfitability !== undefined)
+    return ownProfitability + 0.0000001 < targetProfitability;
+  return offer.coin === targetCoin && offerRate(offer) < targetRate;
+}
+
+function profitability(
+  offer: Pick<P2pOffer, "amount" | "receive">,
+  economics: LiquidityMarketEconomics | undefined,
+): number | undefined {
+  if (!economics || economics.buyMaxRate <= 0) return undefined;
+  const acquisition = outgoingFiatCost(
+    offer.amount,
+    economics.buyMaxRate,
+    economics.outgoingTransferFee,
+  ).total;
+  if (acquisition <= 0) return undefined;
+  const netRevenue = offer.receive * (1 - economics.sellFeePercent / 100);
+  return ((netRevenue - acquisition) / acquisition) * 100;
 }
 
 function snapshot(offer: P2pOffer): RestorableOwnOffer {
@@ -147,6 +218,7 @@ function infeasible(input: LiquidityPlanInput, reason: string): LiquidityPlan {
     ),
     requiredReleaseQusd: 0,
     plannedReleaseQusd: 0,
+    potentialReleaseQusd: 0,
     cancel: [],
     reason,
   };
@@ -172,4 +244,8 @@ function timestamp(value?: string): number {
 
 function offerRate(offer: Pick<P2pOffer, "amount" | "receive">): number {
   return offer.receive / offer.amount;
+}
+
+function roundQusd(value: number): number {
+  return Math.round(value * 100_000_000) / 100_000_000;
 }

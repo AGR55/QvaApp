@@ -26,6 +26,7 @@ export interface OpportunityInput {
 export interface OpportunityResult {
   decision: RiskDecision;
   workflow?: TradeWorkflow;
+  applicationConfirmed?: boolean;
 }
 
 export interface ReconciliationResult {
@@ -95,9 +96,25 @@ export class OpportunityOrchestrator {
       const remoteTarget = await this.qva.getOffer(workflow.targetOffer.uuid);
       if (applicationIsConfirmed(remoteTarget.status)) {
         this.ensureAppliedOperation(workflow);
-        this.store.updateWorkflowState(workflowId, "applied");
         this.store.releaseCapitalReservation(workflowId);
         this.store.reconcileWorkflowMutationIntents(workflowId);
+        try {
+          await this.restoreSurplusOffers(workflowId);
+          this.store.updateWorkflowState(workflowId, "applied");
+        } catch (error) {
+          const detail = errorMessage(error);
+          this.store.updateWorkflowState(workflowId, "surplus_restore_failed", detail);
+          this.store.audit(
+            "surplus_reconciliation_pending",
+            detail,
+            workflow.targetOffer.uuid,
+          );
+          return {
+            workflowId,
+            outcome: "unresolved",
+            detail: `La aplicación está confirmada, pero falta reponer excedente: ${detail}`,
+          };
+        }
         this.store.audit(
           "workflow_reconciled_applied",
           `QvaPay confirmó el estado remoto ${remoteTarget.status}.`,
@@ -160,7 +177,12 @@ export class OpportunityOrchestrator {
 
   private async executeOnce(input: OpportunityInput): Promise<OpportunityResult> {
     const existing = this.store.findWorkflowByTarget(input.target.uuid);
-    if (existing) return { decision: existing.riskDecision, workflow: existing };
+    if (existing)
+      return {
+        decision: existing.riskDecision,
+        workflow: existing,
+        applicationConfirmed: Boolean(this.store.getOperation(input.target.uuid)),
+      };
     if (input.target.type !== "buy" || input.target.status !== "open")
       return {
         decision: this.nonExecutableDecision(input, "ignored", "La oferta no es una compra externa abierta."),
@@ -181,6 +203,16 @@ export class OpportunityOrchestrator {
       availableQusd: qusdBalance,
       reserveQusd: current.risk.minQusdReserve,
       ownOffers,
+      marketEconomics: Object.fromEntries(
+        current.markets.map((configured) => [
+          configured.code,
+          {
+            buyMaxRate: configured.buyMaxRate,
+            sellFeePercent: configured.sellFeePercent,
+            outgoingTransferFee: configured.outgoingTransferFee,
+          },
+        ]),
+      ),
     });
     const priceDecision =
       current.risk.reviewedAt === null && input.priceDecision === "eligible"
@@ -213,7 +245,11 @@ export class OpportunityOrchestrator {
           : input.priceReason
         : liquidity.reason,
       expectedMarginPercent: input.expectedMarginPercent,
-      qusdBalance: qusdBalance + liquidity.plannedReleaseQusd,
+      qusdBalance:
+        qusdBalance +
+        (liquidity.feasible
+          ? liquidity.plannedReleaseQusd
+          : liquidity.potentialReleaseQusd),
       fiatAvailable: market.fiatBalance,
       concurrentQusdExposure:
         this.store.activeOperations().reduce((sum, operation) => sum + operation.amount, 0) +
@@ -289,11 +325,26 @@ export class OpportunityOrchestrator {
           : {}),
         referenceRate: input.referenceRate,
       });
-      this.store.updateWorkflowState(workflowId, "applied");
       this.store.releaseCapitalReservation(workflowId);
+      let surplusRestored = true;
+      try {
+        await this.restoreSurplusOffers(workflowId);
+        this.store.updateWorkflowState(workflowId, "applied");
+      } catch (error) {
+        surplusRestored = false;
+        const detail = errorMessage(error);
+        this.store.updateWorkflowState(workflowId, "surplus_restore_failed", detail);
+        this.store.audit("surplus_restore_failed", detail, input.target.uuid);
+        await this.notifyBestEffort(
+          `⚠️ La aplicación ${input.target.uuid} fue confirmada, pero el excedente de las ofertas canceladas requiere conciliación.`,
+          { kind: "reconciliation-required", uuid: input.target.uuid, coin: input.target.coin, amount: input.target.amount },
+        );
+      }
       this.store.audit(
         "opportunity_applied",
-        "Aplicación automática confirmada; el pago fiat permanece manual.",
+        surplusRestored
+          ? "Aplicación automática confirmada y excedente QUSD repuesto; el pago fiat permanece manual."
+          : "Aplicación automática confirmada; la reposición del excedente requiere conciliación.",
         input.target.uuid,
       );
       await this.notifyBestEffort(
@@ -324,6 +375,7 @@ export class OpportunityOrchestrator {
     return {
       decision,
       workflow: persistedWorkflow,
+      applicationConfirmed: Boolean(this.store.getOperation(input.target.uuid)),
     };
   }
 
@@ -379,18 +431,56 @@ export class OpportunityOrchestrator {
     }
   }
 
+  private async restoreSurplusOffers(workflowId: string): Promise<void> {
+    this.store.updateWorkflowState(workflowId, "restoring_surplus");
+    for (const own of this.store.workflowOwnOffers(workflowId)) {
+      if (own.state === "restored" || own.state === "consumed") continue;
+      const restoreQusd = plannedRestoreQusd(own.snapshot);
+      if (restoreQusd < 0.1 - 0.0000001) {
+        this.store.updateWorkflowOwnOffer(workflowId, own.originalUuid, "consumed");
+        if (restoreQusd > 0)
+          this.store.audit(
+            "surplus_below_minimum",
+            `No se repusieron ${restoreQusd} QUSD porque el mínimo de creación es 0.1 QUSD.`,
+            own.originalUuid,
+          );
+        continue;
+      }
+      this.store.updateWorkflowOwnOffer(workflowId, own.originalUuid, "restore_requested");
+      try {
+        const restored = await this.restoreOffer(workflowId, own, restoreQusd);
+        this.store.updateWorkflowOwnOffer(workflowId, own.originalUuid, "restored", {
+          restoredUuid: restored.uuid,
+        });
+        this.store.audit(
+          "surplus_restored",
+          `Se repusieron ${restoreQusd} QUSD de la oferta cancelada.`,
+          restored.uuid,
+        );
+      } catch (error) {
+        this.store.updateWorkflowOwnOffer(
+          workflowId,
+          own.originalUuid,
+          isUncertain(error) ? "uncertain" : "restore_requested",
+          { error: errorMessage(error) },
+        );
+        throw error;
+      }
+    }
+  }
+
   private async restoreOffer(
     workflowId: string,
     own: ReturnType<Store["workflowOwnOffers"]>[number],
+    amount = own.snapshot.amount,
   ): Promise<P2pOffer> {
+    const request = restorationRequest(own.snapshot, own.restoreIdempotencyKey, amount);
     try {
       return await this.mutation(
         "restore_own_offer",
         own.originalUuid,
-        { workflowId, snapshot: own.snapshot },
-        () => this.qva.createOffer(
-          restorationRequest(own.snapshot, own.restoreIdempotencyKey),
-        ),
+        { workflowId, snapshot: own.snapshot, amount },
+        () => this.qva.createOffer(request),
         own.restoreIdempotencyKey,
       );
     } catch (error) {
@@ -405,8 +495,8 @@ export class OpportunityOrchestrator {
         (candidate) =>
           candidate.type === "sell" &&
           candidate.coin === own.snapshot.coin &&
-          nearlyEqual(candidate.amount, own.snapshot.amount) &&
-          nearlyEqual(candidate.receive, own.snapshot.receive),
+          nearlyEqual(candidate.amount, request.amount) &&
+          nearlyEqual(candidate.receive, request.receive),
       );
       if (!duplicate)
         throw new Error(
@@ -505,12 +595,16 @@ export class OpportunityOrchestrator {
   }
 }
 
-function restorationRequest(offer: RestorableOwnOffer, idempotencyKey: string) {
+function restorationRequest(
+  offer: RestorableOwnOffer,
+  idempotencyKey: string,
+  amount = offer.amount,
+) {
   return {
     type: "sell" as const,
     coin: offer.coin,
-    amount: offer.amount,
-    receive: offer.receive,
+    amount: roundQusd(amount),
+    receive: roundFiat(amount * offer.rate),
     details: offer.details,
     ...(offer.message ? { message: offer.message } : {}),
     onlyKyc: offer.onlyKyc,
@@ -520,6 +614,22 @@ function restorationRequest(offer: RestorableOwnOffer, idempotencyKey: string) {
     tags: offer.tags,
     idempotencyKey,
   };
+}
+
+function plannedRestoreQusd(
+  offer: RestorableOwnOffer & { restoreQusd?: number },
+): number {
+  return Number.isFinite(offer.restoreQusd)
+    ? Math.max(0, offer.restoreQusd ?? 0)
+    : 0;
+}
+
+function roundQusd(value: number): number {
+  return Math.round(value * 100_000_000) / 100_000_000;
+}
+
+function roundFiat(value: number): number {
+  return Math.round(value * 100_000_000) / 100_000_000;
 }
 
 function isUncertain(error: unknown): boolean {

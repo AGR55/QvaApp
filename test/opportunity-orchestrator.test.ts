@@ -67,14 +67,20 @@ const input = {
 
 test("cancela, aplica y deja el pago fiat como acción humana", async () => {
   const { store, markets } = setup();
+  const config = markets.current();
+  config.qusdReserve = 0;
+  config.risk.minQusdReserve = 0;
+  markets.save(config);
   const calls: string[] = [];
+  const restored: Array<{ amount: number; receive: number }> = [];
   const qva = {
     qusdBalance: async () => 10,
     listOffers: async () => [own],
     cancel: async (uuid: string) => void calls.push(`cancel:${uuid}`),
     apply: async (uuid: string) => void calls.push(`apply:${uuid}`),
-    createOffer: async () => {
-      throw new Error("no debe restaurar");
+    createOffer: async (request: { amount: number; receive: number }) => {
+      restored.push(request);
+      return { ...own, ...request, uuid: "restored-surplus" };
     },
   };
   const orchestrator = new OpportunityOrchestrator(
@@ -89,9 +95,12 @@ test("cancela, aplica y deja el pago fiat como acción humana", async () => {
   assert.equal(result.decision.kind, "apply");
   assert.equal(result.workflow?.state, "applied");
   assert.deepEqual(calls, ["cancel:own-sale", "apply:external"]);
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0]?.amount, 10);
+  assert.equal(restored[0]?.receive, 9_900);
   assert.equal(store.getOperation("external")?.state, "applied");
   assert.equal(store.activeReservedQusd(), 0);
-  assert.equal(store.workflowOwnOffers(result.workflow!.id)[0]?.state, "cancelled");
+  assert.equal(store.workflowOwnOffers(result.workflow!.id)[0]?.state, "restored");
   store.close();
 });
 
@@ -127,6 +136,77 @@ test("restaura la oferta original cuando aplicar es rechazado", async () => {
     (restored[0] as { idempotencyKey: string }).idempotencyKey,
     /^[a-f0-9]{64}$/,
   );
+  assert.equal(store.activeReservedQusd(), 0);
+  store.close();
+});
+
+test("libera QUSD desde otro mercado y repone el excedente proporcional", async () => {
+  const { store, markets } = setup();
+  const config = markets.current();
+  config.qusdReserve = 0;
+  config.risk.minQusdReserve = 0;
+  markets.save(config);
+  const otherMarket: P2pOffer = {
+    ...own,
+    uuid: "classic-liquidity",
+    coin: "CLASICA",
+    amount: 30,
+    receive: 31.5,
+  };
+  const calls: string[] = [];
+  const restored: Array<{ coin: string; amount: number; receive: number }> = [];
+  const qva = {
+    qusdBalance: async () => 0,
+    listOffers: async () => [otherMarket],
+    cancel: async (uuid: string) => void calls.push(`cancel:${uuid}`),
+    apply: async (uuid: string) => void calls.push(`apply:${uuid}`),
+    createOffer: async (request: { coin: string; amount: number; receive: number }) => {
+      restored.push(request);
+      return { ...otherMarket, ...request, uuid: "classic-restored" };
+    },
+  };
+  const orchestrator = new OpportunityOrchestrator(store, qva as never, markets, {
+    now: () => now,
+  });
+
+  const result = await orchestrator.execute(input);
+
+  assert.equal(result.applicationConfirmed, true);
+  assert.deepEqual(calls, ["cancel:classic-liquidity", "apply:external"]);
+  assert.equal(restored.length, 1);
+  assert.equal(restored[0]?.coin, "CLASICA");
+  assert.equal(restored[0]?.amount, 10);
+  assert.equal(restored[0]?.receive, 10.5);
+  store.close();
+});
+
+test("conserva la aplicación confirmada si falla la reposición del excedente", async () => {
+  const { store, markets } = setup();
+  const config = markets.current();
+  config.qusdReserve = 0;
+  config.risk.minQusdReserve = 0;
+  markets.save(config);
+  let restorationAttempts = 0;
+  const qva = {
+    qusdBalance: async () => 10,
+    listOffers: async () => [own],
+    cancel: async () => undefined,
+    apply: async () => undefined,
+    createOffer: async () => {
+      restorationAttempts += 1;
+      throw new QvaApiError(400, "Límite de ofertas alcanzado");
+    },
+  };
+  const orchestrator = new OpportunityOrchestrator(store, qva as never, markets, {
+    now: () => now,
+  });
+
+  const result = await orchestrator.execute(input);
+
+  assert.equal(result.applicationConfirmed, true);
+  assert.equal(result.workflow?.state, "surplus_restore_failed");
+  assert.equal(store.getOperation(target.uuid)?.state, "applied");
+  assert.equal(restorationAttempts, 1);
   assert.equal(store.activeReservedQusd(), 0);
   store.close();
 });

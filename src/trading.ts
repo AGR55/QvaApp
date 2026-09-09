@@ -609,7 +609,7 @@ export class TradingEngine {
             : "No existe una referencia de mercado válida.",
           canApply: () => this.huntEnabled(coin, "sell"),
         });
-        if (result.workflow?.state === "applied") {
+        if (result.applicationConfirmed) {
           this.store.recordDecisionEvent({
             uuid: bestExternalBuy.uuid, coin, offerType: bestExternalBuy.type,
             amount: bestExternalBuy.amount, receive: bestExternalBuy.receive,
@@ -690,9 +690,15 @@ export class TradingEngine {
         "La oferta ya no está abierta o no usa un mercado fiat compatible.",
       );
     if (offer.type === "sell") {
-      if (rate(offer) > this.market(this.offerMarket(offer))!.buyMaxRate)
+      const market = this.market(this.offerMarket(offer))!;
+      const transfer = outgoingFiatCost(
+        offer.amount,
+        rate(offer),
+        market.outgoingTransferFee,
+      );
+      if (transfer.effectiveRate > market.buyMaxRate)
         throw new Error(
-          `La tasa ${rate(offer).toFixed(2)} supera tu máximo de compra.`,
+          `La tasa efectiva ${transfer.effectiveRate.toFixed(2)} supera tu máximo de compra ${market.buyMaxRate.toFixed(2)}.`,
         );
       if (!this.canFund(offer))
         throw new Error("Saldo fiat declarado insuficiente para esta compra.");
@@ -757,7 +763,14 @@ export class TradingEngine {
     const deviationPercent = referenceRate
       ? ((rate(offer) - referenceRate) / referenceRate) * 100
       : 0;
-    let plannedCancellations: Array<{ uuid: string; amount: number; rate: number }> = [];
+    let plannedCancellations: Array<{
+      uuid: string;
+      coin: string;
+      amount: number;
+      rate: number;
+      consumeQusd: number;
+      restoreQusd: number;
+    }> = [];
     let liquidityReason = "No requiere cancelar ofertas propias.";
     if (offer.type === "buy") {
       const [balance, ownOffers] = await Promise.all([
@@ -769,11 +782,15 @@ export class TradingEngine {
         availableQusd: balance,
         reserveQusd: this.marketConfig.current().risk.minQusdReserve,
         ownOffers,
+        marketEconomics: liquidityEconomics(this.marketConfig.current()),
       });
-      plannedCancellations = liquidity.cancel.map(({ uuid: ownUuid, amount, rate: ownRate }) => ({
+      plannedCancellations = liquidity.cancel.map(({ uuid: ownUuid, coin, amount, rate: ownRate, consumeQusd, restoreQusd }) => ({
         uuid: ownUuid,
+        coin,
         amount,
         rate: ownRate,
+        consumeQusd,
+        restoreQusd,
       }));
       liquidityReason = liquidity.reason;
     }
@@ -833,7 +850,7 @@ export class TradingEngine {
       priceDecision: "eligible",
       priceReason: "Bloqueo de precio/mediana revisado y autorizado manualmente.",
     });
-    if (result.workflow?.state !== "applied") {
+    if (!result.applicationConfirmed) {
       store.audit("blocked_offer_safety_rejected", result.decision.reasons.join(" · "), uuid);
       throw new Error(result.decision.reasons.join(" · "));
     }
@@ -1485,12 +1502,24 @@ export class TradingEngine {
           decision: "ignored",
           reason: `Supera límite de ${market.purchaseMaxQusd} QUSD por compra`,
         };
+      const transfer = outgoingFiatCost(
+        offer.amount,
+        value,
+        configured.outgoingTransferFee,
+      );
       if (value > buyMax)
         return {
           offer,
           rate: value,
           decision: "ignored",
           reason: `Supera máximo de compra (${buyMax} ${this.marketCurrency(coin)}/QUSD)`,
+        };
+      if (transfer.effectiveRate > buyMax)
+        return {
+          offer,
+          rate: value,
+          decision: "blocked",
+          reason: `La tasa efectiva ${transfer.effectiveRate.toFixed(2)} supera el máximo de compra ${buyMax.toFixed(2)} ${this.marketCurrency(coin)}/QUSD (nominal ${value.toFixed(2)} + comisión ${transfer.fee.toFixed(2)})`,
         };
       const marketMedian = numeric(statistics?.median_sell);
       if (!marketMedian)
@@ -1591,6 +1620,7 @@ export class TradingEngine {
     const expectedMargin = transfer.total
       ? ((expectedRevenue - transfer.total) / transfer.total) * 100
       : 0;
+    const effectiveRateAllowed = transfer.effectiveRate <= market.buyMaxRate;
     const now = Date.now();
     return evaluateRisk({
       now,
@@ -1607,13 +1637,17 @@ export class TradingEngine {
       },
       limits: config.risk,
       priceDecision:
-        config.risk.reviewedAt === null
+        !effectiveRateAllowed
+          ? "blocked"
+          : config.risk.reviewedAt === null
           ? "manual_review"
           : reference
             ? "eligible"
             : "blocked",
       priceReason:
-        config.risk.reviewedAt === null
+        !effectiveRateAllowed
+          ? `La tasa efectiva ${transfer.effectiveRate.toFixed(2)} supera el máximo de compra ${market.buyMaxRate.toFixed(2)} (nominal ${currentRate.toFixed(2)} + comisión ${transfer.fee.toFixed(2)}).`
+          : config.risk.reviewedAt === null
           ? "Los límites globales todavía no han sido revisados desde el panel."
           : reference
             ? "La tasa cumple el máximo de compra configurado."
@@ -1816,6 +1850,12 @@ export class TradingEngine {
   ): Promise<void> {
     if (automatic && !this.huntEnabled(this.offerMarket(offer), "buy"))
       throw new Error("La cacería de compra fue detenida antes de aplicar.");
+    const market = this.market(this.offerMarket(offer))!;
+    const transfer = outgoingFiatCost(
+      offer.amount,
+      rate(offer),
+      market.outgoingTransferFee,
+    );
     await this.executeMutation(
       "apply",
       offer.uuid,
@@ -1841,7 +1881,7 @@ export class TradingEngine {
     await this.sendChatBestEffort(offer.uuid);
     this.store.audit(
       automatic ? "auto_apply_buy" : "manual_apply_buy",
-      `Compra de ${offer.amount} QUSD a ${rate(offer).toFixed(2)}`,
+      `Compra de ${offer.amount} QUSD · tasa nominal ${rate(offer).toFixed(2)} · comisión ${transfer.fee.toFixed(2)} · tasa efectiva ${transfer.effectiveRate.toFixed(2)}`,
       offer.uuid,
     );
     this.store.recordDecisionEvent({
@@ -1852,11 +1892,11 @@ export class TradingEngine {
       receive: offer.receive,
       rate: rate(offer),
       decision: "applied",
-      reason: automatic ? "Aplicación automática confirmada." : "Aplicación manual confirmada.",
+      reason: `${automatic ? "Aplicación automática" : "Aplicación manual"} confirmada a tasa efectiva ${transfer.effectiveRate.toFixed(2)} (nominal ${rate(offer).toFixed(2)} + comisión ${transfer.fee.toFixed(2)}).`,
       ...(referenceRate === undefined ? {} : { referenceRate }),
     });
     await this.notify(
-      `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} (${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD) en ${this.marketLabel(this.offerMarket(offer))}.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? `Cancelaré automáticamente en ${this.automationConfig().autoCancelMinutes} min si no indicas que pagarás: /ack ${offer.uuid}` : ""}`,
+      `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} en ${this.marketLabel(this.offerMarket(offer))}.\nTasa nominal ${rate(offer).toFixed(2)} · comisión ${transfer.fee.toFixed(2)} · tasa efectiva ${transfer.effectiveRate.toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? `Cancelaré automáticamente en ${this.automationConfig().autoCancelMinutes} min si no indicas que pagarás: /ack ${offer.uuid}` : ""}`,
       offer.uuid,
       automatic ? {
         kind: "operation-applied",
@@ -2119,6 +2159,19 @@ function huntingChangeDetail(values: Parameters<TradingEngine["updateHunting"]>[
     values.market ? `mercado=${values.market.code}` : undefined,
   ].filter(Boolean);
   return changes.join(" · ") || "Sin cambios";
+}
+
+function liquidityEconomics(config: TradingConfig) {
+  return Object.fromEntries(
+    config.markets.map((market) => [
+      market.code,
+      {
+        buyMaxRate: market.buyMaxRate,
+        sellFeePercent: market.sellFeePercent,
+        outgoingTransferFee: market.outgoingTransferFee,
+      },
+    ]),
+  );
 }
 
 function dayStart(now: number): number {

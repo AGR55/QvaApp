@@ -107,3 +107,49 @@ test("ignora mercados, tipos y estados que no liberan el QUSD objetivo", () => {
   assert.equal(plan.feasible, false);
   assert.deepEqual(plan.cancel, []);
 });
+
+test("combina ventas propias de distintos mercados y reserva solo el volumen necesario", () => {
+  const plan = planLiquidity({
+    target: { ...target, amount: 73, receive: 72_400 },
+    availableQusd: 0,
+    reserveQusd: 0,
+    ownOffers: [
+      own("cup-one", 16.51, 975),
+      own("cup-two", 20, 985),
+      own("classic-one", 20, 1.13, { coin: "CLASICA" }),
+      own("classic-two", 50, 1.13, { coin: "CLASICA" }),
+    ],
+    marketEconomics: {
+      BANK_CUP: { buyMaxRate: 930, sellFeePercent: 0, outgoingTransferFee: 0 },
+      CLASICA: { buyMaxRate: 1.06, sellFeePercent: 0, outgoingTransferFee: 0.08 },
+    },
+  });
+
+  assert.equal(plan.feasible, true);
+  assert.ok(plan.cancel.some((offer) => offer.coin === "CLASICA"));
+  assert.ok(plan.plannedReleaseQusd >= 73);
+  assert.equal(
+    plan.cancel.reduce((sum, offer) => sum + offer.consumeQusd, 0),
+    73,
+  );
+  assert.ok(
+    Math.abs(
+      plan.cancel.reduce((sum, offer) => sum + offer.restoreQusd, 0) -
+        (plan.plannedReleaseQusd - 73),
+    ) < 0.000001,
+  );
+});
+
+test("la liberación también cubre una reserva QUSD parcialmente descubierta", () => {
+  const plan = planLiquidity({
+    target,
+    availableQusd: 5,
+    reserveQusd: 10,
+    ownOffers: [own("enough", 40, 1_000)],
+  });
+
+  assert.equal(plan.requiredReleaseQusd, 35);
+  assert.equal(plan.feasible, true);
+  assert.equal(plan.cancel[0]?.consumeQusd, 35);
+  assert.equal(plan.cancel[0]?.restoreQusd, 5);
+});

@@ -66,6 +66,54 @@ test("el escaneo real cancela liquidez peor y aplica a la mejor compra externa",
   store.close();
 });
 
+test("Clásica bloquea una compra cuya comisión supera la tasa máxima efectiva", async () => {
+  const { store, cfg, markets } = setup();
+  const next = markets.current();
+  next.markets.forEach((market) => {
+    market.active = market.code === "CLASICA";
+  });
+  const classic = next.markets.find((market) => market.code === "CLASICA")!;
+  classic.buyMaxRate = 1.06;
+  classic.sellMinRate = 1.13;
+  classic.outgoingTransferFee = 0.08;
+  classic.fiatBalance = 20;
+  markets.save(next);
+  store.set("fiat_balance:CLASICA", "20");
+  const target: P2pOffer = {
+    uuid: "classic-fee-too-high",
+    type: "sell",
+    coin: "CLASICA",
+    amount: 2,
+    receive: 2.12,
+    status: "open",
+    User: { uuid: "peer" },
+  };
+  let applications = 0;
+  const qva = {
+    listOffersPage: async (params: { type?: string }) => ({
+      offers: params.type === "sell" ? [target] : [],
+      total: params.type === "sell" ? 1 : 0,
+      currentPage: 1,
+      perPage: 100,
+    }),
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => 100,
+    apply: async () => void (applications += 1),
+    sendChat: async () => undefined,
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const result = await trading.scan();
+
+  assert.equal(applications, 0);
+  assert.equal(result.action, undefined);
+  assert.match(
+    store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
+    /tasa efectiva 1\.10.*máximo de compra 1\.06/i,
+  );
+  store.close();
+});
+
 test("detiene compra y venta por separado sin consultar el lado deshabilitado", async () => {
   const { store, cfg, markets } = setup();
   const queries: string[] = [];

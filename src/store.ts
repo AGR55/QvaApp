@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { conservativeRiskLimits } from "./core/risk-policy.js";
 import type { RiskDecision } from "./core/risk-policy.js";
-import type { RestorableOwnOffer } from "./core/liquidity-plan.js";
+import type {
+  PlannedOwnOffer,
+  RestorableOwnOffer,
+} from "./core/liquidity-plan.js";
 import type { TradingConfig } from "./market-config.js";
 import type {
   FiatMarket,
@@ -33,7 +36,9 @@ export type WorkflowState =
   | "apply_uncertain"
   | "reconciling"
   | "restoring_own_offers"
+  | "restoring_surplus"
   | "restored"
+  | "surplus_restore_failed"
   | "compensation_failed"
   | "blocked";
 
@@ -50,13 +55,14 @@ export interface TradeWorkflow {
 export interface WorkflowOwnOffer {
   workflowId: string;
   originalUuid: string;
-  snapshot: RestorableOwnOffer;
+  snapshot: PlannedOwnOffer;
   state:
     | "planned"
     | "cancel_requested"
     | "cancelled"
     | "restore_requested"
     | "restored"
+    | "consumed"
     | "uncertain";
   restoreIdempotencyKey: string;
   restoredUuid: string | null;
@@ -863,7 +869,7 @@ export class Store {
 
   createTradeWorkflow(
     workflow: Pick<TradeWorkflow, "id" | "targetOffer" | "riskDecision">,
-    ownOffers: RestorableOwnOffer[],
+    ownOffers: Array<RestorableOwnOffer | PlannedOwnOffer>,
   ): void {
     this.transaction(() => {
       const now = Date.now();
@@ -964,7 +970,7 @@ export class Store {
     ).map((row) => ({
       workflowId: String(row.workflow_id),
       originalUuid: String(row.original_uuid),
-      snapshot: JSON.parse(String(row.snapshot_json)) as RestorableOwnOffer,
+      snapshot: JSON.parse(String(row.snapshot_json)) as PlannedOwnOffer,
       state: String(row.state) as WorkflowOwnOffer["state"],
       restoreIdempotencyKey: String(row.restore_idempotency_key),
       restoredUuid:
