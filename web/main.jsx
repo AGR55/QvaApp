@@ -13,6 +13,8 @@ import {
   ShieldCheck,
   Bell,
   X,
+  Moon,
+  Sun,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { useDashboard } from "./hooks/use-dashboard.js";
@@ -57,7 +59,13 @@ function App() {
   const [view, setView] = useState(() => initialView());
   const [market, setMarket] = useState("");
   const [notice, setNotice] = useState(null);
+  const [theme, setTheme] = useState(() => getInitialTheme());
   const { data, status, resources, online, refresh } = useDashboard(view, market, setMarket);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    window.localStorage.setItem("qvaapply-theme", theme);
+  }, [theme]);
   const navigate = useCallback((next) => {
     setView(next);
     const url = new URL(window.location.href);
@@ -144,6 +152,14 @@ function App() {
           </div>
           <div className="top-actions">
             <PushControl onNotification={setNotice} />
+            <button
+              className="icon-action theme-toggle"
+              onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
+              aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+              title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+            >
+              {theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+            </button>
             <button className="refresh" onClick={refresh} disabled={Object.values(resources).some((item) => item.loading)}>
               <RefreshCw className={Object.values(resources).some((item) => item.loading) ? "spinning" : ""} aria-hidden="true" />
               Actualizar
@@ -208,6 +224,12 @@ createRoot(document.getElementById("root")).render(<App />);
 function initialView() {
   const requested = new URLSearchParams(window.location.search).get("view");
   return navigation.some(([key]) => key === requested) ? requested : "resumen";
+}
+
+function getInitialTheme() {
+  const saved = window.localStorage.getItem("qvaapply-theme");
+  if (saved === "dark" || saved === "light") return saved;
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
 function PushControl({ onNotification }) {

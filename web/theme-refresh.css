@@ -92,3 +92,69 @@ tbody tr { transition:background-color .16s ease; } tbody tr:hover { background:
 @media (max-width:1050px) { .hunting-command { grid-template-columns:1fr; }.control-deck { grid-template-columns:1fr 1fr; }.control-deck>div { grid-column:1/-1; } }
 @media (max-width:700px) { .page-stack,.capital-stack,.hunting-stack,.operations-stack,.settings-stack,.audit-main { gap:14px; }.decision-strip { grid-template-columns:1fr; gap:14px; padding:20px; }.decision-strip>b { font-size:30px; }.control-deck { grid-template-columns:1fr; }.market-grid { gap:10px; }.hunting-command { padding:19px; }.hunt-market { padding:14px; }.capture-row { margin-bottom:10px; background:var(--surface); }.chart-stage { height:340px; }.settings-form { grid-template-columns:1fr; }.review-actions,.offer-modal-actions { display:grid; grid-template-columns:1fr; }.review-actions button,.offer-modal-actions button { width:100%; }.table-wrap table,.table-scroll table { min-width:620px; } }
 @media (max-width:700px) { .chart-summary { grid-template-columns:1fr 1fr; }.chart-summary div:last-child { grid-column:1/-1; } }
+
+/* QvaApply visual baseline: quiet surfaces, neutral borders and full-width workspace. */
+:root {
+  --bg: #f5f7f9;
+  --surface: #ffffff;
+  --surface-alt: #edf1f4;
+  --ink: #17212b;
+  --muted: #64717d;
+  --line: #d8e0e6;
+  --accent: #245f9e;
+  --accent-soft: #e7eff8;
+  --success: #287653;
+  --success-soft: #e7f3ed;
+  --success-ink: #236546;
+  --warning: #8a5b18;
+  --warning-soft: #f7efdf;
+  --danger: #b54855;
+  --radius-sm: 6px;
+  --radius-md: 9px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow: 0 1px 2px rgba(23, 33, 43, .06);
+}
+[data-theme="dark"] {
+  --bg: #11161b;
+  --surface: #171d23;
+  --surface-alt: #1d252d;
+  --ink: #edf2f5;
+  --muted: #9aa8b3;
+  --line: #303c46;
+  --accent: #76a9dc;
+  --accent-soft: #1d3044;
+  --success: #71c69a;
+  --success-soft: #1b3529;
+  --success-ink: #9cdbb8;
+  --warning: #e3b66c;
+  --warning-soft: #3a2e1d;
+  --danger: #ee8e98;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .22);
+}
+html { background: var(--bg); }
+body { background: var(--bg); }
+.app-shell { grid-template-columns: 232px minmax(0, 1fr); gap: 28px; padding: 0; }
+.sidebar { top: 0; height: 100dvh; min-height: 100dvh; padding: 28px 14px; border: 0; border-right: 1px solid var(--line); border-radius: 0; background: var(--surface); box-shadow: none; backdrop-filter: none; }
+.brand { padding-bottom: 30px; }
+.mark { border-radius: 7px; box-shadow: none; }
+.sidebar button.active { box-shadow: none; }
+.content { max-width: none; padding: 32px clamp(20px, 3vw, 48px) 56px; }
+.topbar { border-bottom: 1px solid var(--line); padding-bottom: 20px; }
+.connection-state { border: 1px solid var(--line); background: var(--surface); }
+.metric, .panel, .control-deck, .offer-workbench, .hunting-command { box-shadow: none; border-color: var(--line); }
+.metric, .panel { border-radius: var(--radius-lg); }
+.button.primary, .refresh:hover { box-shadow: none; }
+.decision-strip { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius-lg); background: var(--surface); box-shadow: none; }
+.decision-strip strong { color: var(--ink); }
+.market-card::before { display: none; }
+.tabs button.selected { box-shadow: none; }
+.push-toast, .review-panel>div, .offer-modal, .login-card, .decision-dialog { box-shadow: 0 8px 24px rgba(23, 33, 43, .16); border-color: var(--line); }
+[data-theme="dark"] .push-toast, [data-theme="dark"] .review-panel>div, [data-theme="dark"] .offer-modal, [data-theme="dark"] .login-card, [data-theme="dark"] .decision-dialog { box-shadow: 0 8px 24px rgba(0, 0, 0, .42); }
+.offer-workbench { border-radius: var(--radius-lg); }
+.hunt-side.active { box-shadow: inset 0 2px var(--accent); }
+.hunt-switch[aria-checked="true"]>span { box-shadow: none; }
+.chart-updating, .recharts-default-tooltip { box-shadow: var(--shadow); }
+.theme-toggle { color: var(--muted); }
+.theme-toggle:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+@media (max-width:900px) { .app-shell { padding-bottom: 82px; }.sidebar { top: auto; height: 64px; min-height: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); } }
