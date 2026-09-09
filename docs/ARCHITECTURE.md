@@ -25,6 +25,7 @@ web / Telegram / scheduler
 - `src/trading.ts`: fachada de casos de uso compartida por web, Telegram y scheduler.
 - `src/qvapay.ts`: transporte, rate limits, idempotencia disponible, decodificación y clasificación de errores.
 - `src/store.ts`: única frontera SQLite, migraciones, configuración normalizada, caché remota por recurso, transacciones y reconstrucción de modelos.
+- `src/web-push.ts`: claves VAPID, suscripciones locales y entregas deduplicadas por evento y navegador.
 - `src/http-dashboard.ts`: adaptador Fastify; autenticación, CSRF, límites, schemas y OpenAPI.
 - `src/dashboard.ts`: modelo de lectura local-first; compone el estado SQLite y actualiza balance, ofertas, transacciones o un mercado por separado.
 - `web`: interfaz React dividida por feature; carga solo los recursos de la vista activa y las gráficas de forma diferida.
@@ -44,7 +45,15 @@ abrir vista ──► GET /api/dashboard ──► SQLite ──► render inmed
                             fecha y estado UI
 ```
 
-`/api/dashboard` no realiza I/O de red. Los endpoints `/api/live/*` tienen destinos de fallo independientes y devuelven la copia persistida como `stale` cuando existe. El navegador pausa el polling si está oculto o sin conexión y reintenta con espera creciente.
+`/api/dashboard` no realiza I/O de red. Los endpoints `/api/live/*` tienen destinos de fallo independientes y devuelven la copia persistida como `stale` cuando existe. El navegador pausa el polling si está oculto o sin conexión y reintenta con espera creciente. El escáner, y no una visita a la página, alimenta las observaciones que forman las gráficas de 24 horas.
+
+## Decisiones y avisos
+
+Cada candidata que alcanza la política de decisión genera una versión durable en `decision_events`. Su versión depende de la oferta, tasa, decisión y razones; las mediciones variables actualizan la evidencia sin inundar la cola. Una versión nueva resuelve la anterior y un descarte afecta solo a la versión seleccionada.
+
+Auditoría consulta estos eventos directamente con paginación. Telegram y Web Push consumen el mismo resultado, pero fallan de manera independiente. El service worker entrega una tarjeta dentro del panel visible o una notificación del sistema cuando el panel está en segundo plano.
+
+Las operaciones automáticas con autocancelación vigilan el chat cada 15 segundos. El ID del saludo automático queda excluido y cualquier otro mensaje propio posterior reconoce la operación. La comprobación se repite antes de cancelar; un fallo de lectura aplaza la cancelación.
 
 ## Presupuesto de mercado y mutaciones
 
@@ -72,7 +81,7 @@ El escáner compara márgenes porcentuales entre mercados, prueba candidatas ord
 - No se inicia una operación si existe una mutación sin resolver.
 - Reanudar desde Telegram o desde la web valida primero que la sesión de QvaPay siga activa.
 - Si el panel autenticado no puede arrancar, el proceso completo falla antes de iniciar scheduler o bot.
-- Los cooldowns por mercado y contraparte se calculan desde operaciones persistidas, incluso tras reiniciar.
+- Los cooldowns y el slippage se muestran como advertencias; los rangos, capital, reservas, exposición, concurrencia, volumen y estado remoto continúan siendo bloqueos duros.
 - Al alcanzar el límite configurado de errores consecutivos, la automatización se pausa de forma persistente.
 - El mínimo de venta neto por mercado debe superar el máximo de compra.
 - Una lectura remota fallida nunca borra ni presenta como actual la última lectura válida.

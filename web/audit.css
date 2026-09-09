@@ -23,6 +23,15 @@
 .blocked-reason { display: flex; gap: 8px; margin: 12px 0 14px; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .blocked-reason svg { flex: 0 0 auto; width: 15px; color: var(--warning); }
 .blocked-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.risk-checks { margin: 0 0 14px; border-top: 1px solid var(--line); }
+.risk-checks summary { padding: 11px 0; color: var(--accent); font-size: 11px; font-weight: 700; cursor: pointer; }
+.risk-checks ul { display: grid; gap: 7px; margin: 0; padding: 0; list-style: none; }
+.risk-checks li { display: grid; grid-template-columns: 1fr auto; gap: 3px 10px; padding: 9px; border-radius: var(--radius-sm); background: var(--surface-alt); font-size: 10px; }
+.risk-checks li strong { color: var(--success); }.risk-checks .check-warning strong { color: var(--warning); }.risk-checks .check-fail strong { color: var(--danger); }
+.risk-checks small { grid-column: 1 / -1; color: var(--muted); line-height: 1.45; }
+.blocked-loading { display: grid; gap: 10px; }.blocked-loading span { height: 112px; border-radius: var(--radius-lg); background: linear-gradient(90deg,var(--surface-alt),var(--surface),var(--surface-alt)); background-size: 220% 100%; animation: shimmer 1.3s infinite; }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11px; }.pagination button { padding: 7px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); cursor: pointer; }
+.resource-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 10px 0; padding: 12px; border-radius: var(--radius-md); background: var(--danger-soft); color: var(--danger); }.resource-error p { margin: 0; font-size: 11px; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(24, 38, 65, .38); backdrop-filter: blur(7px); }
 .decision-dialog { position: relative; width: min(620px, 100%); max-height: min(86dvh, 760px); overflow: auto; padding: 30px; border: 1px solid rgba(255,255,255,.75); border-radius: 28px; background: var(--surface); box-shadow: 0 30px 90px rgba(39,58,95,.24); }
 .decision-dialog h2 { margin: 6px 42px 8px 0; font-size: clamp(25px, 4vw, 34px); line-height: 1.08; letter-spacing: -.045em; }

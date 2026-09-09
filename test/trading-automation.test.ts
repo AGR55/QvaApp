@@ -168,7 +168,7 @@ test("consulta hasta cien ofertas por lado y ordena por mejor tasa", async () =>
   store.close();
 });
 
-test("si la mejor compra queda bloqueada intenta la siguiente elegible", async () => {
+test("el cooldown queda visible como advertencia y no pierde la mejor compra", async () => {
   const { store, cfg, markets } = setup();
   const next = markets.current();
   next.risk.marketCooldownSeconds = 0;
@@ -203,8 +203,8 @@ test("si la mejor compra queda bloqueada intenta la siguiente elegible", async (
 
   const result = await trading.scan();
 
-  assert.equal(result.action, "aplicada eligible-next");
-  assert.deepEqual(applied, ["eligible-next"]);
+  assert.equal(result.action, "aplicada blocked-best");
+  assert.deepEqual(applied, ["blocked-best"]);
   store.close();
 });
 
@@ -273,7 +273,7 @@ test("la revisión manual omite precio pero nunca la parada de emergencia", asyn
   store.close();
 });
 
-test("el cooldown persistido bloquea una segunda operación inmediata del mercado", async () => {
+test("el cooldown persistido no bloquea una segunda operación protegida por los límites globales", async () => {
   const { store, cfg, markets } = setup();
   store.createOperation({
     uuid: "previous",
@@ -300,8 +300,34 @@ test("el cooldown persistido bloquea una segunda operación inmediata del mercad
 
   const result = await trading.scan();
 
-  assert.equal(result.action, "bloqueada target-cooldown");
-  assert.equal(mutations, 0);
+  assert.equal(result.action, "aplicada target-cooldown");
+  assert.equal(mutations, 1);
+  store.close();
+});
+
+test("cualquier mensaje propio posterior al saludo detiene la autocancelación", async () => {
+  const { store, cfg, markets } = setup();
+  const createdAt = Date.now() - 60_000;
+  store.createOperation({
+    uuid: "chat-ack", offerType: "sell", coin: "BANK_CUP", amount: 10,
+    receive: 9_200, rate: 920, state: "applied", autoApplied: true,
+    cancelAt: Date.now() + 60_000, createdAt,
+  });
+  store.set("chat:auto_message:chat-ack", JSON.stringify({ id: "automatic", sentAt: createdAt + 1_000 }));
+  const qva = {
+    profile: async () => ({ uuid: "me" }),
+    listChat: async () => [
+      { id: "automatic", peerId: "me", message: "Saludo", createdAt: createdAt + 1_000 },
+      { id: "manual", peerId: "me", message: "Estoy pagando", createdAt: createdAt + 2_000 },
+    ],
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  await trading.syncChatAcknowledgements();
+
+  assert.equal(store.getOperation("chat-ack")?.state, "acknowledged");
+  assert.equal(store.getOperation("chat-ack")?.cancelAt, null);
+  assert.ok(store.get("chat:ack_message:chat-ack")?.includes("manual"));
   store.close();
 });
 

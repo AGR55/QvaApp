@@ -157,6 +157,16 @@ export class DashboardReadModel {
   dismissBlockedOffer(uuid: string): void {
     this.trading.dismissBlockedOffer(uuid);
   }
+  decisionEvents(options: Parameters<Store["decisionEvents"]>[0]) {
+    return this.store.decisionEvents(options);
+  }
+  dismissDecisionEvent(id: number): void {
+    const event = this.store.decisionEvent(id);
+    if (!this.store.resolveDecisionEvent(id, "dismissed"))
+      throw new Error("El evento ya fue resuelto o no existe.");
+    if (event) this.store.resolveTradingAlert(event.uuid, "dismissed");
+    if (event) this.store.audit("blocked_offer_dismissed", "Versión de decisión descartada por el usuario.", event.uuid);
+  }
 
   localSnapshot() {
     const state = this.trading.operationalState();
@@ -403,7 +413,7 @@ export class DashboardReadModel {
   marketAnalytics(coin: string) {
     return {
       coin,
-      history: this.store.marketHistory(startOfDay(), coin),
+      history: this.store.marketHistory(Date.now() - 24 * 3_600_000, coin),
     };
   }
 }
@@ -412,16 +422,16 @@ function numeric(value: unknown): number | undefined {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : undefined;
 }
+function startOfDay(): number {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  return now.getTime();
+}
 function maybeNumber<K extends string>(
   key: K,
   value: number | undefined,
 ): Partial<Record<K, number>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, number>);
-}
-function startOfDay(): number {
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  return now.getTime();
 }
 function bestRate(
   items: { rate: number; offer: P2pOffer }[],

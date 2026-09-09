@@ -49,6 +49,12 @@ export interface LoginResult {
   pinRequested?: boolean;
   hasOtp?: boolean;
 }
+export interface QvaChatMessage {
+  id: string;
+  peerId: string;
+  message: string;
+  createdAt?: number;
+}
 export interface QvaPayRuntime {
   fetch?: typeof globalThis.fetch;
   now?: () => number;
@@ -272,11 +278,39 @@ export class QvaPayClient {
       policy: "received",
     });
   }
-  async sendChat(uuid: string, message: string): Promise<void> {
-    await this.request(`/p2p/${uuid}/chat`, {
+  async sendChat(uuid: string, message: string): Promise<{ id?: string; createdAt?: number }> {
+    const data = await this.request(`/p2p/${uuid}/chat`, {
       method: "POST",
       body: { message },
       policy: "chat",
+    });
+    const raw = isObject(data.message) ? data.message : isObject(data.data) ? data.data : data;
+    return {
+      ...(stringValue(raw.id ?? raw.uuid) ? { id: stringValue(raw.id ?? raw.uuid)! } : {}),
+      ...(timestampValue(raw.created_at) ? { createdAt: timestampValue(raw.created_at)! } : {}),
+    };
+  }
+
+  async listChat(uuid: string): Promise<QvaChatMessage[]> {
+    const data = await this.request(`/p2p/${uuid}/chat`, { policy: "read", retryRead: true });
+    const source = Array.isArray(data)
+      ? data
+      : Array.isArray(data.messages)
+        ? data.messages
+        : isObject(data.data) && Array.isArray(data.data.messages)
+          ? data.data.messages
+          : [];
+    return source.flatMap((entry, index) => {
+      if (!isObject(entry)) return [];
+      const peerId = stringValue(entry.peer_id ?? entry.peerId ?? (isObject(entry.Peer) ? entry.Peer.uuid : undefined));
+      const message = stringValue(entry.message);
+      if (!peerId || message === undefined) return [];
+      return [{
+        id: stringValue(entry.id ?? entry.uuid) ?? `${index}:${peerId}:${String(entry.created_at ?? "")}`,
+        peerId,
+        message,
+        ...(timestampValue(entry.created_at) ? { createdAt: timestampValue(entry.created_at)! } : {}),
+      }];
     });
   }
 
@@ -522,12 +556,13 @@ function parseOffer(value: unknown, context: string): P2pOffer {
   if (typeof raw.status !== "string" || !raw.status)
     throw new Error(`Respuesta inválida de QvaPay (${context}): estado ausente.`);
   if (raw.User !== undefined && raw.User !== null) validateParty(raw.User, `${context}, User`);
-  if (raw.Peer !== undefined && raw.Peer !== null) validateParty(raw.Peer, `${context}, Peer`);
+  const peer = raw.status === "open" && isEmptyParty(raw.Peer) ? null : raw.Peer;
+  if (peer !== undefined && peer !== null) validateParty(peer, `${context}, Peer`);
   if (raw.tags !== undefined && (!Array.isArray(raw.tags) || !raw.tags.every((tag) => typeof tag === "string")))
     throw new Error(`Respuesta inválida de QvaPay (${context}): etiquetas inválidas.`);
   if (raw.details !== undefined && !stringRecord(raw.details))
     throw new Error(`Respuesta inválida de QvaPay (${context}): datos de pago inválidos.`);
-  return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status } as P2pOffer;
+  return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status, Peer: peer } as P2pOffer;
 }
 
 function parseAverages(value: Record<string, unknown>): Record<string, P2pAverage> {
@@ -574,6 +609,12 @@ function validateParty(value: unknown, context: string): void {
     throw new Error(`Respuesta inválida de QvaPay (${context}): identidad inválida.`);
 }
 
+function isEmptyParty(value: unknown): boolean {
+  if (value === undefined || value === null || value === "") return true;
+  if (Array.isArray(value)) return value.length === 0;
+  return typeof value === "object" && Object.keys(value).length === 0;
+}
+
 function stringRecord(value: unknown): value is Record<string, string> {
   return Boolean(
     value &&
@@ -581,4 +622,19 @@ function stringRecord(value: unknown): value is Record<string, string> {
       !Array.isArray(value) &&
       Object.values(value).every((item) => typeof item === "string"),
   );
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length ? value : undefined;
+}
+
+function timestampValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }

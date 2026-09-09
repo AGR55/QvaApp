@@ -10,6 +10,9 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 - Las aplicaciones, cancelaciones y ediciones pasan por una cola única; sus separaciones se conservan en SQLite incluso tras reiniciar.
 - Un timeout de una mutación bloquea nuevas operaciones hasta conciliar por lectura.
 - Las reservas de capital, workflows, configuración, revisiones y auditoría viven en SQLite.
+- Cada oferta candidata conserva en SQLite una decisión versionada con todas sus comprobaciones; Auditoría las consulta con paginación y filtros.
+- El saludo automático se excluye al vigilar el chat: cualquier mensaje propio posterior detiene la autocancelación. Si el chat no responde, la cancelación se aplaza.
+- Telegram y Web Push avisan de aplicaciones, bloqueos y conciliaciones mediante canales independientes.
 - La última lectura válida de cada recurso QvaPay vive en SQLite y se muestra con su fecha cuando la conexión falla.
 - El panel escucha solo en `127.0.0.1`, usa contraseña, sesión `HttpOnly`, `SameSite=Strict`, CSRF y origen exacto.
 - Los pagos y confirmaciones finales siempre requieren intervención humana.
@@ -40,13 +43,15 @@ Precios, límites, mercados, saldos declarados, intervalos, autocancelación, re
 
 El panel abre primero con SQLite y actualiza únicamente los recursos de la vista activa. Si QvaPay tarda o no responde, conserva los datos anteriores, muestra su fecha y permite navegar, auditar o cambiar configuración local sin quedar atrapado en una pantalla de carga.
 
+Los avisos del navegador se activan desde el icono de campana. En la máquina local funcionan mediante `localhost`/`127.0.0.1`; un despliegue futuro en VPS deberá usar HTTPS. Las gráficas leen una ventana móvil de 24 horas alimentada por el escáner y usan un SVG local liviano.
+
 ## Comandos
 
 ```bash
 pnpm typecheck       # análisis estático estricto
 pnpm test            # suite unitaria, contractual e integrada
 pnpm build           # servidor + panel de producción
-pnpm check           # tipos, 89 pruebas, builds y escáner de secretos
+pnpm check           # tipos, 118 pruebas, builds y escáner de secretos
 pnpm check:ui        # build + recorrido Chromium, responsive y WCAG automatizado
 pnpm start           # ejecuta dist/index.js
 ```

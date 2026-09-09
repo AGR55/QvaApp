@@ -11,6 +11,7 @@ import { Vault } from "./vault.js";
 import { DashboardReadModel } from "./dashboard.js";
 import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
+import { WebPushService } from "./web-push.js";
 
 const store = new Store(config.dataDir);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
@@ -19,19 +20,34 @@ const qva = new QvaPayClient(() => session.token(), {
   throttleState: store,
 });
 const bot = new Bot(config.telegramToken);
+const webPush = new WebPushService(store);
 const trading = new TradingEngine(
   store,
   qva,
   config,
   marketConfig,
-  async (message, uuid) => {
+  async (message, uuid, event) => {
     const keyboard = uuid
       ? new InlineKeyboard()
           .text("✅ Voy a pagar", `ack:${uuid}`)
           .text("✖ Cancelar", `cancel:${uuid}`)
       : undefined;
-    await bot.api.sendMessage(String(config.adminChatId), message, {
-      ...(keyboard ? { reply_markup: keyboard } : {}),
+    const deliveries = await Promise.allSettled([
+      bot.api.sendMessage(String(config.adminChatId), message, {
+        ...(keyboard ? { reply_markup: keyboard } : {}),
+      }),
+      event?.kind === "blocked-offer"
+        ? webPush.notifyBlocked(event.alert)
+        : event
+          ? webPush.notifyOperation(event)
+          : Promise.resolve(),
+    ]);
+    deliveries.forEach((result, index) => {
+      if (result.status === "rejected") store.audit(
+        "notification_warning",
+        `${index === 0 ? "Telegram" : "Web Push"}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        uuid,
+      );
     });
   },
 );
@@ -43,6 +59,7 @@ const dashboardServer = await startDashboard(
     trustedOrigin: config.dashboardTrustedOrigin,
     secureCookies: config.dashboardSecureCookies,
   },
+  webPush,
 );
 
 bot.use(async (ctx, next) => {
@@ -239,6 +256,7 @@ scheduler.register("scan", () => marketConfig.current().automation.scanIntervalS
   if (!trading.isPaused()) await trading.scan();
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
+scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());
 scheduler.register("refresh", 5_000, () => trading.refreshOwnOffers());
 scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),

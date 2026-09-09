@@ -36,7 +36,12 @@ export interface ReconciliationResult {
 
 export interface OrchestratorRuntime {
   now?: () => number;
-  notify?: (message: string) => Promise<void>;
+  notify?: (message: string, event?: {
+    kind: "operation-applied" | "reconciliation-required";
+    uuid: string;
+    coin: string;
+    amount: number;
+  }) => Promise<void>;
 }
 
 /**
@@ -45,7 +50,7 @@ export interface OrchestratorRuntime {
  */
 export class OpportunityOrchestrator {
   private readonly now: () => number;
-  private readonly notify: (message: string) => Promise<void>;
+  private readonly notify: NonNullable<OrchestratorRuntime["notify"]>;
   private inFlight: Promise<OpportunityResult> | undefined;
 
   constructor(
@@ -192,7 +197,10 @@ export class OpportunityOrchestrator {
         requiredFiat: 0,
         quotedRate: input.target.receive / input.target.amount,
         referenceRate: input.referenceRate,
-        observedAt: offerTimestamp(input.target, now),
+        // La oferta acaba de ser observada en una lectura actual de /p2p. Las
+        // fechas de creación/edición describen la oferta, no la frescura de la
+        // cotización recibida por este escaneo.
+        observedAt: now,
         ...(input.target.User?.uuid
           ? { counterpartyId: input.target.User.uuid }
           : {}),
@@ -288,8 +296,9 @@ export class OpportunityOrchestrator {
         "Aplicación automática confirmada; el pago fiat permanece manual.",
         input.target.uuid,
       );
-      await this.notify(
+      await this.notifyBestEffort(
         `Aplicación confirmada para ${input.target.amount} QUSD. Verifica el pago fiat recibido antes de confirmar recepción.`,
+        { kind: "operation-applied", uuid: input.target.uuid, coin: input.target.coin, amount: input.target.amount },
       );
     } catch (error) {
       const message = errorMessage(error);
@@ -300,6 +309,10 @@ export class OpportunityOrchestrator {
             : "cancellation_uncertain";
         this.store.updateWorkflowState(workflowId, state, message);
         this.store.audit("workflow_reconciliation_required", message, input.target.uuid);
+        await this.notifyBestEffort(
+          `⚠️ La operación ${input.target.uuid} requiere conciliación manual con QvaPay.`,
+          { kind: "reconciliation-required", uuid: input.target.uuid, coin: input.target.coin, amount: input.target.amount },
+        );
       } else {
         this.store.updateWorkflowState(workflowId, "apply_rejected", message);
         await this.restoreCancelledOffers(workflowId);
@@ -333,6 +346,17 @@ export class OpportunityOrchestrator {
           });
         throw error;
       }
+    }
+  }
+
+  private async notifyBestEffort(
+    message: string,
+    event?: Parameters<NonNullable<OrchestratorRuntime["notify"]>>[1],
+  ): Promise<void> {
+    try {
+      await this.notify(message, event);
+    } catch (error) {
+      this.store.audit("notification_warning", errorMessage(error));
     }
   }
 
@@ -507,11 +531,6 @@ function isUncertain(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function offerTimestamp(offer: P2pOffer, fallback: number): number {
-  const parsed = Date.parse(offer.updated_at ?? offer.created_at ?? "");
-  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function startOfDay(now: number): number {

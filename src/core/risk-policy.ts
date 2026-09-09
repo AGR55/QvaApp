@@ -4,7 +4,7 @@ export type RiskDecisionKind =
   | "blocked"
   | "ignored";
 
-export type RiskCheckStatus = "pass" | "fail" | "not_applicable";
+export type RiskCheckStatus = "pass" | "fail" | "warning" | "not_applicable";
 
 export interface RiskCheck {
   code: string;
@@ -161,7 +161,7 @@ export function evaluateRisk(context: RiskContext): RiskDecision {
       limits.minExpectedMarginPercent,
       "El margen esperado no alcanza el mínimo configurado.",
     ),
-    maximumCheck(
+    advisoryMaximumCheck(
       "slippage",
       "Deslizamiento frente a referencia",
       slippagePercent(opportunity.quotedRate, opportunity.referenceRate),
@@ -175,7 +175,7 @@ export function evaluateRisk(context: RiskContext): RiskDecision {
       Math.max(0, limits.maxConsecutiveErrors - 1),
       "El sistema alcanzó el umbral de errores consecutivos.",
     ),
-    cooldownCheck(
+    advisoryCooldownCheck(
       "market_cooldown",
       "Enfriamiento del mercado",
       context.now,
@@ -183,7 +183,7 @@ export function evaluateRisk(context: RiskContext): RiskDecision {
       limits.marketCooldownSeconds,
       "El mercado todavía está en periodo de enfriamiento.",
     ),
-    cooldownCheck(
+    advisoryCooldownCheck(
       "counterparty_cooldown",
       "Enfriamiento de contraparte",
       context.now,
@@ -313,7 +313,25 @@ function minimumCheck(
   };
 }
 
-function cooldownCheck(
+function advisoryMaximumCheck(
+  code: string,
+  label: string,
+  actual: number,
+  limit: number,
+  warningReason: string,
+): RiskCheck {
+  const passes = actual <= limit;
+  return {
+    code,
+    label,
+    status: passes ? "pass" : "warning",
+    actual,
+    limit,
+    reason: passes ? `${label}: dentro del límite.` : warningReason,
+  };
+}
+
+function advisoryCooldownCheck(
   code: string,
   label: string,
   now: number,
@@ -334,7 +352,7 @@ function cooldownCheck(
   return {
     code,
     label,
-    status: passes ? "pass" : "fail",
+    status: passes ? "pass" : "warning",
     actual: elapsedSeconds,
     limit: cooldownSeconds,
     reason: passes ? `${label}: completado.` : failureReason,

@@ -267,3 +267,44 @@ test("una lectura remota fallida conserva la copia SQLite y marca su antigüedad
   assert.match(payload.error, /inestable/);
   await app.close();
 });
+
+test("expone decisiones paginadas y protege la resolución con CSRF", async () => {
+  const dismissed: number[] = [];
+  const readModel = {
+    decisionEvents: (options: unknown) => ({ items: [], total: 0, pending: 0, page: 2, pageSize: 5, options }),
+    dismissDecisionEvent: (id: number) => void dismissed.push(id),
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const listed = await app.inject({ method: "GET", url: "/api/decision-events?decision=blocked&status=pending&page=2&pageSize=5", headers: { cookie } });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json<{ data: { page: number } }>().data.page, 2);
+  const rejected = await app.inject({ method: "POST", url: "/api/decision-events/7/dismiss", headers: { origin, cookie, "content-type": "application/json" }, payload: {} });
+  assert.equal(rejected.statusCode, 403);
+  const accepted = await app.inject({ method: "POST", url: "/api/decision-events/7/dismiss", headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf }, payload: {} });
+  assert.equal(accepted.statusCode, 204);
+  assert.deepEqual(dismissed, [7]);
+  await app.close();
+});
+
+test("registra y elimina Web Push solo con sesión, origen y CSRF", async () => {
+  const subscriptions: string[] = [];
+  const push = {
+    publicKey: () => "public-key",
+    subscribe: (value: { endpoint: string }) => { subscriptions.push(value.endpoint); return value; },
+    unsubscribe: (endpoint: string) => { subscriptions.splice(subscriptions.indexOf(endpoint), 1); return true; },
+  };
+  const app = buildDashboard({} as never, { password, trustedOrigin: origin }, push as never);
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  assert.equal((await app.inject({ method: "GET", url: "/api/push/public-key", headers: { cookie } })).statusCode, 200);
+  const headers = { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf };
+  const body = { endpoint: "https://push.example/device", expirationTime: null, keys: { p256dh: "key", auth: "auth" } };
+  assert.equal((await app.inject({ method: "POST", url: "/api/push/subscriptions", headers, payload: body })).statusCode, 201);
+  assert.equal((await app.inject({ method: "DELETE", url: "/api/push/subscriptions", headers, payload: { endpoint: body.endpoint } })).statusCode, 204);
+  assert.deepEqual(subscriptions, []);
+  await app.close();
+});

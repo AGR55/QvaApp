@@ -107,7 +107,7 @@ try {
         viewport: document.documentElement.clientWidth,
         scroll: document.documentElement.scrollWidth,
         content: document.querySelector('#main-content')?.getBoundingClientRect().width || 0,
-        chart: document.querySelector('.recharts-responsive-container')?.getBoundingClientRect().width || 0
+        chart: document.querySelector('.market-chart')?.getBoundingClientRect().width || 0
       });
       window.__chartLayoutFrames += 1;
       if (window.__chartLayoutFrames < 120) requestAnimationFrame(sample);
@@ -122,12 +122,12 @@ try {
   if (chartOverflowFrames.length || Math.max(...chartContentWidths) - Math.min(...chartContentWidths) > 1 || Math.min(...chartWidths) <= 0 || Math.max(...chartWidths) - Math.min(...chartWidths) > 1)
     throw new Error(`Gráfica inestable durante actualización: ${JSON.stringify({ overflowFrames: chartOverflowFrames.length, minContent: Math.min(...chartContentWidths), maxContent: Math.max(...chartContentWidths), minChart: Math.min(...chartWidths), maxChart: Math.max(...chartWidths) })}`);
   await command("POST", `/session/${sessionId}/window/rect`, { width: 1440, height: 1000, x: 0, y: 0 });
-  await waitFor(() => execute("return Array.from(document.querySelectorAll('.recharts-area-curve')).filter(path => path.getAttribute('d')).length >= 2"));
+  await waitFor(() => execute("return Array.from(document.querySelectorAll('.chart-line')).filter(line => line.getAttribute('points')).length >= 2"));
   const chartRender = await execute(`return {
-    surface: document.querySelector('.recharts-surface')?.getBoundingClientRect().toJSON(),
-    axes: document.querySelectorAll('.recharts-cartesian-axis-tick').length,
-    curves: Array.from(document.querySelectorAll('.recharts-area-curve')).map(path => ({
-      d: path.getAttribute('d'), stroke: getComputedStyle(path).stroke,
+    surface: document.querySelector('.market-chart')?.getBoundingClientRect().toJSON(),
+    axes: document.querySelectorAll('.chart-y-label,.chart-x-label').length,
+    curves: Array.from(document.querySelectorAll('.chart-line')).map(path => ({
+      d: path.getAttribute('points'), stroke: getComputedStyle(path).stroke,
       box: path.getBoundingClientRect().toJSON()
     }))
   }`);
@@ -176,7 +176,7 @@ try {
     await command("POST", `/session/${sessionId}/element/${navigationButton}/click`, {});
     await waitFor(() => execute(`return document.body.innerText.includes(${JSON.stringify(visibleText)})`));
     if (navLabel === "Gráficas")
-      await waitFor(() => execute("return document.querySelectorAll('.recharts-area-curve').length >= 2"));
+      await waitFor(() => execute("return document.querySelectorAll('.chart-line').length >= 2"));
     await screenshot(imagePath);
     mobile[navLabel] = await assertPageQuality(`${navLabel} móvil`);
   }

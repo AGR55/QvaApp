@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState } from "react";
+import React, { lazy, Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BarChart3,
@@ -11,6 +11,8 @@ import {
   LogOut,
   Workflow,
   ShieldCheck,
+  Bell,
+  X,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { useDashboard } from "./hooks/use-dashboard.js";
@@ -52,9 +54,16 @@ const navigation = [
 
 function App() {
   const [session, setSession] = useState();
-  const [view, setView] = useState("resumen");
+  const [view, setView] = useState(() => initialView());
   const [market, setMarket] = useState("");
+  const [notice, setNotice] = useState(null);
   const { data, status, resources, online, refresh } = useDashboard(view, market, setMarket);
+  const navigate = useCallback((next) => {
+    setView(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", next);
+    window.history.replaceState({}, "", url);
+  }, []);
   useEffect(() => {
     void requestJson("/api/session")
       .then((payload) => {
@@ -82,7 +91,7 @@ function App() {
   const logout = async () => {
     await requestJson("/api/session", {
       method: "DELETE",
-      headers: { "content-type": "apAplication/json" },
+      headers: { "content-type": "application/json" },
     });
     setCsrfToken("");
     setSession({ authenticated: false });
@@ -119,7 +128,7 @@ function App() {
               key={key}
               className={view === key ? "active" : ""}
               aria-current={view === key ? "page" : undefined}
-              onClick={() => setView(key)}
+              onClick={() => navigate(key)}
             >
               <Icon />
               {text}
@@ -134,6 +143,7 @@ function App() {
             <h1>{title}</h1>
           </div>
           <div className="top-actions">
+            <PushControl onNotification={setNotice} />
             <button className="refresh" onClick={refresh} disabled={Object.values(resources).some((item) => item.loading)}>
               <RefreshCw className={Object.values(resources).some((item) => item.loading) ? "spinning" : ""} aria-hidden="true" />
               Actualizar
@@ -152,6 +162,7 @@ function App() {
           <span />
           <p>{status}</p>
         </div>
+        {notice ? <aside className="push-toast" role="status" aria-live="polite"><Bell aria-hidden="true" /><div><strong>{notice.type === "blocked-offer" ? "Oferta requiere revisión" : notice.type === "operation-applied" ? "Aplicación confirmada" : "Conciliación necesaria"}</strong><p>{notice.alert?.coin || "QvaApply"}{notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}{notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}</p><button className="button primary" onClick={() => { const next = new URL(notice.url || "/?view=auditoria", window.location.origin).searchParams.get("view") || "auditoria"; navigate(next); setNotice(null); }}>Abrir detalle</button></div><button className="dialog-close" onClick={() => setNotice(null)} aria-label="Cerrar aviso"><X /></button></aside> : null}
         {view === "resumen" ? (
           <Cockpit data={data} label={label} unit={unit} onChanged={refresh} resources={resources} />
         ) : null}
@@ -193,3 +204,67 @@ function App() {
 }
 
 createRoot(document.getElementById("root")).render(<App />);
+
+function initialView() {
+  const requested = new URLSearchParams(window.location.search).get("view");
+  return navigation.some(([key]) => key === requested) ? requested : "resumen";
+}
+
+function PushControl({ onNotification }) {
+  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const [state, setState] = useState(supported ? "checking" : "unsupported");
+  useEffect(() => {
+    if (!supported) return;
+    let active = true;
+    const onMessage = (event) => {
+      if (event.data?.type !== "qvaapply-notification") return;
+      onNotification(event.data.payload || {});
+      playNotificationTone();
+    };
+    navigator.serviceWorker.addEventListener("message", onMessage);
+    void navigator.serviceWorker.register("/service-worker.js").then(async (registration) => {
+      const subscription = await registration.pushManager.getSubscription();
+      if (active) setState(subscription ? "enabled" : Notification.permission === "denied" ? "denied" : "disabled");
+    }).catch(() => { if (active) setState("unsupported"); });
+    return () => { active = false; navigator.serviceWorker.removeEventListener("message", onMessage); };
+  }, [supported, onNotification]);
+  const toggle = async () => {
+    try {
+      setState("checking");
+      const registration = await navigator.serviceWorker.ready;
+      const current = await registration.pushManager.getSubscription();
+      if (current) {
+        await requestJson("/api/push/subscriptions", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: current.endpoint }) });
+        await current.unsubscribe(); setState("disabled"); return;
+      }
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { setState("denied"); return; }
+      const payload = await requestJson("/api/push/public-key");
+      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(payload.data.publicKey) });
+      await requestJson("/api/push/subscriptions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(subscription) });
+      setState("enabled");
+    } catch { setState("error"); }
+  };
+  const labels = { checking: "Comprobando avisos", enabled: "Avisos activados", disabled: "Activar avisos", denied: "Avisos bloqueados", unsupported: "Avisos no compatibles", error: "Reintentar avisos" };
+  return <button className={`icon-action push-control ${state}`} onClick={() => void toggle()} disabled={state === "checking" || state === "unsupported" || state === "denied"} aria-label={labels[state]} title={labels[state]}><Bell aria-hidden="true" /><span className="push-dot" /></button>;
+}
+
+function decodeVapidKey(value) {
+  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const raw = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+function playNotificationTone() {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+    const context = new AudioContext();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 660; gain.gain.value = 0.035;
+    oscillator.connect(gain); gain.connect(context.destination);
+    oscillator.start(); gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18);
+    oscillator.stop(context.currentTime + 0.18);
+  } catch { /* el aviso visual y nativo siguen disponibles */ }
+}

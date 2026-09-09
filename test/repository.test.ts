@@ -162,7 +162,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v9-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v10-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });
@@ -190,6 +190,35 @@ test("mantiene ofertas bloqueadas accionables y respeta un descarte sin cambios"
   store.syncTradingAlerts([{ ...alert, rate: 1_021 }]);
   assert.equal(store.tradingAlert("blocked-1")?.resolvedAt, null);
   assert.equal(store.tradingAlert("blocked-1")?.resolution, undefined);
+  store.close();
+});
+
+test("pagina eventos de decisión y descarta solamente una versión", () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-decisions-")));
+  const base = {
+    uuid: "offer-versioned",
+    coin: "BANK_CUP",
+    offerType: "sell" as const,
+    amount: 10,
+    receive: 10_000,
+    rate: 1_000,
+    decision: "blocked" as const,
+    reason: "Capital insuficiente",
+    checks: [{ code: "fiat_capital", label: "Capital", status: "fail" as const, reason: "Capital insuficiente" }],
+  };
+  const first = store.recordDecisionEvent(base);
+  assert.equal(store.resolveDecisionEvent(first.id, "dismissed"), true);
+  const same = store.recordDecisionEvent(base);
+  assert.equal(same.id, first.id);
+  assert.equal(same.resolution, "dismissed");
+
+  const changed = store.recordDecisionEvent({ ...base, rate: 999, receive: 9_990 });
+  assert.notEqual(changed.id, first.id);
+  const pending = store.decisionEvents({ decision: "blocked", status: "pending", pageSize: 1 });
+  assert.equal(pending.total, 1);
+  assert.equal(pending.pending, 1);
+  assert.equal(pending.items[0]?.id, changed.id);
+  assert.equal(pending.items[0]?.checks[0]?.code, "fiat_capital");
   store.close();
 });
 

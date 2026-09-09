@@ -101,7 +101,7 @@ test("mantiene la revisión manual aunque otros límites pasen", () => {
   assert.equal(decision.checks[0]?.code, "price_policy");
 });
 
-test("bloquea cotizaciones antiguas, slippage y cooldown", () => {
+test("solo la cotización antigua bloquea; slippage y cooldown son advertencias", () => {
   const decision = evaluateRisk(
     context({
       opportunity: {
@@ -115,12 +115,20 @@ test("bloquea cotizaciones antiguas, slippage y cooldown", () => {
   );
 
   assert.equal(decision.kind, "blocked");
-  for (const code of ["quote_age", "slippage", "market_cooldown", "counterparty_cooldown"])
-    assert.ok(
-      decision.checks.some(
-        (check) => check.code === code && check.status === "fail",
-      ),
-    );
+  assert.ok(decision.checks.some((check) => check.code === "quote_age" && check.status === "fail"));
+  for (const code of ["slippage", "market_cooldown", "counterparty_cooldown"])
+    assert.ok(decision.checks.some((check) => check.code === code && check.status === "warning"));
+});
+
+test("slippage y cooldown no impiden aplicar cuando pasan las protecciones duras", () => {
+  const decision = evaluateRisk(context({
+    opportunity: { ...context().opportunity, quotedRate: 1_030, observedAt: now },
+    lastMarketOperationAt: now - 10_000,
+    lastCounterpartyOperationAt: now - 60_000,
+  }));
+
+  assert.equal(decision.kind, "apply");
+  assert.equal(decision.checks.filter((check) => check.status === "warning").length, 3);
 });
 
 test("una compra de QUSD consume fiat, no la reserva QUSD", () => {

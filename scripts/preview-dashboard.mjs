@@ -79,7 +79,7 @@ const snapshot = {
   recoverableWorkflows: [], workflows: [workflow], workflowOffers: {},
   capitalReservations: [{ workflowId: workflow.id, market: "BANK_CUP", amount: 20, state: "released", createdAt: now - 120000, releasedAt: now - 90000 }],
   mutationIntents: [{ intentId: "intent-demo", operationUuid: operation.uuid, kind: "apply", state: "confirmed", request: {}, createdAt: now - 100000, updatedAt: now - 90000 }],
-  operations: [operation], integrity: { schemaVersion: 9, configRevisionChainValid: true },
+  operations: [operation], integrity: { schemaVersion: 10, configRevisionChainValid: true },
   freshness: { balance: now, ownOffers: now, transactions: now, markets: { BANK_CUP: now, BANDECPREPAGO: now } },
 };
 
@@ -97,6 +97,15 @@ const model = {
   config: () => config,
   configRevisions: () => [{ id: 1, createdAt: now, source: "preview", reason: "Datos de demostración", config, previousHash: null, hash: "0123456789abcdef" }],
   auditLog: () => snapshot.activity,
+  decisionEvents: ({ page = 1, pageSize = 20 } = {}) => ({
+    items: [{ id: 1, version: "preview-blocked-v1", ...snapshot.alerts[0], checks: [
+      { code: "price_policy", label: "Política de precio", status: "fail", actual: "blocked", limit: "eligible", reason: "Supera la protección extrema de mediana." },
+      { code: "operation_amount", label: "Importe por operación", status: "pass", actual: 20, limit: 25, reason: "Dentro del límite." },
+      { code: "slippage", label: "Deslizamiento", status: "warning", actual: 4.15, limit: 1, reason: "Advertencia informativa; no bloquea por sí sola." },
+    ] }],
+    total: 1, pending: 1, page, pageSize,
+  }),
+  dismissDecisionEvent: () => undefined,
   setPaused: (value) => { snapshot.state.paused = value; },
   setMode: (value) => { snapshot.state.mode = value; },
   setRefresh: (value) => { snapshot.state.refresh = value; },

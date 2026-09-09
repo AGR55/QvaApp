@@ -2,6 +2,50 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { QvaPayClient } from "../src/qvapay.js";
 
+test("normaliza un Peer vacío como contraparte ausente en una oferta abierta", async () => {
+  const client = new QvaPayClient(() => "token", {
+    fetch: async () => new Response(JSON.stringify({ p2p: {
+      uuid: "open-without-peer", type: "buy", coin: "BANK_CUP",
+      amount: "10.00", receive: "10200.00", status: "open",
+      User: { uuid: "creator" }, Peer: {},
+    } }), { status: 200 }),
+  });
+
+  const offer = await client.getOffer("open-without-peer");
+
+  assert.equal(offer.Peer, null);
+  assert.equal(offer.User?.uuid, "creator");
+});
+
+test("normaliza el chat documentado e identifica al autor por peer_id", async () => {
+  const client = new QvaPayClient(() => "token", {
+    fetch: async (_input, init) => new Response(JSON.stringify(init?.method === "POST"
+      ? { message: { id: "automatic-1", created_at: "2026-09-09T12:00:00Z" } }
+      : { messages: [{ id: "own-2", peer_id: "me", message: "Voy a pagar", created_at: "2026-09-09T12:01:00Z" }] }), { status: 200 }),
+  });
+
+  assert.equal((await client.sendChat("offer", "Hola")).id, "automatic-1");
+  assert.deepEqual(await client.listChat("offer"), [{
+    id: "own-2", peerId: "me", message: "Voy a pagar",
+    createdAt: Date.parse("2026-09-09T12:01:00Z"),
+  }]);
+});
+
+test("rechaza un Peer inválido cuando la oferta ya tiene contraparte", async () => {
+  const client = new QvaPayClient(() => "token", {
+    fetch: async () => new Response(JSON.stringify({ p2p: {
+      uuid: "processing-with-peer", type: "sell", coin: "BANK_CUP",
+      amount: 10, receive: 9_400, status: "processing",
+      User: { uuid: "creator" }, Peer: {},
+    } }), { status: 200 }),
+  });
+
+  await assert.rejects(
+    () => client.getOffer("processing-with-peer"),
+    /oferta solicitada, Peer.*identidad inválida/,
+  );
+});
+
 test("serializa mutaciones distintas bajo un único límite global", async () => {
   let now = 1_000;
   const calls: { url: string; at: number }[] = [];

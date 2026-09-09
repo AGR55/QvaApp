@@ -545,6 +545,8 @@ test("no reintenta automáticamente una cancelación cuyo resultado remoto es in
   });
   let cancelCalls = 0;
   const qva = {
+    profile: async () => ({ uuid: "me" }),
+    listChat: async () => [],
     getOffer: async () => ({ uuid: "uncertain-cancel", status: "open" }),
     cancel: async () => {
       cancelCalls += 1;

@@ -13,7 +13,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 9;
+const LATEST_SCHEMA_VERSION = 10;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -102,6 +102,33 @@ export interface TradingAlert {
   createdAt: number;
   updatedAt: number;
   resolvedAt: number | null;
+}
+
+export interface DecisionEvent {
+  id: number;
+  version: string;
+  uuid: string;
+  coin: FiatMarket;
+  offerType: P2pType;
+  amount: number;
+  receive: number;
+  rate: number;
+  decision: "applied" | "blocked" | "manual_review";
+  reason: string;
+  checks: RiskDecision["checks"];
+  referenceRate?: number;
+  resolution?: "dismissed" | "applied" | "expired" | "resolved";
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt: number | null;
+}
+
+export interface DecisionEventPage {
+  items: DecisionEvent[];
+  total: number;
+  pending: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface MutationIntent {
@@ -405,6 +432,35 @@ export class Store {
         this.ensureColumn("trading_alerts", "resolution", "TEXT");
         this.db.prepare(
           "INSERT INTO schema_migrations(version, applied_at) VALUES (9, ?)",
+        ).run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 10) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS decision_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            version TEXT NOT NULL UNIQUE,
+            offer_uuid TEXT NOT NULL,
+            coin TEXT NOT NULL,
+            offer_type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            receive REAL NOT NULL,
+            rate REAL NOT NULL,
+            decision TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            checks_json TEXT NOT NULL,
+            reference_rate REAL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            resolved_at INTEGER,
+            resolution TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_decision_events_queue
+            ON decision_events(resolved_at, decision, updated_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_decision_events_offer
+            ON decision_events(offer_uuid, updated_at DESC);
+        `);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (10, ?)",
         ).run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
@@ -1356,6 +1412,28 @@ export class Store {
       );
   }
 
+  upsertTradingAlert(
+    alert: Omit<TradingAlert, "createdAt" | "updatedAt" | "resolvedAt">,
+  ): void {
+    const now = Date.now();
+    this.db.prepare(`INSERT INTO trading_alerts(offer_uuid, coin, offer_type, amount, receive, rate, decision, reason, reference_rate, created_at, updated_at, resolved_at, resolution)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+      ON CONFLICT(offer_uuid) DO UPDATE SET
+        coin = excluded.coin, offer_type = excluded.offer_type, amount = excluded.amount,
+        receive = excluded.receive, rate = excluded.rate, decision = excluded.decision,
+        reason = excluded.reason, reference_rate = excluded.reference_rate,
+        updated_at = excluded.updated_at,
+        resolved_at = CASE
+          WHEN trading_alerts.resolution = 'dismissed' AND trading_alerts.rate = excluded.rate
+            AND trading_alerts.reason = excluded.reason THEN trading_alerts.resolved_at ELSE NULL END,
+        resolution = CASE
+          WHEN trading_alerts.resolution = 'dismissed' AND trading_alerts.rate = excluded.rate
+            AND trading_alerts.reason = excluded.reason THEN trading_alerts.resolution ELSE NULL END`).run(
+      alert.uuid, alert.coin, alert.offerType, alert.amount, alert.receive, alert.rate,
+      alert.decision, alert.reason, alert.referenceRate ?? null, now, now,
+    );
+  }
+
   tradingAlert(uuid: string): TradingAlert | undefined {
     return this.readTradingAlert(
       this.db.prepare(
@@ -1382,6 +1460,123 @@ export class Store {
         )
         .all(limit) as Record<string, unknown>[]
     ).map((row) => this.readTradingAlert(row)!);
+  }
+
+  recordDecisionEvent(input: {
+    uuid: string;
+    coin: FiatMarket;
+    offerType: P2pType;
+    amount: number;
+    receive: number;
+    rate: number;
+    decision: DecisionEvent["decision"];
+    reason: string;
+    checks?: RiskDecision["checks"];
+    referenceRate?: number;
+  }): DecisionEvent {
+    const checks = input.checks ?? [];
+    const version = createHash("sha256")
+      .update(JSON.stringify({
+        uuid: input.uuid,
+        rate: input.rate,
+        decision: input.decision,
+        reason: input.reason,
+      }))
+      .digest("hex");
+    const now = Date.now();
+    this.db.prepare(
+      "UPDATE decision_events SET resolved_at = ?, resolution = 'resolved', updated_at = ? WHERE offer_uuid = ? AND version <> ? AND resolved_at IS NULL",
+    ).run(now, now, input.uuid, version);
+    this.db.prepare(`INSERT INTO decision_events(
+      version, offer_uuid, coin, offer_type, amount, receive, rate, decision,
+      reason, checks_json, reference_rate, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(version) DO UPDATE SET
+      amount = excluded.amount, receive = excluded.receive,
+      checks_json = excluded.checks_json, reference_rate = excluded.reference_rate,
+      updated_at = excluded.updated_at`).run(
+      version, input.uuid, input.coin, input.offerType, input.amount, input.receive,
+      input.rate, input.decision, input.reason, JSON.stringify(checks),
+      input.referenceRate ?? null, now, now,
+    );
+    const row = this.db.prepare(
+      "SELECT * FROM decision_events WHERE version = ?",
+    ).get(version) as Record<string, unknown>;
+    return this.readDecisionEvent(row);
+  }
+
+  decisionEvents(options: {
+    decision?: DecisionEvent["decision"];
+    status?: "pending" | "resolved" | "all";
+    page?: number;
+    pageSize?: number;
+  } = {}): DecisionEventPage {
+    const page = Math.max(1, Math.trunc(options.page ?? 1));
+    const pageSize = Math.min(100, Math.max(1, Math.trunc(options.pageSize ?? 20)));
+    const conditions: string[] = [];
+    const parameters: Array<string | number> = [];
+    if (options.decision) {
+      conditions.push("decision = ?");
+      parameters.push(options.decision);
+    }
+    if (options.status === "pending") conditions.push("resolved_at IS NULL");
+    if (options.status === "resolved") conditions.push("resolved_at IS NOT NULL");
+    const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
+    const total = Number((this.db.prepare(
+      `SELECT COUNT(*) AS count FROM decision_events${where}`,
+    ).get(...parameters) as { count: number }).count);
+    const pending = Number((this.db.prepare(
+      "SELECT COUNT(*) AS count FROM decision_events WHERE resolved_at IS NULL",
+    ).get() as { count: number }).count);
+    const rows = this.db.prepare(
+      `SELECT * FROM decision_events${where}
+       ORDER BY resolved_at IS NULL DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?`,
+    ).all(...parameters, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
+    return { items: rows.map((row) => this.readDecisionEvent(row)), total, pending, page, pageSize };
+  }
+
+  decisionEvent(id: number): DecisionEvent | undefined {
+    const row = this.db.prepare("SELECT * FROM decision_events WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return row ? this.readDecisionEvent(row) : undefined;
+  }
+
+  resolveDecisionEvent(
+    id: number,
+    resolution: NonNullable<DecisionEvent["resolution"]>,
+  ): boolean {
+    const now = Date.now();
+    return this.db.prepare(
+      "UPDATE decision_events SET resolved_at = ?, resolution = ?, updated_at = ? WHERE id = ? AND resolved_at IS NULL",
+    ).run(now, resolution, now, id).changes > 0;
+  }
+
+  resolveDecisionEventsForOffer(
+    uuid: string,
+    resolution: NonNullable<DecisionEvent["resolution"]>,
+  ): number {
+    const now = Date.now();
+    return Number(this.db.prepare(
+      "UPDATE decision_events SET resolved_at = ?, resolution = ?, updated_at = ? WHERE offer_uuid = ? AND decision = 'blocked' AND resolved_at IS NULL",
+    ).run(now, resolution, now, uuid).changes);
+  }
+
+  private readDecisionEvent(row: Record<string, unknown>): DecisionEvent {
+    let checks: RiskDecision["checks"] = [];
+    try {
+      const parsed = JSON.parse(String(row.checks_json));
+      if (Array.isArray(parsed)) checks = parsed as RiskDecision["checks"];
+    } catch { /* una explicación corrupta no debe ocultar el evento */ }
+    return {
+      id: Number(row.id), version: String(row.version), uuid: String(row.offer_uuid),
+      coin: String(row.coin), offerType: String(row.offer_type) as P2pType,
+      amount: Number(row.amount), receive: Number(row.receive), rate: Number(row.rate),
+      decision: String(row.decision) as DecisionEvent["decision"],
+      reason: String(row.reason), checks,
+      ...(row.reference_rate === null ? {} : { referenceRate: Number(row.reference_rate) }),
+      ...(row.resolution === null ? {} : { resolution: String(row.resolution) as NonNullable<DecisionEvent["resolution"]> }),
+      createdAt: Number(row.created_at), updatedAt: Number(row.updated_at),
+      resolvedAt: row.resolved_at === null ? null : Number(row.resolved_at),
+    };
   }
 
   private readTradingAlert(row?: Record<string, unknown>): TradingAlert | undefined {

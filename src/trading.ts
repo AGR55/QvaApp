@@ -18,7 +18,31 @@ import { median, outgoingFiatCost } from "./market-math.js";
 import { planLiquidity } from "./core/liquidity-plan.js";
 
 type RuntimeConfig = typeof Config;
-type Notify = (message: string, operationUuid?: string) => Promise<void>;
+export interface BlockedOfferNotification {
+  kind: "blocked-offer";
+  alert: {
+    uuid: string;
+    coin: FiatMarket;
+    offerType: "buy" | "sell";
+    amount: number;
+    receive: number;
+    rate: number;
+    reason: string;
+    referenceRate?: number;
+    updatedAt: number;
+  };
+}
+export interface OperationNotification {
+  kind: "operation-applied" | "reconciliation-required";
+  uuid: string;
+  coin: FiatMarket;
+  amount: number;
+}
+type Notify = (
+  message: string,
+  operationUuid?: string,
+  event?: BlockedOfferNotification | OperationNotification,
+) => Promise<void>;
 
 export type MarketDecision = "auto_buy" | "manual_sell" | "blocked" | "ignored";
 export interface MarketItem {
@@ -76,7 +100,7 @@ export class TradingEngine {
       this.store as Store,
       this.qva,
       this.marketConfig,
-      { notify: (message) => this.notify(message) },
+      { notify: (message, event) => this.notify(message, undefined, event) },
     );
     for (const market of this.marketConfig.markets()) {
       if (this.store.get(`fiat_balance:${market.code}`) === undefined) {
@@ -434,10 +458,44 @@ export class TradingEngine {
           candidate.decision === "blocked" &&
           !this.store.isSeen(candidate.offer.uuid),
       )) {
+        const snapshot = snapshots.find(
+          (entry) => entry.coin === item.offer.coin && entry.side === item.offer.type,
+        );
+        const referenceRate = numeric(
+          item.offer.type === "sell"
+            ? snapshot?.average?.median_sell
+            : snapshot?.average?.median_buy,
+        );
         this.store.markSeen(item.offer.uuid);
         this.store.audit("price_guard_block", item.reason, item.offer.uuid);
+        this.store.recordDecisionEvent({
+          uuid: item.offer.uuid,
+          coin: this.offerMarket(item.offer),
+          offerType: item.offer.type,
+          amount: item.offer.amount,
+          receive: item.offer.receive,
+          rate: item.rate,
+          decision: "blocked",
+          reason: item.reason,
+          ...(referenceRate ? { referenceRate } : {}),
+        });
         await this.notify(
           `🛡️ Oferta bloqueada por cortafuegos (${this.marketLabel(this.offerMarket(item.offer))})\n${item.offer.amount} QUSD · ${item.rate.toFixed(2)} ${this.marketCurrency(this.offerMarket(item.offer))}/QUSD\n${item.reason}\nOferta: ${item.offer.uuid}`,
+          undefined,
+          {
+            kind: "blocked-offer",
+            alert: {
+              uuid: item.offer.uuid,
+              coin: this.offerMarket(item.offer),
+              offerType: item.offer.type,
+              amount: item.offer.amount,
+              receive: item.offer.receive,
+              rate: item.rate,
+              reason: item.reason,
+              ...(referenceRate ? { referenceRate } : {}),
+              updatedAt: Date.now(),
+            },
+          },
         );
       }
 
@@ -462,8 +520,27 @@ export class TradingEngine {
           const risk = await this.evaluateAutomaticBuy(best, reference);
           if (risk.kind !== "apply") {
             blockedUuid ??= best.uuid;
-            this.store.audit("risk_block", risk.reasons.join(" · "), best.uuid);
-            await this.notifyRiskBlock(best.uuid, `🛡️ Compra automática bloqueada: ${risk.reasons.join(" · ")}`);
+            const reason = risk.reasons.join(" · ");
+            this.store.audit("risk_block", reason, best.uuid);
+            this.store.recordDecisionEvent({
+              uuid: best.uuid,
+              coin: bestCoin,
+              offerType: best.type,
+              amount: best.amount,
+              receive: best.receive,
+              rate: rate(best),
+              decision: "blocked",
+              reason,
+              checks: risk.checks,
+              ...(reference ? { referenceRate: reference } : {}),
+            });
+            this.store.upsertTradingAlert({
+              uuid: best.uuid, coin: bestCoin, offerType: best.type,
+              amount: best.amount, receive: best.receive, rate: rate(best),
+              decision: "blocked", reason,
+              ...(reference ? { referenceRate: reference } : {}),
+            });
+            await this.notifyRiskBlock(best, reason, reference);
             continue;
           }
           await this.applyBuyQusd(best, true, reference);
@@ -533,6 +610,13 @@ export class TradingEngine {
           canApply: () => this.huntEnabled(coin, "sell"),
         });
         if (result.workflow?.state === "applied") {
+          this.store.recordDecisionEvent({
+            uuid: bestExternalBuy.uuid, coin, offerType: bestExternalBuy.type,
+            amount: bestExternalBuy.amount, receive: bestExternalBuy.receive,
+            rate: rate(bestExternalBuy), decision: "applied",
+            reason: "Aplicación automática confirmada.", checks: result.decision.checks,
+            ...(reference ? { referenceRate: reference } : {}),
+          });
           this.store.markSeen(bestExternalBuy.uuid);
           this.recordScan(
             offers.length,
@@ -550,6 +634,25 @@ export class TradingEngine {
           result.decision.reasons.join(" · "),
           bestExternalBuy.uuid,
         );
+        this.store.recordDecisionEvent({
+          uuid: bestExternalBuy.uuid,
+          coin,
+          offerType: bestExternalBuy.type,
+          amount: bestExternalBuy.amount,
+          receive: bestExternalBuy.receive,
+          rate: rate(bestExternalBuy),
+          decision: "blocked",
+          reason: result.decision.reasons.join(" · "),
+          checks: result.decision.checks,
+          ...(reference ? { referenceRate: reference } : {}),
+        });
+        this.store.upsertTradingAlert({
+          uuid: bestExternalBuy.uuid, coin, offerType: bestExternalBuy.type,
+          amount: bestExternalBuy.amount, receive: bestExternalBuy.receive,
+          rate: rate(bestExternalBuy), decision: "blocked",
+          reason: result.decision.reasons.join(" · "),
+          ...(reference ? { referenceRate: reference } : {}),
+        });
         blockedUuid ??= bestExternalBuy.uuid;
       }
 
@@ -714,6 +817,7 @@ export class TradingEngine {
       }
       await this.applyBuyQusd(offer, false, referenceRate);
       store.resolveTradingAlert(uuid, "applied");
+      store.resolveDecisionEventsForOffer(uuid, "applied");
       store.audit("blocked_offer_applied", "Oferta aplicada tras revisión manual segura.", uuid);
       return "Aplicación confirmada. Realiza el pago fiat solo después de verificar los datos.";
     }
@@ -734,6 +838,7 @@ export class TradingEngine {
       throw new Error(result.decision.reasons.join(" · "));
     }
     store.resolveTradingAlert(uuid, "applied");
+    store.resolveDecisionEventsForOffer(uuid, "applied");
     store.audit("blocked_offer_applied", "Oferta aplicada mediante el workflow compensable.", uuid);
     return "Aplicación confirmada. Verifica el pago fiat recibido antes de confirmar la operación.";
   }
@@ -820,6 +925,8 @@ export class TradingEngine {
     if (this.mode() !== "real") return;
     for (const operation of this.store.pendingCancellations(Date.now())) {
       try {
+        if (await this.acknowledgeFromOwnChat(operation.uuid, operation.createdAt))
+          continue;
         const remote = await this.qva.getOffer(operation.uuid);
         if (isTerminal(remote.status)) {
           this.closeRemoteOperation(
@@ -877,6 +984,20 @@ export class TradingEngine {
           continue;
         }
         this.scheduleAutoCancelRetry(operation.uuid, error);
+        try {
+          await this.notify(`⚠️ No pude verificar el chat de ${operation.uuid}; aplacé la cancelación automática para proteger una operación que podrías estar pagando.`);
+        } catch { /* el aplazamiento ya quedó persistido */ }
+      }
+    }
+  }
+
+  async syncChatAcknowledgements(): Promise<void> {
+    if (this.mode() !== "real") return;
+    for (const operation of this.store.pendingCancellations(Number.MAX_SAFE_INTEGER)) {
+      try {
+        await this.acknowledgeFromOwnChat(operation.uuid, operation.createdAt);
+      } catch (error) {
+        this.store.audit("chat_poll_warning", error instanceof Error ? error.message : String(error), operation.uuid);
       }
     }
   }
@@ -1631,6 +1752,19 @@ export class TradingEngine {
           scannedAt,
         );
       }
+      this.store.recordMarketObservation({
+        coin: market.code,
+        ...optionalPositive("averageBuy", statistics.average_buy),
+        ...optionalPositive("averageSell", statistics.average_sell),
+        ...optionalPositive("medianBuy", statistics.median_buy),
+        ...optionalPositive("medianSell", statistics.median_sell),
+        ...optionalPositive("bestBuy", bestOfferRate(visibleItems, "buy")),
+        ...optionalPositive("bestSell", bestOfferRate(visibleItems, "sell")),
+        openOffers: Math.max(total, visibleItems.length),
+        eligible: marketItems.filter(
+          (item) => item.decision === "auto_buy" || item.decision === "manual_sell",
+        ).length,
+      });
       return {
         coin: market.code,
         sides,
@@ -1645,12 +1779,34 @@ export class TradingEngine {
     );
   }
 
-  private async notifyRiskBlock(uuid: string, message: string): Promise<void> {
-    const key = `risk_notice_at:${uuid}`;
+  private async notifyRiskBlock(
+    offer: P2pOffer,
+    reason: string,
+    referenceRate?: number,
+  ): Promise<void> {
+    const key = `risk_notice_at:${offer.uuid}`;
     const now = Date.now();
     if (now - Number(this.store.get(key) ?? 0) < 5 * 60_000) return;
     this.store.set(key, String(now));
-    await this.notify(message);
+    const coin = this.offerMarket(offer);
+    await this.notify(
+      `🛡️ Compra automática bloqueada: ${reason}`,
+      undefined,
+      {
+        kind: "blocked-offer",
+        alert: {
+          uuid: offer.uuid,
+          coin,
+          offerType: offer.type,
+          amount: offer.amount,
+          receive: offer.receive,
+          rate: rate(offer),
+          reason,
+          ...(referenceRate ? { referenceRate } : {}),
+          updatedAt: now,
+        },
+      },
+    );
   }
 
   private async applyBuyQusd(
@@ -1688,9 +1844,26 @@ export class TradingEngine {
       `Compra de ${offer.amount} QUSD a ${rate(offer).toFixed(2)}`,
       offer.uuid,
     );
+    this.store.recordDecisionEvent({
+      uuid: offer.uuid,
+      coin: this.offerMarket(offer),
+      offerType: offer.type,
+      amount: offer.amount,
+      receive: offer.receive,
+      rate: rate(offer),
+      decision: "applied",
+      reason: automatic ? "Aplicación automática confirmada." : "Aplicación manual confirmada.",
+      ...(referenceRate === undefined ? {} : { referenceRate }),
+    });
     await this.notify(
       `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} (${rate(offer).toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD) en ${this.marketLabel(this.offerMarket(offer))}.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? `Cancelaré automáticamente en ${this.automationConfig().autoCancelMinutes} min si no indicas que pagarás: /ack ${offer.uuid}` : ""}`,
       offer.uuid,
+      automatic ? {
+        kind: "operation-applied",
+        uuid: offer.uuid,
+        coin: this.offerMarket(offer),
+        amount: offer.amount,
+      } : undefined,
     );
   }
 
@@ -1738,7 +1911,9 @@ export class TradingEngine {
   }
   private async sendChatBestEffort(uuid: string): Promise<void> {
     try {
-      await this.qva.sendChat(uuid, this.automationConfig().welcomeMessage);
+      const sentAt = Date.now();
+      const sent = await this.qva.sendChat(uuid, this.automationConfig().welcomeMessage);
+      this.store.set(`chat:auto_message:${uuid}`, JSON.stringify({ id: sent.id ?? null, sentAt: sent.createdAt ?? sentAt }));
     } catch (error) {
       this.store.audit(
         "chat_warning",
@@ -1749,6 +1924,23 @@ export class TradingEngine {
         `⚠️ La operación ${uuid} quedó registrada, pero no se pudo enviar el mensaje automático al chat P2P.`,
       );
     }
+  }
+
+  private async acknowledgeFromOwnChat(uuid: string, appliedAt: number): Promise<boolean> {
+    const [profile, messages] = await Promise.all([this.qva.profile(), this.qva.listChat(uuid)]);
+    let automatic: { id?: string | null; sentAt?: number } = {};
+    try { automatic = JSON.parse(this.store.get(`chat:auto_message:${uuid}`) ?? "{}"); } catch { /* ignora metadatos dañados */ }
+    const own = messages.find((message) =>
+      message.peerId === profile.uuid &&
+      message.id !== automatic.id &&
+      (message.createdAt === undefined || message.createdAt >= Math.max(appliedAt, automatic.sentAt ?? appliedAt)),
+    );
+    if (!own) return false;
+    this.store.updateOperation(uuid, "acknowledged", null);
+    this.store.set(`chat:ack_message:${uuid}`, JSON.stringify({ id: own.id, detectedAt: Date.now() }));
+    this.store.audit("chat_acknowledged", "Mensaje propio detectado; autocancelación detenida.", uuid);
+    await this.notify(`✅ Detecté tu mensaje en el chat de ${uuid}. La cancelación automática quedó detenida.`);
+    return true;
   }
   private offerMarket(offer: Pick<P2pOffer, "coin">): FiatMarket {
     if (!this.isMarket(offer.coin))
@@ -1900,6 +2092,25 @@ const isTerminal = (status: string): boolean =>
   ["cancelled", "canceled", "completed", "revision"].includes(
     status.toLowerCase(),
   );
+
+function optionalPositive<K extends string>(key: K, value: unknown): Partial<Record<K, number>> {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? ({ [key]: parsed } as Record<K, number>)
+    : {};
+}
+
+function bestOfferRate(
+  offers: Array<P2pOffer & { rate?: number }>,
+  type: "buy" | "sell",
+): number | undefined {
+  const rates = offers
+    .filter((offer) => offer.type === type)
+    .map((offer) => Number(offer.rate ?? offer.receive / offer.amount))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (!rates.length) return undefined;
+  return type === "buy" ? Math.max(...rates) : Math.min(...rates);
+}
 
 function huntingChangeDetail(values: Parameters<TradingEngine["updateHunting"]>[0]): string {
   const changes = [

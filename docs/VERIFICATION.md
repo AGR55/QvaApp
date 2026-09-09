@@ -1,18 +1,18 @@
 # Evidencia de verificación
 
-Última ejecución completa: 2026-09-08. Entorno local, Node.js 25.9.0 y pnpm 11.26.0.
+Última ejecución completa: 2026-09-09. Entorno local, Node.js 25.9.0 y pnpm 11.26.0.
 
 ## Puertas automáticas
 
 | Puerta | Resultado | Evidencia |
 | --- | --- | --- |
 | TypeScript estricto | Correcto | `pnpm typecheck`; sin errores |
-| Pruebas | Correcto | 89 ejecutadas, 89 aprobadas, 0 omitidas |
+| Pruebas | Correcto | 118 ejecutadas, 118 aprobadas, 0 omitidas |
 | Servidor | Correcto | `tsc -p tsconfig.build.json` |
-| Panel | Correcto | Vite; JS principal 239.12 kB (74.87 kB gzip), gráficas diferidas 377.65 kB (110.44 kB gzip), CSS 23.36 kB (5.57 kB gzip) |
+| Panel | Correcto | Vite; JS principal 268.92 kB (82.83 kB gzip), gráficas diferidas 3.78 kB (1.65 kB gzip), CSS 59.69 kB (12.08 kB gzip) |
 | Secretos literales | Correcto | `pnpm check:secrets`; ninguno detectado |
 | Dependencias de producción | Correcto | `pnpm audit --prod`; ninguna vulnerabilidad conocida |
-| Accesibilidad automática | Correcto | axe-core: 0 violaciones en el cockpit autenticado |
+| Accesibilidad automática | Correcto | axe-core: 0 violaciones serias en las ocho vistas, escritorio y móvil |
 | Escritorio | Correcto | 1425 px de viewport y de documento; sin overflow horizontal |
 | Móvil | Correcto | 375 px de viewport y de documento; sin overflow horizontal |
 | Controles de icono | Correcto | 0 botones sin nombre accesible |
@@ -34,7 +34,9 @@ El recorrido Chromium accede mediante `localhost` a un panel cuyo origen configu
 
 ## Cobertura financiera relevante
 
-La suite cubre política de riesgo y números no finitos, reserva QUSD, límites por operación/día/exposición/concurrencia, cooldown persistente por mercado y contraparte, pausa por errores, serialización de mutaciones, idempotencia, resultado remoto incierto, compensación, migraciones con backup, reinicio y conciliación. También comprueba el flujo TOTP, los timeouts de autenticación, la verificación previa del token y que el pago fiat queda como acción humana.
+La suite cubre política de riesgo y números no finitos, reserva QUSD, límites por operación/día/exposición/concurrencia, advertencias de slippage/cooldown, pausa por errores, serialización de mutaciones, idempotencia, resultado remoto incierto, compensación, migraciones con backup, reinicio y conciliación. También comprueba el flujo TOTP, los timeouts de autenticación, la verificación previa del token y que el pago fiat queda como acción humana.
+
+Las pruebas nuevas cubren eventos de decisión versionados y paginados, descarte aislado, rutas Push con sesión/CSRF, deduplicación por navegador, aplicaciones y conciliaciones notificables, normalización del chat oficial, exclusión del saludo automático y reconocimiento de cualquier mensaje propio posterior.
 
 La automatización de mercado prueba consultas separadas `sell`/`buy` con `take=100` y `best_rate`, que una candidata bloqueada no oculta la siguiente, una sola edición de oferta propia por turno y la persistencia del intervalo de aplicaciones a través de una nueva instancia del cliente.
 

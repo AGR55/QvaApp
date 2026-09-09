@@ -10,19 +10,22 @@ import type { TradingConfig } from "./market-config.js";
 import { QvaApiError } from "./qvapay.js";
 import type { TradingEngine } from "./trading.js";
 import type { FiatMarket } from "./types.js";
+import type { StoredPushSubscription, WebPushService } from "./web-push.js";
 
 type AuthOptions = {
   password: string;
   trustedOrigin: string;
   secureCookies?: boolean;
 };
+type PushService = Pick<WebPushService, "publicKey" | "subscribe" | "unsubscribe">;
 
 export async function startDashboard(
   readModel: DashboardReadModel,
   port = 3000,
   authOptions: AuthOptions,
+  pushService?: PushService,
 ): Promise<FastifyInstance> {
-  const app = buildDashboard(readModel, authOptions);
+  const app = buildDashboard(readModel, authOptions, pushService);
   await app.listen({ port, host: "127.0.0.1" });
   console.log(`Panel web: http://127.0.0.1:${port}`);
   return app;
@@ -31,6 +34,7 @@ export async function startDashboard(
 export function buildDashboard(
   readModel: DashboardReadModel,
   authOptions: AuthOptions,
+  pushService?: PushService,
 ): FastifyInstance {
   const app = Fastify({
     logger: false,
@@ -81,6 +85,9 @@ export function buildDashboard(
 
   app.get("/", async (_request, reply) =>
     reply.type("text/html; charset=utf-8").send(reactPage()),
+  );
+  app.get("/service-worker.js", async (_request, reply) =>
+    reply.type("text/javascript; charset=utf-8").send(serviceWorkerScript()),
   );
   app.get<{ Params: { "*": string } }>("/dashboard/*", async (request, reply) => {
     const relative = request.params["*"];
@@ -333,6 +340,44 @@ export function buildDashboard(
     reply.status(204);
   });
   app.get("/api/audit", async () => ({ data: readModel.auditLog() }));
+  app.get<{ Querystring: { decision?: string; status?: string; page?: string; pageSize?: string } }>(
+    "/api/decision-events",
+    async (request) => {
+      const decision = request.query.decision;
+      const status = request.query.status;
+      if (decision && !["applied", "blocked", "manual_review"].includes(decision))
+        throw new ClientInputError("Filtro de decisión inválido.");
+      if (status && !["pending", "resolved", "all"].includes(status))
+        throw new ClientInputError("Filtro de estado inválido.");
+      return { data: readModel.decisionEvents({
+        ...(decision ? { decision: decision as "applied" | "blocked" | "manual_review" } : {}),
+        ...(status ? { status: status as "pending" | "resolved" | "all" } : {}),
+        page: positiveInteger(request.query.page, 1),
+        pageSize: positiveInteger(request.query.pageSize, 20),
+      }), source: "sqlite" };
+    },
+  );
+  app.post<{ Params: { id: string } }>("/api/decision-events/:id/dismiss", async (request, reply) => {
+    const id = positiveInteger(request.params.id, 0);
+    if (!id) throw new ClientInputError("Evento inválido.");
+    readModel.dismissDecisionEvent(id);
+    reply.status(204);
+  });
+
+  if (pushService) {
+    app.get("/api/push/public-key", async () => ({ data: { publicKey: pushService.publicKey() } }));
+    app.post<{ Body: StoredPushSubscription }>("/api/push/subscriptions", async (request, reply) => {
+      const subscription = pushService.subscribe(request.body);
+      reply.status(201);
+      return { data: { endpoint: subscription.endpoint } };
+    });
+    app.delete<{ Body: { endpoint: string } }>("/api/push/subscriptions", async (request, reply) => {
+      if (!request.body || typeof request.body.endpoint !== "string")
+        throw new ClientInputError("Suscripción Push inválida.");
+      pushService.unsubscribe(request.body.endpoint);
+      reply.status(204);
+    });
+  }
   app.post<{ Params: { uuid: string } }>("/api/blocked-offers/:uuid/preview", {
     schema: { params: uuidParamsSchema() },
   }, async (request) => ({
@@ -406,6 +451,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function positiveInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function serviceWorkerScript(): string {
+  return `self.addEventListener("push", (event) => {
+    let payload = {};
+    try { payload = event.data ? event.data.json() : {}; } catch {}
+    const alert = payload.alert || {};
+    const title = payload.type === "blocked-offer" ? "Oferta requiere revisión" : "Actividad de QvaApply";
+    const body = [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
+    const url = payload.url || "/?view=auditoria";
+    event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const visible = clients.find((client) => client.visibilityState === "visible");
+      if (visible) { visible.postMessage({ type: "qvaapply-notification", payload }); return; }
+      return self.registration.showNotification(title, { body, tag: payload.version || payload.type, data: { url } });
+    }));
+  });
+  self.addEventListener("notificationclick", (event) => {
+    event.notification.close();
+    const target = new URL(event.notification.data?.url || "/", self.location.origin).href;
+    event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
+      const existing = clients[0];
+      if (existing) { await existing.navigate(target); return existing.focus(); }
+      return self.clients.openWindow(target);
+    }));
+  });`;
+}
+
 function requireJson(request: FastifyRequest): void {
   if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json"))
     throw new DashboardAuthError(403, "Se requiere contenido JSON.");
@@ -454,6 +530,10 @@ function openApiDocument() {
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
       "/api/hunting": { put: { summary: "Controlar cacerías y precios por mercado" } },
       "/api/audit": { get: { summary: "Exportar auditoría" } },
+      "/api/decision-events": { get: { summary: "Consultar decisiones operativas paginadas" } },
+      "/api/decision-events/{id}/dismiss": { post: { summary: "Descartar una versión de decisión" } },
+      "/api/push/public-key": { get: { summary: "Obtener la clave pública Web Push" } },
+      "/api/push/subscriptions": { post: { summary: "Registrar el navegador para avisos" }, delete: { summary: "Eliminar la suscripción del navegador" } },
       "/api/blocked-offers/{uuid}/preview": { post: { summary: "Previsualizar una oferta bloqueada sin mutaciones" } },
       "/api/blocked-offers/{uuid}/apply": { post: { summary: "Aplicar tras omitir solo el bloqueo de precio" } },
       "/api/blocked-offers/{uuid}/dismiss": { post: { summary: "Descartar una oferta bloqueada" } },

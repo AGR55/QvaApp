@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, X, XCircle } from "lucide-react";
 import { Empty, Panel } from "../components/common.jsx";
 import { useDialog } from "../hooks/use-dialog.js";
@@ -6,13 +6,28 @@ import { requestJson } from "../lib/http.js";
 
 export function Audit({ data, onChanged }) {
   const integrity = data.integrity?.configRevisionChainValid;
-  const blocked = useMemo(() => (data.alerts || []).filter((item) => item.decision === "blocked" && item.resolvedAt === null), [data.alerts]);
+  const fallbackBlocked = useMemo(() => (data.alerts || []).filter((item) => item.decision === "blocked" && item.resolvedAt === null), [data.alerts]);
+  const [events, setEvents] = useState();
+  const [eventsError, setEventsError] = useState("");
+  const [eventsLoading, setEventsLoading] = useState(true);
+  const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState(null);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const close = useCallback(() => { if (!busy) { setDialog(null); setPreview(null); setMessage(""); } }, [busy]);
   const dialogRef = useDialog(Boolean(dialog), close);
+  const loadEvents = useCallback(async () => {
+    setEventsLoading(true); setEventsError("");
+    try {
+      const payload = await requestJson(`/api/decision-events?decision=blocked&status=pending&page=${page}&pageSize=20`);
+      setEvents(payload.data);
+    } catch (error) {
+      setEventsError(error instanceof Error ? error.message : "No se pudo leer la cola de decisiones.");
+    } finally { setEventsLoading(false); }
+  }, [page]);
+  useEffect(() => { void loadEvents(); }, [loadEvents, data.generatedAt]);
+  const blocked = events?.items ?? fallbackBlocked;
 
   const review = async (offer) => {
     setDialog({ kind: "review", offer }); setBusy(true); setMessage("Comprobando la oferta y calculando la liquidez…");
@@ -35,8 +50,11 @@ export function Audit({ data, onChanged }) {
     if (!dialog?.offer) return;
     setBusy(true);
     try {
-      await requestJson(`/api/blocked-offers/${encodeURIComponent(dialog.offer.uuid)}/dismiss`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
-      await onChanged(); setDialog(null);
+      const path = dialog.offer.id
+        ? `/api/decision-events/${dialog.offer.id}/dismiss`
+        : `/api/blocked-offers/${encodeURIComponent(dialog.offer.uuid)}/dismiss`;
+      await requestJson(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      await Promise.all([onChanged(), loadEvents()]); setDialog(null);
     } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo descartar la oferta."); }
     finally { setBusy(false); }
   };
@@ -57,8 +75,11 @@ export function Audit({ data, onChanged }) {
         <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")} {item.uuid ? `· ${item.uuid}` : ""}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
-        <div className="blocked-rail-head"><div><span className="section-kicker">Revisión manual</span><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{blocked.length}</span></div>
-        {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : <Empty>No hay ofertas esperando tu decisión.</Empty>}
+        <div className="blocked-rail-head"><div><span className="section-kicker">Revisión manual</span><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
+        {eventsError ? <div className="resource-error" role="alert"><p>{eventsError}</p><button className="button secondary" onClick={() => void loadEvents()}>Reintentar</button></div> : null}
+        {eventsLoading && !events ? <div className="blocked-loading" aria-label="Cargando ofertas bloqueadas"><span /><span /><span /></div> : null}
+        {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.id ?? offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : !eventsLoading ? <Empty>No hay ofertas esperando tu decisión.</Empty> : null}
+        {events && events.total > events.pageSize ? <nav className="pagination" aria-label="Páginas de ofertas bloqueadas"><button disabled={page === 1 || eventsLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</button><span>{page} / {Math.ceil(events.total / events.pageSize)}</span><button disabled={page * events.pageSize >= events.total || eventsLoading} onClick={() => setPage((value) => value + 1)}>Siguiente</button></nav> : null}
       </aside>
     </div>
     {dialog ? <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
@@ -88,7 +109,9 @@ function BlockedCard({ offer, onReview, onDismiss }) {
   return <article className="blocked-card"><header><span className={`offer-side ${buying ? "buy" : "sell"}`}><Trend />{buying ? "Comprar QUSD" : "Vender QUSD"}</span><time><Clock3 />{relativeTime(offer.updatedAt)}</time></header>
     <div className="blocked-value"><strong>{offer.amount.toFixed(2)} QUSD</strong><span>{offer.receive.toLocaleString("es-CU")} · {offer.coin}</span></div>
     <dl className="offer-comparison"><div><dt>Tasa</dt><dd>{offer.rate.toFixed(2)}</dd></div><div><dt>Mediana</dt><dd>{reference ? reference.toFixed(2) : "No disponible"}</dd></div><div><dt>Diferencia</dt><dd className={deviation === null ? "" : Math.abs(deviation) > 1 ? "warning-text" : ""}>{deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(2)}%`}</dd></div></dl>
-    <p className="blocked-reason"><ShieldAlert />{offer.reason}</p><div className="blocked-actions"><button className="button text-button" onClick={onDismiss}>Descartar</button><button className="button primary" onClick={onReview}>Revisar y aplicar</button></div></article>;
+    <p className="blocked-reason"><ShieldAlert />{offer.reason}</p>
+    {offer.checks?.length ? <details className="risk-checks"><summary>Ver {offer.checks.length} comprobaciones</summary><ul>{offer.checks.map((check) => <li key={check.code} className={`check-${check.status}`}><span>{check.label}</span><strong>{check.status === "pass" ? "Correcta" : check.status === "warning" ? "Advertencia" : check.status === "fail" ? "Bloqueo" : "No aplica"}</strong><small>{check.reason}{check.actual !== undefined ? ` · observado: ${String(check.actual)}` : ""}{check.limit !== undefined ? ` · límite: ${String(check.limit)}` : ""}</small></li>)}</ul></details> : null}
+    <div className="blocked-actions"><button className="button text-button" onClick={onDismiss}>Descartar</button><button className="button primary" onClick={onReview}>Revisar y aplicar</button></div></article>;
 }
 
 function PreviewDetails({ preview }) {
