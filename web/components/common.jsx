@@ -3,7 +3,7 @@ import { Activity } from "lucide-react";
 
 export function Panel({ title, children, wide = false }) {
   return (
-    <section className={`panel ${wide ? "wide" : ""}`}>
+    <section className={`panel ${wide ? "wide" : ""}`} data-ui="panel">
       <header className="panel-head">
         <h2>{title}</h2>
       </header>
@@ -13,7 +13,7 @@ export function Panel({ title, children, wide = false }) {
 }
 export function Empty({ children }) {
   return (
-    <div className="empty">
+    <div className="empty" data-ui="empty">
       <Activity />
       <p>{children}</p>
     </div>

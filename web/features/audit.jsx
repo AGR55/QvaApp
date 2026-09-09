@@ -116,7 +116,11 @@ function BlockedCard({ offer, onReview, onDismiss }) {
 
 function PreviewDetails({ preview }) {
   return <div className="preview-details"><dl><div><dt>Operación</dt><dd>{preview.offerType === "sell" ? "Comprar" : "Vender"} {preview.amount.toFixed(2)} QUSD</dd></div><div><dt>Fiat</dt><dd>{preview.receive.toLocaleString("es-CU")} · {preview.coin}</dd></div><div><dt>Tasa / mediana</dt><dd>{preview.rate.toFixed(2)} / {preview.referenceRate.toFixed(2)}</dd></div><div><dt>Desviación</dt><dd>{preview.deviationPercent > 0 ? "+" : ""}{preview.deviationPercent.toFixed(2)}%</dd></div></dl>
-    <div className="liquidity-preview"><strong>Plan de liquidez</strong><p>{preview.liquidityReason}</p>{preview.plannedCancellations.length ? <ul>{preview.plannedCancellations.map((item) => <li key={item.uuid}>{item.amount.toFixed(2)} QUSD · {item.coin} · tasa {item.rate.toFixed(2)}<small>Usar {item.consumeQusd.toFixed(2)} · reponer {item.restoreQusd.toFixed(2)} QUSD · {item.uuid}</small></li>)}</ul> : null}</div></div>;
+    <div className="liquidity-preview"><strong>Plan de liquidez</strong><p>{preview.liquidityReason}</p>{preview.plannedCancellations.length ? <ul>{preview.plannedCancellations.map((item) => <li key={item.uuid}>{item.amount.toFixed(2)} QUSD · {item.coin} · tasa {item.rate.toFixed(2)}<small>Usar {optionalMoney(item.consumeQusd)} · reponer {optionalMoney(item.restoreQusd)} QUSD · {item.uuid}</small></li>)}</ul> : null}</div></div>;
+}
+
+function optionalMoney(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "no disponible";
 }
 
 function Health({ label, ok, value }) { return <div><dt>{ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}{label}</dt><dd className={ok ? "" : "danger"}>{value}</dd></div>; }

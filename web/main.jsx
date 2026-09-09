@@ -37,6 +37,7 @@ import "./capital.css";
 import "./hunting.css";
 import "./audit.css";
 import "./theme-refresh.css";
+import "./components.css";
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({

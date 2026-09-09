@@ -102,6 +102,7 @@ tbody tr { transition:background-color .16s ease; } tbody tr:hover { background:
   --muted: #64717d;
   --line: #d8e0e6;
   --accent: #245f9e;
+  --accent-solid: #245f9e;
   --accent-soft: #e7eff8;
   --success: #287653;
   --success-soft: #e7f3ed;
@@ -123,6 +124,7 @@ tbody tr { transition:background-color .16s ease; } tbody tr:hover { background:
   --muted: #9aa8b3;
   --line: #303c46;
   --accent: #76a9dc;
+  --accent-solid: #285f98;
   --accent-soft: #1d3044;
   --success: #71c69a;
   --success-soft: #1b3529;
