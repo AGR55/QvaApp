@@ -1,4 +1,4 @@
-import * as webpush from "web-push";
+import webpush from "web-push";
 import { createHash } from "node:crypto";
 import type { TradingAlert } from "./store.js";
 

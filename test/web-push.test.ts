@@ -33,6 +33,16 @@ const alert = {
   reason: "Precio sobre la mediana", updatedAt: 1_000,
 };
 
+test("inicializa el runtime real de web-push bajo ESM", () => {
+  const values = new Map<string, string>();
+  const service = new WebPushService({
+    get: (key) => values.get(key),
+    set: (key, value) => void values.set(key, value),
+  });
+
+  assert.match(service.publicKey(), /^[A-Za-z0-9_-]{40,}$/);
+});
+
 test("persiste una suscripción y envía una alerta bloqueada una sola vez", async () => {
   const { service, sent } = fixture();
   service.subscribe(subscription("one"));
