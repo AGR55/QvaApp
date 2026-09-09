@@ -102,6 +102,7 @@ test("Clásica bloquea una compra cuya comisión supera la tasa máxima efectiva
     sendChat: async () => undefined,
   };
   const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  store.markSeen(target.uuid);
 
   const result = await trading.scan();
 

@@ -289,6 +289,27 @@ test("expone decisiones paginadas y protege la resolución con CSRF", async () =
   await app.close();
 });
 
+test("permite cancelar una operación con cuerpo vacío y reserva reference para paid", async () => {
+  const calls: string[] = [];
+  const readModel = {
+    cancelOperation: async (uuid: string) => void calls.push(`cancel:${uuid}`),
+    markPaid: async (uuid: string, reference: string) => void calls.push(`paid:${uuid}:${reference}`),
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const headers = { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf };
+
+  const cancelled = await app.inject({ method: "POST", url: "/api/operations/operation-1/cancel", headers, payload: {} });
+  const invalidPaid = await app.inject({ method: "POST", url: "/api/operations/operation-2/paid", headers, payload: {} });
+
+  assert.equal(cancelled.statusCode, 204);
+  assert.equal(invalidPaid.statusCode, 400);
+  assert.deepEqual(calls, ["cancel:operation-1"]);
+  await app.close();
+});
+
 test("registra y elimina Web Push solo con sesión, origen y CSRF", async () => {
   const subscriptions: string[] = [];
   const push = {

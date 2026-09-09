@@ -1323,6 +1323,19 @@ export class Store {
     ).map((row) => this.operationFromRow(row));
   }
 
+  visibleOperations(limit = 100): Operation[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT uuid, offer_type, coin, amount, receive, rate, state,
+                  auto_applied, cancel_at, created_at, counterparty_id, reference_rate
+           FROM operations WHERE state <> 'cancelled'
+           ORDER BY created_at DESC LIMIT ?`,
+        )
+        .all(limit) as Record<string, unknown>[]
+    ).map((row) => this.operationFromRow(row));
+  }
+
   updateOperation(
     uuid: string,
     state: OperationState,
@@ -1525,6 +1538,12 @@ export class Store {
       conditions.push("decision = ?");
       parameters.push(options.decision);
     }
+    const pendingConditions = [
+      ...conditions,
+      "decision IN ('blocked', 'manual_review')",
+      "resolved_at IS NULL",
+    ];
+    const pendingParameters = [...parameters];
     if (options.status === "pending") conditions.push("resolved_at IS NULL");
     if (options.status === "resolved") conditions.push("resolved_at IS NOT NULL");
     const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
@@ -1532,8 +1551,8 @@ export class Store {
       `SELECT COUNT(*) AS count FROM decision_events${where}`,
     ).get(...parameters) as { count: number }).count);
     const pending = Number((this.db.prepare(
-      "SELECT COUNT(*) AS count FROM decision_events WHERE resolved_at IS NULL",
-    ).get() as { count: number }).count);
+      `SELECT COUNT(*) AS count FROM decision_events WHERE ${pendingConditions.join(" AND ")}`,
+    ).get(...pendingParameters) as { count: number }).count);
     const rows = this.db.prepare(
       `SELECT * FROM decision_events${where}
        ORDER BY resolved_at IS NULL DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?`,

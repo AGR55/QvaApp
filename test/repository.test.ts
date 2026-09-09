@@ -214,11 +214,37 @@ test("pagina eventos de decisión y descarta solamente una versión", () => {
 
   const changed = store.recordDecisionEvent({ ...base, rate: 999, receive: 9_990 });
   assert.notEqual(changed.id, first.id);
+  store.recordDecisionEvent({
+    ...base,
+    uuid: "already-applied",
+    decision: "applied",
+    reason: "Aplicación confirmada",
+  });
   const pending = store.decisionEvents({ decision: "blocked", status: "pending", pageSize: 1 });
   assert.equal(pending.total, 1);
   assert.equal(pending.pending, 1);
   assert.equal(pending.items[0]?.id, changed.id);
   assert.equal(pending.items[0]?.checks[0]?.code, "fiat_capital");
+  store.close();
+});
+
+test("conserva canceladas en el historial pero las excluye de la proyección operativa", () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-visible-operations-")));
+  const base = {
+    offerType: "sell" as const,
+    coin: "CLASICA",
+    amount: 2,
+    receive: 2.12,
+    rate: 1.06,
+    autoApplied: true,
+    cancelAt: null,
+    createdAt: Date.now(),
+  };
+  store.createOperation({ ...base, uuid: "active", state: "acknowledged" });
+  store.createOperation({ ...base, uuid: "cancelled", state: "cancelled" });
+
+  assert.deepEqual(store.visibleOperations().map((item) => item.uuid), ["active"]);
+  assert.deepEqual(new Set(store.operations().map((item) => item.uuid)), new Set(["active", "cancelled"]));
   store.close();
 });
 

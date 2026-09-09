@@ -454,9 +454,7 @@ export class TradingEngine {
       this.persistScanCoverage(snapshots, items, includeBuySide);
 
       for (const item of items.filter(
-        (candidate) =>
-          candidate.decision === "blocked" &&
-          !this.store.isSeen(candidate.offer.uuid),
+        (candidate) => candidate.decision === "blocked",
       )) {
         const snapshot = snapshots.find(
           (entry) => entry.coin === item.offer.coin && entry.side === item.offer.type,
@@ -466,8 +464,6 @@ export class TradingEngine {
             ? snapshot?.average?.median_sell
             : snapshot?.average?.median_buy,
         );
-        this.store.markSeen(item.offer.uuid);
-        this.store.audit("price_guard_block", item.reason, item.offer.uuid);
         this.store.recordDecisionEvent({
           uuid: item.offer.uuid,
           coin: this.offerMarket(item.offer),
@@ -479,6 +475,9 @@ export class TradingEngine {
           reason: item.reason,
           ...(referenceRate ? { referenceRate } : {}),
         });
+        if (this.store.isSeen(item.offer.uuid)) continue;
+        this.store.markSeen(item.offer.uuid);
+        this.store.audit("price_guard_block", item.reason, item.offer.uuid);
         await this.notify(
           `🛡️ Oferta bloqueada por cortafuegos (${this.marketLabel(this.offerMarket(item.offer))})\n${item.offer.amount} QUSD · ${item.rate.toFixed(2)} ${this.marketCurrency(this.offerMarket(item.offer))}/QUSD\n${item.reason}\nOferta: ${item.offer.uuid}`,
           undefined,

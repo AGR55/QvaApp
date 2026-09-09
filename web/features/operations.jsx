@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, RefreshCcw } from "lucide-react";
 import { Empty, Panel } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
+import { operationActionBody } from "../lib/operation-actions.js";
 import { useDialog } from "../hooks/use-dialog.js";
 
 const terminalWorkflow = new Set(["applied", "restored", "blocked"]);
@@ -87,7 +88,7 @@ export function Operations({ data, label, unit, onChanged }) {
             {pending.action === "paid" ? <label>Referencia del pago<input autoFocus value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
             <div className="review-actions">
               <button onClick={closePending}>Volver</button>
-              <button className="refresh" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, { reference })}>Confirmar acción</button>
+              <button className="refresh" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, operationActionBody(pending.action, reference))}>Confirmar acción</button>
             </div>
           </div>
         </section>

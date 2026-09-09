@@ -290,7 +290,7 @@ export class DashboardReadModel {
       ),
       capitalReservations: this.store.capitalReservations(),
       mutationIntents: this.store.recentMutationIntents(100),
-      operations: this.store.operations(),
+      operations: this.store.visibleOperations(),
       integrity: {
         schemaVersion: this.store.schemaVersion(),
         configRevisionChainValid: this.store.verifyConfigRevisionChain(),
