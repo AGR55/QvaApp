@@ -8,7 +8,11 @@ import {
   type MarketConfig,
   type TradingConfig,
 } from "./market-config.js";
-import { QvaApiError, QvaMutationUncertainError } from "./qvapay.js";
+import {
+  QvaApiError,
+  QvaConnectionError,
+  QvaMutationUncertainError,
+} from "./qvapay.js";
 import type { Store } from "./store.js";
 import type { FiatMarket, OperationState, P2pAverage, P2pOffer } from "./types.js";
 import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
@@ -546,7 +550,39 @@ export class TradingEngine {
             await this.notifyRiskBlock(best, reason, reference);
             continue;
           }
-          await this.applyBuyQusd(best, true, reference);
+          try {
+            await this.applyBuyQusd(best, true, reference);
+          } catch (error) {
+            if (!isDefinitiveQvaApplyRejection(error)) throw error;
+            const reason = qvaPayFailureDetail("aplicar a la oferta", error);
+            this.store.audit("qvapay_apply_rejected", reason, best.uuid);
+            this.store.recordDecisionEvent({
+              uuid: best.uuid,
+              coin: bestCoin,
+              offerType: best.type,
+              amount: best.amount,
+              receive: best.receive,
+              rate: rate(best),
+              decision: "blocked",
+              reason,
+              ...(reference ? { referenceRate: reference } : {}),
+            });
+            this.store.upsertTradingAlert({
+              uuid: best.uuid,
+              coin: bestCoin,
+              offerType: best.type,
+              amount: best.amount,
+              receive: best.receive,
+              rate: rate(best),
+              decision: "blocked",
+              reason,
+              ...(reference ? { referenceRate: reference } : {}),
+            });
+            this.store.markSeen(best.uuid);
+            await this.notifyRiskBlock(best, reason, reference);
+            blockedUuid ??= best.uuid;
+            continue;
+          }
           this.store.markSeen(best.uuid);
           this.recordScan(
             offers.length,
@@ -656,6 +692,11 @@ export class TradingEngine {
           reason: result.decision.reasons.join(" · "),
           ...(reference ? { referenceRate: reference } : {}),
         });
+        await this.notifyRiskBlock(
+          bestExternalBuy,
+          result.decision.reasons.join(" · "),
+          reference,
+        );
         blockedUuid ??= bestExternalBuy.uuid;
       }
 
@@ -1531,6 +1572,14 @@ export class TradingEngine {
       };
     const coin = this.offerMarket(offer);
     const configured = this.market(coin)!;
+    if (Boolean(offer.only_vip))
+      return {
+        offer,
+        rate: value,
+        decision: "blocked",
+        reason:
+          "Oferta exclusiva para usuarios VIP; QvaPay no permite aplicarla con esta cuenta.",
+      };
     if (
       (offer.type === "sell" && !this.huntEnabled(coin, "buy")) ||
       (offer.type === "buy" && !this.huntEnabled(coin, "sell"))
@@ -2049,6 +2098,24 @@ export class TradingEngine {
     uuid?: string,
   ): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
+    if (isQvaPayFailure(error)) {
+      const detail = qvaPayFailureDetail(action, error);
+      this.store.audit(`${action}_qvapay_error`, detail, uuid);
+      this.store.set(
+        "last_qvapay_error",
+        JSON.stringify({ at: Date.now(), action, detail, ...(uuid ? { uuid } : {}) }),
+      );
+      if (error instanceof QvaApiError && error.status === 401)
+        this.setPaused(true, "sesión de QvaPay inválida");
+      await this.notify(
+        `${detail}\nEste fallo procede de QvaPay o de la conexión y no se contabiliza como error interno del bot.${
+          error instanceof QvaApiError && error.status === 401
+            ? "\nEl bot fue pausado; ejecuta pnpm login."
+            : ""
+        }`,
+      );
+      return;
+    }
     const failures = Number(this.store.get("consecutive_errors") ?? 0) + 1;
     this.store.set("consecutive_errors", String(failures));
     this.store.audit(`${action}_error`, message, uuid);
@@ -2162,6 +2229,34 @@ export class TradingEngine {
         : { lastCounterpartyOperationAt: counterpartyAt }),
     };
   }
+}
+
+function isQvaPayFailure(error: unknown): boolean {
+  return (
+    error instanceof QvaApiError ||
+    error instanceof QvaConnectionError ||
+    error instanceof QvaMutationUncertainError ||
+    (error instanceof Error && error.message.includes("QvaPay"))
+  );
+}
+
+function isDefinitiveQvaApplyRejection(error: unknown): error is QvaApiError {
+  return (
+    error instanceof QvaApiError &&
+    [400, 403, 404, 409].includes(error.status)
+  );
+}
+
+function qvaPayFailureDetail(action: string, error: unknown): string {
+  if (error instanceof QvaApiError)
+    return `⚠️ QvaPay rechazó ${action} (HTTP ${error.status}): ${error.message}`;
+  if (error instanceof QvaConnectionError)
+    return `🌐 No se pudo completar ${action} por la conexión con QvaPay: ${error.message}`;
+  if (error instanceof QvaMutationUncertainError)
+    return `⚠️ QvaPay no confirmó ${action}: ${error.message}`;
+  return `⚠️ QvaPay devolvió un dato no utilizable durante ${action}: ${
+    error instanceof Error ? error.message : String(error)
+  }`;
 }
 
 /** @deprecated Use TradingEngine. Kept while Telegram and HTTP adapters migrate. */

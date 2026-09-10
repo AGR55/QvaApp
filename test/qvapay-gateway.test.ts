@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { QvaPayClient } from "../src/qvapay.js";
+import { QvaConnectionError, QvaPayClient } from "../src/qvapay.js";
 
 test("normaliza un Peer vacío como contraparte ausente en una oferta abierta", async () => {
   const client = new QvaPayClient(() => "token", {
@@ -167,4 +167,21 @@ test("normaliza promedios numéricos y rechaza valores no finitos", async () => 
   assert.equal((await client.p2pAverages()).BANK_CUP?.average_buy, 1010.5);
   invalid = true;
   await assert.rejects(() => client.p2pAverages(), /promedio BANK_CUP.average_buy/);
+});
+
+test("clasifica un fetch fallido de lectura como conexión con QvaPay", async () => {
+  const client = new QvaPayClient(() => "token", {
+    sleep: async () => undefined,
+    fetch: async () => {
+      throw new TypeError("fetch failed");
+    },
+  });
+
+  await assert.rejects(
+    () => client.listOffersPage({ take: 20 }),
+    (error: unknown) =>
+      error instanceof QvaConnectionError &&
+      error.reason === "network" &&
+      /QvaPay/.test(error.message),
+  );
 });

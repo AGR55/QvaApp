@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MarketConfigService } from "../src/market-config.js";
+import { QvaApiError } from "../src/qvapay.js";
 import { Store } from "../src/store.js";
 import { TradingEngine } from "../src/trading.js";
 import type { P2pOffer } from "../src/types.js";
@@ -113,6 +114,107 @@ test("Clásica bloquea una compra cuya comisión supera la tasa máxima efectiva
     store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
     /tasa efectiva 1\.10.*máximo de compra 1\.06/i,
   );
+  store.close();
+});
+
+test("ignora ofertas exclusivas VIP sin intentar aplicar ni sumar errores", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "vip-only",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+    only_vip: true,
+    User: { uuid: "peer" },
+  };
+  let applications = 0;
+  const qva = {
+    listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({}),
+    apply: async () => void (applications += 1),
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  await trading.scan();
+
+  assert.equal(applications, 0);
+  assert.equal(Number(store.get("consecutive_errors") ?? 0), 0);
+  assert.match(
+    store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
+    /exclusiva para usuarios VIP/i,
+  );
+  store.close();
+});
+
+test("un rechazo o caída de QvaPay no activa el cortafuegos de errores internos", async () => {
+  const { store, cfg, markets } = setup();
+  const notifications: string[] = [];
+  const qva = {
+    listOffersPage: async () => {
+      throw new QvaApiError(503, "Servicio P2P temporalmente no disponible");
+    },
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async (message) => void notifications.push(message),
+  );
+
+  await trading.scan();
+  await trading.scan();
+  await trading.scan();
+
+  assert.equal(Number(store.get("consecutive_errors") ?? 0), 0);
+  assert.equal(trading.isPaused(), false);
+  assert.match(notifications.at(-1) ?? "", /QvaPay.*HTTP 503.*temporalmente no disponible/i);
+  assert.ok(store.countAudit("scan_qvapay_error") >= 3);
+  store.close();
+});
+
+test("un rechazo definitivo al aplicar queda explicado y no se reintenta", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "account-rejected",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+    User: { uuid: "peer" },
+  };
+  const notifications: string[] = [];
+  let applications = 0;
+  const qva = {
+    listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => 100,
+    apply: async () => {
+      applications += 1;
+      throw new QvaApiError(403, "La contraparte bloqueó esta cuenta");
+    },
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async (message) => void notifications.push(message),
+  );
+
+  await trading.scan();
+  await trading.scan();
+
+  assert.equal(applications, 1);
+  assert.equal(Number(store.get("consecutive_errors") ?? 0), 0);
+  assert.match(
+    store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
+    /QvaPay.*HTTP 403.*bloqueó esta cuenta/i,
+  );
+  assert.match(notifications.at(-1) ?? "", /Compra automática bloqueada.*QvaPay.*HTTP 403/is);
   store.close();
 });
 

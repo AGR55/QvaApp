@@ -424,7 +424,10 @@ export class QvaPayClient {
         if (attempt < 2) await this.sleep(800 * (attempt + 1));
       }
     }
-    throw lastError;
+    throw new QvaConnectionError(
+      isTimeoutFailure(lastError) ? "timeout" : "network",
+      lastError,
+    );
   }
 
   private async fetchAuthentication(

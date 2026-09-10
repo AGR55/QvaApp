@@ -170,6 +170,8 @@ test("restaura la oferta original cuando aplicar es rechazado", async () => {
 
   const result = await orchestrator.execute(input);
 
+  assert.equal(result.decision.kind, "blocked");
+  assert.match(result.decision.reasons.at(-1) ?? "", /QvaPay.*ya no está disponible/i);
   assert.equal(result.workflow?.state, "restored");
   assert.equal(restored.length, 1);
   assert.equal((restored[0] as { amount: number }).amount, own.amount);

@@ -179,12 +179,23 @@ export class OpportunityOrchestrator {
 
   private async executeOnce(input: OpportunityInput): Promise<OpportunityResult> {
     const existing = this.store.findWorkflowByTarget(input.target.uuid);
-    if (existing)
+    if (existing) {
+      const applicationConfirmed = Boolean(
+        this.store.getOperation(input.target.uuid),
+      );
       return {
-        decision: existing.riskDecision,
+        decision: applicationConfirmed
+          ? existing.riskDecision
+          : this.blockDecision(
+              existing.riskDecision,
+              existing.error
+                ? `QvaPay rechazó la aplicación anterior: ${existing.error}`
+                : `La aplicación anterior no fue confirmada por QvaPay (flujo ${existing.state}).`,
+            ),
         workflow: existing,
-        applicationConfirmed: Boolean(this.store.getOperation(input.target.uuid)),
+        applicationConfirmed,
       };
+    }
     if (input.target.type !== "buy" || input.target.status !== "open")
       return {
         decision: this.nonExecutableDecision(input, "ignored", "La oferta no es una compra externa abierta."),
@@ -269,6 +280,7 @@ export class OpportunityOrchestrator {
       ),
     });
     if (decision.kind !== "apply") return { decision };
+    let outcomeDecision = decision;
 
     let cancellationPlan = liquidity.cancel;
     if (cancellationPlan.length) {
@@ -375,6 +387,10 @@ export class OpportunityOrchestrator {
     } catch (error) {
       const message = errorMessage(error);
       if (isUncertain(error)) {
+        outcomeDecision = this.blockDecision(
+          decision,
+          `QvaPay no confirmó la aplicación: ${message}`,
+        );
         const state =
           this.store.getTradeWorkflow(workflowId)?.state === "applying_external"
             ? "apply_uncertain"
@@ -386,15 +402,20 @@ export class OpportunityOrchestrator {
           { kind: "reconciliation-required", uuid: input.target.uuid, coin: input.target.coin, amount: input.target.amount },
         );
       } else {
+        outcomeDecision = this.blockDecision(
+          decision,
+          `QvaPay rechazó la aplicación: ${message}`,
+        );
         this.store.updateWorkflowState(workflowId, "apply_rejected", message);
         await this.restoreCancelledOffers(workflowId);
+        this.store.updateWorkflowState(workflowId, "restored", message);
         this.store.releaseCapitalReservation(workflowId);
       }
     }
     const persistedWorkflow = this.store.getTradeWorkflow(workflowId);
     if (!persistedWorkflow) throw new Error("No se pudo recuperar el flujo persistido.");
     return {
-      decision,
+      decision: outcomeDecision,
       workflow: persistedWorkflow,
       applicationConfirmed: Boolean(this.store.getOperation(input.target.uuid)),
     };
