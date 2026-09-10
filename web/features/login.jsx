@@ -21,7 +21,9 @@ export function Login({ onAuthenticated }) {
       setPassword("");
       onAuthenticated(payload.data);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "No se pudo iniciar sesión.");
+      setStatus(
+        error instanceof Error ? error.message : "No se pudo iniciar sesión.",
+      );
     } finally {
       setBusy(false);
     }
@@ -30,29 +32,33 @@ export function Login({ onAuthenticated }) {
     <main className="login-shell">
       <section className="login-card" aria-labelledby="login-title">
         <span className="mark">Q</span>
-        <p className="eyebrow">ACCESO LOCAL PROTEGIDO</p>
         <h1 id="login-title">Mesa de operaciones</h1>
-        <p>Introduce la contraseña administrativa. La sesión expira automáticamente.</p>
+        <p>
+          Introduce la contraseña administrativa. La sesión expira
+          automáticamente.
+        </p>
         <form onSubmit={submit}>
           <Field label="Contraseña" htmlFor="dashboard-password">
-          <div className="password-field">
-            <LockKeyhole aria-hidden="true" />
-            <Input
-              id="dashboard-password"
-              type="password"
-              autoComplete="current-password"
-              minLength="14"
-              required
-              autoFocus
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-            />
-          </div>
+            <div className="password-field">
+              <LockKeyhole aria-hidden="true" />
+              <Input
+                id="dashboard-password"
+                type="password"
+                autoComplete="current-password"
+                minLength="14"
+                required
+                autoFocus
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </div>
           </Field>
           <Button variant="primary" disabled={busy} type="submit">
             {busy ? "Verificando…" : "Entrar de forma segura"}
           </Button>
-          <p className="detail" role="status" aria-live="polite">{status}</p>
+          <p className="detail" role="status" aria-live="polite">
+            {status}
+          </p>
         </form>
       </section>
     </main>

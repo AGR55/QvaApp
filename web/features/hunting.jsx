@@ -12,7 +12,7 @@ import { Empty, Panel } from "../components/common.jsx";
 import { useDialog } from "../hooks/use-dialog.js";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
-import { Button, Input } from "../components/ui.jsx";
+import { Badge, Button, Input } from "../components/ui.jsx";
 
 const cancellableStates = new Set(["applied", "acknowledged"]);
 
@@ -255,7 +255,7 @@ function HuntSide({ icon: Icon, title, description, enabled, running, paused, mo
 
 function OperationState({ value }) {
   const labels = { applied: "Aplicada", acknowledged: "Pago anunciado", paid: "Pagada", cancelled: "Cancelada", completed: "Completada", failed: "Fallida" };
-  return <span className={`state state-${value}`}>{labels[value] || value}</span>;
+  return <Badge className={`state state-${value}`}>{labels[value] || value}</Badge>;
 }
 
 function rateDraft(markets) {

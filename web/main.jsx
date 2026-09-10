@@ -62,7 +62,11 @@ function App() {
   const [market, setMarket] = useState("");
   const [notice, setNotice] = useState(null);
   const [theme, setTheme] = useState(() => getInitialTheme());
-  const { data, status, resources, online, refresh } = useDashboard(view, market, setMarket);
+  const { data, status, resources, online, refresh } = useDashboard(
+    view,
+    market,
+    setMarket,
+  );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.style.colorScheme = theme;
@@ -112,7 +116,9 @@ function App() {
         <div className="mark">Q</div>
         <p>{status}</p>
         <Skeleton label="Leyendo la base de datos local" />
-        <Button variant="primary" onClick={refresh}>Reintentar lectura local</Button>
+        <Button variant="primary" onClick={refresh}>
+          Reintentar lectura local
+        </Button>
       </main>
     );
   const metadata = new Map(data.markets.map((item) => [item.code, item]));
@@ -128,9 +134,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="mark">Q</span>
-          <span>
-            QvaApply<small>DESK</small>
-          </span>
+          <span>QvaApply</span>
         </div>
         <nav>
           {navigation.map(([key, text, Icon]) => (
@@ -150,21 +154,45 @@ function App() {
       <main className="content" id="main-content" tabIndex="-1">
         <header className="topbar">
           <div>
-            <p className="eyebrow">MESA DE DECISIÓN</p>
             <h1>{title}</h1>
           </div>
           <div className="top-actions">
             <PushControl onNotification={setNotice} />
             <IconButton
               className="theme-toggle"
-              onClick={() => setTheme((current) => current === "dark" ? "light" : "dark")}
-              aria-label={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
-              title={theme === "dark" ? "Cambiar a modo claro" : "Cambiar a modo oscuro"}
+              onClick={() =>
+                setTheme((current) => (current === "dark" ? "light" : "dark"))
+              }
+              aria-label={
+                theme === "dark"
+                  ? "Cambiar a modo claro"
+                  : "Cambiar a modo oscuro"
+              }
+              title={
+                theme === "dark"
+                  ? "Cambiar a modo claro"
+                  : "Cambiar a modo oscuro"
+              }
             >
-              {theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+              {theme === "dark" ? (
+                <Sun aria-hidden="true" />
+              ) : (
+                <Moon aria-hidden="true" />
+              )}
             </IconButton>
-            <Button variant="primary" onClick={refresh} disabled={Object.values(resources).some((item) => item.loading)}>
-              <RefreshCw className={Object.values(resources).some((item) => item.loading) ? "spinning" : ""} aria-hidden="true" />
+            <Button
+              variant="primary"
+              onClick={refresh}
+              disabled={Object.values(resources).some((item) => item.loading)}
+            >
+              <RefreshCw
+                className={
+                  Object.values(resources).some((item) => item.loading)
+                    ? "spinning"
+                    : ""
+                }
+                aria-hidden="true"
+              />
               Actualizar
             </Button>
             <IconButton
@@ -176,13 +204,65 @@ function App() {
             </IconButton>
           </div>
         </header>
-        <div className={`connection-state ${online ? "" : "offline"}`} role="status" aria-live="polite">
+        <div
+          className={`connection-state ${online ? "" : "offline"}`}
+          role="status"
+          aria-live="polite"
+        >
           <span />
           <p>{status}</p>
         </div>
-        {notice ? <aside className="push-toast" role="status" aria-live="polite"><Bell aria-hidden="true" /><div><strong>{notice.type === "blocked-offer" ? "Oferta requiere revisión" : notice.type === "operation-applied" ? "Aplicación confirmada" : "Conciliación necesaria"}</strong><p>{notice.alert?.coin || "QvaApply"}{notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}{notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}</p><Button variant="primary" size="sm" onClick={() => { const next = new URL(notice.url || "/?view=auditoria", window.location.origin).searchParams.get("view") || "auditoria"; navigate(next); setNotice(null); }}>Abrir detalle</Button></div><IconButton variant="ghost" size="icon" className="dialog-close" onClick={() => setNotice(null)} aria-label="Cerrar aviso"><X /></IconButton></aside> : null}
+        {notice ? (
+          <aside className="push-toast" role="status" aria-live="polite">
+            <Bell aria-hidden="true" />
+            <div>
+              <strong>
+                {notice.type === "blocked-offer"
+                  ? "Oferta requiere revisión"
+                  : notice.type === "operation-applied"
+                    ? "Aplicación confirmada"
+                    : "Conciliación necesaria"}
+              </strong>
+              <p>
+                {notice.alert?.coin || "QvaApply"}
+                {notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}
+                {notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}
+              </p>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const next =
+                    new URL(
+                      notice.url || "/?view=auditoria",
+                      window.location.origin,
+                    ).searchParams.get("view") || "auditoria";
+                  navigate(next);
+                  setNotice(null);
+                }}
+              >
+                Abrir detalle
+              </Button>
+            </div>
+            <IconButton
+              variant="ghost"
+              size="icon"
+              className="dialog-close"
+              onClick={() => setNotice(null)}
+              aria-label="Cerrar aviso"
+            >
+              <X />
+            </IconButton>
+          </aside>
+        ) : null}
         {view === "resumen" ? (
-          <Cockpit data={data} label={label} unit={unit} onChanged={refresh} resources={resources} />
+          <Cockpit
+            data={data}
+            label={label}
+            unit={unit}
+            onChanged={refresh}
+            resources={resources}
+          />
         ) : null}
         {view === "mercado" ? (
           <Market
@@ -196,7 +276,13 @@ function App() {
           />
         ) : null}
         {view === "ofertas" ? (
-          <Capital data={data} label={label} unit={unit} onChanged={refresh} resources={resources} />
+          <Capital
+            data={data}
+            label={label}
+            unit={unit}
+            onChanged={refresh}
+            resources={resources}
+          />
         ) : null}
         {view === "operaciones" ? (
           <Operations
@@ -215,7 +301,9 @@ function App() {
           </Suspense>
         ) : null}
         {view === "configuracion" ? <Settings onChanged={refresh} /> : null}
-        {view === "auditoria" ? <Audit data={data} onChanged={refresh} /> : null}
+        {view === "auditoria" ? (
+          <Audit data={data} onChanged={refresh} />
+        ) : null}
       </main>
     </div>
   );
@@ -231,11 +319,16 @@ function initialView() {
 function getInitialTheme() {
   const saved = window.localStorage.getItem("qvaapply-theme");
   if (saved === "dark" || saved === "light") return saved;
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 function PushControl({ onNotification }) {
-  const supported = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const supported =
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window;
   const [state, setState] = useState(supported ? "checking" : "unsupported");
   useEffect(() => {
     if (!supported) return;
@@ -246,11 +339,26 @@ function PushControl({ onNotification }) {
       playNotificationTone();
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
-    void navigator.serviceWorker.register("/service-worker.js").then(async (registration) => {
-      const subscription = await registration.pushManager.getSubscription();
-      if (active) setState(subscription ? "enabled" : Notification.permission === "denied" ? "denied" : "disabled");
-    }).catch(() => { if (active) setState("unsupported"); });
-    return () => { active = false; navigator.serviceWorker.removeEventListener("message", onMessage); };
+    void navigator.serviceWorker
+      .register("/service-worker.js")
+      .then(async (registration) => {
+        const subscription = await registration.pushManager.getSubscription();
+        if (active)
+          setState(
+            subscription
+              ? "enabled"
+              : Notification.permission === "denied"
+                ? "denied"
+                : "disabled",
+          );
+      })
+      .catch(() => {
+        if (active) setState("unsupported");
+      });
+    return () => {
+      active = false;
+      navigator.serviceWorker.removeEventListener("message", onMessage);
+    };
   }, [supported, onNotification]);
   const toggle = async () => {
     try {
@@ -258,23 +366,61 @@ function PushControl({ onNotification }) {
       const registration = await navigator.serviceWorker.ready;
       const current = await registration.pushManager.getSubscription();
       if (current) {
-        await requestJson("/api/push/subscriptions", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ endpoint: current.endpoint }) });
-        await current.unsubscribe(); setState("disabled"); return;
+        await requestJson("/api/push/subscriptions", {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ endpoint: current.endpoint }),
+        });
+        await current.unsubscribe();
+        setState("disabled");
+        return;
       }
       const permission = await Notification.requestPermission();
-      if (permission !== "granted") { setState("denied"); return; }
+      if (permission !== "granted") {
+        setState("denied");
+        return;
+      }
       const payload = await requestJson("/api/push/public-key");
-      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(payload.data.publicKey) });
-      await requestJson("/api/push/subscriptions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(subscription) });
+      const subscription = await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: decodeVapidKey(payload.data.publicKey),
+      });
+      await requestJson("/api/push/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(subscription),
+      });
       setState("enabled");
-    } catch { setState("error"); }
+    } catch {
+      setState("error");
+    }
   };
-  const labels = { checking: "Comprobando avisos", enabled: "Avisos activados", disabled: "Activar avisos", denied: "Avisos bloqueados", unsupported: "Avisos no compatibles", error: "Reintentar avisos" };
-  return <IconButton className={`push-control ${state}`} onClick={() => void toggle()} disabled={state === "checking" || state === "unsupported" || state === "denied"} aria-label={labels[state]} title={labels[state]}><Bell aria-hidden="true" /><span className="push-dot" /></IconButton>;
+  const labels = {
+    checking: "Comprobando avisos",
+    enabled: "Avisos activados",
+    disabled: "Activar avisos",
+    denied: "Avisos bloqueados",
+    unsupported: "Avisos no compatibles",
+    error: "Reintentar avisos",
+  };
+  return (
+    <IconButton
+      className={`push-control ${state}`}
+      onClick={() => void toggle()}
+      disabled={
+        state === "checking" || state === "unsupported" || state === "denied"
+      }
+      aria-label={labels[state]}
+      title={labels[state]}
+    >
+      <Bell aria-hidden="true" />
+      <span className="push-dot" />
+    </IconButton>
+  );
 }
 
 function decodeVapidKey(value) {
-  const padding = "=".repeat((4 - value.length % 4) % 4);
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
   const raw = atob((value + padding).replace(/-/g, "+").replace(/_/g, "/"));
   return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
@@ -286,9 +432,14 @@ function playNotificationTone() {
     const context = new AudioContext();
     const oscillator = context.createOscillator();
     const gain = context.createGain();
-    oscillator.frequency.value = 660; gain.gain.value = 0.035;
-    oscillator.connect(gain); gain.connect(context.destination);
-    oscillator.start(); gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18);
+    oscillator.frequency.value = 660;
+    gain.gain.value = 0.035;
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.18);
     oscillator.stop(context.currentTime + 0.18);
-  } catch { /* el aviso visual y nativo siguen disponibles */ }
+  } catch {
+    /* el aviso visual y nativo siguen disponibles */
+  }
 }

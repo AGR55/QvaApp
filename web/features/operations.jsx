@@ -5,7 +5,7 @@ import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { operationActionBody } from "../lib/operation-actions.js";
 import { useDialog } from "../hooks/use-dialog.js";
-import { Button, Input } from "../components/ui.jsx";
+import { Badge, Button, Input } from "../components/ui.jsx";
 
 const terminalWorkflow = new Set(["applied", "restored", "blocked"]);
 
@@ -99,7 +99,7 @@ export function Operations({ data, label, unit, onChanged }) {
 }
 
 function State({ value }) {
-  return <span className={`state state-${value}`}>{value.replaceAll("_", " ")}</span>;
+  return <Badge className={`state state-${value}`}>{value.replaceAll("_", " ")}</Badge>;
 }
 
 function actionTitle(action) {

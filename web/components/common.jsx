@@ -1,14 +1,13 @@
 import React from "react";
 import { Activity } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui.jsx";
 
 export function Panel({ title, children, wide = false }) {
   return (
-    <section className={`panel ${wide ? "wide" : ""}`} data-ui="panel">
-      <header className="panel-head">
-        <h2>{title}</h2>
-      </header>
-      {children}
-    </section>
+    <Card className={`panel ${wide ? "wide" : ""}`} data-ui="panel">
+      <CardHeader className="panel-head"><CardTitle>{title}</CardTitle></CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   );
 }
 export function Empty({ children }) {

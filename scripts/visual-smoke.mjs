@@ -25,82 +25,194 @@ try {
       alwaysMatch: {
         browserName: "chrome",
         "goog:chromeOptions": {
-          args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--window-size=1440,1000"],
+          args: [
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--window-size=1440,1000",
+          ],
         },
       },
     },
   });
   sessionId = created.value.sessionId;
   await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
-  await waitFor(() => execute("return document.querySelector('#dashboard-password') !== null"));
+  await waitFor(() =>
+    execute("return document.querySelector('#dashboard-password') !== null"),
+  );
   await screenshot("/tmp/qvaapply-login-desktop.png");
   const loginAccessibility = await assertPageQuality("Acceso");
   const password = await find("css selector", "#dashboard-password");
-  await command("POST", `/session/${sessionId}/element/${password}/value`, { text: "preview-segura-2026" });
+  await command("POST", `/session/${sessionId}/element/${password}/value`, {
+    text: "preview-segura-2026",
+  });
   const submit = await find("css selector", "button[type='submit']");
   await command("POST", `/session/${sessionId}/element/${submit}/click`, {});
-  await waitFor(() => execute("return document.querySelector('.app-shell') !== null"));
-  await waitFor(() => execute("return document.body.innerText.includes('Dato guardado')"));
+  await waitFor(() =>
+    execute("return document.querySelector('.app-shell') !== null"),
+  );
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Dato guardado')"),
+  );
   await screenshot("/tmp/qvaapply-dashboard-desktop.png");
   const desktop = await assertPageQuality("Cockpit");
 
-  const markets = await find("xpath", "//button[contains(normalize-space(.), 'Mercados')]");
+  const markets = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Mercados')]",
+  );
   await command("POST", `/session/${sessionId}/element/${markets}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Libro ·')"));
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Libro ·')"),
+  );
   await screenshot("/tmp/qvaapply-markets-desktop.png");
   const marketsDesktop = await assertPageQuality("Mercados");
 
-  const operations = await find("xpath", "//button[contains(normalize-space(.), 'Operaciones')]");
-  await command("POST", `/session/${sessionId}/element/${operations}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Operaciones con dinero')"));
+  const operations = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Operaciones')]",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${operations}/click`,
+    {},
+  );
+  await waitFor(() =>
+    execute(
+      "return document.body.innerText.includes('Operaciones con dinero')",
+    ),
+  );
   await screenshot("/tmp/qvaapply-operations-desktop.png");
   const operationsDesktop = await assertPageQuality("Operaciones");
 
-  const hunting = await find("xpath", "//button[contains(normalize-space(.), 'Cacería')]");
+  const hunting = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Cacería')]",
+  );
   await command("POST", `/session/${sessionId}/element/${hunting}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Cazar solo donde tú decidas')"));
-  const huntSwitches = await execute("return document.querySelectorAll('[role=switch]').length");
+  await waitFor(() =>
+    execute(
+      "return document.body.innerText.includes('Cazar solo donde tú decidas')",
+    ),
+  );
+  const huntSwitches = await execute(
+    "return document.querySelectorAll('[role=switch]').length",
+  );
   if (huntSwitches !== 6)
-    throw new Error(`Se esperaban 6 controles de mercado y lado; aparecieron ${huntSwitches}.`);
+    throw new Error(
+      `Se esperaban 6 controles de mercado y lado; aparecieron ${huntSwitches}.`,
+    );
   const huntingDesktop = await assertPageQuality("Cacería");
   await screenshot("/tmp/qvaapply-hunting-desktop.png");
-  await execute("window.scrollTo(0, document.documentElement.scrollHeight); return true");
+  await execute(
+    "window.scrollTo(0, document.documentElement.scrollHeight); return true",
+  );
   await new Promise((resolve) => setTimeout(resolve, 250));
   await screenshot("/tmp/qvaapply-hunting-log-desktop.png");
-  const cancelCapture = await find("xpath", "//button[normalize-space(.)='Cancelar aplicación']");
-  await command("POST", `/session/${sessionId}/element/${cancelCapture}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Cancelar esta aplicación')"));
+  const cancelCapture = await find(
+    "xpath",
+    "//button[normalize-space(.)='Cancelar aplicación']",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${cancelCapture}/click`,
+    {},
+  );
+  await waitFor(() =>
+    execute(
+      "return document.body.innerText.includes('Cancelar esta aplicación')",
+    ),
+  );
   await screenshot("/tmp/qvaapply-hunting-cancel-desktop.png");
-  const keepCapture = await find("xpath", "//button[normalize-space(.)='Mantener aplicación']");
-  await command("POST", `/session/${sessionId}/element/${keepCapture}/click`, {});
+  const keepCapture = await find(
+    "xpath",
+    "//button[normalize-space(.)='Mantener aplicación']",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${keepCapture}/click`,
+    {},
+  );
 
-  const capital = await find("xpath", "//button[contains(normalize-space(.), 'Capital')]");
+  const capital = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Capital')]",
+  );
   await command("POST", `/session/${sessionId}/element/${capital}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Capital disponible')"));
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Capital disponible')"),
+  );
   const capitalDesktop = await assertPageQuality("Capital");
-  const editOffer = await find("xpath", "//button[normalize-space(.)='Editar']");
+  const editOffer = await find(
+    "xpath",
+    "//button[normalize-space(.)='Editar']",
+  );
   await command("POST", `/session/${sessionId}/element/${editOffer}/click`, {});
-  await waitFor(() => execute("return document.querySelector('.offer-workbench') !== null")).catch(async () => {
-    const visibleText = await execute("return document.body.innerText.slice(-1200)");
-    throw new Error(`El editor de Capital no apareció. Texto visible: ${visibleText}`);
+  await waitFor(() =>
+    execute("return document.querySelector('.offer-workbench') !== null"),
+  ).catch(async () => {
+    const visibleText = await execute(
+      "return document.body.innerText.slice(-1200)",
+    );
+    throw new Error(
+      `El editor de Capital no apareció. Texto visible: ${visibleText}`,
+    );
   });
-  const capitalCalculation = await execute(`return document.querySelector('.offer-calculation')?.innerText || ''`);
-  if (!/0[.,]08/.test(capitalCalculation) || !/1[.,]0400/.test(capitalCalculation))
-    throw new Error(`El editor no muestra comisión y mediana de Clásica: ${capitalCalculation}`);
+  const capitalCalculation = await execute(
+    `return document.querySelector('.offer-calculation')?.innerText || ''`,
+  );
+  if (
+    !/0[.,]08/.test(capitalCalculation) ||
+    !/1[.,]0400/.test(capitalCalculation)
+  )
+    throw new Error(
+      `El editor no muestra comisión y mediana de Clásica: ${capitalCalculation}`,
+    );
   await screenshot("/tmp/qvaapply-capital-editor-desktop.png");
-  const closeEditor = await find("css selector", ".offer-workbench .icon-action");
-  await command("POST", `/session/${sessionId}/element/${closeEditor}/click`, {});
-  const cancelOffer = await find("xpath", "//button[normalize-space(.)='Cancelar']");
-  await command("POST", `/session/${sessionId}/element/${cancelOffer}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Eliminar esta oferta')"));
+  const closeEditor = await find(
+    "css selector",
+    ".offer-workbench .icon-action",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${closeEditor}/click`,
+    {},
+  );
+  const cancelOffer = await find(
+    "xpath",
+    "//button[normalize-space(.)='Cancelar']",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${cancelOffer}/click`,
+    {},
+  );
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Eliminar esta oferta')"),
+  );
   await screenshot("/tmp/qvaapply-capital-cancel-desktop.png");
-  const keepOffer = await find("xpath", "//button[normalize-space(.)='Conservar oferta']");
+  const keepOffer = await find(
+    "xpath",
+    "//button[normalize-space(.)='Conservar oferta']",
+  );
   await command("POST", `/session/${sessionId}/element/${keepOffer}/click`, {});
 
-  const charts = await find("xpath", "//button[contains(normalize-space(.), 'Gráficas')]");
+  const charts = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Gráficas')]",
+  );
   await command("POST", `/session/${sessionId}/element/${charts}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Fluctuación de precios')"));
-  await command("POST", `/session/${sessionId}/window/rect`, { width: 1440, height: 540, x: 0, y: 0 });
+  await waitFor(() =>
+    execute(
+      "return document.body.innerText.includes('Fluctuación de precios')",
+    ),
+  );
+  await command("POST", `/session/${sessionId}/window/rect`, {
+    width: 1440,
+    height: 540,
+    x: 0,
+    y: 0,
+  });
   await execute(`window.__chartLayoutSamples = []; window.__chartLayoutFrames = 0;
     (function sample() {
       window.__chartLayoutSamples.push({
@@ -112,17 +224,40 @@ try {
       window.__chartLayoutFrames += 1;
       if (window.__chartLayoutFrames < 120) requestAnimationFrame(sample);
     })(); return true;`);
-  const usdChart = await find("xpath", "//button[normalize-space(.)='USD Prepago']");
+  const usdChart = await find(
+    "xpath",
+    "//button[normalize-space(.)='USD Prepago']",
+  );
   await command("POST", `/session/${sessionId}/element/${usdChart}/click`, {});
   await new Promise((resolve) => setTimeout(resolve, 2_100));
-  const chartLayoutSamples = await execute("return window.__chartLayoutSamples");
-  const chartOverflowFrames = chartLayoutSamples.filter((sample) => sample.scroll > sample.viewport);
+  const chartLayoutSamples = await execute(
+    "return window.__chartLayoutSamples",
+  );
+  const chartOverflowFrames = chartLayoutSamples.filter(
+    (sample) => sample.scroll > sample.viewport,
+  );
   const chartContentWidths = chartLayoutSamples.map((sample) => sample.content);
   const chartWidths = chartLayoutSamples.map((sample) => sample.chart);
-  if (chartOverflowFrames.length || Math.max(...chartContentWidths) - Math.min(...chartContentWidths) > 1 || Math.min(...chartWidths) <= 0 || Math.max(...chartWidths) - Math.min(...chartWidths) > 1)
-    throw new Error(`Gráfica inestable durante actualización: ${JSON.stringify({ overflowFrames: chartOverflowFrames.length, minContent: Math.min(...chartContentWidths), maxContent: Math.max(...chartContentWidths), minChart: Math.min(...chartWidths), maxChart: Math.max(...chartWidths) })}`);
-  await command("POST", `/session/${sessionId}/window/rect`, { width: 1440, height: 1000, x: 0, y: 0 });
-  await waitFor(() => execute("return Array.from(document.querySelectorAll('.chart-line')).filter(line => line.getAttribute('points')).length >= 2"));
+  if (
+    chartOverflowFrames.length ||
+    Math.max(...chartContentWidths) - Math.min(...chartContentWidths) > 1 ||
+    Math.min(...chartWidths) <= 0 ||
+    Math.max(...chartWidths) - Math.min(...chartWidths) > 1
+  )
+    throw new Error(
+      `Gráfica inestable durante actualización: ${JSON.stringify({ overflowFrames: chartOverflowFrames.length, minContent: Math.min(...chartContentWidths), maxContent: Math.max(...chartContentWidths), minChart: Math.min(...chartWidths), maxChart: Math.max(...chartWidths) })}`,
+    );
+  await command("POST", `/session/${sessionId}/window/rect`, {
+    width: 1440,
+    height: 1000,
+    x: 0,
+    y: 0,
+  });
+  await waitFor(() =>
+    execute(
+      "return Array.from(document.querySelectorAll('.chart-line')).filter(line => line.getAttribute('points')).length >= 2",
+    ),
+  );
   const chartRender = await execute(`return {
     surface: document.querySelector('.market-chart')?.getBoundingClientRect().toJSON(),
     axes: document.querySelectorAll('.chart-y-label,.chart-x-label').length,
@@ -131,33 +266,77 @@ try {
       box: path.getBoundingClientRect().toJSON()
     }))
   }`);
-  if (chartRender.axes === 0 || chartRender.curves.some((curve) => !curve.d || curve.box.width <= 0 || curve.box.height <= 0))
-    throw new Error(`La gráfica no dibujó sus ejes o curvas: ${JSON.stringify(chartRender)}`);
+  if (
+    chartRender.axes === 0 ||
+    chartRender.curves.some(
+      (curve) => !curve.d || curve.box.width <= 0 || curve.box.height <= 0,
+    )
+  )
+    throw new Error(
+      `La gráfica no dibujó sus ejes o curvas: ${JSON.stringify(chartRender)}`,
+    );
   await screenshot("/tmp/qvaapply-charts-desktop.png");
   const chartsDesktop = await assertPageQuality("Gráficas");
 
-  const settings = await find("xpath", "//button[contains(normalize-space(.), 'Estrategia')]");
+  const settings = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Estrategia')]",
+  );
   await command("POST", `/session/${sessionId}/element/${settings}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Comportamiento del bot')"));
-  const initialReviewAvailable = await execute(`return Array.from(document.querySelectorAll('button')).some(button => button.textContent.includes('Revisar y aprobar límites') && !button.disabled)`);
+  await waitFor(() =>
+    execute(
+      "return document.body.innerText.includes('Comportamiento del bot')",
+    ),
+  );
+  const initialReviewAvailable = await execute(
+    `return Array.from(document.querySelectorAll('button')).some(button => button.textContent.includes('Revisar y aprobar límites') && !button.disabled)`,
+  );
   if (!initialReviewAvailable)
-    throw new Error("La aprobación inicial de límites no está disponible sin cambios artificiales.");
+    throw new Error(
+      "La aprobación inicial de límites no está disponible sin cambios artificiales.",
+    );
   await screenshot("/tmp/qvaapply-settings-desktop.png");
   const settingsDesktop = await assertPageQuality("Estrategia");
 
-  const audit = await find("xpath", "//button[contains(normalize-space(.), 'Auditoría')]");
+  const audit = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Auditoría')]",
+  );
   await command("POST", `/session/${sessionId}/element/${audit}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Ofertas bloqueadas')"));
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Ofertas bloqueadas')"),
+  );
   const auditDesktop = await assertPageQuality("Auditoría");
   await screenshot("/tmp/qvaapply-audit-desktop.png");
-  const reviewBlocked = await find("xpath", "//button[normalize-space(.)='Revisar y aplicar']");
-  await command("POST", `/session/${sessionId}/element/${reviewBlocked}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('Plan de liquidez')"));
+  const reviewBlocked = await find(
+    "xpath",
+    "//button[normalize-space(.)='Revisar y aplicar']",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${reviewBlocked}/click`,
+    {},
+  );
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Plan de liquidez')"),
+  );
   await screenshot("/tmp/qvaapply-audit-review-desktop.png");
-  const closeAuditDialog = await find("css selector", ".decision-dialog .dialog-close");
-  await command("POST", `/session/${sessionId}/element/${closeAuditDialog}/click`, {});
+  const closeAuditDialog = await find(
+    "css selector",
+    ".decision-dialog .dialog-close",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${closeAuditDialog}/click`,
+    {},
+  );
 
-  await command("POST", `/session/${sessionId}/window/rect`, { width: 390, height: 844, x: 0, y: 0 });
+  await command("POST", `/session/${sessionId}/window/rect`, {
+    width: 390,
+    height: 844,
+    x: 0,
+    y: 0,
+  });
   await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
   await new Promise((resolve) => setTimeout(resolve, 500));
   await screenshot("/tmp/qvaapply-dashboard-mobile.png");
@@ -165,24 +344,87 @@ try {
   const mobileViews = [
     ["Mercados", "Libro ·", "/tmp/qvaapply-markets-mobile.png"],
     ["Capital", "Capital disponible", "/tmp/qvaapply-capital-mobile.png"],
-    ["Cacería", "Cazar solo donde tú decidas", "/tmp/qvaapply-hunting-mobile.png"],
-    ["Operaciones", "Operaciones con dinero", "/tmp/qvaapply-operations-mobile.png"],
+    [
+      "Cacería",
+      "Cazar solo donde tú decidas",
+      "/tmp/qvaapply-hunting-mobile.png",
+    ],
+    [
+      "Operaciones",
+      "Operaciones con dinero",
+      "/tmp/qvaapply-operations-mobile.png",
+    ],
     ["Gráficas", "Fluctuación de precios", "/tmp/qvaapply-charts-mobile.png"],
-    ["Estrategia", "Comportamiento del bot", "/tmp/qvaapply-settings-mobile.png"],
+    [
+      "Estrategia",
+      "Comportamiento del bot",
+      "/tmp/qvaapply-settings-mobile.png",
+    ],
     ["Auditoría", "Ofertas bloqueadas", "/tmp/qvaapply-audit-mobile.png"],
   ];
   for (const [navLabel, visibleText, imagePath] of mobileViews) {
-    const navigationButton = await find("xpath", `//button[contains(normalize-space(.), '${navLabel}')]`);
-    await command("POST", `/session/${sessionId}/element/${navigationButton}/click`, {});
-    await waitFor(() => execute(`return document.body.innerText.includes(${JSON.stringify(visibleText)})`));
+    const navigationButton = await find(
+      "xpath",
+      `//button[contains(normalize-space(.), '${navLabel}')]`,
+    );
+    await command(
+      "POST",
+      `/session/${sessionId}/element/${navigationButton}/click`,
+      {},
+    );
+    await waitFor(() =>
+      execute(
+        `return document.body.innerText.includes(${JSON.stringify(visibleText)})`,
+      ),
+    );
     if (navLabel === "Gráficas")
-      await waitFor(() => execute("return document.querySelectorAll('.chart-line').length >= 2"));
+      await waitFor(() =>
+        execute("return document.querySelectorAll('.chart-line').length >= 2"),
+      );
     await screenshot(imagePath);
     mobile[navLabel] = await assertPageQuality(`${navLabel} móvil`);
   }
-  console.log(JSON.stringify({ loginAccessibility, chartRender, desktop: { Cockpit: desktop, Mercados: marketsDesktop, Operaciones: operationsDesktop, Cacería: huntingDesktop, Capital: capitalDesktop, Gráficas: chartsDesktop, Estrategia: settingsDesktop, Auditoría: auditDesktop }, mobile, screenshots: ["/tmp/qvaapply-login-desktop.png", "/tmp/qvaapply-dashboard-desktop.png", "/tmp/qvaapply-markets-desktop.png", "/tmp/qvaapply-operations-desktop.png", "/tmp/qvaapply-hunting-desktop.png", "/tmp/qvaapply-hunting-log-desktop.png", "/tmp/qvaapply-hunting-cancel-desktop.png", "/tmp/qvaapply-capital-editor-desktop.png", "/tmp/qvaapply-capital-cancel-desktop.png", "/tmp/qvaapply-charts-desktop.png", "/tmp/qvaapply-settings-desktop.png", "/tmp/qvaapply-audit-desktop.png", "/tmp/qvaapply-audit-review-desktop.png", "/tmp/qvaapply-dashboard-mobile.png", ...mobileViews.map(([, , path]) => path)] }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        loginAccessibility,
+        chartRender,
+        desktop: {
+          Cockpit: desktop,
+          Mercados: marketsDesktop,
+          Operaciones: operationsDesktop,
+          Cacería: huntingDesktop,
+          Capital: capitalDesktop,
+          Gráficas: chartsDesktop,
+          Estrategia: settingsDesktop,
+          Auditoría: auditDesktop,
+        },
+        mobile,
+        screenshots: [
+          "/tmp/qvaapply-login-desktop.png",
+          "/tmp/qvaapply-dashboard-desktop.png",
+          "/tmp/qvaapply-markets-desktop.png",
+          "/tmp/qvaapply-operations-desktop.png",
+          "/tmp/qvaapply-hunting-desktop.png",
+          "/tmp/qvaapply-hunting-log-desktop.png",
+          "/tmp/qvaapply-hunting-cancel-desktop.png",
+          "/tmp/qvaapply-capital-editor-desktop.png",
+          "/tmp/qvaapply-capital-cancel-desktop.png",
+          "/tmp/qvaapply-charts-desktop.png",
+          "/tmp/qvaapply-settings-desktop.png",
+          "/tmp/qvaapply-audit-desktop.png",
+          "/tmp/qvaapply-audit-review-desktop.png",
+          "/tmp/qvaapply-dashboard-mobile.png",
+          ...mobileViews.map(([, , path]) => path),
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
-  if (sessionId) await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
+  if (sessionId)
+    await command("DELETE", `/session/${sessionId}`).catch(() => undefined);
   driver.kill("SIGTERM");
   preview.kill("SIGTERM");
 }
@@ -202,7 +444,9 @@ async function metrics() {
 async function assertPageQuality(name) {
   const pageMetrics = await metrics();
   if (pageMetrics.horizontalOverflow)
-    throw new Error(`${name} desborda horizontalmente: ${JSON.stringify(pageMetrics)}`);
+    throw new Error(
+      `${name} desborda horizontalmente: ${JSON.stringify(pageMetrics)}`,
+    );
   const accessibility = await accessibilityAudit();
   if (accessibility.serious.length > 0)
     throw new Error(`WCAG ${name}: ${JSON.stringify(accessibility.serious)}`);
@@ -240,17 +484,26 @@ async function screenshot(path) {
 }
 
 async function execute(script) {
-  const result = await command("POST", `/session/${sessionId}/execute/sync`, { script, args: [] });
+  const result = await command("POST", `/session/${sessionId}/execute/sync`, {
+    script,
+    args: [],
+  });
   return result.value;
 }
 
 async function executeAsync(script) {
-  const result = await command("POST", `/session/${sessionId}/execute/async`, { script, args: [] });
+  const result = await command("POST", `/session/${sessionId}/execute/async`, {
+    script,
+    args: [],
+  });
   return result.value;
 }
 
 async function find(using, value) {
-  const result = await command("POST", `/session/${sessionId}/element`, { using, value });
+  const result = await command("POST", `/session/${sessionId}/element`, {
+    using,
+    value,
+  });
   return result.value["element-6066-11e4-a52e-4f735466cecf"];
 }
 
@@ -267,7 +520,9 @@ async function waitForDriver() {
     try {
       const response = await fetch(`${base}/status`);
       if (response.ok) return;
-    } catch { /* todavía arrancando */ }
+    } catch {
+      /* todavía arrancando */
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("ChromeDriver no inició.");
@@ -278,9 +533,13 @@ async function waitForPreview() {
     try {
       const response = await fetch(`${previewOrigin}/api/session`);
       if (response.ok) return;
-    } catch { /* todavía arrancando */ }
+    } catch {
+      /* todavía arrancando */
+    }
     if (preview.exitCode !== null)
-      throw new Error(`El panel de prueba terminó antes de iniciar (código ${preview.exitCode}).`);
+      throw new Error(
+        `El panel de prueba terminó antes de iniciar (código ${preview.exitCode}).`,
+      );
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("El panel de prueba no inició.");

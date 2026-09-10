@@ -12,6 +12,7 @@
     "build:server": "tsc -p tsconfig.build.json",
     "build:web": "vite build",
     "dev": "tsx watch src/index.ts",
+    "dev:web": "vite build --watch",
     "login": "tsx src/login.ts",
     "start": "node --enable-source-maps dist/index.js",
     "test": "tsx --test test/*.test.ts",
