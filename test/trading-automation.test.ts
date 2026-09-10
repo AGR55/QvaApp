@@ -218,6 +218,36 @@ test("un rechazo definitivo al aplicar queda explicado y no se reintenta", async
   store.close();
 });
 
+test("concilia una aplicación incierta cuando QvaPay confirma la restricción VIP", async () => {
+  const { store, cfg, markets } = setup();
+  store.createMutationIntent({
+    intentId: "uncertain-vip-apply",
+    operationUuid: "vip-restricted-target",
+    kind: "apply",
+    request: { uuid: "vip-restricted-target", automatic: true },
+  });
+  store.updateMutationIntent(
+    "uncertain-vip-apply",
+    "uncertain",
+    undefined,
+    "No se recibió confirmación de QvaPay",
+  );
+  const qva = {
+    getOffer: async () => {
+      throw new QvaApiError(404, "No tienes VIP para ver esta oferta");
+    },
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const reconciled = await trading.reconcilePendingStandaloneApplications();
+
+  assert.equal(reconciled, 1);
+  assert.equal(store.hasUnresolvedMutation(), false);
+  assert.equal(store.recentMutationIntents(1)[0]?.state, "reconciled");
+  assert.ok(store.countAudit("standalone_apply_reconciled") > 0);
+  store.close();
+});
+
 test("detiene compra y venta por separado sin consultar el lado deshabilitado", async () => {
   const { store, cfg, markets } = setup();
   const queries: string[] = [];

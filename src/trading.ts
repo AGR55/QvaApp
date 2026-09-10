@@ -329,6 +329,60 @@ export class TradingEngine {
     return this.opportunityOrchestrator.reconcilePending();
   }
 
+  async reconcilePendingStandaloneApplications(): Promise<number> {
+    let reconciled = 0;
+    const pending = this.store
+      .recentMutationIntents(500)
+      .filter(
+        (intent) =>
+          intent.kind === "apply" &&
+          ["submitted", "uncertain"].includes(intent.state) &&
+          intent.operationUuid &&
+          !this.store.findWorkflowByTarget(intent.operationUuid),
+      );
+    for (const intent of pending) {
+      const uuid = intent.operationUuid!;
+      try {
+        const remote = await this.qva.getOffer(uuid);
+        if (
+          remote.status === "open" ||
+          remote.status === "cancelled" ||
+          remote.status === "completed"
+        ) {
+          this.store.updateMutationIntent(intent.intentId, "reconciled", {
+            remoteStatus: remote.status,
+          });
+          this.store.audit(
+            "standalone_apply_reconciled",
+            `QvaPay confirmó el estado ${remote.status}; la mutación incierta ya no bloquea el motor.`,
+            uuid,
+          );
+          reconciled += 1;
+        }
+      } catch (error) {
+        if (!isDefinitiveAccountRestriction(error)) {
+          this.store.audit(
+            "standalone_apply_reconciliation_pending",
+            qvaPayFailureDetail("conciliar la aplicación", error),
+            uuid,
+          );
+          continue;
+        }
+        this.store.updateMutationIntent(intent.intentId, "reconciled", {
+          rejectedByQvaPay: true,
+          reason: error.message,
+        });
+        this.store.audit(
+          "standalone_apply_reconciled",
+          `QvaPay confirmó que la cuenta no cumple la restricción de la oferta: ${error.message}`,
+          uuid,
+        );
+        reconciled += 1;
+      }
+    }
+    return reconciled;
+  }
+
   reconcileWorkflow(workflowId: string) {
     return this.opportunityOrchestrator.reconcile(workflowId);
   }
@@ -2244,6 +2298,14 @@ function isDefinitiveQvaApplyRejection(error: unknown): error is QvaApiError {
   return (
     error instanceof QvaApiError &&
     [400, 403, 404, 409].includes(error.status)
+  );
+}
+
+function isDefinitiveAccountRestriction(error: unknown): error is QvaApiError {
+  return (
+    error instanceof QvaApiError &&
+    [403, 404].includes(error.status) &&
+    /\bVIP\b|KYC/i.test(error.message)
   );
 }
 

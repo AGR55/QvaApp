@@ -260,6 +260,9 @@ scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements())
 scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );
+scheduler.register("mutation_reconcile", 60_000, () =>
+  trading.reconcilePendingStandaloneApplications().then(() => undefined),
+);
 scheduler.register("refresh", 5_000, () => trading.refreshOwnOffers());
 scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),
@@ -267,12 +270,19 @@ scheduler.register("fiat_sync", 30_000, () =>
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
+  const standaloneReconciled =
+    await trading.reconcilePendingStandaloneApplications();
   const reconciliations = await trading.reconcilePendingWorkflows();
   const unresolved = reconciliations.filter((item) => item.outcome === "unresolved");
   if (reconciliations.length)
     store.audit(
       "startup_reconciliation",
       `${reconciliations.length} flujo(s) revisados; ${unresolved.length} requieren atención.`,
+    );
+  if (standaloneReconciled)
+    store.audit(
+      "startup_mutation_reconciliation",
+      `${standaloneReconciled} aplicación(es) incierta(s) resuelta(s) con QvaPay.`,
     );
   scheduler.start();
   void scheduler.run("fiat_sync");
