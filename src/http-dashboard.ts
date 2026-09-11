@@ -516,7 +516,7 @@ function message(error: unknown): string {
 }
 
 function reactPage(): string {
-  return "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><title>QvaApply · Mesa de trading</title><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>";
+  return "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><title>QvaApply · Mesa de trading</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap\"><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>";
 }
 
 function openApiDocument() {

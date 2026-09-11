@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
+import { money } from "./lib/format.js";
 import { useDashboard } from "./hooks/use-dashboard.js";
 import { Capital } from "./features/capital.jsx";
 import { Cockpit } from "./features/cockpit.jsx";
@@ -39,6 +40,7 @@ import "./hunting.css";
 import "./audit.css";
 import "./theme-refresh.css";
 import "./components.css";
+import "./ui-polish.css";
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({
@@ -134,9 +136,12 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <span className="mark">Q</span>
-          <span>QvaApply</span>
+          <span className="brand-name">
+            <strong>QvaApply</strong>
+            <small>Mesa privada</small>
+          </span>
         </div>
-        <nav>
+        <nav aria-label="Navegación principal">
           {navigation.map(([key, text, Icon]) => (
             <Button
               key={key}
@@ -145,16 +150,50 @@ function App() {
               aria-current={view === key ? "page" : undefined}
               onClick={() => navigate(key)}
             >
-              <Icon />
+              <Icon aria-hidden="true" />
               {text}
             </Button>
           ))}
         </nav>
+        <div className="sidebar-foot" aria-label="Estado operativo">
+          <div className="foot-row">
+            <span
+              className={`live ${data.state.paused ? "offline" : ""}`}
+              aria-hidden="true"
+            />
+            <span>
+              {data.state.paused ? "Pausado" : "Activo"} ·{" "}
+              {data.state.mode === "real" ? "Real" : "Simulación"}
+            </span>
+          </div>
+          <div className="foot-row">
+            <span>{money(data.availability.qusd.available)} QUSD libres</span>
+          </div>
+        </div>
       </aside>
       <main className="content" id="main-content" tabIndex="-1">
         <header className="topbar">
           <div>
             <h1>{title}</h1>
+            <p className="top-sub">
+              <span
+                className={
+                  data.state.mode === "real" ? "mode-real" : "mode-sim"
+                }
+              >
+                {data.state.paused
+                  ? "Automatización pausada"
+                  : "Automatización activa"}
+              </span>
+              <span className="dot-sep" aria-hidden="true">
+                ·
+              </span>
+              <span>{money(data.availability.qusd.available)} QUSD libres</span>
+              <span className="dot-sep" aria-hidden="true">
+                ·
+              </span>
+              <span>{data.operations?.length || 0} operaciones</span>
+            </p>
           </div>
           <div className="top-actions">
             <PushControl onNotification={setNotice} />
@@ -184,6 +223,8 @@ function App() {
               variant="primary"
               onClick={refresh}
               disabled={Object.values(resources).some((item) => item.loading)}
+              aria-label="Actualizar datos"
+              title="Actualizar datos"
             >
               <RefreshCw
                 className={
@@ -193,7 +234,6 @@ function App() {
                 }
                 aria-hidden="true"
               />
-              Actualizar
             </Button>
             <IconButton
               onClick={logout}
