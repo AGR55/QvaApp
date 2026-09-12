@@ -550,12 +550,10 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 14px;
 }
 .freshness {
   display: inline-flex;
   width: fit-content;
-  margin: 0 0 12px;
   padding: 5px 8px;
   border: 1px solid var(--line);
   color: var(--muted);

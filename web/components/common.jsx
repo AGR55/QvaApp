@@ -1,13 +1,19 @@
 import React from "react";
 import { Activity } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui.jsx";
+import { CardTitle } from "./ui.jsx";
 
-export function Panel({ title, children, wide = false }) {
+export function Panel({ title, children, wide = false, kicker, description }) {
   return (
-    <Card className={`panel ${wide ? "wide" : ""}`} data-ui="panel">
-      <CardHeader className="panel-head"><CardTitle>{title}</CardTitle></CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+    <section className={`panel ui-section ${wide ? "wide" : ""}`} data-ui="panel">
+      <header className="panel-head ui-section-head">
+        <div className="ui-section-titles">
+          {kicker ? <span className="section-kicker">{kicker}</span> : null}
+          <CardTitle>{title}</CardTitle>
+          {description ? <p className="ui-section-description">{description}</p> : null}
+        </div>
+      </header>
+      <div className="ui-section-body">{children}</div>
+    </section>
   );
 }
 export function Empty({ children }) {
@@ -38,7 +44,7 @@ export function Freshness({ state, cachedAt }) {
     </span>
   );
 }
-export function List({ rows, render }) {
+export function List({ rows, render, empty = "Sin señales todavía." }) {
   return rows?.length ? (
     <ol className="decision-list">
       {rows.slice(0, 6).map((item, index) => (
@@ -46,6 +52,6 @@ export function List({ rows, render }) {
       ))}
     </ol>
   ) : (
-    <Empty>Sin señales todavía.</Empty>
+    <Empty>{empty}</Empty>
   );
 }

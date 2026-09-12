@@ -280,7 +280,8 @@
   gap: 7px;
 }
 
-/* Surfaces rely on spacing and contrast. Elevation is reserved for dialogs. */
+/* Surfaces rely on spacing and contrast. Elevation is reserved for dialogs.
+   Outer panels are transparent sections — only inner content may be a card. */
 [data-ui="panel"],
 .metric,
 .control-deck,
@@ -292,18 +293,54 @@
 .blocked-card,
 .offer-workbench,
 .hunting-command {
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
   box-shadow: none;
 }
+[data-ui="panel"],
+.metric,
+.control-deck,
+.market-card,
+.hunt-side,
+.capture-row,
+.blocked-card,
+.offer-workbench,
+.hunting-command {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+}
+/* Outer section: transparent, no card-in-card. Heading carries the hierarchy. */
 [data-ui="panel"] {
-  padding: var(--ui-space-5);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
 }
-[data-ui="panel"] > .ui-card-header {
-  margin-bottom: var(--ui-space-4);
+[data-ui="panel"] > .ui-card-header .ui-card-title,
+[data-ui="panel"] .ui-section-titles .ui-card-title {
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
-[data-ui="panel"] > .ui-card-header .ui-card-title {
-  font-size: 15px;
+.ui-section-titles {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.ui-section-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+/* Grouping wrappers are transparent too: the cards live one level down. */
+.hunt-market,
+.blocked-rail {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .button,
@@ -600,7 +637,7 @@ tbody tr:hover {
 }
 @media (max-width: 620px) {
   [data-ui="panel"] {
-    padding: 16px;
+    padding: 0;
   }
   .topbar h1 {
     font-size: 28px;

@@ -44,12 +44,12 @@ export function Operations({ data, label, unit, onChanged }) {
           {data.operations?.length ? (
             <div className="table-scroll" tabIndex="0" role="region" aria-label="Operaciones con dinero, tabla desplazable">
               <table>
-                <thead><tr><th>Estado</th><th>Flujo</th><th>Mercado</th><th>Importe</th><th>Acción humana</th></tr></thead>
+                <thead><tr><th>Estado</th><th>Flujo</th><th>Mercado</th><th>Importe</th><th>Acciones</th></tr></thead>
                 <tbody>
                   {data.operations.map((operation) => (
                     <tr key={operation.uuid}>
                       <td><State value={operation.state} /></td>
-                      <td>{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}<small>{operation.uuid}</small></td>
+                      <td>{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}</td>
                       <td>{label(operation.coin)}</td>
                       <td>{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}</small></td>
                       <td className="row-actions">
@@ -79,13 +79,13 @@ export function Operations({ data, label, unit, onChanged }) {
           ) : <Empty>No se han ejecutado flujos automáticos.</Empty>}
         </Panel>
       </div>
-      <p className="detail" role="status" aria-live="polite">{status}</p>
+      {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
       {pending ? (
         <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="operation-review-title">
           <div>
-            <p className="eyebrow">ACCIÓN FINANCIERA</p>
+            <p className="eyebrow">Acción financiera</p>
             <h2 id="operation-review-title">{actionTitle(pending.action)}</h2>
-            <p>{money(pending.operation.amount)} QUSD · {label(pending.operation.coin)}. QvaApply registrará la acción, pero nunca realizará la transferencia fiat.</p>
+            <p>{money(pending.operation.amount)} QUSD · {label(pending.operation.coin)}.</p>
             {pending.action === "paid" ? <label>Referencia del pago<Input autoFocus value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
             <div className="review-actions">
               <Button variant="ghost" onClick={closePending}>Volver</Button>

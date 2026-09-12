@@ -1,0 +1,18 @@
+.brand-logo { width: 34px; height: 34px; flex: 0 0 auto; display: block; }
+.boot-logo, .login-logo { width: 56px; height: 56px; margin-inline: auto; border-radius: 16px; }
+.market-identity { display: inline-flex; align-items: center; gap: 8px; min-width: 0; vertical-align: middle; }
+.market-identity img, .market-identity-fallback { width: 32px; height: 32px; flex: 0 0 auto; object-fit: contain; border-radius: 9px; background: var(--surface-alt); border: 1px solid var(--line); }
+.market-identity-fallback { display: grid; place-items: center; color: var(--accent); font-weight: 800; }
+.market-identity-sm img, .market-identity-sm .market-identity-fallback { width: 24px; height: 24px; border-radius: 7px; }
+.market-identity-lg img, .market-identity-lg .market-identity-fallback { width: 42px; height: 42px; border-radius: 11px; }
+.market-identity-copy { display: grid; gap: 2px; min-width: 0; }
+.market-identity-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem; line-height: 1.1; }
+.market-identity-copy small { color: var(--muted); font-family: var(--font-mono, ui-monospace); font-size: 0.62rem; letter-spacing: .08em; text-transform: uppercase; }
+.market-identity-cup img { background: color-mix(in srgb, #2b78c5 12%, var(--surface-alt)); }
+.market-identity-prepago img { background: color-mix(in srgb, #35c98b 12%, var(--surface-alt)); }
+.market-identity-clasica img { background: color-mix(in srgb, #f2b84b 14%, var(--surface-alt)); }
+.ui-tabs .market-identity { gap: 5px; }
+.ui-tabs .market-identity-copy strong { font-size: .75rem; }
+.ui-tabs .market-identity-copy small { display: none; }
+.brand .brand-logo + .brand-name { min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .market-identity img { transition: none; } }

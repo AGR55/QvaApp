@@ -13,6 +13,7 @@ import { useDialog } from "../hooks/use-dialog.js";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { Badge, Button, Input } from "../components/ui.jsx";
+import { MarketIdentity } from "../components/market-identity.jsx";
 
 const cancellableStates = new Set(["applied", "acknowledged"]);
 
@@ -70,16 +71,11 @@ export function Hunting({ data, label, unit, onChanged }) {
 
   return (
     <div className="hunting-stack">
-      <section className="hunting-command" aria-labelledby="hunting-command-title">
-        <div className="hunting-command-copy">
-          <p className="eyebrow">CONTROL EN TIEMPO REAL</p>
-          <h2 id="hunting-command-title">Cazar solo donde tú decidas</h2>
-          <p>Detener un lado impide nuevas aplicaciones. Las operaciones abiertas continúan bajo tu control.</p>
-          <div className="hunt-scan-status">
-            <span className={`live ${data.state.paused ? "offline" : ""}`} />
-            <strong>{data.state.paused ? "Motor general pausado" : `Escaneo cada ${data.automation?.scanIntervalSeconds || "—"} s`}</strong>
-            <small>{data.state.lastScan ? `Último: ${new Date(data.state.lastScan.at).toLocaleTimeString("es-CU")} · ${data.state.lastScan.result}` : "Aún no hay escaneos registrados"}</small>
-          </div>
+      <section className="hunting-command" aria-label="Controles de cacería">
+        <div className="hunt-scan-status">
+          <span className={`live ${data.state.paused ? "offline" : ""}`} />
+          <strong>{data.state.paused ? "Motor general pausado" : `Escaneo cada ${data.automation?.scanIntervalSeconds || "—"} s`}</strong>
+          <small>{data.state.lastScan ? `Último: ${new Date(data.state.lastScan.at).toLocaleTimeString("es-CU")} · ${data.state.lastScan.result}` : "Aún no hay escaneos registrados"}</small>
         </div>
         <div className="hunt-master-grid">
           <MasterControl
@@ -112,17 +108,13 @@ export function Hunting({ data, label, unit, onChanged }) {
             return (
               <article className={`hunt-market ${market.active ? "" : "disabled"}`} key={market.code}>
                 <header>
-                  <div>
-                    <span>{market.code}</span>
-                    <h3>{label(market.code)}</h3>
-                  </div>
+                  <MarketIdentity code={market.code} label={label(market.code)} size="lg" />
                   <strong>{market.active ? "Disponible" : "Mercado inactivo"}</strong>
                 </header>
                 <div className="hunt-side-grid">
                   <HuntSide
                     icon={ShoppingCart}
                     title="Comprar QUSD"
-                    description="Aplica a ofertas de venta con tasa igual o menor."
                     enabled={market.huntBuyEnabled}
                     running={data.hunting.buyRunning}
                     paused={data.state.paused}
@@ -138,7 +130,6 @@ export function Hunting({ data, label, unit, onChanged }) {
                   <HuntSide
                     icon={Tags}
                     title="Vender QUSD"
-                    description="Aplica a ofertas de compra con tasa igual o mayor."
                     enabled={market.huntSellEnabled}
                     running={data.hunting.sellRunning}
                     paused={data.state.paused}
@@ -153,7 +144,6 @@ export function Hunting({ data, label, unit, onChanged }) {
                   />
                 </div>
                 <footer>
-                  <span>Los límites de riesgo y el cortafuegos de mediana siguen activos.</span>
                   <Button
                     type="button"
                     variant="primary"
@@ -172,7 +162,6 @@ export function Hunting({ data, label, unit, onChanged }) {
 
       <Panel title="Ofertas cazadas" wide>
         <div className="capture-heading">
-          <p>Aplicaciones automáticas registradas por el motor.</p>
           <strong>{captured.length} captura{captured.length === 1 ? "" : "s"}</strong>
         </div>
         {captured.length ? (
@@ -196,7 +185,7 @@ export function Hunting({ data, label, unit, onChanged }) {
         ) : <Empty>Cuando el bot aplique una oferta con precio de caza, aparecerá aquí.</Empty>}
       </Panel>
 
-      <p className="detail hunt-feedback" role="status" aria-live="polite">{status}</p>
+      {status ? <p className="detail hunt-feedback" role="status" aria-live="polite">{status}</p> : null}
       {pendingCancel ? (
         <section ref={dialogRef} className="offer-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cancel-capture-title">
           <div className="offer-modal cancel-offer-dialog">
@@ -232,7 +221,7 @@ function MasterControl({ side, running, paused, mode, busy, disabled, onToggle }
   );
 }
 
-function HuntSide({ icon: Icon, title, description, enabled, running, paused, mode, disabled, median, rate, unit, limitLabel, onToggle, onRate }) {
+function HuntSide({ icon: Icon, title, enabled, running, paused, mode, disabled, median, rate, unit, limitLabel, onToggle, onRate }) {
   const active = enabled && running && !paused;
   const state = !enabled
     ? "Fuera de cacería"
@@ -245,7 +234,7 @@ function HuntSide({ icon: Icon, title, description, enabled, running, paused, mo
           : "Buscando";
   return (
     <section className={`hunt-side ${active ? "active" : ""}`}>
-      <div className="hunt-side-title"><Icon aria-hidden="true" /><div><h4>{title}</h4><p>{description}</p></div></div>
+      <div className="hunt-side-title"><Icon aria-hidden="true" /><div><h4>{title}</h4></div></div>
       <Button variant={enabled ? "secondary" : "ghost"} type="button" role="switch" aria-checked={enabled} className="hunt-switch" onClick={onToggle} disabled={disabled}><span />{enabled ? "Seleccionado" : "No cazar"}</Button>
       <dl><div><dt>Mediana actual</dt><dd>{Number.isFinite(Number(median)) ? money(median, unit === "USD" ? 4 : 2) : "Sin muestra"}</dd></div><div><dt>Estado efectivo</dt><dd>{state}</dd></div></dl>
       <label>{limitLabel}<span className="input-unit"><Input type="number" min="0.0001" step="0.0001" value={rate} disabled={disabled} onChange={(event) => onRate(event.target.value)} /><small>{unit}/QUSD</small></span></label>

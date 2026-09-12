@@ -2,6 +2,7 @@ import React from "react";
 import { Empty } from "./common.jsx";
 import { Badge, Button } from "./ui.jsx";
 import { money } from "../lib/format.js";
+import { MarketIdentity } from "./market-identity.jsx";
 
 export function Offers({ offers, label, unit, editable = false, onEdit, onCancel }) {
   if (!offers?.length) return <Empty>Sin ofertas.</Empty>;
@@ -20,7 +21,7 @@ export function Offers({ offers, label, unit, editable = false, onEdit, onCancel
         <tbody>
           {offers.map((offer) => (
             <tr key={offer.uuid}>
-              <td>{label(offer.coin)}</td>
+              <td><MarketIdentity code={offer.coin} label={label(offer.coin)} size="sm" /></td>
               <td><Badge variant={offer.type === "buy" ? "buy" : "sell"}>{offer.type === "buy" ? "Compra" : "Venta"}</Badge></td>
               <td>{money(offer.amount)}</td>
               <td>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, History, Plus, Save, ShieldAlert, Trash2 } from "lucide-react";
+import { Check, History, Plus, Save, Trash2 } from "lucide-react";
 import { Empty, Panel, Skeleton } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
@@ -58,7 +58,7 @@ export function Settings({ onChanged }) {
   if (!draft)
     return (
       <Panel title="Estrategia y riesgo" wide>
-        <Skeleton rows={7} label={status || "Leyendo configuración SQLite"} />
+        <Skeleton rows={7} label={status || "Leyendo configuración"} />
       </Panel>
     );
 
@@ -121,17 +121,6 @@ export function Settings({ onChanged }) {
 
   return (
     <div className="settings-stack">
-      <section className="decision-strip settings-hero">
-        <div>
-          <span>POLÍTICA GLOBAL</span>
-          <strong>
-            {draft.risk.reviewedAt ? "Límites revisados" : "Revisión obligatoria"}
-          </strong>
-          <p>El bot no moverá capital con límites conservadores sin confirmar.</p>
-        </div>
-        <ShieldAlert aria-hidden="true" />
-      </section>
-
       <Panel title="Límites de riesgo" wide>
         <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
           <label>
@@ -206,9 +195,8 @@ export function Settings({ onChanged }) {
                 },
               }))}
             />
-            <small>{draft.automation.welcomeMessage.length}/79 caracteres</small>
+            <small>{draft.automation.welcomeMessage.length}/79</small>
           </label>
-          <p className="settings-note-inline">Estos valores están en SQLite y se aplican sin editar archivos. El interruptor de despliegue para permitir dinero real permanece protegido en el entorno.</p>
         </form>
       </Panel>
 

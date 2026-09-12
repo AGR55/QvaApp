@@ -4,8 +4,10 @@
    radios 10 (controles) / 14 (superficies) / 18 (flotantes), claro + oscuro. */
 
 :root {
-  --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "DM Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  --font-sans:
+    "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono:
+    "DM Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   --s-1: 4px;
   --s-2: 8px;
   --s-3: 12px;
@@ -33,13 +35,21 @@ body {
 ::selection {
   background: var(--accent-soft);
 }
-h1, h2, h3 {
+h1,
+h2,
+h3 {
   text-wrap: balance;
 }
-p, li, td, dd {
+p,
+li,
+td,
+dd {
   text-wrap: pretty;
 }
-button, input, select, textarea {
+button,
+input,
+select,
+textarea {
   font-family: inherit;
 }
 button {
@@ -192,7 +202,6 @@ td,
   justify-content: space-between;
   gap: var(--s-4);
   padding-bottom: 20px;
-  border-bottom: 1px solid var(--line);
 }
 .eyebrow,
 .section-kicker {
@@ -285,26 +294,40 @@ td,
 .hunting-stack > *:nth-child(2),
 .operations-stack > *:nth-child(2),
 .settings-stack > *:nth-child(2),
-.audit-main > *:nth-child(2) { --qa-i: 1; }
+.audit-main > *:nth-child(2) {
+  --qa-i: 1;
+}
 .page-stack > *:nth-child(3),
 .capital-stack > *:nth-child(3),
 .hunting-stack > *:nth-child(3),
 .operations-stack > *:nth-child(3),
 .settings-stack > *:nth-child(3),
-.audit-main > *:nth-child(3) { --qa-i: 2; }
+.audit-main > *:nth-child(3) {
+  --qa-i: 2;
+}
 .page-stack > *:nth-child(4),
 .capital-stack > *:nth-child(4),
 .hunting-stack > *:nth-child(4),
 .settings-stack > *:nth-child(4),
-.audit-main > *:nth-child(4) { --qa-i: 3; }
-.page-stack > *:nth-child(n+5),
-.capital-stack > *:nth-child(n+5),
-.hunting-stack > *:nth-child(n+5),
-.settings-stack > *:nth-child(n+5),
-.audit-main > *:nth-child(n+5) { --qa-i: 4; }
+.audit-main > *:nth-child(4) {
+  --qa-i: 3;
+}
+.page-stack > *:nth-child(n + 5),
+.capital-stack > *:nth-child(n + 5),
+.hunting-stack > *:nth-child(n + 5),
+.settings-stack > *:nth-child(n + 5),
+.audit-main > *:nth-child(n + 5) {
+  --qa-i: 4;
+}
 @keyframes qa-rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: none; }
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* ============ Ritmo vertical único ============ */
@@ -342,21 +365,54 @@ td,
   display: flex;
   flex-wrap: wrap;
   gap: var(--s-2);
-  margin-bottom: var(--s-3);
 }
 
-/* ============ Paneles y tarjetas: un solo lenguaje ============ */
+/* ============ Secciones y tarjetas: un solo nivel ============
+   Regla clean: la sección externa con heading es transparente (solo ritmo
+   y tipografía). La tarjeta existe una sola vez, en el contenido interior.
+   Nunca una card/tabla dentro de otra card. */
 [data-ui="panel"],
-.panel,
+.panel {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding: 0;
+  overflow: visible;
+  min-width: 0;
+}
+.panel-head,
+.ui-section-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s-4);
+  margin-bottom: 12px;
+  margin-top: 12px;
+}
+.ui-section-titles {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.ui-section-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 72ch;
+}
+.ui-section-body {
+  min-width: 0;
+  display: grid;
+  gap: var(--s-3);
+}
 .metric,
 .market-card,
 .control-deck,
 .hunt-side,
-.hunt-market,
-.hunt-master,
 .capture-row,
 .blocked-card,
-.blocked-rail,
 .offer-workbench,
 .hunting-command,
 .login-card {
@@ -364,29 +420,15 @@ td,
   border: 1px solid var(--line);
   box-shadow: none;
 }
-.panel,
 .metric,
 .market-card,
 .control-deck,
 .hunt-side,
-.hunt-market,
 .capture-row,
 .blocked-card,
 .offer-workbench,
 .hunting-command {
   border-radius: var(--r-card);
-}
-.panel {
-  padding: 20px;
-  overflow: hidden;
-  min-width: 0;
-}
-.panel-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--s-4);
-  margin-bottom: 14px;
 }
 .panel-head h2,
 .ui-card-title {
@@ -663,7 +705,11 @@ td,
   font-weight: 700;
   cursor: pointer;
   box-shadow: none;
-  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, transform 180ms ease;
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
 }
 .ui-button:hover:not(:disabled),
 .button:hover:not(:disabled),
@@ -699,7 +745,11 @@ td,
 .offer-workbench footer .refresh:hover:not(:disabled),
 .offer-modal-actions .primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent-solid, var(--accent)), #000 12%);
-  border-color: color-mix(in srgb, var(--accent-solid, var(--accent)), #000 12%);
+  border-color: color-mix(
+    in srgb,
+    var(--accent-solid, var(--accent)),
+    #000 12%
+  );
   color: #fff;
 }
 .ui-button-destructive,
@@ -1091,7 +1141,6 @@ td small {
   gap: 4px;
   width: fit-content;
   max-width: 100%;
-  margin-bottom: var(--s-4);
   padding: 4px;
   border: 1px solid var(--line);
   border-radius: 12px;
@@ -1168,7 +1217,10 @@ td small {
   animation: qa-pulse 1.2s ease-in-out infinite;
 }
 @keyframes qa-pulse {
-  50% { opacity: 0.3; transform: scale(0.75); }
+  50% {
+    opacity: 0.3;
+    transform: scale(0.75);
+  }
 }
 .state-applied,
 .state-acknowledged,
@@ -1286,6 +1338,8 @@ td small {
 .hunt-master-grid {
   align-self: center;
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
   gap: 10px;
 }
 .hunt-master {
@@ -1329,7 +1383,6 @@ td small {
   align-items: center;
   justify-content: space-between;
   gap: var(--s-3);
-  margin-bottom: var(--s-4);
 }
 .hunt-market > header span {
   color: var(--muted);
@@ -1462,7 +1515,7 @@ td small {
   font-size: 12.5px;
 }
 .capture-heading strong {
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: -0.03em;
   white-space: nowrap;
@@ -1534,7 +1587,6 @@ td small {
   align-items: center;
   justify-content: space-between;
   gap: var(--s-4);
-  margin-bottom: var(--s-4);
 }
 .capital-toolbar .freshness {
   margin: 0;
@@ -1900,7 +1952,12 @@ td small {
 .blocked-loading span {
   height: 104px;
   border-radius: var(--r-card);
-  background: linear-gradient(90deg, var(--surface-alt), color-mix(in srgb, var(--surface-alt), var(--surface) 55%), var(--surface-alt));
+  background: linear-gradient(
+    90deg,
+    var(--surface-alt),
+    color-mix(in srgb, var(--surface-alt), var(--surface) 55%),
+    var(--surface-alt)
+  );
   background-size: 220% 100%;
   animation: qa-shimmer 1.3s infinite;
 }
@@ -2316,7 +2373,12 @@ td small {
   display: block;
   height: 16px;
   border-radius: 6px;
-  background: linear-gradient(90deg, var(--surface-alt), color-mix(in srgb, var(--surface-alt), var(--surface) 55%), var(--surface-alt));
+  background: linear-gradient(
+    90deg,
+    var(--surface-alt),
+    color-mix(in srgb, var(--surface-alt), var(--surface) 55%),
+    var(--surface-alt)
+  );
   background-size: 220% 100%;
   animation: qa-shimmer 1.3s infinite;
 }
@@ -2327,7 +2389,9 @@ td small {
   width: 58%;
 }
 @keyframes qa-shimmer {
-  to { background-position: -220% 0; }
+  to {
+    background-position: -220% 0;
+  }
 }
 
 /* ============ Gráficas ============ */
@@ -2507,6 +2571,311 @@ td small {
   box-shadow: none;
 }
 
+/* ============ Acceso de marca ============ */
+.login-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(390px, 0.9fr) minmax(480px, 1.1fr);
+  padding: 0;
+  background: #f4f7fb;
+  overflow: hidden;
+}
+.login-panel {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: clamp(32px, 6vw, 96px);
+  background: #f4f7fb;
+}
+.login-panel-inner {
+  width: min(100%, 430px);
+}
+.login-brand-lockup,
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 13px;
+  background: transparent;
+  box-shadow: none;
+}
+.login-brand-lockup img {
+  display: block;
+  width: clamp(240px, 32vw, 280px);
+  height: auto;
+}
+.login-heading {
+  margin-top: clamp(24, 8vh, 88px);
+}
+.login-heading h1 {
+  margin: 13px 0 0;
+  max-width: 20ch;
+  color: #0b2035;
+  font-family: Manrope, sans-serif;
+  font-size: clamp(32px, 3vw, 36px);
+  font-weight: 800;
+  letter-spacing: -0.065em;
+  line-height: 0.96;
+}
+.login-heading p {
+  margin: 20px 0 0;
+  color: #586a7a;
+  font-size: 15px;
+  line-height: 1.65;
+}
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #0d62bd;
+  font:
+    700 10px "DM Mono",
+    monospace;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.eyebrow > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #2e9cff;
+  box-shadow: 0 0 0 4px rgba(46, 156, 255, 0.12);
+}
+.login-panel form {
+  display: grid;
+  gap: 16px;
+  margin-top: clamp(38px, 6vh, 62px);
+}
+.login-panel .ui-field {
+  gap: 9px;
+}
+.login-panel .ui-field > label {
+  color: #24394d;
+  font-size: 12px;
+  font-weight: 750;
+}
+.login-panel .password-field {
+  min-height: 58px;
+  border: 1px solid #cbd7e3;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(33, 66, 98, 0.06);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+.login-panel .password-field svg {
+  color: #738597;
+}
+.login-panel .password-field input {
+  color: #0b2035;
+  font-size: 14px;
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+.login-panel .password-field input:focus,
+.login-panel .password-field input:focus-visible {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+}
+.login-panel .password-field input::placeholder {
+  color: #9aa9b7;
+}
+.login-panel .password-field:focus-within {
+  border-color: #248cf0;
+  box-shadow: 0 0 0 4px rgba(36, 140, 240, 0.13);
+}
+.login-panel .ui-button-primary {
+  min-height: 58px;
+  border: 0;
+  border-radius: 13px;
+  background: #126fdb;
+  box-shadow: 0 13px 25px rgba(18, 111, 219, 0.22);
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+.login-panel .ui-button-primary:hover:not(:disabled) {
+  background: #0b5fbe;
+  box-shadow: 0 16px 30px rgba(18, 111, 219, 0.28);
+  transform: translateY(-2px);
+}
+.login-panel .detail {
+  min-height: 18px;
+  margin: 0;
+  color: #bb3f52;
+  font-size: 12px;
+}
+.login-security-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 34px;
+  color: #5f7180;
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.login-security-note svg {
+  width: 15px;
+  height: 15px;
+  color: #2e9cff;
+}
+.login-visual {
+  position: relative;
+  min-height: 100dvh;
+  overflow: hidden;
+  isolation: isolate;
+  background: #081b2c;
+}
+.login-visual > img:first-child {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  object-position: center;
+  animation: login-image-in 900ms ease both;
+}
+.login-visual-overlay {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(
+    135deg,
+    rgba(4, 21, 37, 0.65),
+    rgba(6, 53, 105, 0.12) 55%,
+    rgba(3, 18, 32, 0.67)
+  );
+}
+.login-visual-content {
+  position: absolute;
+  z-index: 2;
+  left: clamp(30px, 6vw, 96px);
+  right: 30px;
+  bottom: clamp(42px, 9vh, 110px);
+  color: #fff;
+  animation: login-copy-in 700ms 180ms ease both;
+}
+.login-isotype {
+  width: 58px;
+  height: 58px;
+  margin-bottom: 28px;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 15px rgba(28, 142, 255, 0.35));
+}
+.login-visual-content .eyebrow {
+  color: #9fd3ff;
+}
+.login-visual-content h2 {
+  max-width: 10ch;
+  margin: 17px 0 0;
+  font-size: clamp(38px, 5vw, 70px);
+  font-weight: 780;
+  letter-spacing: -0.065em;
+  line-height: 0.96;
+}
+.login-visual-content h2 span {
+  color: #66baff;
+}
+.login-visual-caption {
+  max-width: 33ch;
+  margin: 25px 0 0;
+  color: rgba(235, 246, 255, 0.75);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.login-visual-index {
+  position: absolute;
+  z-index: 2;
+  right: 28px;
+  top: 30px;
+  color: rgba(224, 241, 255, 0.72);
+  font:
+    10px "DM Mono",
+    monospace;
+  letter-spacing: 0.12em;
+}
+.brand-lockup {
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.brand-lockup img {
+  display: block;
+  width: 166px;
+  height: auto;
+}
+.brand {
+  padding-top: 0;
+}
+[data-theme="dark"] .login-shell,
+[data-theme="dark"] .login-panel {
+  background: #11161b;
+}
+[data-theme="dark"] .login-heading h1 {
+  color: #edf2f5;
+}
+[data-theme="dark"] .login-heading p {
+  color: #aab7c0;
+}
+[data-theme="dark"] .login-panel .ui-field > label {
+  color: #d6e0e6;
+}
+[data-theme="dark"] .login-panel .password-field {
+  border-color: #303c46;
+  background: #171d23;
+  box-shadow: none;
+}
+[data-theme="dark"] .login-panel .password-field input {
+  color: #edf2f5;
+}
+[data-theme="dark"] .login-panel .password-field input::placeholder {
+  color: #93a4b0;
+}
+[data-theme="dark"] .login-panel .password-field:focus-within {
+  border-color: #76a9dc;
+  box-shadow: 0 0 0 4px rgba(118, 169, 220, 0.16);
+}
+[data-theme="dark"] .login-security-note {
+  color: #aab7c0;
+}
+@keyframes login-image-in {
+  from {
+    opacity: 0;
+    transform: scale(1.035);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes login-copy-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-visual > img:first-child,
+  .login-visual-content {
+    animation: none;
+  }
+  .login-panel .ui-button-primary,
+  .login-panel .password-field {
+    transition: none;
+  }
+}
+
 /* ============ Responsive ============ */
 @media (max-width: 1120px) {
   .audit-layout {
@@ -2619,6 +2988,42 @@ td small {
   }
   .row-actions {
     min-width: 0;
+  }
+}
+@media (max-width: 760px) {
+  .login-shell {
+    display: block;
+    overflow: visible;
+  }
+  .login-visual {
+    min-height: 300px;
+    height: 38dvh;
+  }
+  .login-visual-content {
+    left: 24px;
+    bottom: 28px;
+  }
+  .login-visual-content h2 {
+    font-size: clamp(30px, 9vw, 46px);
+  }
+  .login-visual-caption,
+  .login-isotype,
+  .login-visual-index {
+    display: none;
+  }
+  .login-panel {
+    min-height: 62dvh;
+    place-items: start center;
+    padding: 42px 24px 54px;
+  }
+  .login-heading {
+    margin-top: 42px;
+  }
+  .login-heading h1 {
+    font-size: clamp(38px, 12vw, 54px);
+  }
+  .login-panel form {
+    margin-top: 36px;
   }
 }
 @media (max-width: 620px) {
@@ -2748,4 +3153,194 @@ td small {
   .audit-main > * {
     animation: none;
   }
+}
+
+/* ============ Desanidado clean (capa final, gana a todo lo anterior) ============
+   - Secciones externas transparentes, sin caja.
+   - Agrupadores intermedios transparentes (hunt-market, blocked-rail).
+   - Mini-estadísticas planas, sin borde dentro de tarjeta.
+   - Formularios internos planos, sin caja dentro de caja. */
+
+/* Agrupadores que contenían tarjetas: se vuelven ritmo, no caja. */
+.hunt-market,
+.blocked-rail {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 0;
+  overflow: visible;
+}
+.hunt-market-list {
+  display: grid;
+  gap: var(--s-6);
+}
+.hunt-market > header {
+  padding-bottom: 10px;
+}
+.hunt-market > footer {
+  border-top: 1px solid var(--line);
+}
+.blocked-rail {
+  display: grid;
+  gap: var(--s-3);
+}
+.blocked-rail-head {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+/* Las tarjetas reales conservan su caja de un solo nivel. */
+.hunt-side,
+.capture-row,
+.market-card,
+.metric,
+.blocked-card,
+.market-settings,
+.offer-workbench,
+.table-wrap,
+.table-scroll,
+.chart-stage {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: none;
+}
+.capture-list {
+  display: grid;
+  gap: var(--s-2);
+  border-top: 0;
+}
+.capture-row {
+  padding: 14px var(--s-4);
+}
+.hunt-master {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  box-shadow: none;
+}
+/* Mini-bloques dentro de una tarjeta: planos, sin segundo borde. */
+.offer-comparison div,
+.preview-details > dl div,
+.liquidity-preview,
+.risk-checks li,
+.offer-calculation dl div,
+.offer-summary div,
+.chart-summary div {
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface-alt);
+  box-shadow: none;
+}
+.offer-calculation,
+.offer-summary {
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--surface);
+  overflow: hidden;
+}
+.offer-calculation {
+  display: grid;
+  grid-template-columns: minmax(210px, 0.75fr) 1.7fr;
+  gap: 0;
+  margin-top: 18px;
+}
+.offer-calculation dl {
+  background: var(--surface);
+}
+/* Campos de formulario dentro de sección o de market-settings: sin caja anidada. */
+.settings-form label,
+.market-settings label,
+.offer-fields label {
+  border: 0;
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+.market-settings {
+  background: var(--surface);
+}
+.payment-details {
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 14px 0 0;
+}
+.settings-form {
+  border: 0;
+  background: transparent;
+}
+/* Listas planas dentro de sección transparente: respiran con divisores. */
+.decision-list li,
+.audit-list li,
+.workflow-list li,
+.revision-list li,
+.health-list > div {
+  border-color: var(--line);
+}
+.empty {
+  background: transparent;
+}
+/* Tablas: una sola caja, nunca dentro de otra. */
+.table-wrap,
+.table-scroll {
+  border-radius: var(--r-control);
+}
+@media (max-width: 620px) {
+  .panel {
+    padding: 0;
+  }
+  .hunt-market {
+    padding: 0;
+  }
+}
+
+/* ============ Limpieza de contenido (logo + ruido) ============ */
+.boot {
+  gap: 16px;
+}
+.boot-logo {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(23, 33, 43, 0.16);
+  animation: qa-boot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes qa-boot-pulse {
+  50% {
+    opacity: 0.72;
+    transform: scale(0.97);
+  }
+}
+/* Estado de conexión: texto sutil, sin píldora con borde. */
+.connection-state {
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  margin-bottom: var(--s-2);
+  min-height: 0;
+}
+/* Cacería compacta: sin hero de marketing, solo estado + controles. */
+.hunting-command {
+  grid-template-columns: minmax(240px, 0.8fr) minmax(0, 1.2fr);
+  align-items: center;
+}
+.hunt-scan-status {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.hunt-market > footer {
+  justify-content: flex-end;
+  border-top: 0;
+  margin-top: 12px;
+  padding-top: 0;
+}
+.capture-heading {
+  margin-bottom: 10px;
+}
+/* Gráficas: dos medianas, sin tarjeta estática de ventana. */
+.chart-summary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }

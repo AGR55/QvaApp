@@ -10,13 +10,16 @@ export function useDashboard(view, market, setMarket) {
   const [online, setOnline] = useState(() => navigator.onLine);
   const generation = useRef(0);
 
-  const loadLocal = useCallback(async (activeGeneration = generation.current) => {
-    const payload = await requestJson("/api/dashboard", { timeoutMs: 5_000 });
-    if (activeGeneration !== generation.current || !payload.data) return;
-    setData(payload.data);
-    setMarket((current) => current || payload.data.markets[0]?.code || "");
-    setStatus("Datos locales disponibles");
-  }, [setMarket]);
+  const loadLocal = useCallback(
+    async (activeGeneration = generation.current) => {
+      const payload = await requestJson("/api/dashboard", { timeoutMs: 5_000 });
+      if (activeGeneration !== generation.current || !payload.data) return;
+      setData(payload.data);
+      setMarket((current) => current || payload.data.markets[0]?.code || "");
+      setStatus("Datos locales disponibles");
+    },
+    [setMarket],
+  );
 
   const setResource = useCallback((key, patch) => {
     setResources((current) => ({
@@ -25,70 +28,83 @@ export function useDashboard(view, market, setMarket) {
     }));
   }, []);
 
-  const syncOne = useCallback(async (key, url, activeGeneration) => {
-    setResource(key, { loading: true, error: "" });
-    let lastError;
-    for (const delay of RETRY_DELAYS) {
-      if (activeGeneration !== generation.current) return;
-      if (delay) await wait(delay);
-      try {
-        const payload = await requestJson(url, { timeoutMs: 12_000 });
+  const syncOne = useCallback(
+    async (key, url, activeGeneration) => {
+      setResource(key, { loading: true, error: "" });
+      let lastError;
+      for (const delay of RETRY_DELAYS) {
         if (activeGeneration !== generation.current) return;
-        setResource(key, {
-          loading: false,
-          stale: Boolean(payload.stale),
-          updatedAt: payload.updatedAt ?? null,
-          error: payload.error || "",
-        });
-        await loadLocal(activeGeneration);
-        return !payload.stale;
-      } catch (error) {
-        if (error?.status === 401) throw error;
-        lastError = error;
-        if (!navigator.onLine) break;
+        if (delay) await wait(delay);
+        try {
+          const payload = await requestJson(url, { timeoutMs: 12_000 });
+          if (activeGeneration !== generation.current) return;
+          setResource(key, {
+            loading: false,
+            stale: Boolean(payload.stale),
+            updatedAt: payload.updatedAt ?? null,
+            error: payload.error || "",
+          });
+          await loadLocal(activeGeneration);
+          return !payload.stale;
+        } catch (error) {
+          if (error?.status === 401) throw error;
+          lastError = error;
+          if (!navigator.onLine) break;
+        }
       }
-    }
-    if (activeGeneration !== generation.current) return;
-    const detail = lastError instanceof Error
-      ? lastError.message
-      : "QvaPay no respondió.";
-    setResource(key, { loading: false, stale: true, error: detail });
-    setStatus(`Mostrando datos guardados · ${detail}`);
-    return false;
-  }, [loadLocal, setResource]);
+      if (activeGeneration !== generation.current) return;
+      const detail =
+        lastError instanceof Error ? lastError.message : "QvaPay no respondió.";
+      setResource(key, { loading: false, stale: true, error: detail });
+      setStatus(`Mostrando datos guardados · ${detail}`);
+      return false;
+    },
+    [loadLocal, setResource],
+  );
 
-  const resourcesForView = useCallback((snapshot) => {
-    if (!snapshot) return [];
-    if (view === "resumen") {
-      return [
-        ["balance", "/api/live/balance"],
-        ["ownOffers", "/api/live/own-offers"],
-        ...snapshot.markets
-          .filter((item) => item.active)
+  const resourcesForView = useCallback(
+    (snapshot) => {
+      if (!snapshot) return [];
+      if (view === "resumen") {
+        return [
+          ["balance", "/api/live/balance"],
+          ["ownOffers", "/api/live/own-offers"],
+          ...snapshot.markets
+            .filter((item) => item.active)
+            .map((item) => [
+              `market:${item.code}`,
+              `/api/live/markets/${encodeURIComponent(item.code)}`,
+            ]),
+        ];
+      }
+      if (view === "mercado" && market)
+        return [
+          [
+            `market:${market}`,
+            `/api/live/markets/${encodeURIComponent(market)}`,
+          ],
+        ];
+      if (view === "ofertas")
+        return [
+          ["balance", "/api/live/balance"],
+          ["ownOffers", "/api/live/own-offers"],
+        ];
+      if (view === "caceria")
+        return snapshot.markets
+          .filter(
+            (item) =>
+              item.active && (item.huntBuyEnabled || item.huntSellEnabled),
+          )
           .map((item) => [
             `market:${item.code}`,
             `/api/live/markets/${encodeURIComponent(item.code)}`,
-          ]),
-      ];
-    }
-    if (view === "mercado" && market)
-      return [[`market:${market}`, `/api/live/markets/${encodeURIComponent(market)}`]];
-    if (view === "ofertas")
-      return [
-        ["balance", "/api/live/balance"],
-        ["ownOffers", "/api/live/own-offers"],
-      ];
-    if (view === "caceria")
-      return snapshot.markets
-        .filter((item) => item.active && (item.huntBuyEnabled || item.huntSellEnabled))
-        .map((item) => [
-          `market:${item.code}`,
-          `/api/live/markets/${encodeURIComponent(item.code)}`,
-        ]);
-    if (view === "operaciones")
-      return [["operations", "/api/live/operations"]];
-    return [];
-  }, [market, view]);
+          ]);
+      if (view === "operaciones")
+        return [["operations", "/api/live/operations"]];
+      return [];
+    },
+    [market, view],
+  );
 
   const refresh = useCallback(async () => {
     const activeGeneration = ++generation.current;
@@ -96,17 +112,23 @@ export function useDashboard(view, market, setMarket) {
     try {
       await loadLocal(activeGeneration);
       if (!navigator.onLine) {
-        setStatus("Sin conexión · usando SQLite");
+        setStatus("Sin conexión · usando datos guardados");
         return;
       }
       // Secuencial a propósito: evita saturar conexiones lentas con ráfagas.
       let allFresh = true;
       for (const [key, url] of resourcesForView(data))
-        allFresh = (await syncOne(key, url, activeGeneration)) !== false && allFresh;
+        allFresh =
+          (await syncOne(key, url, activeGeneration)) !== false && allFresh;
       if (activeGeneration === generation.current)
-        setStatus(allFresh ? "Vista actualizada" : "Vista disponible con datos guardados");
+        setStatus(
+          allFresh
+            ? "Vista actualizada"
+            : "Vista disponible con datos guardados",
+        );
     } catch (error) {
-      if (activeGeneration !== generation.current || error?.status === 401) return;
+      if (activeGeneration !== generation.current || error?.status === 401)
+        return;
       setStatus(error instanceof Error ? error.message : "Sin conexión local");
     }
   }, [data, loadLocal, resourcesForView, syncOne]);
@@ -115,9 +137,15 @@ export function useDashboard(view, market, setMarket) {
     const activeGeneration = ++generation.current;
     void loadLocal(activeGeneration).catch((error) => {
       if (activeGeneration === generation.current)
-        setStatus(error instanceof Error ? error.message : "No se pudo leer SQLite");
+        setStatus(
+          error instanceof Error
+            ? error.message
+            : "No se pudo leer los datos locales",
+        );
     });
-    return () => { generation.current += 1; };
+    return () => {
+      generation.current += 1;
+    };
   }, [loadLocal]);
 
   useEffect(() => {
@@ -138,9 +166,11 @@ export function useDashboard(view, market, setMarket) {
   useEffect(() => {
     const updateConnection = () => {
       setOnline(navigator.onLine);
-      setStatus(navigator.onLine
-        ? "Conexión recuperada · listo para actualizar"
-        : "Sin conexión · usando SQLite");
+      setStatus(
+        navigator.onLine
+          ? "Conexión recuperada · listo para actualizar"
+          : "Sin conexión · usando datos guardados",
+      );
     };
     const onVisibility = () => {
       if (!document.hidden && navigator.onLine) void refresh();

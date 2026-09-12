@@ -30,37 +30,59 @@ export function Login({ onAuthenticated }) {
   };
   return (
     <main className="login-shell">
-      <section className="login-card" aria-labelledby="login-title">
-        <span className="mark">Q</span>
-        <h1 id="login-title">Mesa de operaciones</h1>
-        <p>
-          Introduce la contraseña administrativa. La sesión expira
-          automáticamente.
-        </p>
-        <form onSubmit={submit}>
-          <Field label="Contraseña" htmlFor="dashboard-password">
-            <div className="password-field">
-              <LockKeyhole aria-hidden="true" />
-              <Input
-                id="dashboard-password"
-                type="password"
-                autoComplete="current-password"
-                minLength="14"
-                required
-                autoFocus
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
-            </div>
-          </Field>
-          <Button variant="primary" disabled={busy} type="submit">
-            {busy ? "Verificando…" : "Entrar de forma segura"}
-          </Button>
-          <p className="detail" role="status" aria-live="polite">
-            {status}
-          </p>
-        </form>
+      <section className="login-panel" aria-labelledby="login-title">
+        <div className="login-panel-inner">
+          <div className="login-brand-lockup">
+            <img
+              src="/logo/logotipo.webp"
+              alt="QvaApply"
+              width="300"
+              height="84"
+            />
+          </div>
+          <div className="login-heading">
+            <h1 id="login-title">Mesa de operaciones</h1>
+            <p>Todo el control de tus mercados, en un solo lugar.</p>
+          </div>
+          <form onSubmit={submit}>
+            <Field
+              label="Contraseña administrativa"
+              htmlFor="dashboard-password"
+            >
+              <div className="password-field">
+                <LockKeyhole aria-hidden="true" />
+                <Input
+                  id="dashboard-password"
+                  type="password"
+                  autoComplete="current-password"
+                  minLength="14"
+                  required
+                  autoFocus
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder="Introduce tu contraseña"
+                />
+              </div>
+            </Field>
+            <Button variant="primary" disabled={busy} type="submit">
+              {busy ? "Verificando…" : "Entrar de forma segura"}
+            </Button>
+            <p className="detail" role="status" aria-live="polite">
+              {status}
+            </p>
+          </form>
+        </div>
       </section>
+      <aside
+        className="login-visual"
+        aria-label="Panorama de mercados financieros"
+      >
+        <img
+          src="/images/signin-picture.webp"
+          alt="Visualización de mercados financieros globales"
+        />
+        <div className="login-visual-overlay" />
+      </aside>
     </main>
   );
 }

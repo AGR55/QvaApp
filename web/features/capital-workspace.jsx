@@ -7,6 +7,7 @@ import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
 import { median, ownOfferFiatTotal } from "../../src/market-math.js";
 import { Button, IconButton, Input, Select } from "../components/ui.jsx";
+import { MarketIdentity } from "../components/market-identity.jsx";
 
 export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
   const [editor, setEditor] = useState();
@@ -63,7 +64,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
             const availability = data.availability.fiat[market.code] || {};
             return (
               <article className="market-card capital-card" key={market.code}>
-                <span>{label(market.code)}</span>
+                <MarketIdentity code={market.code} label={label(market.code)} size="sm" />
                 <strong>{money(availability.available)} {unit(market.code)}</strong>
                 <small>{money(availability.committed)} comprometidos · {money(availability.declared)} declarados</small>
                 {market.outgoingTransferFee > 0 ? <em>{money(market.outgoingTransferFee)} {unit(market.code)} por cada salida</em> : null}
@@ -178,9 +179,8 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
       <header>
         <div className="dialog-icon">{initial.mode === "create" ? <Plus aria-hidden="true" /> : <Pencil aria-hidden="true" />}</div>
         <div>
-          <p className="eyebrow">{initial.mode === "create" ? "NUEVA POSICIÓN" : "AJUSTAR POSICIÓN"}</p>
+          <p className="eyebrow">{initial.mode === "create" ? "Nueva posición" : "Ajustar posición"}</p>
           <h3 id="offer-editor-title">{initial.mode === "create" ? "Crear oferta" : `Editar ${label(initial.coin)}`}</h3>
-          <p>Los cálculos se actualizan antes de enviar cualquier cambio a QvaPay.</p>
         </div>
               <IconButton variant="ghost" type="button" onClick={onClose} aria-label="Cerrar editor"><X aria-hidden="true" /></IconButton>
       </header>

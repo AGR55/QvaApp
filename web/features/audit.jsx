@@ -73,10 +73,10 @@ export function Audit({ data, onChanged }) {
           <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
         </div>
         <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
-        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")} {item.uuid ? `· ${item.uuid}` : ""}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
+        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
-        <div className="blocked-rail-head"><div><span className="section-kicker">Revisión manual</span><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
+        <div className="blocked-rail-head"><div><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
         {eventsError ? <div className="resource-error" role="alert"><p>{eventsError}</p><Button variant="secondary" size="sm" onClick={() => void loadEvents()}>Reintentar</Button></div> : null}
         {eventsLoading && !events ? <div className="blocked-loading" aria-label="Cargando ofertas bloqueadas"><span /><span /><span /></div> : null}
         {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.id ?? offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : !eventsLoading ? <Empty>No hay ofertas esperando tu decisión.</Empty> : null}
@@ -117,7 +117,7 @@ function BlockedCard({ offer, onReview, onDismiss }) {
 
 function PreviewDetails({ preview }) {
   return <div className="preview-details"><dl><div><dt>Operación</dt><dd>{preview.offerType === "sell" ? "Comprar" : "Vender"} {preview.amount.toFixed(2)} QUSD</dd></div><div><dt>Fiat</dt><dd>{preview.receive.toLocaleString("es-CU")} · {preview.coin}</dd></div><div><dt>Tasa / mediana</dt><dd>{preview.rate.toFixed(2)} / {preview.referenceRate.toFixed(2)}</dd></div><div><dt>Desviación</dt><dd>{preview.deviationPercent > 0 ? "+" : ""}{preview.deviationPercent.toFixed(2)}%</dd></div></dl>
-    <div className="liquidity-preview"><strong>Plan de liquidez</strong><p>{preview.liquidityReason}</p>{preview.plannedCancellations.length ? <ul>{preview.plannedCancellations.map((item) => <li key={item.uuid}>{item.amount.toFixed(2)} QUSD · {item.coin} · tasa {item.rate.toFixed(2)}<small>Usar {optionalMoney(item.consumeQusd)} · reponer {optionalMoney(item.restoreQusd)} QUSD · {item.uuid}</small></li>)}</ul> : null}</div></div>;
+    <div className="liquidity-preview"><strong>Plan de liquidez</strong><p>{preview.liquidityReason}</p>{preview.plannedCancellations.length ? <ul>{preview.plannedCancellations.map((item) => <li key={item.uuid}>{item.amount.toFixed(2)} QUSD · {item.coin} · tasa {item.rate.toFixed(2)}<small>Usar {optionalMoney(item.consumeQusd)} · reponer {optionalMoney(item.restoreQusd)} QUSD</small></li>)}</ul> : null}</div></div>;
 }
 
 function optionalMoney(value) {

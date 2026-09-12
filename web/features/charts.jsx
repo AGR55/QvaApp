@@ -4,6 +4,7 @@ import { Button, Tabs } from "../components/ui.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { chartDomain } from "../lib/chart-domain.js";
+import { MarketIdentity } from "../components/market-identity.jsx";
 
 export function Charts({ markets }) {
   const [coin, setCoin] = useState(markets[0]?.code || ""),
@@ -51,11 +52,11 @@ export function Charts({ markets }) {
   return (
     <div className="page-stack">
       <Panel title="Fluctuación de precios" wide>
-          <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: market.label }))} />
+          <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: <MarketIdentity code={market.code} label={market.label} size="sm" showCode={false} /> }))} />
         {error ? <div className="resource-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((value) => value + 1)}>Reintentar</Button></div> : null}
         {data && values.length ? (
           <>
-          <dl className="chart-summary"><div><dt>Última mediana de compra</dt><dd>{Number.isFinite(latest?.medianaCompra) ? money(latest.medianaCompra, digits) : "—"}</dd></div><div><dt>Última mediana de venta</dt><dd>{Number.isFinite(latest?.medianaVenta) ? money(latest.medianaVenta, digits) : "—"}</dd></div><div><dt>Ventana</dt><dd>Últimas 24 h</dd></div></dl>
+          <dl className="chart-summary"><div><dt>Última mediana de compra</dt><dd>{Number.isFinite(latest?.medianaCompra) ? money(latest.medianaCompra, digits) : "—"}</dd></div><div><dt>Última mediana de venta</dt><dd>{Number.isFinite(latest?.medianaVenta) ? money(latest.medianaVenta, digits) : "—"}</dd></div></dl>
           <div className="chart-stage" aria-busy={loading}>
             <MarketChart rows={rows} domain={domain} digits={digits} />
             {loading ? <div className="chart-updating" role="status">Actualizando medianas…</div> : null}

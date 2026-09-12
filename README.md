@@ -31,6 +31,20 @@ pnpm dev
 
 Configura en `.env` una `LOCAL_ENCRYPTION_KEY` aleatoria y una `DASHBOARD_ADMIN_PASSWORD` distinta, de al menos 14 caracteres. No reutilices la contraseña de QvaPay. Abre [http://127.0.0.1:3000](http://127.0.0.1:3000).
 
+### Desarrollo con recarga
+
+Para levantar el servidor y el watcher del panel en un solo comando:
+
+```bash
+pnpm dev:all
+```
+
+El servidor reinicia automáticamente al cambiar archivos de `src/` y el
+frontend recompila automáticamente al cambiar archivos de `web/`. Como el
+panel se sirve como archivos estáticos, actualiza el navegador después de
+cada cambio visual. También puedes ejecutar `pnpm dev` y `pnpm dev:web` en
+terminales separadas.
+
 En operación local también puedes entrar mediante [http://localhost:3000](http://localhost:3000). La protección de origen considera equivalentes únicamente `127.0.0.1`, `localhost` e IPv6 loopback cuando protocolo y puerto coinciden; cualquier dirección externa continúa bloqueada.
 
 `pnpm login` admite el TOTP de seis dígitos de una aplicación autenticadora. La contraseña y el código se introducen ocultos; ante fallos transitorios de conexión se hacen tres intentos y el token solo se guarda cifrado después de validarlo con `GET /user`.

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">QvaApply</title>
+  <rect width="64" height="64" rx="16" fill="#18222d"/>
+  <path d="M14 39c7 0 8-14 16-14h12m-5-5 5 5-5 5M50 25c-7 0-8 14-16 14H22m5-5-5 5 5 5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

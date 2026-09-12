@@ -45,6 +45,9 @@ export function buildDashboard(
   });
   const auth = new DashboardAuth(authOptions);
   const publicRoot = resolve("public/dashboard");
+  const iconsRoot = resolve("public/icons");
+  const logoRoot = resolve("public/logo");
+  const imagesRoot = resolve("public/images");
 
   app.addHook("onSend", async (_request, reply, payload) => {
     reply
@@ -89,6 +92,39 @@ export function buildDashboard(
   app.get("/service-worker.js", async (_request, reply) =>
     reply.type("text/javascript; charset=utf-8").send(serviceWorkerScript()),
   );
+  app.get<{ Params: { name: string } }>("/icons/:name", async (request, reply) => {
+    const name = request.params.name;
+    if (!/^[a-zA-Z0-9._-]+\.(?:svg|png)$/.test(name))
+      return reply.status(404).type("text/plain").send("Icono no encontrado.");
+    const file = resolve(iconsRoot, name);
+    if (!file.startsWith(`${iconsRoot}/`) || !existsSync(file))
+      return reply.status(404).type("text/plain").send("Icono no encontrado.");
+    return reply.type(name.endsWith(".svg") ? "image/svg+xml" : "image/png")
+      .header("cache-control", "public, max-age=86400")
+      .send(readFileSync(file));
+  });
+  app.get<{ Params: { name: string } }>("/logo/:name", async (request, reply) => {
+    const name = request.params.name;
+    if (!/^[a-zA-Z0-9._-]+\.webp$/.test(name))
+      return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
+    const file = resolve(logoRoot, name);
+    if (!file.startsWith(`${logoRoot}/`) || !existsSync(file))
+      return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
+    return reply.type("image/webp")
+      .header("cache-control", "public, max-age=86400")
+      .send(readFileSync(file));
+  });
+  app.get<{ Params: { name: string } }>("/images/:name", async (request, reply) => {
+    const name = request.params.name;
+    if (!/^[a-zA-Z0-9._-]+\.webp$/.test(name))
+      return reply.status(404).type("text/plain").send("Imagen no encontrada.");
+    const file = resolve(imagesRoot, name);
+    if (!file.startsWith(`${imagesRoot}/`) || !existsSync(file))
+      return reply.status(404).type("text/plain").send("Imagen no encontrada.");
+    return reply.type("image/webp")
+      .header("cache-control", "public, max-age=86400")
+      .send(readFileSync(file));
+  });
   app.get<{ Params: { "*": string } }>("/dashboard/*", async (request, reply) => {
     const relative = request.params["*"];
     const file = resolve(publicRoot, relative);
@@ -516,7 +552,7 @@ function message(error: unknown): string {
 }
 
 function reactPage(): string {
-  return "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><title>QvaApply · Mesa de trading</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap\"><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>";
+  return "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><meta name=\"theme-color\" content=\"#123b70\"><link rel=\"icon\" href=\"/logo/isotipo.webp\" type=\"image/webp\"><link rel=\"apple-touch-icon\" href=\"/logo/isotipo.webp\"><title>QvaApply · Mesa de trading</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap\"><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>";
 }
 
 function openApiDocument() {

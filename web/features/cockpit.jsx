@@ -30,10 +30,10 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         <Button variant="outline" onClick={() => data.state.mode === "real" ? control({ mode: "simulation", paused: true }) : setConfirmReal(true)}><Radio />{data.state.mode === "real" ? "Pasar a simulación" : "Preparar modo real"}</Button>
         <Button variant="destructive" className={data.risk.usage.emergencyStop ? "emergency active" : "emergency"} onClick={() => control({ emergencyStop: !data.risk.usage.emergencyStop })}><AlertOctagon />{data.risk.usage.emergencyStop ? "Desbloquear emergencia" : "Parada de emergencia"}</Button>
       </section>
-      <p className="detail" role="status" aria-live="polite">{status}</p>
+      {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
       <section className="decision-strip">
         <div>
-          <span>DECISIÓN AHORA</span>
+          <span>Decisión ahora</span>
           <strong>
             {first
               ? `${label(first.buy)} → ${label(first.sell)}`
@@ -45,10 +45,6 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
               : "Esperando una tasa que cumpla límites y capital."}
           </p>
         </div>
-        <b>
-          {money(data.availability.qusd.available)}
-          <small> QUSD libres</small>
-        </b>
       </section>
       <div className="freshness-row">
         <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
@@ -101,16 +97,16 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
             <article className="market-card"><span>Sin ronda registrada</span><strong>Esperando al escáner</strong><small>Se conservará aquí la última lectura completa.</small></article>
           ) : null}
           <article className="market-card">
-            <span>PRESUPUESTO DE APLICACIÓN</span>
+            <span>Presupuesto de aplicación</span>
             <strong>{Date.now() >= applyReadyAt ? "Disponible" : "En espera segura"}</strong>
             <p>{Date.now() >= applyReadyAt ? "Puede aplicar a una oportunidad" : `Disponible en ${Math.ceil((applyReadyAt - Date.now()) / 1000)} s`}</p>
-            <small>Máximo 2 aplicaciones por minuto</small>
           </article>
         </div>
       </Panel>
       <div className="dashboard-grid">
         <Panel title="Oportunidades priorizadas">
           <List
+            empty="Sin oportunidades por ahora."
             rows={data.rankings.potential}
             render={(item) =>
               `${label(item.buy)} → ${label(item.sell)} · +${money(item.profit, 4)} ${unit(item.sell)}`
@@ -119,6 +115,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         </Panel>
         <Panel title="Rotación · 24 h">
           <List
+            empty="Sin rotación registrada."
             rows={data.rankings.rotation}
             render={(item) =>
               `${item.label} · ${item.eligible} candidatas · ${item.observed} observadas`
@@ -127,7 +124,8 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         </Panel>
         <Panel title="Alertas operativas" wide>
           <List
-            rows={data.alerts?.length ? data.alerts : data.activity}
+            empty="Sin alertas."
+            rows={data.alerts}
             render={(item) => item.reason || item.detail}
           />
         </Panel>

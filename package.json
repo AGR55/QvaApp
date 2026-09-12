@@ -13,6 +13,7 @@
     "build:web": "vite build",
     "dev": "tsx watch src/index.ts",
     "dev:web": "vite build --watch",
+    "dev:all": "pnpm dev & pnpm dev:web & wait",
     "login": "tsx src/login.ts",
     "start": "node --enable-source-maps dist/index.js",
     "test": "tsx --test test/*.test.ts",

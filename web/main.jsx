@@ -41,6 +41,7 @@ import "./audit.css";
 import "./theme-refresh.css";
 import "./components.css";
 import "./ui-polish.css";
+import "./identity.css";
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({
@@ -91,7 +92,7 @@ function App() {
   if (!session)
     return (
       <main className="boot">
-        <div className="mark">Q</div>
+        <img className="brand-logo boot-logo" src="/logo/isotipo.webp" alt="QvaApply" width="56" height="56" />
         <p>Verificando sesión…</p>
       </main>
     );
@@ -115,7 +116,7 @@ function App() {
   if (!data)
     return (
       <main className="boot">
-        <div className="mark">Q</div>
+        <img className="brand-logo boot-logo" src="/logo/isotipo.webp" alt="QvaApply" width="56" height="56" />
         <p>{status}</p>
         <Skeleton label="Leyendo la base de datos local" />
         <Button variant="primary" onClick={refresh}>
@@ -135,11 +136,9 @@ function App() {
       </a>
       <aside className="sidebar">
         <div className="brand">
-          <span className="mark">Q</span>
-          <span className="brand-name">
-            <strong>QvaApply</strong>
-            <small>Mesa privada</small>
-          </span>
+          <div className="brand-lockup">
+            <img src="/logo/logotipo.webp" alt="QvaApply" width="180" height="50" />
+          </div>
         </div>
         <nav aria-label="Navegación principal">
           {navigation.map(([key, text, Icon]) => (
@@ -166,9 +165,6 @@ function App() {
               {data.state.mode === "real" ? "Real" : "Simulación"}
             </span>
           </div>
-          <div className="foot-row">
-            <span>{money(data.availability.qusd.available)} QUSD libres</span>
-          </div>
         </div>
       </aside>
       <main className="content" id="main-content" tabIndex="-1">
@@ -176,18 +172,6 @@ function App() {
           <div>
             <h1>{title}</h1>
             <p className="top-sub">
-              <span
-                className={
-                  data.state.mode === "real" ? "mode-real" : "mode-sim"
-                }
-              >
-                {data.state.paused
-                  ? "Automatización pausada"
-                  : "Automatización activa"}
-              </span>
-              <span className="dot-sep" aria-hidden="true">
-                ·
-              </span>
               <span>{money(data.availability.qusd.available)} QUSD libres</span>
               <span className="dot-sep" aria-hidden="true">
                 ·

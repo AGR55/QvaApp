@@ -56,6 +56,26 @@ test("Fastify protege datos, origen y mutaciones con sesión y CSRF", async () =
   await app.close();
 });
 
+test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", async () => {
+  const app = buildDashboard({} as never, { password, trustedOrigin: origin });
+  const page = await app.inject({ method: "GET", url: "/" });
+  assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
+  const icon = await app.inject({ method: "GET", url: "/icons/qvaapply-mark.svg" });
+  assert.equal(icon.statusCode, 200);
+  assert.match(String(icon.headers["content-type"]), /image\/svg\+xml/);
+  const logo = await app.inject({ method: "GET", url: "/logo/logotipo.webp" });
+  assert.equal(logo.statusCode, 200);
+  assert.match(String(logo.headers["content-type"]), /image\/webp/);
+  const signinImage = await app.inject({ method: "GET", url: "/images/signin-picture.webp" });
+  assert.equal(signinImage.statusCode, 200);
+  assert.match(String(signinImage.headers["content-type"]), /image\/webp/);
+  const traversal = await app.inject({ method: "GET", url: "/icons/%2e%2e%2fpackage.json" });
+  assert.equal(traversal.statusCode, 404);
+  const imageTraversal = await app.inject({ method: "GET", url: "/images/%2e%2e%2fpackage.json" });
+  assert.equal(imageTraversal.statusCode, 404);
+  await app.close();
+});
+
 test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () => {
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const login = await app.inject({
