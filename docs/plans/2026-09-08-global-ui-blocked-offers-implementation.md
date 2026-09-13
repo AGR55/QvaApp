@@ -23,7 +23,7 @@
 
 ## 4. Sistema visual compartido
 
-- Consolidar tokens y fundamentos globales en `web/styles.css` y `web/layout.css`.
+- Consolidar tokens y fundamentos globales en `web/ui-polish.css`.
 - Evolucionar `web/components/common.jsx` con superficies, badges, botones, mensajes y diálogo accesible.
 - Renovar shell, navegación, cabecera, conectividad, login y responsive global en `web/main.jsx`.
 - Mantener dependencias actuales y usar iconos ya instalados.

@@ -15,6 +15,8 @@ import {
   X,
   Moon,
   Sun,
+  Menu,
+  ChevronDown,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
@@ -29,16 +31,13 @@ import { Operations } from "./features/operations.jsx";
 import { Hunting } from "./features/hunting.jsx";
 import { Audit } from "./features/audit.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
-import "./styles.css";
 import "./settings.css";
-import "./layout.css";
 import "./cockpit.css";
 import "./offer-actions.css";
 import "./offer-modal.css";
 import "./capital.css";
 import "./hunting.css";
 import "./audit.css";
-import "./theme-refresh.css";
 import "./components.css";
 import "./ui-polish.css";
 import "./identity.css";
@@ -48,16 +47,32 @@ const Charts = lazy(() =>
     default: module.Charts,
   })),
 );
-const navigation = [
-  ["resumen", "Cockpit", LayoutDashboard],
-  ["mercado", "Mercados", CandlestickChart],
-  ["ofertas", "Capital", WalletCards],
-  ["caceria", "Cacería", Crosshair],
-  ["operaciones", "Operaciones", Workflow],
-  ["graficas", "Gráficas", BarChart3],
-  ["configuracion", "Estrategia", SlidersHorizontal],
-  ["auditoria", "Auditoría", ShieldCheck],
+const navigationGroups = [
+  {
+    label: "Operar",
+    items: [
+      ["resumen", "Cockpit", LayoutDashboard],
+      ["mercado", "Mercados", CandlestickChart],
+      ["caceria", "Cacería", Crosshair],
+      ["operaciones", "Operaciones", Workflow],
+    ],
+  },
+  {
+    label: "Gestionar",
+    items: [
+      ["ofertas", "Capital", WalletCards],
+      ["graficas", "Gráficas", BarChart3],
+    ],
+  },
+  {
+    label: "Sistema",
+    items: [
+      ["configuracion", "Estrategia", SlidersHorizontal],
+      ["auditoria", "Auditoría", ShieldCheck],
+    ],
+  },
 ];
+const navigation = navigationGroups.flatMap((group) => group.items);
 
 function App() {
   const [session, setSession] = useState();
@@ -65,6 +80,7 @@ function App() {
   const [market, setMarket] = useState("");
   const [notice, setNotice] = useState(null);
   const [theme, setTheme] = useState(() => getInitialTheme());
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { data, status, resources, online, refresh } = useDashboard(
     view,
     market,
@@ -75,8 +91,17 @@ function App() {
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("qvaapply-theme", theme);
   }, [theme]);
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [mobileNavOpen]);
   const navigate = useCallback((next) => {
     setView(next);
+    setMobileNavOpen(false);
     const url = new URL(window.location.href);
     url.searchParams.set("view", next);
     window.history.replaceState({}, "", url);
@@ -92,7 +117,13 @@ function App() {
   if (!session)
     return (
       <main className="boot">
-        <img className="brand-logo boot-logo" src="/logo/isotipo.webp" alt="QvaApply" width="56" height="56" />
+        <img
+          className="brand-logo boot-logo"
+          src="/logo/isotipo.webp"
+          alt="QvaApply"
+          width="56"
+          height="56"
+        />
         <p>Verificando sesión…</p>
       </main>
     );
@@ -116,7 +147,13 @@ function App() {
   if (!data)
     return (
       <main className="boot">
-        <img className="brand-logo boot-logo" src="/logo/isotipo.webp" alt="QvaApply" width="56" height="56" />
+        <img
+          className="brand-logo boot-logo"
+          src="/logo/isotipo.webp"
+          alt="QvaApply"
+          width="56"
+          height="56"
+        />
         <p>{status}</p>
         <Skeleton label="Leyendo la base de datos local" />
         <Button variant="primary" onClick={refresh}>
@@ -128,7 +165,6 @@ function App() {
   const label = (code) => metadata.get(code)?.label || code;
   const unit = (code) => metadata.get(code)?.currency || "";
   const selected = data.market[market] || { offers: [], total: 0 };
-  const title = navigation.find(([key]) => key === view)?.[1] || "QvaApply";
   return (
     <div className="app-shell">
       <a className="skip-link" href="#main-content">
@@ -137,21 +173,37 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-lockup">
-            <img src="/logo/logotipo.webp" alt="QvaApply" width="180" height="50" />
+            <img
+              src="/logo/isotipo.webp"
+              alt="QvaApply"
+              width="34"
+              height="34"
+            />
+            <span className="brand-word">
+              <strong>QvaApply</strong>
+              <small>Mesa P2P</small>
+            </span>
           </div>
         </div>
         <nav aria-label="Navegación principal">
-          {navigation.map(([key, text, Icon]) => (
-            <Button
-              key={key}
-              variant="ghost"
-              className={view === key ? "active" : ""}
-              aria-current={view === key ? "page" : undefined}
-              onClick={() => navigate(key)}
-            >
-              <Icon aria-hidden="true" />
-              {text}
-            </Button>
+          {navigationGroups.map((group) => (
+            <div key={group.label}>
+              <p className="nav-group-label" aria-hidden="true">
+                {group.label}
+              </p>
+              {group.items.map(([key, text, Icon]) => (
+                <Button
+                  key={key}
+                  variant="ghost"
+                  className={view === key ? "active" : ""}
+                  aria-current={view === key ? "page" : undefined}
+                  onClick={() => navigate(key)}
+                >
+                  <Icon aria-hidden="true" />
+                  {text}
+                </Button>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-foot" aria-label="Estado operativo">
@@ -169,17 +221,57 @@ function App() {
       </aside>
       <main className="content" id="main-content" tabIndex="-1">
         <header className="topbar">
-          <div>
-            <h1>{title}</h1>
-            <p className="top-sub">
-              <span>{money(data.availability.qusd.available)} QUSD libres</span>
-              <span className="dot-sep" aria-hidden="true">
-                ·
-              </span>
-              <span>{data.operations?.length || 0} operaciones</span>
-            </p>
+          <div
+            className="header-metrics"
+            role="region"
+            tabIndex="0"
+            aria-label="Resumen de fondos disponibles"
+          >
+            <CurrencyBadge
+              src="/icons/qusd.png"
+              alt="QUSD"
+              value={money(data.availability.qusd.available)}
+              tone="qusd"
+            />
+            <CurrencyBadge
+              src="/icons/cup.png"
+              alt="CUP"
+              value={money(data.availability.fiat.BANK_CUP?.available || 0)}
+              tone="cup"
+              danger={isOvercommitted(data.availability.fiat.BANK_CUP)}
+              deficit={fiatDeficit(data.availability.fiat.BANK_CUP)}
+            />
+            <CurrencyBadge
+              src="/icons/clasica.png"
+              alt="Clásica"
+              value={money(data.availability.fiat.CLASICA?.available || 0)}
+              tone="clasica"
+              danger={isOvercommitted(data.availability.fiat.CLASICA)}
+              deficit={fiatDeficit(data.availability.fiat.CLASICA)}
+            />
+            <CurrencyBadge
+              src="/icons/tropical.png"
+              alt="Prepago"
+              value={money(
+                data.availability.fiat.BANDECPREPAGO?.available || 0,
+              )}
+              tone="prepago"
+              danger={isOvercommitted(data.availability.fiat.BANDECPREPAGO)}
+              deficit={fiatDeficit(data.availability.fiat.BANDECPREPAGO)}
+            />
           </div>
           <div className="top-actions">
+            <Button
+              variant="secondary"
+              className="mobile-nav-trigger"
+              onClick={() => setMobileNavOpen((open) => !open)}
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-navigation"
+            >
+              <Menu aria-hidden="true" />
+              <span>Secciones</span>
+              <ChevronDown aria-hidden="true" />
+            </Button>
             <PushControl onNotification={setNotice} />
             <IconButton
               className="theme-toggle"
@@ -227,6 +319,45 @@ function App() {
               <LogOut aria-hidden="true" />
             </IconButton>
           </div>
+          {mobileNavOpen ? (
+            <div className="mobile-nav-layer">
+              <button
+                className="mobile-nav-backdrop"
+                type="button"
+                aria-label="Cerrar navegación"
+                onClick={() => setMobileNavOpen(false)}
+              />
+              <nav
+                id="mobile-navigation"
+                className="mobile-nav-panel"
+                aria-label="Navegación principal"
+              >
+                <div className="mobile-nav-heading">
+                  <span>Ir a</span>
+                  <IconButton
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setMobileNavOpen(false)}
+                    aria-label="Cerrar menú"
+                  >
+                    <X aria-hidden="true" />
+                  </IconButton>
+                </div>
+                {navigation.map(([key, text, Icon]) => (
+                  <Button
+                    key={key}
+                    variant="ghost"
+                    className={view === key ? "active" : ""}
+                    aria-current={view === key ? "page" : undefined}
+                    onClick={() => navigate(key)}
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>{text}</span>
+                  </Button>
+                ))}
+              </nav>
+            </div>
+          ) : null}
         </header>
         <div
           className={`connection-state ${online ? "" : "offline"}`}
@@ -346,6 +477,36 @@ function getInitialTheme() {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
+}
+
+function CurrencyBadge({ src, alt, value, tone, danger = false, deficit = 0 }) {
+  const title = danger
+    ? `${value} ${alt} disponibles · faltan ${money(deficit)} ${alt} para cubrir ofertas`
+    : `${value} ${alt} disponibles`;
+  return (
+    <span
+      className={`currency-badge tone-${tone}${danger ? " is-danger" : ""}`}
+      title={title}
+      aria-label={title}
+    >
+      <img src={src} alt={alt} />
+      <strong>{value}</strong>
+    </span>
+  );
+}
+
+function isOvercommitted(availability) {
+  return (
+    Number(availability?.committed || 0) >
+    Number(availability?.declared || 0) + 0.000001
+  );
+}
+
+function fiatDeficit(availability) {
+  return Math.max(
+    0,
+    Number(availability?.committed || 0) - Number(availability?.declared || 0),
+  );
 }
 
 function PushControl({ onNotification }) {

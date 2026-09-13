@@ -2,8 +2,7 @@ import React from "react";
 import { Activity } from "lucide-react";
 import { CardTitle } from "./ui.jsx";
 
-export function Panel({ title, children, wide = false, kicker, description }) {
-  return (
+export function Panel({ title, children, wide = false, kicker, description }) {  return (
     <section className={`panel ui-section ${wide ? "wide" : ""}`} data-ui="panel">
       <header className="panel-head ui-section-head">
         <div className="ui-section-titles">
@@ -14,6 +13,16 @@ export function Panel({ title, children, wide = false, kicker, description }) {
       </header>
       <div className="ui-section-body">{children}</div>
     </section>
+  );
+}
+export function ViewHead({ kicker, title, description, meta }) {
+  return (
+    <header className="view-head">
+      {kicker ? <span className="view-kicker">{kicker}</span> : null}
+      <h1>{title}</h1>
+      {description ? <p>{description}</p> : null}
+      {meta ? <div className="view-meta">{meta}</div> : null}
+    </header>
   );
 }
 export function Empty({ children }) {

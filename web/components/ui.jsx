@@ -36,32 +36,8 @@ export function Badge({ variant = "neutral", className, children }) {
   return <span className={cx("ui-badge", `ui-badge-${variant}`, className)}>{children}</span>;
 }
 
-export function Card({ className, children, ...props }) {
-  return <section className={cx("ui-card", className)} {...props}>{children}</section>;
-}
-
-export function CardHeader({ className, children }) {
-  return <header className={cx("ui-card-header", className)}>{children}</header>;
-}
-
 export function CardTitle({ className, children }) {
   return <h2 className={cx("ui-card-title", className)}>{children}</h2>;
-}
-
-export function CardDescription({ className, children }) {
-  return <p className={cx("ui-card-description", className)}>{children}</p>;
-}
-
-export function CardContent({ className, children }) {
-  return <div className={cx("ui-card-content", className)}>{children}</div>;
-}
-
-export function CardFooter({ className, children }) {
-  return <footer className={cx("ui-card-footer", className)}>{children}</footer>;
-}
-
-export function Alert({ variant = "default", className, children, ...props }) {
-  return <div className={cx("ui-alert", `ui-alert-${variant}`, className)} role={props.role || "status"} {...props}>{children}</div>;
 }
 
 export function Tabs({ items, value, onChange, className }) {

@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { AlertTriangle, CheckCircle2, RefreshCcw } from "lucide-react";
-import { Empty, Panel } from "../components/common.jsx";
+import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { operationActionBody } from "../lib/operation-actions.js";
@@ -33,6 +33,11 @@ export function Operations({ data, label, unit, onChanged }) {
   };
   return (
     <div className="operations-stack">
+      <ViewHead
+        kicker="Dinero en movimiento"
+        title="Operaciones"
+        description="Cada aplicación con su estado y la acción manual que le toca: pagar, registrar o conciliar."
+      />
       {data.risk.usage.unresolvedMutation ? (
         <div className="alert" role="alert">
           <AlertTriangle aria-hidden="true" />
@@ -40,7 +45,7 @@ export function Operations({ data, label, unit, onChanged }) {
         </div>
       ) : null}
       <div className="dashboard-grid">
-        <Panel title="Operaciones con dinero" wide>
+        <Panel title="Operaciones con dinero" kicker="Seguimiento" wide>
           {data.operations?.length ? (
             <div className="table-scroll" tabIndex="0" role="region" aria-label="Operaciones con dinero, tabla desplazable">
               <table>
@@ -65,7 +70,7 @@ export function Operations({ data, label, unit, onChanged }) {
             </div>
           ) : <Empty>No hay operaciones registradas.</Empty>}
         </Panel>
-        <Panel title="Flujos automáticos y compensación" wide>
+        <Panel title="Flujos automáticos y compensación" kicker="Motor" description="Concilia cuando el resultado remoto quede ambiguo." wide>
           {data.workflows?.length ? (
             <ol className="workflow-list">
               {data.workflows.map((workflow) => (

@@ -23,7 +23,7 @@ export interface PlannedOwnOffer extends RestorableOwnOffer {
   restoreQusd: number;
 }
 
-export interface LiquidityMarketEconomics {
+interface LiquidityMarketEconomics {
   buyMaxRate: number;
   sellFeePercent: number;
   outgoingTransferFee: number;

@@ -19,9 +19,10 @@
     "test": "tsx --test test/*.test.ts",
     "test:watch": "tsx --test --watch test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm typecheck && pnpm test && pnpm build:server && pnpm build:web && pnpm check:secrets",
+    "check": "pnpm typecheck && pnpm knip && pnpm test && pnpm build:server && pnpm build:web && pnpm check:secrets",
     "check:ui": "pnpm build && node scripts/visual-smoke.mjs",
-    "check:secrets": "node scripts/check-secrets.mjs"
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "knip": "knip"
   },
   "dependencies": {
     "dotenv": "^17.2.2",
@@ -33,14 +34,15 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
-    "@types/node": "^24.3.1",
+    "@types/node": "^24.13.3",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^5.0.2",
     "axe-core": "^4.13.0",
+    "knip": "^6.35.1",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
+    "typescript": "^5.9.3",
     "vite": "^7.1.4"
   }
 }

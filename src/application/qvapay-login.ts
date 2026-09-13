@@ -1,6 +1,6 @@
 import type { LoginResult } from "../qvapay.js";
 
-export interface QvaLoginGateway {
+interface QvaLoginGateway {
   login(email: string, password: string, twoFactorCode?: string): Promise<LoginResult>;
 }
 

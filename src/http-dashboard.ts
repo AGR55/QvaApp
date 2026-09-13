@@ -309,6 +309,43 @@ export function buildDashboard(
       throw new ClientInputError("Mercado inválido.");
     return { data: await readModel.marketAnalytics(coin), source: "sqlite" };
   });
+  app.post("/api/offers/rebalance/preview", {
+    schema: {
+      body: { type: "object", additionalProperties: false },
+    },
+  }, async () => ({
+    data: await clientAction(() => readModel.previewBudgetRebalance()),
+  }));
+  app.post<{
+    Body: { adjustments: { uuid: string; amount: number }[] };
+  }>("/api/offers/rebalance/apply", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["adjustments"],
+        properties: {
+          adjustments: {
+            type: "array",
+            minItems: 1,
+            maxItems: 100,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["uuid", "amount"],
+              properties: {
+                uuid: { type: "string", minLength: 1, maxLength: 100 },
+                amount: { type: "number", minimum: 0 },
+              },
+            },
+          },
+        },
+      },
+    },
+  }, async (request) => ({
+    data: await clientAction(() =>
+      readModel.applyBudgetRebalance(request.body.adjustments)),
+  }));
   app.post<{ Body: { coin: FiatMarket; type: "buy" | "sell"; amount: number; rate: number } }>("/api/offers", {
     schema: {
       body: {
@@ -571,6 +608,8 @@ function openApiDocument() {
       "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },
       "/api/control": { put: { summary: "Pausa, modo, refresco y emergencia" } },
       "/api/offers": { post: { summary: "Crear oferta propia" } },
+      "/api/offers/rebalance/preview": { post: { summary: "Previsualizar un reajuste del capital fiat" } },
+      "/api/offers/rebalance/apply": { post: { summary: "Aplicar un reajuste validado de ofertas propias" } },
       "/api/offers/{uuid}": { put: { summary: "Editar oferta propia" }, delete: { summary: "Cancelar oferta propia" } },
       "/api/workflows/{workflowId}/reconcile": { post: { summary: "Conciliar un resultado remoto ambiguo" } },
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },

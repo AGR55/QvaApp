@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from "react";
 import { AlertOctagon, Pause, Play, Radio, ShieldCheck } from "lucide-react";
-import { Freshness, List, Panel, Skeleton } from "../components/common.jsx";
+import { Freshness, List, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
@@ -24,6 +24,11 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
   };
   return (
     <div className="page-stack">
+      <ViewHead
+        kicker="Mesa · Resumen operativo"
+        title="Cockpit"
+        description="La decisión del momento, el capital por mercado y el consumo de límites. Si algo exige tu atención, está arriba del todo."
+      />
       <section className="control-deck" aria-label="Controles operativos">
         <div><span className={`live ${data.state.paused ? "offline" : ""}`} /> <strong>{data.state.paused ? "Automatización pausada" : "Automatización activa"}</strong><small>Modo {data.state.mode}</small></div>
         <Button variant="outline" onClick={() => control({ paused: !data.state.paused })}>{data.state.paused ? <Play /> : <Pause />}{data.state.paused ? "Reanudar" : "Pausar"}</Button>
@@ -75,7 +80,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
           );
         })}
       </div>
-      <Panel title="Consumo de límites globales" wide>
+      <Panel title="Consumo de límites globales" kicker="Riesgo" description="Cuánto del margen de seguridad queda antes de frenar en automático." wide>
         <div className="risk-meter-grid">
           <RiskMeter label="Exposición simultánea" value={data.risk.usage.exposureQusd} maximum={data.risk.limits.maxConcurrentQusdExposure} unit="QUSD" />
           <RiskMeter label="Volumen aplicado hoy" value={data.risk.usage.dailyAppliedQusd} maximum={data.risk.limits.maxDailyAppliedQusd} unit="QUSD" />
@@ -83,7 +88,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
           <RiskMeter label="Reserva mínima" value={data.availability.qusd.reported} maximum={data.risk.limits.minQusdReserve} unit="QUSD" inverse />
         </div>
       </Panel>
-      <Panel title="Cobertura del escáner" wide>
+      <Panel title="Cobertura del escáner" kicker="Vigilancia" description="Qué revisó la última ronda y si el presupuesto de aplicación está libre." wide>
         <div className="market-grid">
           {(data.state.scanCoverage?.markets || []).map((market) => (
             <article className="market-card" key={market.coin}>
@@ -104,7 +109,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         </div>
       </Panel>
       <div className="dashboard-grid">
-        <Panel title="Oportunidades priorizadas">
+        <Panel title="Oportunidades priorizadas" kicker="Señal">
           <List
             empty="Sin oportunidades por ahora."
             rows={data.rankings.potential}
@@ -113,7 +118,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
             }
           />
         </Panel>
-        <Panel title="Rotación · 24 h">
+        <Panel title="Rotación · 24 h" kicker="Ritmo">
           <List
             empty="Sin rotación registrada."
             rows={data.rankings.rotation}
@@ -122,7 +127,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
             }
           />
         </Panel>
-        <Panel title="Alertas operativas" wide>
+        <Panel title="Alertas operativas" kicker="Atención" wide>
           <List
             empty="Sin alertas."
             rows={data.alerts}

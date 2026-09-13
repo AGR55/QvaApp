@@ -68,6 +68,44 @@ export function ownOfferFiatTotal(
   return rounded;
 }
 
+/**
+ * Presents an effective rate conservatively using the precision already
+ * chosen for the market index. Purchases round up; sales round down.
+ */
+export function roundRateForIndex(
+  effectiveRate: number,
+  type: "buy" | "sell",
+  configuredIndex: number,
+): number {
+  if (!Number.isFinite(effectiveRate) || effectiveRate < 0)
+    throw new Error("La tasa efectiva debe ser un número positivo.");
+  if (!Number.isFinite(configuredIndex) || configuredIndex <= 0)
+    throw new Error("El índice configurado debe ser positivo.");
+  const factor = 10 ** decimalPlaces(configuredIndex);
+  const scaled = effectiveRate * factor;
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(scaled)) * 8;
+  const rounded = type === "buy"
+    ? Math.ceil(scaled - tolerance)
+    : Math.floor(scaled + tolerance);
+  return rounded / factor;
+}
+
+export function indexDecimalPlaces(configuredIndex: number): number {
+  if (!Number.isFinite(configuredIndex) || configuredIndex <= 0) return 0;
+  return decimalPlaces(configuredIndex);
+}
+
+function decimalPlaces(value: number): number {
+  const text = value.toString().toLowerCase();
+  if (!text.includes("e")) return text.includes(".") ? text.split(".")[1]!.length : 0;
+  const [coefficient, exponentText] = text.split("e");
+  const exponent = Number(exponentText);
+  const coefficientDecimals = coefficient!.includes(".")
+    ? coefficient!.split(".")[1]!.length
+    : 0;
+  return Math.max(0, coefficientDecimals - exponent);
+}
+
 function roundDecimal(value: number): number {
   return Math.round(value * 100_000_000) / 100_000_000;
 }

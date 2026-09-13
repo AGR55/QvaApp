@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "web/main.jsx",
+    "scripts/*.mjs",
+    "test/*.test.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}",
+    "web/**/*.{js,jsx,ts,tsx}",
+    "scripts/**/*.mjs",
+    "test/**/*.ts"
+  ],
+  "ignoreBinaries": ["wait", "chromedriver"]
+}

@@ -1,7 +1,7 @@
 export type P2pType = "buy" | "sell";
 /** Código de mercado fiat de QvaPay, configurable desde SQLite y el panel local. */
 export type FiatMarket = string;
-export type P2pStatus =
+type P2pStatus =
   | "open"
   | "processing"
   | "paid"
@@ -36,9 +36,6 @@ export interface P2pOffer {
   Peer?: { uuid: string; username?: string; name?: string } | null;
 }
 
-export interface P2pListResponse {
-  offers: P2pOffer[];
-}
 export interface P2pListPage {
   offers: P2pOffer[];
   total: number;
@@ -54,12 +51,6 @@ export interface P2pAverage {
   count?: number;
   updated_at?: string;
 }
-export interface QvaErrorBody {
-  error?: string;
-  message?: string;
-  info?: string;
-}
-
 export interface QvaTransaction {
   uuid: string;
   amount: number;

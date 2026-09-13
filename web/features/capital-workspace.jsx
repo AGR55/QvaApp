@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, X } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Scale, X } from "lucide-react";
 import { Offers } from "../components/offers.jsx";
-import { Freshness, Panel, Skeleton } from "../components/common.jsx";
+import { Freshness, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
-import { median, ownOfferFiatTotal } from "../../src/market-math.js";
+import { indexDecimalPlaces, median, ownOfferFiatTotal, roundRateForIndex } from "../../src/market-math.js";
 import { Button, IconButton, Input, Select } from "../components/ui.jsx";
 import { MarketIdentity } from "../components/market-identity.jsx";
 
@@ -14,10 +14,29 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
   const [pendingCancel, setPendingCancel] = useState();
   const [cancelError, setCancelError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [rebalance, setRebalance] = useState();
+  const [loadingRebalance, setLoadingRebalance] = useState(false);
   const closeCancel = useCallback(() => {
     if (!cancelling) setPendingCancel(undefined);
   }, [cancelling]);
   const cancelDialogRef = useDialog(Boolean(pendingCancel), closeCancel);
+  const hasDeficit = Object.values(data.budget || {}).some((plan) => Number(plan.deficit) > 0.000001);
+
+  const openRebalance = async () => {
+    setLoadingRebalance(true);
+    try {
+      const payload = await requestJson("/api/offers/rebalance/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      setRebalance({ plans: payload.data, error: "" });
+    } catch (error) {
+      setRebalance({ plans: [], error: error instanceof Error ? error.message : "No se pudo preparar el reajuste." });
+    } finally {
+      setLoadingRebalance(false);
+    }
+  };
 
   const openCreate = () => setEditor({ mode: "create", coin: data.markets[0]?.code || "", type: "buy", amount: "", rate: "" });
   const openEdit = (offer) => setEditor({ mode: "edit", offer, coin: offer.coin, type: offer.type, amount: String(offer.amount), rate: String(offer.rate) });
@@ -56,7 +75,12 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
 
   return (
     <div className="capital-stack">
-      <Panel title="Capital disponible" wide>
+      <ViewHead
+        kicker="Fondos propios"
+        title="Capital"
+        description="Lo declarado frente a lo comprometido por mercado, y tus ofertas abiertas listas para ajustar."
+      />
+      <Panel title="Capital disponible" kicker="Saldos" wide>
         <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
         {resources.balance?.loading && !data.freshness?.balance ? <Skeleton label="Consultando saldo QUSD" /> : null}
         <div className="market-grid capital-grid">
@@ -74,9 +98,12 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
         </div>
       </Panel>
 
-      <Panel title="Mis ofertas" wide>
+      <Panel title="Mis ofertas" kicker="Posiciones abiertas" description="Edita importe y tasa, o reajusta cuando un mercado quede por encima de lo declarado." wide>
         <div className="capital-toolbar">
           <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
+          <Button variant={hasDeficit ? "destructive" : "secondary"} onClick={openRebalance} disabled={!hasDeficit || loadingRebalance}>
+            <Scale aria-hidden="true" /> {loadingRebalance ? "Calculando…" : "Reajustar capital"}
+          </Button>
           <Button variant="primary" onClick={openCreate}><Plus aria-hidden="true" /> Nueva oferta</Button>
         </div>
         {editor ? (
@@ -126,7 +153,109 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
           </div>
         </section>
       ) : null}
+      {rebalance ? (
+        <RebalanceDialog
+          initial={rebalance}
+          data={data}
+          label={label}
+          unit={unit}
+          onClose={() => setRebalance(undefined)}
+          onApplied={async () => {
+            setRebalance(undefined);
+            await onChanged?.();
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function RebalanceDialog({ initial, data, label, unit, onClose, onApplied }) {
+  const [values, setValues] = useState(() => Object.fromEntries(
+    initial.plans.flatMap((plan) => plan.adjustments.map((item) => [item.uuid, String(item.proposedQusd)])),
+  ));
+  const [error, setError] = useState(initial.error || "");
+  const [applying, setApplying] = useState(false);
+  const close = useCallback(() => { if (!applying) onClose(); }, [applying, onClose]);
+  const dialogRef = useDialog(true, close);
+  const summaries = initial.plans.map((plan) => {
+    const market = data.markets.find((item) => item.code === plan.coin);
+    const proposed = plan.committed - plan.adjustments.reduce((sum, item) => sum + item.currentFiat, 0)
+      + plan.adjustments.reduce((sum, item) => {
+        const amount = Number(values[item.uuid]);
+        if (!Number.isFinite(amount) || amount <= 0) return sum;
+        return sum + ownOfferFiatTotal(amount, item.rate, "buy", market?.currency || "") + (market?.outgoingTransferFee || 0);
+      }, 0);
+    return { plan, market, proposed, valid: proposed <= plan.available + 0.000001 };
+  });
+  const invalidAmount = initial.plans.some((plan) => plan.adjustments.some((item) => {
+    const amount = Number(values[item.uuid]);
+    return !Number.isFinite(amount) || amount < 0 || amount > item.currentQusd + 0.000001;
+  }));
+  const valid = initial.plans.length > 0 && !invalidAmount && summaries.every((item) => item.valid);
+  const apply = async () => {
+    if (!valid || applying) return;
+    setApplying(true);
+    setError("");
+    try {
+      await requestJson("/api/offers/rebalance/apply", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          adjustments: initial.plans.flatMap((plan) => plan.adjustments.map((item) => ({
+            uuid: item.uuid,
+            amount: Number(values[item.uuid]),
+          }))),
+        }),
+        timeoutMs: 60_000,
+      });
+      await onApplied();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo aplicar el reajuste.");
+      setApplying(false);
+    }
+  };
+
+  return (
+    <section ref={dialogRef} className="offer-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rebalance-title">
+      <div className="offer-modal rebalance-dialog">
+        <header className="rebalance-heading">
+          <div className="dialog-icon warning-icon"><Scale aria-hidden="true" /></div>
+          <div><p className="eyebrow">CONTROL DE EXPOSICIÓN</p><h2 id="rebalance-title">Reajustar ofertas de compra</h2></div>
+          <IconButton variant="ghost" onClick={close} disabled={applying} aria-label="Cerrar reajuste"><X aria-hidden="true" /></IconButton>
+        </header>
+        <p>Reduce las cantidades para que cada mercado vuelva a quedar dentro del fiat declarado. Las tasas actuales se conservan.</p>
+        {summaries.map(({ plan, market, proposed, valid: marketValid }) => (
+          <section className="rebalance-market" key={plan.coin}>
+            <div className="rebalance-market-summary">
+              <MarketIdentity code={plan.coin} label={label(plan.coin)} size="sm" />
+              <span className={marketValid ? "positive-value" : "negative-value"}>{money(proposed, market?.currency === "USD" ? 2 : 0)} / {money(plan.available, market?.currency === "USD" ? 2 : 0)} {unit(plan.coin)}</span>
+            </div>
+            <div className="rebalance-adjustments">
+              {plan.adjustments.map((item) => {
+                const amount = Number(values[item.uuid]);
+                const effective = amount > 0
+                  ? (ownOfferFiatTotal(amount, item.rate, "buy", market?.currency || "") + (market?.outgoingTransferFee || 0)) / amount
+                  : 0;
+                const index = market?.buyMaxRate || item.rate;
+                const shownRate = amount > 0 ? roundRateForIndex(effective, "buy", index) : 0;
+                return (
+                  <label className="rebalance-row" key={item.uuid}>
+                    <span><strong>{money(item.currentQusd)} QUSD</strong><small>Tasa {money(shownRate, indexDecimalPlaces(index))} {unit(plan.coin)} · se conserva {item.rate}</small></span>
+                    <span className="input-unit"><Input type="number" min="0" max={item.currentQusd} step="0.01" inputMode="decimal" value={values[item.uuid]} onChange={(event) => setValues((current) => ({ ...current, [item.uuid]: event.target.value }))} /><small>QUSD</small></span>
+                    <em>{amount === 0 ? "Se cancelará" : `Nuevo importe`}</em>
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+        {invalidAmount ? <p className="form-error" role="alert">Cada cantidad debe estar entre cero y su importe actual.</p> : null}
+        {!invalidAmount && summaries.some((item) => !item.valid) ? <p className="form-error" role="alert">Todavía hay más fiat comprometido que declarado. Reduce un poco más las cantidades.</p> : null}
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        <div className="offer-modal-actions"><Button variant="ghost" onClick={close} disabled={applying}>Cancelar</Button><Button variant="primary" onClick={apply} disabled={!valid || applying}>{applying ? "Aplicando…" : "Aceptar reajuste"}</Button></div>
+      </div>
+    </section>
   );
 }
 
@@ -148,6 +277,10 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
     total: roundedReceive + (paysFiat ? market?.outgoingTransferFee || 0 : 0),
     effectiveRate: amount > 0 ? (roundedReceive + (paysFiat ? market?.outgoingTransferFee || 0 : 0)) / amount : 0,
   };
+  const configuredIndex = values.type === "buy" ? market?.buyMaxRate : market?.sellMinRate;
+  const indexedEffectiveRate = configuredIndex && validNumbers
+    ? roundRateForIndex(transfer.effectiveRate, values.type, configuredIndex)
+    : transfer.effectiveRate;
   const marketReference = useMemo(() => referenceMedian(data, values.coin, values.type), [data, values.coin, values.type]);
   const deviation = marketReference && rate > 0 ? ((rate - marketReference) / marketReference) * 100 : undefined;
   const favorableDeviation = deviation === undefined
@@ -200,7 +333,7 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
           <dl>
             <div><dt>Importe fiat</dt><dd>{money(transfer.nominal, unit(values.coin) === "USD" ? 4 : 2)}</dd></div>
             <div><dt>Comisión de salida</dt><dd>{paysFiat ? money(transfer.fee, 2) : "No aplica"}</dd></div>
-            <div><dt>Tasa efectiva</dt><dd>{money(transfer.effectiveRate, 4)}</dd></div>
+            <div><dt>Tasa efectiva</dt><dd>{money(indexedEffectiveRate, configuredIndex ? indexDecimalPlaces(configuredIndex) : 4)}</dd></div>
             <div><dt>Mediana del mercado</dt><dd>{marketReference ? money(marketReference, 4) : "Sin muestra"}</dd></div>
             <div><dt>Diferencia</dt><dd className={favorableDeviation === undefined ? "" : favorableDeviation ? "positive-value" : "negative-value"}>{deviation === undefined ? "—" : `${deviation > 0 ? "+" : ""}${money(deviation, 2)}%`}</dd></div>
             <div><dt>Fiat disponible</dt><dd>{money(spendable, unit(values.coin) === "USD" ? 2 : 0)}</dd></div>

@@ -8,7 +8,7 @@ import {
   ShoppingCart,
   Tags,
 } from "lucide-react";
-import { Empty, Panel } from "../components/common.jsx";
+import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { useDialog } from "../hooks/use-dialog.js";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
@@ -71,6 +71,11 @@ export function Hunting({ data, label, unit, onChanged }) {
 
   return (
     <div className="hunting-stack">
+      <ViewHead
+        kicker="Automatismo"
+        title="Cacería"
+        description="Interruptores maestros de compra y venta, precios por mercado y el registro de capturas."
+      />
       <section className="hunting-command" aria-label="Controles de cacería">
         <div className="hunt-scan-status">
           <span className={`live ${data.state.paused ? "offline" : ""}`} />
@@ -99,7 +104,7 @@ export function Hunting({ data, label, unit, onChanged }) {
         </div>
       </section>
 
-      <Panel title="Mercados de cacería" wide>
+      <Panel title="Mercados de cacería" kicker="Precios objetivo" description="Activa cada lado y fija el máximo de compra o el mínimo de venta. Nada se guarda hasta pulsar Guardar precios." wide>
         <div className="hunt-market-list">
           {data.markets.map((market) => {
             const draft = rates[market.code] || { buyMaxRate: market.buyMaxRate, sellMinRate: market.sellMinRate };
@@ -160,7 +165,7 @@ export function Hunting({ data, label, unit, onChanged }) {
         </div>
       </Panel>
 
-      <Panel title="Ofertas cazadas" wide>
+      <Panel title="Ofertas cazadas" kicker="Registro" description="Aplicaciones automáticas con su tasa capturada frente a la mediana de referencia." wide>
         <div className="capture-heading">
           <strong>{captured.length} captura{captured.length === 1 ? "" : "s"}</strong>
         </div>

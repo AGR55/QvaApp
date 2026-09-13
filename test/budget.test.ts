@@ -70,3 +70,26 @@ test("reserva una comisión fija por cada oferta de compra", () => {
   assert.ok(Math.abs(plan.committed - 15.71) < 0.000001);
   assert.equal(plan.available, 20);
 });
+
+test("usa el total fiat remoto y respeta el redondeo transferible del mercado", () => {
+  const plan = proportionalBudgetPlan(
+    [{
+      uuid: "cup-rounded",
+      coin: "BANK_CUP",
+      type: "buy",
+      status: "open",
+      amount: 10,
+      rate: 973.7,
+      receive: 9_730,
+    }],
+    "BANK_CUP",
+    9_000,
+    980,
+    0,
+    "CUP",
+  );
+
+  assert.equal(plan.committed, 9_730);
+  assert.ok(plan.adjustments[0]!.proposedFiat <= 9_000);
+  assert.equal(plan.adjustments[0]!.rate, 973.7);
+});

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, History, Plus, Save, Trash2 } from "lucide-react";
-import { Empty, Panel, Skeleton } from "../components/common.jsx";
+import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
 import { Button, Input, Textarea } from "../components/ui.jsx";
@@ -30,7 +30,9 @@ export function Settings({ onChanged }) {
   const [draft, setDraft] = useState();
   const [revisions, setRevisions] = useState([]);
   const [reviewing, setReviewing] = useState(false);
-  const [reason, setReason] = useState("Revisión de límites y mercados desde la mesa de operaciones");
+  const [reason, setReason] = useState(
+    "Revisión de límites y mercados desde la mesa de operaciones",
+  );
   const [status, setStatus] = useState("Cargando configuración…");
   const closeReview = useCallback(() => setReviewing(false), []);
   const dialogRef = useDialog(reviewing, closeReview);
@@ -45,7 +47,9 @@ export function Settings({ onChanged }) {
         const revisionPayload = await requestJson("/api/config-revisions");
         setRevisions(revisionPayload.data || []);
       } catch {
-        setStatus("Configuración disponible; el historial se reintentará después.");
+        setStatus(
+          "Configuración disponible; el historial se reintentará después.",
+        );
       }
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "No se pudo cargar.");
@@ -84,21 +88,73 @@ export function Settings({ onChanged }) {
   const updateDetail = (marketIndex, detailIndex, key, value) =>
     setDraft((current) => ({
       ...current,
-      markets: current.markets.map((market, index) => index !== marketIndex ? market : {
-        ...market,
-        paymentDetails: market.paymentDetails.map((detail, position) => position === detailIndex ? { ...detail, [key]: value } : detail),
-      }),
+      markets: current.markets.map((market, index) =>
+        index !== marketIndex
+          ? market
+          : {
+              ...market,
+              paymentDetails: market.paymentDetails.map((detail, position) =>
+                position === detailIndex ? { ...detail, [key]: value } : detail,
+              ),
+            },
+      ),
     }));
-  const addDetail = (marketIndex) => setDraft((current) => ({
-    ...current,
-    markets: current.markets.map((market, index) => index === marketIndex ? { ...market, paymentDetails: [...market.paymentDetails, { name: "", value: "" }] } : market),
-  }));
-  const removeDetail = (marketIndex, detailIndex) => setDraft((current) => ({
-    ...current,
-    markets: current.markets.map((market, index) => index === marketIndex ? { ...market, paymentDetails: market.paymentDetails.filter((_, position) => position !== detailIndex) } : market),
-  }));
-  const addMarket = () => setDraft((current) => ({ ...current, markets: [...current.markets, { code: "NUEVO", label: "Nuevo mercado", currency: "", active: false, huntBuyEnabled: false, huntSellEnabled: false, fiatBalance: 0, buyMaxRate: 1, sellMinRate: 1, purchaseMaxQusd: 0, sellFeePercent: 0, outgoingTransferFee: 0, paymentDetails: [] }] }));
-  const removeMarket = (index) => setDraft((current) => ({ ...current, markets: current.markets.filter((_, position) => position !== index) }));
+  const addDetail = (marketIndex) =>
+    setDraft((current) => ({
+      ...current,
+      markets: current.markets.map((market, index) =>
+        index === marketIndex
+          ? {
+              ...market,
+              paymentDetails: [
+                ...market.paymentDetails,
+                { name: "", value: "" },
+              ],
+            }
+          : market,
+      ),
+    }));
+  const removeDetail = (marketIndex, detailIndex) =>
+    setDraft((current) => ({
+      ...current,
+      markets: current.markets.map((market, index) =>
+        index === marketIndex
+          ? {
+              ...market,
+              paymentDetails: market.paymentDetails.filter(
+                (_, position) => position !== detailIndex,
+              ),
+            }
+          : market,
+      ),
+    }));
+  const addMarket = () =>
+    setDraft((current) => ({
+      ...current,
+      markets: [
+        ...current.markets,
+        {
+          code: "NUEVO",
+          label: "Nuevo mercado",
+          currency: "",
+          active: false,
+          huntBuyEnabled: false,
+          huntSellEnabled: false,
+          fiatBalance: 0,
+          buyMaxRate: 1,
+          sellMinRate: 1,
+          purchaseMaxQusd: 0,
+          sellFeePercent: 0,
+          outgoingTransferFee: 0,
+          paymentDetails: [],
+        },
+      ],
+    }));
+  const removeMarket = (index) =>
+    setDraft((current) => ({
+      ...current,
+      markets: current.markets.filter((_, position) => position !== index),
+    }));
   const save = async () => {
     setStatus("Guardando revisión…");
     try {
@@ -121,11 +177,33 @@ export function Settings({ onChanged }) {
 
   return (
     <div className="settings-stack">
-      <Panel title="Límites de riesgo" wide>
-        <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
+      <ViewHead
+        kicker="Configuración activa"
+        title="Estrategia"
+        description="Límites de riesgo, comportamiento del bot y mercados. Cada cambio se revisa y queda auditado."
+      />
+      <Panel title="Límites de riesgo" kicker="Protección" wide>
+        <form
+          className="settings-form"
+          onSubmit={(event) => event.preventDefault()}
+        >
           <label>
             Máximo de ofertas propias
-            <span className="input-unit"><Input type="number" min="1" step="1" value={draft.maxOpenOffers} onChange={(event) => setDraft((current) => ({ ...current, maxOpenOffers: Number(event.target.value) }))} /><small>ofertas</small></span>
+            <span className="input-unit">
+              <Input
+                type="number"
+                min="1"
+                step="1"
+                value={draft.maxOpenOffers}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    maxOpenOffers: Number(event.target.value),
+                  }))
+                }
+              />
+              <small>ofertas</small>
+            </span>
           </label>
           {riskFields.map(([key, label, unit]) => (
             <label key={key}>
@@ -134,7 +212,11 @@ export function Settings({ onChanged }) {
                 <Input
                   type="number"
                   min="0"
-                  step={key.includes("Operations") || key.includes("Errors") ? "1" : "0.01"}
+                  step={
+                    key.includes("Operations") || key.includes("Errors")
+                      ? "1"
+                      : "0.01"
+                  }
                   value={draft.risk[key]}
                   onChange={(event) => updateRisk(key, event.target.value)}
                 />
@@ -149,7 +231,8 @@ export function Settings({ onChanged }) {
               disabled={!changes.length && !requiresInitialReview}
               onClick={() => setReviewing(true)}
             >
-              <Save aria-hidden="true" /> {requiresInitialReview && !changes.length
+              <Save aria-hidden="true" />{" "}
+              {requiresInitialReview && !changes.length
                 ? "Revisar y aprobar límites"
                 : `Revisar ${changes.length} cambio(s)`}
             </Button>
@@ -158,8 +241,11 @@ export function Settings({ onChanged }) {
         </form>
       </Panel>
 
-      <Panel title="Comportamiento del bot" wide>
-        <form className="settings-form" onSubmit={(event) => event.preventDefault()}>
+      <Panel title="Comportamiento del bot" kicker="Ritmo" wide>
+        <form
+          className="settings-form"
+          onSubmit={(event) => event.preventDefault()}
+        >
           {automationFields.map(([key, label, unit, minimum]) => (
             <label key={key}>
               {label}
@@ -169,13 +255,15 @@ export function Settings({ onChanged }) {
                   min={minimum}
                   step="1"
                   value={draft.automation[key]}
-                  onChange={(event) => setDraft((current) => ({
-                    ...current,
-                    automation: {
-                      ...current.automation,
-                      [key]: Number(event.target.value),
-                    },
-                  }))}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      automation: {
+                        ...current.automation,
+                        [key]: Number(event.target.value),
+                      },
+                    }))
+                  }
                 />
                 <small>{unit}</small>
               </span>
@@ -187,20 +275,22 @@ export function Settings({ onChanged }) {
               maxLength="79"
               rows="3"
               value={draft.automation.welcomeMessage}
-              onChange={(event) => setDraft((current) => ({
-                ...current,
-                automation: {
-                  ...current.automation,
-                  welcomeMessage: event.target.value,
-                },
-              }))}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  automation: {
+                    ...current.automation,
+                    welcomeMessage: event.target.value,
+                  },
+                }))
+              }
             />
             <small>{draft.automation.welcomeMessage.length}/79</small>
           </label>
         </form>
       </Panel>
 
-      <Panel title="Mercados y precios" wide>
+      <Panel title="Mercados y precios" kicker="Terreno" wide>
         <div className="market-settings-grid">
           {draft.markets.map((market, index) => (
             <fieldset key={market.code} className="market-settings">
@@ -217,19 +307,50 @@ export function Settings({ onChanged }) {
               </label>
               <label>
                 Código QvaPay
-                <Input value={market.code} onChange={(event) => updateMarket(index, "code", event.target.value.toUpperCase())} />
+                <Input
+                  value={market.code}
+                  onChange={(event) =>
+                    updateMarket(
+                      index,
+                      "code",
+                      event.target.value.toUpperCase(),
+                    )
+                  }
+                />
               </label>
               <label>
                 Nombre visible
-                <Input value={market.label} onChange={(event) => updateMarket(index, "label", event.target.value)} />
+                <Input
+                  value={market.label}
+                  onChange={(event) =>
+                    updateMarket(index, "label", event.target.value)
+                  }
+                />
               </label>
               <label>
                 Moneda fiat
-                <Input value={market.currency} onChange={(event) => updateMarket(index, "currency", event.target.value.toUpperCase())} />
+                <Input
+                  value={market.currency}
+                  onChange={(event) =>
+                    updateMarket(
+                      index,
+                      "currency",
+                      event.target.value.toUpperCase(),
+                    )
+                  }
+                />
               </label>
               <label>
                 Saldo fiat declarado
-                <Input type="number" min="0" step="0.01" value={market.fiatBalance} onChange={(event) => updateMarket(index, "fiatBalance", event.target.value)} />
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={market.fiatBalance}
+                  onChange={(event) =>
+                    updateMarket(index, "fiatBalance", event.target.value)
+                  }
+                />
               </label>
               <label>
                 Máximo de compra
@@ -289,7 +410,11 @@ export function Settings({ onChanged }) {
                     step="0.01"
                     value={market.outgoingTransferFee}
                     onChange={(event) =>
-                      updateMarket(index, "outgoingTransferFee", event.target.value)
+                      updateMarket(
+                        index,
+                        "outgoingTransferFee",
+                        event.target.value,
+                      )
                     }
                   />
                   <small>{market.currency}</small>
@@ -299,22 +424,81 @@ export function Settings({ onChanged }) {
                 <strong>Datos de cobro</strong>
                 {market.paymentDetails.map((detail, detailIndex) => (
                   <div key={detailIndex}>
-                    <Input aria-label={`Nombre del dato ${detailIndex + 1}`} placeholder="Campo" value={detail.name} onChange={(event) => updateDetail(index, detailIndex, "name", event.target.value)} />
-                    <Input aria-label={`Valor del dato ${detailIndex + 1}`} placeholder="Valor" value={detail.value} onChange={(event) => updateDetail(index, detailIndex, "value", event.target.value)} />
-                    <Button variant="ghost" size="icon" type="button" aria-label="Eliminar dato" onClick={() => removeDetail(index, detailIndex)}><Trash2 aria-hidden="true" /></Button>
+                    <Input
+                      aria-label={`Nombre del dato ${detailIndex + 1}`}
+                      placeholder="Campo"
+                      value={detail.name}
+                      onChange={(event) =>
+                        updateDetail(
+                          index,
+                          detailIndex,
+                          "name",
+                          event.target.value,
+                        )
+                      }
+                    />
+                    <Input
+                      aria-label={`Valor del dato ${detailIndex + 1}`}
+                      placeholder="Valor"
+                      value={detail.value}
+                      onChange={(event) =>
+                        updateDetail(
+                          index,
+                          detailIndex,
+                          "value",
+                          event.target.value,
+                        )
+                      }
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      type="button"
+                      aria-label="Eliminar dato"
+                      onClick={() => removeDetail(index, detailIndex)}
+                    >
+                      <Trash2 aria-hidden="true" />
+                    </Button>
                   </div>
                 ))}
-                <Button variant="outline" size="sm" type="button" onClick={() => addDetail(index)}><Plus aria-hidden="true" /> Añadir dato</Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={() => addDetail(index)}
+                >
+                  <Plus aria-hidden="true" /> Añadir dato
+                </Button>
               </div>
-              <Button variant="destructive" size="sm" type="button" onClick={() => removeMarket(index)}><Trash2 aria-hidden="true" /> Eliminar mercado</Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                type="button"
+                onClick={() => removeMarket(index)}
+              >
+                <Trash2 aria-hidden="true" /> Eliminar mercado
+              </Button>
             </fieldset>
           ))}
         </div>
-        <Button variant="primary" type="button" className="add-market" onClick={addMarket}><Plus aria-hidden="true" /> Añadir mercado</Button>
+        <Button
+          variant="primary"
+          type="button"
+          className="add-market"
+          onClick={addMarket}
+        >
+          <Plus aria-hidden="true" /> Añadir mercado
+        </Button>
       </Panel>
 
       {reviewing ? (
-        <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="review-title">
+        <section
+          ref={dialogRef}
+          className="review-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="review-title"
+        >
           <div>
             <p className="eyebrow">CONFIRMACIÓN CRÍTICA</p>
             <h2 id="review-title">Revisa el impacto antes de activar</h2>
@@ -334,10 +518,25 @@ export function Settings({ onChanged }) {
                 </li>
               ))}
             </ul>
-            <label className="reason-field">Motivo de la revisión<Input value={reason} minLength="5" required onChange={(event) => setReason(event.target.value)} /></label>
+            <label className="reason-field">
+              Motivo de la revisión
+              <Input
+                value={reason}
+                minLength="5"
+                required
+                onChange={(event) => setReason(event.target.value)}
+              />
+            </label>
             <div className="review-actions">
-              <Button variant="ghost" type="button" onClick={closeReview}>Volver</Button>
-              <Button variant="primary" type="button" disabled={reason.trim().length < 5} onClick={save}>
+              <Button variant="ghost" type="button" onClick={closeReview}>
+                Volver
+              </Button>
+              <Button
+                variant="primary"
+                type="button"
+                disabled={reason.trim().length < 5}
+                onClick={save}
+              >
                 <Check aria-hidden="true" /> Confirmar y activar
               </Button>
             </div>
@@ -345,7 +544,7 @@ export function Settings({ onChanged }) {
         </section>
       ) : null}
 
-      <Panel title="Historial de revisiones" wide>
+      <Panel title="Historial de revisiones" kicker="Versiones" wide>
         {revisions.length ? (
           <ol className="revision-list">
             {revisions.slice(0, 10).map((revision) => (
@@ -353,7 +552,9 @@ export function Settings({ onChanged }) {
                 <History aria-hidden="true" />
                 <span>
                   <strong>{revision.source}</strong>
-                  <small>{new Date(revision.createdAt).toLocaleString("es-CU")}</small>
+                  <small>
+                    {new Date(revision.createdAt).toLocaleString("es-CU")}
+                  </small>
                 </span>
                 <code>{revision.hash.slice(0, 12)}</code>
               </li>
@@ -369,9 +570,12 @@ export function Settings({ onChanged }) {
 
 function diffConfig(saved, draft) {
   if (!saved || !draft) return [];
-  const rootChanges = [
-    ["maxOpenOffers", "Máximo de ofertas propias"],
-  ].flatMap(([key, label]) => saved[key] === draft[key] ? [] : [{ key, label, before: saved[key], after: draft[key] }]);
+  const rootChanges = [["maxOpenOffers", "Máximo de ofertas propias"]].flatMap(
+    ([key, label]) =>
+      saved[key] === draft[key]
+        ? []
+        : [{ key, label, before: saved[key], after: draft[key] }],
+  );
   const riskChanges = riskFields.flatMap(([key, label]) =>
     saved.risk[key] === draft.risk[key]
       ? []
@@ -383,27 +587,63 @@ function diffConfig(saved, draft) {
   ].flatMap(([key, label]) =>
     saved.automation?.[key] === draft.automation?.[key]
       ? []
-      : [{
-          key: `automation:${key}`,
-          label,
-          before: saved.automation?.[key] ?? "",
-          after: draft.automation?.[key] ?? "",
-        }],
+      : [
+          {
+            key: `automation:${key}`,
+            label,
+            before: saved.automation?.[key] ?? "",
+            after: draft.automation?.[key] ?? "",
+          },
+        ],
   );
   const marketChanges = draft.markets.flatMap((market, index) => {
     const before = saved.markets[index];
-    if (!before) return [{ key: `market:${market.code}`, label: market.label, before: "Nuevo", after: "Activo" }];
-    return ["code", "label", "currency", "active", "huntBuyEnabled", "huntSellEnabled", "fiatBalance", "buyMaxRate", "sellMinRate", "purchaseMaxQusd", "sellFeePercent", "outgoingTransferFee", "paymentDetails"].flatMap(
-      (key) =>
-        JSON.stringify(before[key]) === JSON.stringify(market[key])
-          ? []
-          : [{
+    if (!before)
+      return [
+        {
+          key: `market:${market.code}`,
+          label: market.label,
+          before: "Nuevo",
+          after: "Activo",
+        },
+      ];
+    return [
+      "code",
+      "label",
+      "currency",
+      "active",
+      "huntBuyEnabled",
+      "huntSellEnabled",
+      "fiatBalance",
+      "buyMaxRate",
+      "sellMinRate",
+      "purchaseMaxQusd",
+      "sellFeePercent",
+      "outgoingTransferFee",
+      "paymentDetails",
+    ].flatMap((key) =>
+      JSON.stringify(before[key]) === JSON.stringify(market[key])
+        ? []
+        : [
+            {
               key: `market:${market.code}:${key}`,
               label: `${market.label} · ${key}`,
-              before: key === "paymentDetails" ? `${before[key].length} dato(s)` : String(before[key]),
-              after: key === "paymentDetails" ? `${market[key].length} dato(s)` : String(market[key]),
-            }],
+              before:
+                key === "paymentDetails"
+                  ? `${before[key].length} dato(s)`
+                  : String(before[key]),
+              after:
+                key === "paymentDetails"
+                  ? `${market[key].length} dato(s)`
+                  : String(market[key]),
+            },
+          ],
     );
   });
-  return [...rootChanges, ...automationChanges, ...riskChanges, ...marketChanges];
+  return [
+    ...rootChanges,
+    ...automationChanges,
+    ...riskChanges,
+    ...marketChanges,
+  ];
 }

@@ -4,7 +4,8 @@ import { rate, type TradingService } from "./trading.js";
 import { MarketConfigService, type TradingConfig } from "./market-config.js";
 import type { FiatMarket, P2pOffer } from "./types.js";
 import type { Store } from "./store.js";
-import { proportionalBudgetPlan } from "./budget.js";
+import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
+import { ownOfferFiatTotal } from "./market-math.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -114,6 +115,81 @@ export class DashboardReadModel {
   async cancelOwnOffer(uuid: string): Promise<void> {
     await this.trading.cancelOwnOffer(uuid);
   }
+  async previewBudgetRebalance(): Promise<BudgetPlan[]> {
+    await this.refreshOwnOffers();
+    return this.currentBudgetDeficits();
+  }
+  async applyBudgetRebalance(
+    requested: { uuid: string; amount: number }[],
+  ): Promise<{ applied: string[] }> {
+    if (!requested.length) throw new Error("No hay ajustes para aplicar.");
+    await this.refreshOwnOffers();
+    const snapshot = this.localSnapshot();
+    const deficits = Object.values(snapshot.budget)
+      .filter((plan): plan is BudgetPlan => (plan as BudgetPlan).deficit > 0);
+    if (!deficits.length)
+      throw new Error("El capital declarado ya cubre todas las ofertas abiertas.");
+
+    const eligible = new Set(
+      deficits.flatMap((plan) => plan.adjustments.map((item) => item.uuid)),
+    );
+    const changes = new Map<string, number>();
+    for (const adjustment of requested) {
+      if (changes.has(adjustment.uuid))
+        throw new Error(`La oferta ${adjustment.uuid} está repetida.`);
+      if (!eligible.has(adjustment.uuid))
+        throw new Error(`La oferta ${adjustment.uuid} no forma parte del reajuste vigente.`);
+      if (!Number.isFinite(adjustment.amount) || adjustment.amount < 0)
+        throw new Error("Los importes propuestos no son válidos.");
+      changes.set(adjustment.uuid, precisionQusd(adjustment.amount));
+    }
+
+    const offers = snapshot.ownOffers.filter(
+      (offer) => offer.type === "buy" && offer.status === "open",
+    );
+    for (const [uuid, amount] of changes) {
+      const offer = offers.find((item) => item.uuid === uuid);
+      if (!offer) throw new Error(`La oferta ${uuid} ya no está abierta.`);
+      if (amount > offer.amount + 0.000001)
+        throw new Error("El reajuste solo puede reducir el importe de una oferta.");
+    }
+
+    for (const plan of deficits) {
+      const market = snapshot.markets.find((item) => item.code === plan.coin);
+      if (!market) throw new Error(`No existe la configuración de ${plan.coin}.`);
+      const projected = offers
+        .filter((offer) => offer.coin === plan.coin)
+        .reduce((sum, offer) => {
+          const amount = changes.get(offer.uuid);
+          if (amount === 0) return sum;
+          if (amount === undefined)
+            return sum + Number(offer.receive) + market.outgoingTransferFee;
+          return sum + ownOfferFiatTotal(amount, offer.rate, "buy", market.currency)
+            + market.outgoingTransferFee;
+        }, 0);
+      if (projected > plan.available + 0.000001)
+        throw new Error(
+          `El ajuste de ${market.label} todavía compromete ${projected.toFixed(2)} ${market.currency}; el límite declarado es ${plan.available.toFixed(2)}.`,
+        );
+    }
+
+    const applied: string[] = [];
+    try {
+      for (const [uuid, amount] of changes) {
+        const offer = offers.find((item) => item.uuid === uuid)!;
+        if (amount === 0) await this.trading.cancelOwnOffer(uuid);
+        else await this.trading.editOwnOffer(uuid, amount, offer.rate);
+        applied.push(uuid);
+      }
+      await this.refreshOwnOffers();
+      return { applied };
+    } catch (error) {
+      const progress = applied.length
+        ? ` Se aplicaron ${applied.length} cambios antes del fallo; actualiza la vista antes de reintentar.`
+        : "";
+      throw new Error(`${error instanceof Error ? error.message : "No se pudo reajustar el capital."}${progress}`);
+    }
+  }
   async setPaused(paused: boolean): Promise<void> {
     if (paused) {
       this.trading.setPaused(true, "panel web");
@@ -201,6 +277,7 @@ export class DashboardReadModel {
             state.fiat[configured.code] ?? 0,
             strategy.buyMax[configured.code] ?? configured.buyMaxRate,
             configured.outgoingTransferFee,
+            configured.currency,
           ),
         ]),
     );
@@ -421,6 +498,15 @@ export class DashboardReadModel {
       history: this.store.marketHistory(Date.now() - 24 * 3_600_000, coin),
     };
   }
+
+  private currentBudgetDeficits(): BudgetPlan[] {
+    return Object.values(this.localSnapshot().budget)
+      .filter((plan): plan is BudgetPlan => (plan as BudgetPlan).deficit > 0);
+  }
+}
+
+function precisionQusd(value: number): number {
+  return Math.max(0, Math.floor((value + Number.EPSILON) * 100) / 100);
 }
 
 function numeric(value: unknown): number | undefined {

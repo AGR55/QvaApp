@@ -37,6 +37,8 @@ try {
   });
   sessionId = created.value.sessionId;
   await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
+  await execute("window.localStorage.setItem('qvaapply-theme', 'light'); return true");
+  await command("POST", `/session/${sessionId}/url`, { url: browserOrigin });
   await waitFor(() =>
     execute("return document.querySelector('#dashboard-password') !== null"),
   );
@@ -52,7 +54,10 @@ try {
     execute("return document.querySelector('.app-shell') !== null"),
   );
   await waitFor(() =>
-    execute("return document.body.innerText.includes('Dato guardado')"),
+    execute("return document.querySelectorAll('.header-metrics .currency-badge').length === 4"),
+  );
+  await waitFor(() =>
+    execute("return document.querySelector('.connection-state p')?.textContent === 'Vista actualizada'"),
   );
   await screenshot("/tmp/qvaapply-dashboard-desktop.png");
   const desktop = await assertPageQuality("Cockpit");
@@ -91,9 +96,7 @@ try {
   );
   await command("POST", `/session/${sessionId}/element/${hunting}/click`, {});
   await waitFor(() =>
-    execute(
-      "return document.body.innerText.includes('Cazar solo donde tú decidas')",
-    ),
+    execute("return document.querySelector('.hunting-stack') !== null"),
   );
   const huntSwitches = await execute(
     "return document.querySelectorAll('[role=switch]').length",
@@ -163,7 +166,7 @@ try {
   );
   if (
     !/0[.,]08/.test(capitalCalculation) ||
-    !/1[.,]0400/.test(capitalCalculation)
+    !/1[.,]05/.test(capitalCalculation)
   )
     throw new Error(
       `El editor no muestra comisión y mediana de Clásica: ${capitalCalculation}`,
@@ -178,6 +181,25 @@ try {
     `/session/${sessionId}/element/${closeEditor}/click`,
     {},
   );
+  const rebalance = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Reajustar capital')]",
+  );
+  await command("POST", `/session/${sessionId}/element/${rebalance}/click`, {});
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Reajustar ofertas de compra')"),
+  );
+  await executeAsync(`
+    const done = arguments[arguments.length - 1];
+    Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)))
+      .then(() => done(true));
+  `);
+  await screenshot("/tmp/qvaapply-capital-rebalance-desktop.png");
+  const closeRebalance = await find(
+    "xpath",
+    "//button[@aria-label='Cerrar reajuste']",
+  );
+  await command("POST", `/session/${sessionId}/element/${closeRebalance}/click`, {});
   const cancelOffer = await find(
     "xpath",
     "//button[normalize-space(.)='Cancelar']",
@@ -346,7 +368,7 @@ try {
     ["Capital", "Capital disponible", "/tmp/qvaapply-capital-mobile.png"],
     [
       "Cacería",
-      "Cazar solo donde tú decidas",
+      "Motor general pausado",
       "/tmp/qvaapply-hunting-mobile.png",
     ],
     [
@@ -363,9 +385,14 @@ try {
     ["Auditoría", "Ofertas bloqueadas", "/tmp/qvaapply-audit-mobile.png"],
   ];
   for (const [navLabel, visibleText, imagePath] of mobileViews) {
+    const mobileMenu = await find(
+      "xpath",
+      "//button[contains(normalize-space(.), 'Secciones')]",
+    );
+    await command("POST", `/session/${sessionId}/element/${mobileMenu}/click`, {});
     const navigationButton = await find(
       "xpath",
-      `//button[contains(normalize-space(.), '${navLabel}')]`,
+      `//nav[@id='mobile-navigation']//button[contains(normalize-space(.), '${navLabel}')]`,
     );
     await command(
       "POST",
@@ -435,6 +462,13 @@ async function metrics() {
     horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     width: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
+    overflowers: Array.from(document.querySelectorAll('body *')).map(element => ({
+      element: element.tagName.toLowerCase() + (element.className && typeof element.className === 'string' ? '.' + element.className.trim().replace(/\\s+/g, '.') : ''),
+      left: Math.round(element.getBoundingClientRect().left),
+      right: Math.round(element.getBoundingClientRect().right),
+      width: Math.round(element.getBoundingClientRect().width),
+      scrollWidth: element.scrollWidth
+    })).filter(item => item.right > document.documentElement.clientWidth + 1 || item.left < -1).slice(0, 12),
     buttons: document.querySelectorAll('button').length,
     unlabeledIconButtons: Array.from(document.querySelectorAll('button')).filter(b => !b.textContent.trim() && !b.getAttribute('aria-label')).length,
     headings: Array.from(document.querySelectorAll('h1,h2')).map(h => h.textContent.trim()).slice(0, 12)
@@ -442,6 +476,11 @@ async function metrics() {
 }
 
 async function assertPageQuality(name) {
+  await executeAsync(`
+    const done = arguments[arguments.length - 1];
+    Promise.all(document.getAnimations().map((animation) => animation.finished.catch(() => undefined)))
+      .then(() => done(true));
+  `);
   const pageMetrics = await metrics();
   if (pageMetrics.horizontalOverflow)
     throw new Error(

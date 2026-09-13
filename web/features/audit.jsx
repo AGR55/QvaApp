@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, X, XCircle } from "lucide-react";
-import { Empty, Panel } from "../components/common.jsx";
+import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { useDialog } from "../hooks/use-dialog.js";
 import { Button, IconButton } from "../components/ui.jsx";
 import { requestJson } from "../lib/http.js";
@@ -61,19 +61,24 @@ export function Audit({ data, onChanged }) {
   };
 
   return <>
+    <ViewHead
+      kicker="Confianza verificable"
+      title="Auditoría"
+      description="Salud del sistema, reservas e intenciones remotas. A la derecha, lo bloqueado que espera tu criterio."
+    />
     <div className="audit-layout">
       <div className="audit-main">
         <div className="dashboard-grid audit-health-grid">
-          <Panel title="Salud e integridad"><dl className="health-list">
+          <Panel title="Salud e integridad" kicker="Sistema"><dl className="health-list">
             <Health label="Cadena de configuración" ok={integrity} value={integrity ? "Íntegra" : "Alterada"} />
             <Health label="Esquema de datos" ok value={`v${data.integrity?.schemaVersion}`} />
             <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "Bloqueo activo" : "Ninguna"} />
             <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
           </dl></Panel>
-          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
+          <Panel title="Reservas de capital" kicker="Apartado">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
         </div>
-        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
-        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
+        <Panel title="Intenciones remotas" kicker="Trazabilidad">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
+        <Panel title="Registro de auditoría" kicker="Historial">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
         <div className="blocked-rail-head"><div><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>

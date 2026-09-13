@@ -1,13 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { config as RuntimeConfig } from "./config.js";
-import {
-  conservativeRiskLimits,
-  type RiskLimits,
-} from "./core/risk-policy.js";
+import { conservativeRiskLimits, type RiskLimits } from "./core/risk-policy.js";
 import type { Store } from "./store.js";
 
-export type PaymentDetail = { name: string; value: string };
+type PaymentDetail = { name: string; value: string };
 
 export interface MarketConfig {
   code: string;
@@ -73,8 +70,10 @@ export class MarketConfigService {
         "migration",
         "Configuración operativa importada a SQLite",
       );
-    }
-    else if (persisted && JSON.stringify(persisted) !== JSON.stringify(this.value))
+    } else if (
+      persisted &&
+      JSON.stringify(persisted) !== JSON.stringify(this.value)
+    )
       this.store.saveTradingConfig(
         this.value,
         "migration",
@@ -111,11 +110,7 @@ export class MarketConfigService {
     }));
   }
 
-  save(
-    next: TradingConfig,
-    source = "system",
-    reason?: string,
-  ): TradingConfig {
+  save(next: TradingConfig, source = "system", reason?: string): TradingConfig {
     validate(next);
     const normalized = harmonize(next);
     this.store.saveTradingConfig(normalized, source, reason);
@@ -242,13 +237,17 @@ function validate(value: unknown): asserts value is TradingConfig {
     if (
       typeof market.huntBuyEnabled !== "boolean" ||
       typeof market.huntSellEnabled !== "boolean"
-    ) throw new Error(`Control de cacería inválido para ${market.code}.`);
+    )
+      throw new Error(`Control de cacería inválido para ${market.code}.`);
     finite(market.fiatBalance, `Saldo de ${market.code}`);
     finite(market.buyMaxRate, `Máximo de compra de ${market.code}`, 0.0000001);
     finite(market.sellMinRate, `Mínimo de venta de ${market.code}`, 0.0000001);
     finite(market.purchaseMaxQusd, `Límite por compra de ${market.code}`);
     finite(market.sellFeePercent, `Comisión de venta de ${market.code}`);
-    finite(market.outgoingTransferFee, `Comisión fija de salida de ${market.code}`);
+    finite(
+      market.outgoingTransferFee,
+      `Comisión fija de salida de ${market.code}`,
+    );
     if (market.sellFeePercent >= 100)
       throw new Error(`La comisión de ${market.code} debe ser menor de 100%.`);
     if (
@@ -294,13 +293,17 @@ function normalize(value: unknown): TradingConfig {
     ...(raw as Omit<TradingConfig, "version" | "risk" | "automation">),
     version: 3,
     automation: defaultAutomation(),
-    risk: raw.version === 2 && raw.risk
-      ? raw.risk
-      : {
-          ...conservativeRiskLimits,
-          minQusdReserve: numberOr(raw.qusdReserve, conservativeRiskLimits.minQusdReserve),
-          reviewedAt: null,
-        },
+    risk:
+      raw.version === 2 && raw.risk
+        ? raw.risk
+        : {
+            ...conservativeRiskLimits,
+            minQusdReserve: numberOr(
+              raw.qusdReserve,
+              conservativeRiskLimits.minQusdReserve,
+            ),
+            reviewedAt: null,
+          },
   } as TradingConfig;
   config.markets = withMarketDefaults(config.markets);
   config.hunting = withHuntingDefaults(config.hunting);
@@ -319,7 +322,9 @@ function withMarketDefaults(markets: MarketConfig[]): MarketConfig[] {
   }));
 }
 
-function withHuntingDefaults(value: TradingConfig["hunting"] | undefined): TradingConfig["hunting"] {
+function withHuntingDefaults(
+  value: TradingConfig["hunting"] | undefined,
+): TradingConfig["hunting"] {
   return {
     buyRunning: booleanOr(value?.buyRunning, true),
     sellRunning: booleanOr(value?.sellRunning, true),
@@ -333,10 +338,9 @@ function automationFromRuntime(cfg: LegacyConfig): TradingConfig["automation"] {
     offerRefreshIntervalMinutes:
       numberOr(cfg.offerRefreshIntervalMs, 300_000) / 60_000,
     priceGuardPercent: numberOr(cfg.priceGuardPercent, 15),
-    welcomeMessage: (
-      typeof cfg.welcomeMessage === "string"
-        ? cfg.welcomeMessage
-        : defaultAutomation().welcomeMessage
+    welcomeMessage: (typeof cfg.welcomeMessage === "string"
+      ? cfg.welcomeMessage
+      : defaultAutomation().welcomeMessage
     ).slice(0, 79),
   };
 }
@@ -352,11 +356,13 @@ function defaultAutomation(): TradingConfig["automation"] {
   };
 }
 
-function validateAutomation(value: unknown): asserts value is TradingConfig["automation"] {
+function validateAutomation(
+  value: unknown,
+): asserts value is TradingConfig["automation"] {
   if (!value || typeof value !== "object")
     throw new Error("La configuración de automatización es obligatoria.");
   const automation = value as Record<string, unknown>;
-  finite(automation.scanIntervalSeconds, "Intervalo de escaneo", 5);
+  finite(automation.scanIntervalSeconds, "Intervalo de escaneo", 3);
   finite(automation.autoCancelMinutes, "Plazo de cancelación", 1);
   finite(automation.offerRefreshIntervalMinutes, "Intervalo de refresco", 1);
   finite(automation.priceGuardPercent, "Cortafuegos de precio", 1);
@@ -365,16 +371,20 @@ function validateAutomation(value: unknown): asserts value is TradingConfig["aut
   if (
     typeof automation.welcomeMessage !== "string" ||
     automation.welcomeMessage.length > 79
-  ) throw new Error("El mensaje P2P debe tener como máximo 79 caracteres.");
+  )
+    throw new Error("El mensaje P2P debe tener como máximo 79 caracteres.");
 }
 
-function validateHunting(value: unknown): asserts value is TradingConfig["hunting"] {
+function validateHunting(
+  value: unknown,
+): asserts value is TradingConfig["hunting"] {
   if (
     !value ||
     typeof value !== "object" ||
     typeof (value as Record<string, unknown>).buyRunning !== "boolean" ||
     typeof (value as Record<string, unknown>).sellRunning !== "boolean"
-  ) throw new Error("Los controles generales de cacería son inválidos.");
+  )
+    throw new Error("Los controles generales de cacería son inválidos.");
 }
 
 function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {
@@ -397,9 +407,13 @@ function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {
   if (Number(risk.maxConcurrentOperations) < 1)
     throw new Error("Debe permitirse al menos una operación simultánea.");
   if (Number(risk.maxQusdPerOperation) > Number(risk.maxConcurrentQusdExposure))
-    throw new Error("El máximo por operación no puede superar la exposición simultánea.");
+    throw new Error(
+      "El máximo por operación no puede superar la exposición simultánea.",
+    );
   if (Number(risk.maxQusdPerOperation) > Number(risk.maxDailyAppliedQusd))
-    throw new Error("El máximo por operación no puede superar el volumen diario.");
+    throw new Error(
+      "El máximo por operación no puede superar el volumen diario.",
+    );
   if (Number(risk.maxSlippagePercent) > 100)
     throw new Error("El deslizamiento máximo no puede superar 100%.");
 }

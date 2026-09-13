@@ -34,11 +34,15 @@ export function Login({ onAuthenticated }) {
         <div className="login-panel-inner">
           <div className="login-brand-lockup">
             <img
-              src="/logo/logotipo.webp"
+              src="/logo/isotipo.webp"
               alt="QvaApply"
-              width="300"
-              height="84"
+              width="44"
+              height="44"
             />
+            <span className="brand-word">
+              <strong>QvaApply</strong>
+              <small>Mesa P2P</small>
+            </span>
           </div>
           <div className="login-heading">
             <h1 id="login-title">Mesa de operaciones</h1>

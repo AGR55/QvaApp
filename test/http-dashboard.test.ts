@@ -96,6 +96,36 @@ test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () =
   await app.close();
 });
 
+test("previsualiza y aplica un reajuste de capital con confirmación CSRF", async () => {
+  const calls: unknown[] = [];
+  const readModel = {
+    previewBudgetRebalance: async () => [{ coin: "CLASICA", deficit: 2.5, adjustments: [] }],
+    applyBudgetRebalance: async (adjustments: unknown) => {
+      calls.push(adjustments);
+      return { applied: ["offer-1"] };
+    },
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const headers = { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf };
+
+  const preview = await app.inject({ method: "POST", url: "/api/offers/rebalance/preview", headers, payload: {} });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.json<{ data: { coin: string }[] }>().data[0]!.coin, "CLASICA");
+
+  const applied = await app.inject({
+    method: "POST",
+    url: "/api/offers/rebalance/apply",
+    headers,
+    payload: { adjustments: [{ uuid: "offer-1", amount: 8.25 }] },
+  });
+  assert.equal(applied.statusCode, 200);
+  assert.deepEqual(calls, [[{ uuid: "offer-1", amount: 8.25 }]]);
+  await app.close();
+});
+
 test("Fastify valida y aplica controles de cacería por mercado", async () => {
   const updates: unknown[] = [];
   const app = buildDashboard({ updateHunting: (value: unknown) => updates.push(value) } as never, { password, trustedOrigin: origin });

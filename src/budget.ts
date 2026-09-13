@@ -1,4 +1,5 @@
 import type { FiatMarket } from "./types.js";
+import { ownOfferFiatTotal } from "./market-math.js";
 
 export interface BudgetOffer {
   uuid: string;
@@ -7,8 +8,9 @@ export interface BudgetOffer {
   status: string;
   amount: number;
   rate: number;
+  receive?: number;
 }
-export interface BudgetAdjustment {
+interface BudgetAdjustment {
   uuid: string;
   coin: FiatMarket;
   rate: number;
@@ -17,6 +19,7 @@ export interface BudgetAdjustment {
   currentFiat: number;
   proposedFiat: number;
   releasedFiat: number;
+  action: "edit" | "cancel";
 }
 export interface BudgetPlan {
   coin: FiatMarket;
@@ -36,6 +39,7 @@ export function proportionalBudgetPlan(
   available: number,
   maximumRate: number,
   outgoingTransferFee = 0,
+  currency = "",
 ): BudgetPlan {
   const invalid: string[] = [];
   const candidates = offers.filter((offer) => {
@@ -63,7 +67,7 @@ export function proportionalBudgetPlan(
     ? outgoingTransferFee
     : 0;
   const committed = candidates.reduce(
-    (sum, offer) => sum + offer.amount * offer.rate + safeFee,
+    (sum, offer) => sum + currentFiatTotal(offer, currency) + safeFee,
     0,
   );
   if (committed <= safeAvailable)
@@ -76,7 +80,7 @@ export function proportionalBudgetPlan(
       invalid,
     };
   const variableCommitted = candidates.reduce(
-    (sum, offer) => sum + offer.amount * offer.rate,
+    (sum, offer) => sum + currentFiatTotal(offer, currency),
     0,
   );
   const factor = variableCommitted > 0
@@ -90,10 +94,15 @@ export function proportionalBudgetPlan(
     invalid,
     adjustments: candidates
       .map((offer) => {
-        const proposedQusd = precision(offer.amount * factor);
-        const currentFiat = offer.amount * offer.rate + safeFee;
+        const proposedQusd = fitAmount(
+          offer.amount * factor,
+          offer.rate,
+          currency,
+          Math.max(0, currentFiatTotal(offer, currency) * factor),
+        );
+        const currentFiat = currentFiatTotal(offer, currency) + safeFee;
         const proposedFiat = proposedQusd > 0
-          ? proposedQusd * offer.rate + safeFee
+          ? ownOfferFiatTotal(proposedQusd, offer.rate, "buy", currency) + safeFee
           : 0;
         return {
           uuid: offer.uuid,
@@ -104,8 +113,29 @@ export function proportionalBudgetPlan(
           currentFiat,
           proposedFiat,
           releasedFiat: currentFiat - proposedFiat,
+          action: proposedQusd > 0 ? "edit" as const : "cancel" as const,
         };
       })
       .filter((adjustment) => adjustment.proposedQusd < adjustment.currentQusd),
   };
+}
+
+function currentFiatTotal(offer: BudgetOffer, currency: string): number {
+  return Number.isFinite(offer.receive) && Number(offer.receive) >= 0
+    ? Number(offer.receive)
+    : ownOfferFiatTotal(offer.amount, offer.rate, "buy", currency);
+}
+
+function fitAmount(
+  desired: number,
+  rate: number,
+  currency: string,
+  fiatLimit: number,
+): number {
+  let amount = precision(desired);
+  while (
+    amount > 0 &&
+    ownOfferFiatTotal(amount, rate, "buy", currency) > fiatLimit + 0.000001
+  ) amount = precision(amount - 0.01);
+  return Math.max(0, amount);
 }

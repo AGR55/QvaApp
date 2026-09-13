@@ -26,7 +26,7 @@ import {
 import { planLiquidity } from "./core/liquidity-plan.js";
 
 type RuntimeConfig = typeof Config;
-export interface BlockedOfferNotification {
+interface BlockedOfferNotification {
   kind: "blocked-offer";
   alert: {
     uuid: string;
@@ -40,7 +40,7 @@ export interface BlockedOfferNotification {
     updatedAt: number;
   };
 }
-export interface OperationNotification {
+interface OperationNotification {
   kind: "operation-applied" | "reconciliation-required";
   uuid: string;
   coin: FiatMarket;
@@ -52,7 +52,7 @@ type Notify = (
   event?: BlockedOfferNotification | OperationNotification,
 ) => Promise<void>;
 
-export type MarketDecision = "auto_buy" | "manual_sell" | "blocked" | "ignored";
+type MarketDecision = "auto_buy" | "manual_sell" | "blocked" | "ignored";
 export interface MarketItem {
   offer: P2pOffer;
   rate: number;
@@ -65,13 +65,6 @@ export interface MarketSnapshot {
   scannedAt: number;
   average?: P2pAverage;
 }
-
-export const marketLabel = (coin: FiatMarket): string => coin;
-export const marketCurrency = (_coin: FiatMarket): string => "USD";
-// Compatibilidad temporal para los comandos de Telegram; las decisiones usan
-// la comprobación dinámica de la instancia.
-export const isFiatMarket = (value: string): value is FiatMarket =>
-  Boolean(value);
 
 export class TradingEngine {
   private averagesCache?: {

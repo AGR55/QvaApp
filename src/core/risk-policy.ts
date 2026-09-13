@@ -4,9 +4,9 @@ export type RiskDecisionKind =
   | "blocked"
   | "ignored";
 
-export type RiskCheckStatus = "pass" | "fail" | "warning" | "not_applicable";
+type RiskCheckStatus = "pass" | "fail" | "warning" | "not_applicable";
 
-export interface RiskCheck {
+interface RiskCheck {
   code: string;
   label: string;
   status: RiskCheckStatus;
@@ -29,7 +29,7 @@ export interface RiskLimits {
   counterpartyCooldownSeconds: number;
 }
 
-export interface RiskOpportunity {
+interface RiskOpportunity {
   uuid: string;
   market: string;
   side: "buy_qusd" | "sell_qusd";

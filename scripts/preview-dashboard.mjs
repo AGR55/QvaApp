@@ -70,8 +70,13 @@ const snapshot = {
   hunting, automation,
   transactions: [], strategy: { buyMax: { BANK_CUP: 930, BANDECPREPAGO: 1.06 }, sellMin: { BANK_CUP: 1010, BANDECPREPAGO: 1.12 }, reserve: 10, maxOpenOffers: 10 },
   markets: markets.map(({ paymentDetails, ...market }) => ({ ...market, paymentDetailsCount: paymentDetails.length })),
-  availability: { qusd: { reported: 68.5, reserve: 10, available: 58.5, committedSell: 0 }, fiat: { BANK_CUP: { declared: 45000, committed: 0, available: 45000 }, BANDECPREPAGO: { declared: 110, committed: 0, available: 110 }, CLASICA: { declared: 40, committed: 10.48, available: 29.52 } } },
-  discoveredMarkets: [], budget: {}, history: [], marketHistory,
+  availability: { qusd: { reported: 68.5, reserve: 10, available: 58.5, committedSell: 0 }, fiat: { BANK_CUP: { declared: 45000, committed: 0, available: 45000 }, BANDECPREPAGO: { declared: 110, committed: 0, available: 110 }, CLASICA: { declared: 8, committed: 10.48, available: 0 } } },
+  discoveredMarkets: [], budget: {
+    CLASICA: {
+      coin: "CLASICA", available: 8, committed: 10.48, deficit: 2.48, invalid: [],
+      adjustments: [{ uuid: "own-01", coin: "CLASICA", rate: 1.04, currentQusd: 10, proposedQusd: 7.61, currentFiat: 10.48, proposedFiat: 7.9944, releasedFiat: 2.4856, action: "edit" }],
+    },
+  }, history: [], marketHistory,
   rankings: { rotation: [{ code: "BANK_CUP", label: "Transferencia CUP", observed: 210, eligible: 12 }], potential: [{ buy: "BANDECPREPAGO", sell: "BANK_CUP", amount: 15, profit: 450, marginPercent: 2.1 }] },
   activity: [{ createdAt: now - 30000, action: "price_guard_block", uuid: "blocked-demo-01", detail: "4.2% por encima de la mediana de compra." }],
   alerts: [{ uuid: "blocked-demo-01", coin: "BANK_CUP", offerType: "buy", amount: 20, receive: 21080, rate: 1054, referenceRate: 1012, decision: "blocked", reason: "4.2% por encima de la mediana de compra", createdAt: now - 60000, updatedAt: now - 30000, resolvedAt: null }],
@@ -86,7 +91,7 @@ const snapshot = {
 const model = {
   snapshot: async () => snapshot,
   localSnapshot: () => snapshot,
-  refreshBalance: async () => { throw new Error("QvaPay no respondió en la simulación de red lenta"); },
+  refreshBalance: async () => ({ data: snapshot.balance, updatedAt: Date.now() }),
   refreshOwnOffers: async () => ({ data: snapshot.ownOffers, updatedAt: Date.now() }),
   refreshTransactions: async () => ({ data: snapshot.transactions, updatedAt: Date.now() }),
   refreshMarket: async (coin) => ({ data: snapshot.market[coin], updatedAt: Date.now() }),
@@ -119,6 +124,8 @@ const model = {
   createOwnOffer: async () => snapshot.ownOffers[0],
   editOwnOffer: async () => undefined,
   cancelOwnOffer: async () => undefined,
+  previewBudgetRebalance: async () => Object.values(snapshot.budget),
+  applyBudgetRebalance: async (adjustments) => ({ applied: adjustments.map((item) => item.uuid) }),
   previewBlockedOffer: async (uuid) => ({ uuid, coin: "BANK_CUP", offerType: "buy", amount: 20, receive: 21080, rate: 1054, referenceRate: 1012, deviationPercent: 4.15, plannedCancellations: [{ uuid: "own-01", amount: 10, rate: 1040 }], liquidityReason: "Se liberarán 10 QUSD de una oferta propia." }),
   applyBlockedOffer: async () => "Aplicación de demostración confirmada.",
   dismissBlockedOffer: () => undefined,

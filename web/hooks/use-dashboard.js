@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { requestJson } from "../lib/http.js";
+import { dashboardResources } from "../lib/dashboard-resources.js";
 
 const RETRY_DELAYS = [0, 1_200, 3_000];
 
@@ -63,46 +64,7 @@ export function useDashboard(view, market, setMarket) {
   );
 
   const resourcesForView = useCallback(
-    (snapshot) => {
-      if (!snapshot) return [];
-      if (view === "resumen") {
-        return [
-          ["balance", "/api/live/balance"],
-          ["ownOffers", "/api/live/own-offers"],
-          ...snapshot.markets
-            .filter((item) => item.active)
-            .map((item) => [
-              `market:${item.code}`,
-              `/api/live/markets/${encodeURIComponent(item.code)}`,
-            ]),
-        ];
-      }
-      if (view === "mercado" && market)
-        return [
-          [
-            `market:${market}`,
-            `/api/live/markets/${encodeURIComponent(market)}`,
-          ],
-        ];
-      if (view === "ofertas")
-        return [
-          ["balance", "/api/live/balance"],
-          ["ownOffers", "/api/live/own-offers"],
-        ];
-      if (view === "caceria")
-        return snapshot.markets
-          .filter(
-            (item) =>
-              item.active && (item.huntBuyEnabled || item.huntSellEnabled),
-          )
-          .map((item) => [
-            `market:${item.code}`,
-            `/api/live/markets/${encodeURIComponent(item.code)}`,
-          ]);
-      if (view === "operaciones")
-        return [["operations", "/api/live/operations"]];
-      return [];
-    },
+    (snapshot) => dashboardResources(view, market, snapshot),
     [market, view],
   );
 

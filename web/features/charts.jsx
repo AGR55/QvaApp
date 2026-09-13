@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Empty, Panel, Skeleton } from "../components/common.jsx";
+import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { Button, Tabs } from "../components/ui.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
@@ -51,7 +51,12 @@ export function Charts({ markets }) {
     latest = rows.at(-1);
   return (
     <div className="page-stack">
-      <Panel title="Fluctuación de precios" wide>
+      <ViewHead
+        kicker="Últimas 24 horas"
+        title="Gráficas"
+        description="Medianas de compra y venta por mercado. La curva es la memoria del libro."
+      />
+      <Panel title="Fluctuación de precios" kicker="Medianas" wide>
           <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: <MarketIdentity code={market.code} label={market.label} size="sm" showCode={false} /> }))} />
         {error ? <div className="resource-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((value) => value + 1)}>Reintentar</Button></div> : null}
         {data && values.length ? (
