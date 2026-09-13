@@ -2514,6 +2514,23 @@ tbody td small {
 .rebalance-heading > div:nth-child(2) {
   flex: 1;
 }
+.rebalance-freshness {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  margin: 10px 0 2px !important;
+  padding: 6px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-control);
+  background: var(--surface-wash);
+  color: var(--muted) !important;
+  font-family: var(--font-mono);
+  font-size: 10.5px !important;
+}
+.rebalance-freshness.stale {
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--line-soft));
+  color: var(--warning-ink) !important;
+}
 .rebalance-market {
   border-top: 1px solid var(--line-soft);
   padding: 14px 0;

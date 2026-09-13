@@ -31,7 +31,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
         body: JSON.stringify({}),
         timeoutMs: 25_000,
       });
-      setRebalance({ plans: payload.data, error: "" });
+      setRebalance({ ...payload.data, error: "" });
     } catch (error) {
       setRebalance({ plans: [], error: error instanceof Error ? error.message : "No se pudo preparar el reajuste." });
     } finally {
@@ -170,14 +170,47 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
 }
 
 function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
+  const [preview, setPreview] = useState(initial);
   const [values, setValues] = useState(() => Object.fromEntries(
     initial.plans.flatMap((plan) => plan.adjustments.map((item) => [item.uuid, String(item.proposedQusd)])),
   ));
   const [error, setError] = useState(initial.error || "");
   const [applying, setApplying] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [job, setJob] = useState();
   const close = useCallback(() => onClose(), [onClose]);
   const dialogRef = useDialog(true, close);
+  const refreshPreview = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const payload = await requestJson("/api/offers/rebalance/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refresh: true }),
+        timeoutMs: 25_000,
+      });
+      const next = payload.data;
+      setPreview(next);
+      setValues((current) => Object.fromEntries(
+        next.plans.flatMap((plan) => plan.adjustments.map((item) => [
+          item.uuid,
+          current[item.uuid] ?? String(item.proposedQusd),
+        ])),
+      ));
+      setError("");
+      return next;
+    } catch (cause) {
+      setError(
+        `Se conserva el cálculo local. ${cause instanceof Error ? cause.message : "No se pudieron actualizar las ofertas."}`,
+      );
+      return undefined;
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+  useEffect(() => {
+    if (!job) void refreshPreview();
+  }, [job, refreshPreview]);
   useEffect(() => {
     if (!job?.id || ["completed", "partial", "failed"].includes(job.state)) return undefined;
     let active = true;
@@ -199,7 +232,9 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
       window.clearInterval(timer);
     };
   }, [job?.id, job?.state, onChanged]);
-  const summaries = initial.plans.map((plan) => {
+  const plans = preview.plans || [];
+  const previewIsStale = !preview.updatedAt || Date.now() - preview.updatedAt > 60_000;
+  const summaries = plans.map((plan) => {
     const market = data.markets.find((item) => item.code === plan.coin);
     const proposed = plan.committed - plan.adjustments.reduce((sum, item) => sum + item.currentFiat, 0)
       + plan.adjustments.reduce((sum, item) => {
@@ -209,31 +244,37 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
       }, 0);
     return { plan, market, proposed, valid: proposed <= plan.available + 0.000001 };
   });
-  const invalidAmount = initial.plans.some((plan) => plan.adjustments.some((item) => {
+  const invalidAmount = plans.some((plan) => plan.adjustments.some((item) => {
     const amount = Number(values[item.uuid]);
     return !Number.isFinite(amount) || amount < 0 || amount > item.currentQusd + 0.000001;
   }));
-  const valid = initial.plans.length > 0 && !invalidAmount && summaries.every((item) => item.valid);
+  const valid = plans.length > 0 && !invalidAmount && summaries.every((item) => item.valid);
   const apply = async () => {
     if (!valid || applying) return;
     setApplying(true);
     setError("");
     try {
+      let activePlans = plans;
+      if (previewIsStale) {
+        const refreshed = await refreshPreview();
+        if (!refreshed) return;
+        activePlans = refreshed.plans;
+      }
       const payload = await requestJson("/api/offers/rebalance/apply", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          adjustments: initial.plans.flatMap((plan) => plan.adjustments.map((item) => ({
+          adjustments: activePlans.flatMap((plan) => plan.adjustments.map((item) => ({
             uuid: item.uuid,
-            amount: Number(values[item.uuid]),
+            amount: Number(values[item.uuid] ?? item.proposedQusd),
           }))),
         }),
         timeoutMs: 10_000,
       });
       setJob(payload.data);
-      setApplying(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo aplicar el reajuste.");
+    } finally {
       setApplying(false);
     }
   };
@@ -244,9 +285,16 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
         <header className="rebalance-heading">
           <div className="dialog-icon warning-icon"><Scale aria-hidden="true" /></div>
           <div><p className="eyebrow">CONTROL DE EXPOSICIÓN</p><h2 id="rebalance-title">Reajustar ofertas de compra</h2></div>
-          <IconButton variant="ghost" onClick={close} disabled={applying} aria-label="Cerrar reajuste"><X aria-hidden="true" /></IconButton>
+          <IconButton variant="ghost" onClick={close} aria-label="Cerrar reajuste"><X aria-hidden="true" /></IconButton>
         </header>
         <p>Reduce las cantidades para que cada mercado vuelva a quedar dentro del fiat declarado. Las tasas actuales se conservan.</p>
+        <p className={`rebalance-freshness ${previewIsStale ? "stale" : ""}`}>
+          {refreshing
+            ? "Actualizando ofertas con QvaPay…"
+            : preview.updatedAt
+              ? `Ofertas verificadas ${new Date(preview.updatedAt).toLocaleString("es-CU")}.`
+              : "Todavía no hay una lista de ofertas verificada."}
+        </p>
         {summaries.map(({ plan, market, proposed, valid: marketValid }) => (
           <section className="rebalance-market" key={plan.coin}>
             <div className="rebalance-market-summary">
@@ -278,7 +326,7 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
         {job ? <RebalanceProgress job={job} /> : null}
         <div className="offer-modal-actions">
           <Button variant="ghost" onClick={close}>{job ? "Cerrar" : "Cancelar"}</Button>
-          {!job ? <Button variant="primary" onClick={apply} disabled={!valid || applying}>{applying ? "Enviando…" : "Aceptar reajuste"}</Button> : null}
+          {!job ? <Button variant="primary" onClick={apply} disabled={!valid || applying || (refreshing && previewIsStale)}>{applying ? "Validando…" : previewIsStale ? "Validar y aplicar" : "Aceptar reajuste"}</Button> : null}
         </div>
       </div>
     </section>

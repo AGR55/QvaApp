@@ -16,7 +16,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 12;
+const LATEST_SCHEMA_VERSION = 13;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -568,6 +568,11 @@ export class Store {
       if (this.currentSchemaVersion() < 12) {
         this.ensureColumn("market_config", "icon_url", "TEXT");
         this.ensureColumn("market_config", "color", "TEXT");
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (12, ?)",
+        ).run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 13) {
         this.db.exec(`
           CREATE TABLE IF NOT EXISTS capital_rebalance_jobs (
             id TEXT PRIMARY KEY,
@@ -581,7 +586,7 @@ export class Store {
             ON capital_rebalance_jobs(state, updated_at);
         `);
         this.db.prepare(
-          "INSERT INTO schema_migrations(version, applied_at) VALUES (12, ?)",
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (13, ?)",
         ).run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.

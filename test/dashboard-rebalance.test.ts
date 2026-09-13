@@ -69,6 +69,31 @@ test("el reajuste responde con un trabajo y evita releer ofertas por cada edici�
   store.close();
 });
 
+test("previsualiza inmediatamente con la caché y la actualiza por separado", async () => {
+  const { dashboard, store, listCalls } = setup();
+  const cached = dashboard.budgetRebalancePreview();
+  assert.equal(cached.plans[0]?.coin, "BANK_CUP");
+  assert.ok(cached.updatedAt);
+  assert.equal(listCalls(), 0);
+
+  const refreshed = await dashboard.refreshBudgetRebalancePreview();
+  assert.equal(refreshed.plans[0]?.coin, "BANK_CUP");
+  assert.equal(listCalls(), 1);
+  assert.ok((refreshed.updatedAt ?? 0) >= (cached.updatedAt ?? 0));
+  store.close();
+});
+
+test("no crea un reajuste con ofertas locales vencidas", () => {
+  const { dashboard, store } = setup();
+  const cached = store.loadRemoteResource("own-offers")!;
+  store.saveRemoteResource("own-offers", cached.data, 1);
+  assert.throws(
+    () => dashboard.startBudgetRebalance([{ uuid: "buy-1", amount: 10 }]),
+    /actualizar las ofertas/i,
+  );
+  store.close();
+});
+
 test("una edición incierta detiene el trabajo para conciliación sin repetirla", async () => {
   let attempts = 0;
   const { dashboard, store } = setup(async () => {

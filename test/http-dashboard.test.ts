@@ -140,8 +140,10 @@ test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () =
 test("previsualiza y aplica un reajuste de capital con confirmación CSRF", async () => {
   const calls: unknown[] = [];
   const job = { id: "rebalance-1", state: "pending", adjustments: [], createdAt: 1, updatedAt: 1 };
+  const preview = { plans: [{ coin: "CLASICA", deficit: 2.5, adjustments: [] }], updatedAt: 123 };
   const readModel = {
-    previewBudgetRebalance: async () => [{ coin: "CLASICA", deficit: 2.5, adjustments: [] }],
+    budgetRebalancePreview: () => preview,
+    refreshBudgetRebalancePreview: async () => ({ ...preview, updatedAt: 456 }),
     startBudgetRebalance: (adjustments: unknown) => {
       calls.push(adjustments);
       return job;
@@ -154,9 +156,14 @@ test("previsualiza y aplica un reajuste de capital con confirmación CSRF", asyn
   const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
   const headers = { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf };
 
-  const preview = await app.inject({ method: "POST", url: "/api/offers/rebalance/preview", headers, payload: {} });
-  assert.equal(preview.statusCode, 200);
-  assert.equal(preview.json<{ data: { coin: string }[] }>().data[0]!.coin, "CLASICA");
+  const cachedPreview = await app.inject({ method: "POST", url: "/api/offers/rebalance/preview", headers, payload: {} });
+  assert.equal(cachedPreview.statusCode, 200);
+  assert.equal(cachedPreview.json<{ data: { plans: { coin: string }[]; updatedAt: number } }>().data.plans[0]!.coin, "CLASICA");
+  assert.equal(cachedPreview.json<{ data: { updatedAt: number } }>().data.updatedAt, 123);
+
+  const refreshedPreview = await app.inject({ method: "POST", url: "/api/offers/rebalance/preview", headers, payload: { refresh: true } });
+  assert.equal(refreshedPreview.statusCode, 200);
+  assert.equal(refreshedPreview.json<{ data: { updatedAt: number } }>().data.updatedAt, 456);
 
   const applied = await app.inject({
     method: "POST",

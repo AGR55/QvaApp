@@ -234,9 +234,25 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v12-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v13-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
+});
+
+test("repara una base v12 registrada sin la tabla de reajustes", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-rebalance-v12-"));
+  const initial = new Store(dataDir);
+  initial.close();
+  const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"));
+  db.exec("DROP TABLE capital_rebalance_jobs");
+  db.prepare("DELETE FROM schema_migrations WHERE version = 13").run();
+  db.close();
+
+  const migrated = new Store(dataDir);
+  assert.equal(migrated.schemaVersion(), 13);
+  const job = migrated.createRebalanceJob("repair-check", [], 1);
+  assert.equal(job.id, "repair-check");
+  migrated.close();
 });
 
 test("mantiene ofertas bloqueadas accionables y respeta un descarte sin cambios", () => {

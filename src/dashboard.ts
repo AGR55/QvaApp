@@ -29,6 +29,13 @@ type TransactionView = {
   p2p?: { amount?: number; receive?: number; status?: string };
 };
 
+const REBALANCE_OWN_OFFERS_MAX_AGE_MS = 60_000;
+
+export interface BudgetRebalancePreview {
+  plans: BudgetPlan[];
+  updatedAt: number | null;
+}
+
 export function marginCalculation(
   buyRate: number,
   sellRate: number,
@@ -157,14 +164,29 @@ export class DashboardReadModel {
   async cancelOwnOffer(uuid: string): Promise<void> {
     await this.trading.cancelOwnOffer(uuid);
   }
-  async previewBudgetRebalance(): Promise<BudgetPlan[]> {
+  budgetRebalancePreview(): BudgetRebalancePreview {
+    const resource = this.store.loadRemoteResource<OfferView[]>("own-offers");
+    return {
+      plans: this.currentBudgetDeficits(),
+      updatedAt: resource?.updatedAt ?? null,
+    };
+  }
+  async refreshBudgetRebalancePreview(): Promise<BudgetRebalancePreview> {
     await this.refreshOwnOffers();
-    return this.currentBudgetDeficits();
+    return this.budgetRebalancePreview();
   }
   startBudgetRebalance(
     requested: { uuid: string; amount: number }[],
   ): RebalanceJob {
     if (!requested.length) throw new Error("No hay ajustes para aplicar.");
+    const ownOffers = this.store.loadRemoteResource<OfferView[]>("own-offers");
+    if (
+      !ownOffers ||
+      Date.now() - ownOffers.updatedAt > REBALANCE_OWN_OFFERS_MAX_AGE_MS
+    )
+      throw new Error(
+        "Es necesario actualizar las ofertas antes de aplicar el reajuste.",
+      );
     const current = this.store.pendingRebalanceJobs(1)[0];
     if (current)
       throw new Error(`Ya existe un reajuste en curso (${current.id}). Espera a que termine o requiera atención.`);

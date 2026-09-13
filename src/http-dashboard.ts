@@ -339,12 +339,19 @@ export function buildDashboard(
       throw new ClientInputError("Mercado inválido.");
     return { data: await readModel.marketAnalytics(coin), source: "sqlite" };
   });
-  app.post("/api/offers/rebalance/preview", {
+  app.post<{ Body: { refresh?: boolean } }>("/api/offers/rebalance/preview", {
     schema: {
-      body: { type: "object", additionalProperties: false },
+      body: {
+        type: "object",
+        additionalProperties: false,
+        properties: { refresh: { type: "boolean" } },
+      },
     },
-  }, async () => ({
-    data: await clientAction(() => readModel.previewBudgetRebalance()),
+  }, async (request) => ({
+    data: await clientAction(() =>
+      request.body.refresh
+        ? readModel.refreshBudgetRebalancePreview()
+        : readModel.budgetRebalancePreview()),
   }));
   app.post<{
     Body: { adjustments: { uuid: string; amount: number }[] };
