@@ -1,4 +1,11 @@
-import React, { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import React, {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createRoot } from "react-dom/client";
 import {
   BarChart3,
@@ -79,6 +86,9 @@ function App() {
   const [view, setView] = useState(() => initialView());
   const [market, setMarket] = useState("");
   const [notice, setNotice] = useState(null);
+  const noticeRef = useRef(null);
+  const noticeQueueRef = useRef([]);
+  const seenNoticeIdsRef = useRef(new Set());
   const [theme, setTheme] = useState(() => getInitialTheme());
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { data, status, resources, online, refresh } = useDashboard(
@@ -99,6 +109,56 @@ function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavOpen]);
+  const showNotification = useCallback((incoming) => {
+    if (!incoming) return;
+    const id = incoming.id || incoming.version;
+    if (id && seenNoticeIdsRef.current.has(id)) return;
+    if (id) seenNoticeIdsRef.current.add(id);
+    if (noticeRef.current) {
+      noticeQueueRef.current.push(incoming);
+      return;
+    }
+    noticeRef.current = incoming;
+    setNotice(incoming);
+    playNotificationTone();
+  }, []);
+  const dismissNotification = useCallback((current) => {
+    noticeRef.current = null;
+    setNotice(null);
+    const id = current?.id || current?.version;
+    if (id)
+      void requestJson(`/api/notifications/${encodeURIComponent(id)}/ack`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      }).catch(() => undefined);
+    const next = noticeQueueRef.current.shift();
+    if (next) {
+      noticeRef.current = next;
+      setNotice(next);
+      playNotificationTone();
+    }
+  }, []);
+  useEffect(() => {
+    if (!session?.authenticated) return undefined;
+    let active = true;
+    const loadNotifications = async () => {
+      try {
+        const payload = await requestJson("/api/notifications", {
+          timeoutMs: 5_000,
+        });
+        if (active && payload.data?.[0]) showNotification(payload.data[0]);
+      } catch {
+        /* Web Push y Telegram continúan disponibles si el panel está desconectado. */
+      }
+    };
+    void loadNotifications();
+    const timer = window.setInterval(() => void loadNotifications(), 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [session?.authenticated, showNotification]);
   const navigate = useCallback((next) => {
     setView(next);
     setMobileNavOpen(false);
@@ -174,15 +234,11 @@ function App() {
         <div className="brand">
           <div className="brand-lockup">
             <img
-              src="/logo/isotipo.webp"
+              src="/logo/logotipo.webp"
               alt="QvaApply"
-              width="34"
+              width="200"
               height="34"
             />
-            <span className="brand-word">
-              <strong>QvaApply</strong>
-              <small>Mesa P2P</small>
-            </span>
           </div>
         </div>
         <nav aria-label="Navegación principal">
@@ -208,18 +264,20 @@ function App() {
         </nav>
         <div className="sidebar-foot" aria-label="Estado operativo">
           <div className="foot-row">
-            <span
-              className={`live ${data.state.paused ? "offline" : ""}`}
-              aria-hidden="true"
-            />
-            <span>
-              {data.state.paused ? "Pausado" : "Activo"} ·{" "}
-              {data.state.mode === "real" ? "Real" : "Simulación"}
-            </span>
+            <span>{data.state.paused ? "Inactivo" : "Activo"}</span>
+          </div>
+          <span className="foot-separator">-</span>
+          <div
+            className={`connection-state ${online ? "" : "offline"}`}
+            role="status"
+            aria-live="polite"
+            title={status}
+          >
+            <span>{online ? "Conectado" : "Sin conexión"}</span>
           </div>
         </div>
       </aside>
-      <main className="content" id="main-content" tabIndex="-1">
+      <main className="main-area" id="main-content" tabIndex="-1">
         <header className="topbar">
           <div
             className="header-metrics"
@@ -233,32 +291,21 @@ function App() {
               value={money(data.availability.qusd.available)}
               tone="qusd"
             />
-            <CurrencyBadge
-              src="/icons/cup.png"
-              alt="CUP"
-              value={money(data.availability.fiat.BANK_CUP?.available || 0)}
-              tone="cup"
-              danger={isOvercommitted(data.availability.fiat.BANK_CUP)}
-              deficit={fiatDeficit(data.availability.fiat.BANK_CUP)}
-            />
-            <CurrencyBadge
-              src="/icons/clasica.png"
-              alt="Clásica"
-              value={money(data.availability.fiat.CLASICA?.available || 0)}
-              tone="clasica"
-              danger={isOvercommitted(data.availability.fiat.CLASICA)}
-              deficit={fiatDeficit(data.availability.fiat.CLASICA)}
-            />
-            <CurrencyBadge
-              src="/icons/tropical.png"
-              alt="Prepago"
-              value={money(
-                data.availability.fiat.BANDECPREPAGO?.available || 0,
-              )}
-              tone="prepago"
-              danger={isOvercommitted(data.availability.fiat.BANDECPREPAGO)}
-              deficit={fiatDeficit(data.availability.fiat.BANDECPREPAGO)}
-            />
+            {data.markets.filter((item) => item.active).map((item) => {
+              const availability = data.availability.fiat[item.code];
+              return (
+                <CurrencyBadge
+                  key={item.code}
+                  src={item.iconUrl}
+                  alt={item.label}
+                  fallback={item.label}
+                  value={money(availability?.available || 0)}
+                  color={item.color}
+                  danger={isOvercommitted(availability)}
+                  deficit={fiatDeficit(availability)}
+                />
+              );
+            })}
           </div>
           <div className="top-actions">
             <Button
@@ -272,7 +319,7 @@ function App() {
               <span>Secciones</span>
               <ChevronDown aria-hidden="true" />
             </Button>
-            <PushControl onNotification={setNotice} />
+            <PushControl onNotification={showNotification} />
             <IconButton
               className="theme-toggle"
               onClick={() =>
@@ -359,106 +406,109 @@ function App() {
             </div>
           ) : null}
         </header>
-        <div
-          className={`connection-state ${online ? "" : "offline"}`}
-          role="status"
-          aria-live="polite"
-        >
-          <span />
-          <p>{status}</p>
-        </div>
-        {notice ? (
-          <aside className="push-toast" role="status" aria-live="polite">
-            <Bell aria-hidden="true" />
-            <div>
-              <strong>
-                {notice.type === "blocked-offer"
-                  ? "Oferta requiere revisión"
-                  : notice.type === "operation-applied"
-                    ? "Aplicación confirmada"
-                    : "Conciliación necesaria"}
-              </strong>
-              <p>
-                {notice.alert?.coin || "QvaApply"}
-                {notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}
-                {notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}
-              </p>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={() => {
-                  const next =
-                    new URL(
-                      notice.url || "/?view=auditoria",
-                      window.location.origin,
-                    ).searchParams.get("view") || "auditoria";
-                  navigate(next);
-                  setNotice(null);
-                }}
+        <div className="content">
+          {notice ? (
+            <aside className="push-toast" role="alert" aria-live="assertive">
+              <Bell aria-hidden="true" />
+              <div>
+                <strong>
+                  {notice.type === "blocked-offer"
+                    ? "Oferta requiere revisión"
+                    : notice.type === "operation-applied"
+                      ? "Aplicación confirmada"
+                      : notice.type === "rebalance-completed"
+                        ? "Reajuste completado"
+                        : notice.type === "rebalance-attention"
+                          ? "Reajuste requiere atención"
+                          : "Conciliación necesaria"}
+                </strong>
+                <p>
+                  {notice.alert?.coin || "QvaApply"}
+                  {notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}
+                  {notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}
+                </p>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => {
+                    const next =
+                      new URL(
+                        notice.url || "/?view=auditoria",
+                        window.location.origin,
+                      ).searchParams.get("view") || "auditoria";
+                    navigate(next);
+                    dismissNotification(notice);
+                  }}
+                >
+                  Abrir detalle
+                </Button>
+              </div>
+              <IconButton
+                variant="ghost"
+                size="icon"
+                className="dialog-close"
+                onClick={() => dismissNotification(notice)}
+                aria-label="Cerrar aviso"
               >
-                Abrir detalle
-              </Button>
-            </div>
-            <IconButton
-              variant="ghost"
-              size="icon"
-              className="dialog-close"
-              onClick={() => setNotice(null)}
-              aria-label="Cerrar aviso"
-            >
-              <X />
-            </IconButton>
-          </aside>
-        ) : null}
-        {view === "resumen" ? (
-          <Cockpit
-            data={data}
-            label={label}
-            unit={unit}
-            onChanged={refresh}
-            resources={resources}
-          />
-        ) : null}
-        {view === "mercado" ? (
-          <Market
-            data={data}
-            market={market}
-            setMarket={setMarket}
-            selected={selected}
-            label={label}
-            unit={unit}
-            resource={resources[`market:${market}`]}
-          />
-        ) : null}
-        {view === "ofertas" ? (
-          <Capital
-            data={data}
-            label={label}
-            unit={unit}
-            onChanged={refresh}
-            resources={resources}
-          />
-        ) : null}
-        {view === "operaciones" ? (
-          <Operations
-            data={data}
-            label={label}
-            unit={unit}
-            onChanged={refresh}
-          />
-        ) : null}
-        {view === "caceria" ? (
-          <Hunting data={data} label={label} unit={unit} onChanged={refresh} />
-        ) : null}
-        {view === "graficas" ? (
-          <Suspense fallback={<Empty>Cargando gráficas…</Empty>}>
-            <Charts markets={data.markets} />
-          </Suspense>
-        ) : null}
-        {view === "configuracion" ? <Settings onChanged={refresh} /> : null}
-        {view === "auditoria" ? (
-          <Audit data={data} onChanged={refresh} />
-        ) : null}
+                <X />
+              </IconButton>
+            </aside>
+          ) : null}
+          {view === "resumen" ? (
+            <Cockpit
+              data={data}
+              label={label}
+              unit={unit}
+              onChanged={refresh}
+              resources={resources}
+            />
+          ) : null}
+          {view === "mercado" ? (
+            <Market
+              data={data}
+              market={market}
+              setMarket={setMarket}
+              selected={selected}
+              label={label}
+              unit={unit}
+              resource={resources[`market:${market}`]}
+            />
+          ) : null}
+          {view === "ofertas" ? (
+            <Capital
+              data={data}
+              label={label}
+              unit={unit}
+              onChanged={refresh}
+              resources={resources}
+            />
+          ) : null}
+          {view === "operaciones" ? (
+            <Operations
+              data={data}
+              label={label}
+              unit={unit}
+              onChanged={refresh}
+            />
+          ) : null}
+          {view === "caceria" ? (
+            <Hunting
+              data={data}
+              label={label}
+              unit={unit}
+              onChanged={refresh}
+            />
+          ) : null}
+          {view === "graficas" ? (
+            <Suspense fallback={<Empty>Cargando gráficas…</Empty>}>
+              <Charts markets={data.markets} />
+            </Suspense>
+          ) : null}
+          {view === "configuracion" ? <Settings onChanged={refresh} /> : null}
+          {view === "auditoria" ? (
+            <Audit data={data} onChanged={refresh} />
+          ) : null}
+        </div>
       </main>
     </div>
   );
@@ -479,17 +529,18 @@ function getInitialTheme() {
     : "light";
 }
 
-function CurrencyBadge({ src, alt, value, tone, danger = false, deficit = 0 }) {
+function CurrencyBadge({ src, alt, fallback, value, tone = "market", color, danger = false, deficit = 0 }) {
   const title = danger
     ? `${value} ${alt} disponibles · faltan ${money(deficit)} ${alt} para cubrir ofertas`
     : `${value} ${alt} disponibles`;
   return (
     <span
       className={`currency-badge tone-${tone}${danger ? " is-danger" : ""}`}
+      style={{ "--market-accent": color || "#6f8494" }}
       title={title}
       aria-label={title}
     >
-      <img src={src} alt={alt} />
+      {src ? <img src={src} alt={alt} /> : <span className="currency-fallback" aria-hidden="true">{String(fallback || alt).trim().slice(0, 1).toUpperCase()}</span>}
       <strong>{value}</strong>
     </span>
   );
@@ -521,7 +572,6 @@ function PushControl({ onNotification }) {
     const onMessage = (event) => {
       if (event.data?.type !== "qvaapply-notification") return;
       onNotification(event.data.payload || {});
-      playNotificationTone();
     };
     navigator.serviceWorker.addEventListener("message", onMessage);
     void navigator.serviceWorker

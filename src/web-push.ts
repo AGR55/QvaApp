@@ -63,21 +63,35 @@ export class WebPushService {
 
   async notifyBlocked(alert: BlockedOfferPush): Promise<void> {
     const version = `${alert.uuid}:${alert.rate}:${alert.reason}`;
-    await this.notify({ type: "blocked-offer", alert, version, url: `/?view=auditoria&offer=${encodeURIComponent(alert.uuid)}` });
+    await this.notify({ id: version, type: "blocked-offer", alert, version, url: `/?view=auditoria&offer=${encodeURIComponent(alert.uuid)}` });
   }
 
   async notifyOperation(input: { uuid: string; coin: string; amount: number; kind: "operation-applied" | "reconciliation-required" }): Promise<void> {
+    const version = `${input.kind}:${input.uuid}`;
     await this.notify({
+      id: version,
       type: input.kind,
-      version: `${input.kind}:${input.uuid}`,
+      version,
       alert: { uuid: input.uuid, coin: input.coin, amount: input.amount },
       url: `/?view=${input.kind === "operation-applied" ? "operaciones" : "auditoria"}&operation=${encodeURIComponent(input.uuid)}`,
+    });
+  }
+
+  async notifyRebalance(input: { uuid: string; kind: "rebalance-completed" | "rebalance-attention"; reason: string }): Promise<void> {
+    const version = `${input.kind}:${input.uuid}`;
+    await this.notify({
+      id: version,
+      type: input.kind,
+      version,
+      alert: { uuid: input.uuid, reason: input.reason },
+      url: `/?view=ofertas&rebalance=${encodeURIComponent(input.uuid)}`,
     });
   }
 
   private async notify(payloadValue: Record<string, unknown> & { version: string }): Promise<void> {
     const payload = JSON.stringify(payloadValue);
     const expired = new Set<string>();
+    const failures: unknown[] = [];
     await Promise.all(this.subscriptions().map(async (subscription) => {
       const endpointHash = createHash("sha256").update(subscription.endpoint).digest("hex").slice(0, 20);
       const dedupeKey = `web_push:sent:${payloadValue.version}:${endpointHash}`;
@@ -88,10 +102,13 @@ export class WebPushService {
       } catch (error) {
         const status = pushStatus(error);
         if (status === 404 || status === 410) expired.add(subscription.endpoint);
+        else failures.push(error);
       }
     }));
     if (expired.size)
       this.saveSubscriptions(this.subscriptions().filter((item) => !expired.has(item.endpoint)));
+    if (failures.length)
+      throw new AggregateError(failures, "No se pudo entregar Web Push.");
   }
 
   private loadKeys(): webpush.VapidKeys {

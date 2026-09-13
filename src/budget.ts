@@ -133,9 +133,19 @@ function fitAmount(
   fiatLimit: number,
 ): number {
   let amount = precision(desired);
-  while (
-    amount > 0 &&
-    ownOfferFiatTotal(amount, rate, "buy", currency) > fiatLimit + 0.000001
-  ) amount = precision(amount - 0.01);
-  return Math.max(0, amount);
+  while (amount > 0) {
+    // A CUP purchase must produce at least one transferable ten-peso unit.
+    // During budget fitting, falling below it means cancelling, not aborting
+    // the complete dashboard snapshot with a domain validation error.
+    if (
+      currency.trim().toUpperCase() === "CUP" &&
+      amount * rate < 10 - 0.00000001
+    ) return 0;
+    if (
+      ownOfferFiatTotal(amount, rate, "buy", currency) <=
+        fiatLimit + 0.000001
+    ) return amount;
+    amount = precision(amount - 0.01);
+  }
+  return 0;
 }

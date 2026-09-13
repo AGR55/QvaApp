@@ -63,6 +63,78 @@ test("persiste la configuración nueva únicamente en SQLite", () => {
   store.close();
 });
 
+test("persiste la identidad visual de mercados añadidos desde Estrategia", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-market-identity-"));
+  const store = new Store(dataDir);
+  const config = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  const next = config.current();
+  next.markets.push({
+    code: "ETECSA",
+    label: "Saldo Etecsa",
+    currency: "CUP",
+    iconUrl: "/market-icons/etecsa-identity.png",
+    color: "#2f8fcb",
+    active: true,
+    huntBuyEnabled: true,
+    huntSellEnabled: true,
+    fiatBalance: 0,
+    buyMaxRate: 900,
+    sellMinRate: 950,
+    purchaseMaxQusd: 0,
+    sellFeePercent: 0,
+    outgoingTransferFee: 0,
+    paymentDetails: [],
+  });
+  config.save(next, "panel");
+
+  const reopened = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  assert.equal(reopened.find("ETECSA")?.iconUrl, "/market-icons/etecsa-identity.png");
+  assert.equal(reopened.find("ETECSA")?.color, "#2f8fcb");
+  store.close();
+});
+
+test("guarda iconos de mercado administrados y rechaza contenido disfrazado", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-market-icon-"));
+  const store = new Store(dataDir);
+  const config = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "base64");
+  const icon = config.saveMarketIcon("etecsa.png", "image/png", png);
+
+  assert.match(icon.url, /^\/market-icons\/[a-f0-9]{32}\.png$/);
+  assert.equal(existsSync(icon.path), true);
+  assert.throws(
+    () => config.saveMarketIcon("falso.png", "image/png", Buffer.from("no es png")),
+    /contenido no coincide/i,
+  );
+  store.close();
+});
+
+test("persiste el progreso de un reajuste para retomarlo después de reiniciar", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-rebalance-job-"));
+  const store = new Store(dataDir);
+  const adjustment = {
+    uuid: "offer-etecsa",
+    coin: "ETECSA",
+    currentAmount: 20,
+    targetAmount: 12,
+    rate: 900,
+    receive: 18_000,
+    action: "edit" as const,
+    state: "pending" as const,
+  };
+  store.createRebalanceJob("rebalance-1", [adjustment], 123);
+  store.updateRebalanceJob("rebalance-1", "applying", [
+    { ...adjustment, state: "applying" },
+  ]);
+  store.close();
+
+  const reopened = new Store(dataDir);
+  const pending = reopened.pendingRebalanceJobs();
+  assert.equal(pending[0]?.id, "rebalance-1");
+  assert.equal(pending[0]?.adjustments[0]?.state, "applying");
+  reopened.close();
+});
+
 test("unifica la reserva e impide configuraciones financieras incoherentes", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-config-invariants-"));
   const store = new Store(dataDir);
@@ -162,7 +234,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v10-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v12-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });

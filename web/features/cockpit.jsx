@@ -1,26 +1,33 @@
-import React, { useCallback, useState } from "react";
-import { AlertOctagon, Pause, Play, Radio, ShieldCheck } from "lucide-react";
-import { Freshness, List, Panel, Skeleton, ViewHead } from "../components/common.jsx";
+import React, { useState } from "react";
+import { AlertOctagon, Pause, Play } from "lucide-react";
+import {
+  Freshness,
+  List,
+  Panel,
+  Skeleton,
+  ViewHead,
+} from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
-import { useDialog } from "../hooks/use-dialog.js";
 import { Button } from "../components/ui.jsx";
 
 export function Cockpit({ data, label, unit, onChanged, resources }) {
   const first = data.rankings.potential?.[0];
   const applyReadyAt = data.state.mutationBudget?.applyReadyAt ?? 0;
-  const [confirmReal, setConfirmReal] = useState(false);
   const [status, setStatus] = useState("");
-  const closeReal = useCallback(() => setConfirmReal(false), []);
-  const dialogRef = useDialog(confirmReal, closeReal);
   const control = async (change) => {
     setStatus("Aplicando control…");
     try {
-      await requestJson("/api/control", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(change) });
-      setConfirmReal(false);
+      await requestJson("/api/control", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(change),
+      });
       setStatus("Control aplicado y auditado.");
       await onChanged();
-    } catch (error) { setStatus(error instanceof Error ? error.message : "No se pudo aplicar."); }
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "No se pudo aplicar.");
+    }
   };
   return (
     <div className="page-stack">
@@ -30,32 +37,55 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         description="La decisión del momento, el capital por mercado y el consumo de límites. Si algo exige tu atención, está arriba del todo."
       />
       <section className="control-deck" aria-label="Controles operativos">
-        <div><span className={`live ${data.state.paused ? "offline" : ""}`} /> <strong>{data.state.paused ? "Automatización pausada" : "Automatización activa"}</strong><small>Modo {data.state.mode}</small></div>
-        <Button variant="outline" onClick={() => control({ paused: !data.state.paused })}>{data.state.paused ? <Play /> : <Pause />}{data.state.paused ? "Reanudar" : "Pausar"}</Button>
-        <Button variant="outline" onClick={() => data.state.mode === "real" ? control({ mode: "simulation", paused: true }) : setConfirmReal(true)}><Radio />{data.state.mode === "real" ? "Pasar a simulación" : "Preparar modo real"}</Button>
-        <Button variant="destructive" className={data.risk.usage.emergencyStop ? "emergency active" : "emergency"} onClick={() => control({ emergencyStop: !data.risk.usage.emergencyStop })}><AlertOctagon />{data.risk.usage.emergencyStop ? "Desbloquear emergencia" : "Parada de emergencia"}</Button>
-      </section>
-      {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
-      <section className="decision-strip">
         <div>
-          <span>Decisión ahora</span>
+          <span className={`live ${data.state.paused ? "offline" : ""}`} />{" "}
           <strong>
-            {first
-              ? `${label(first.buy)} → ${label(first.sell)}`
-              : "Sin ciclo positivo elegible"}
+            {data.state.paused
+              ? "Automatización pausada"
+              : "Automatización activa"}
           </strong>
-          <p>
-            {first
-              ? `Margen potencial ${money(first.marginPercent)}% · revisa antes de operar.`
-              : "Esperando una tasa que cumpla límites y capital."}
-          </p>
+          <small>{data.state.paused ? "Inactivo" : "Activo"}</small>
         </div>
+        <Button
+          variant="outline"
+          onClick={() => control({ paused: !data.state.paused })}
+        >
+          {data.state.paused ? <Play /> : <Pause />}
+          {data.state.paused ? "Reanudar" : "Pausar"}
+        </Button>
+        <Button
+          variant="destructive"
+          className={
+            data.risk.usage.emergencyStop ? "emergency active" : "emergency"
+          }
+          onClick={() =>
+            control({ emergencyStop: !data.risk.usage.emergencyStop })
+          }
+        >
+          <AlertOctagon />
+          {data.risk.usage.emergencyStop
+            ? "Desbloquear emergencia"
+            : "Parada de emergencia"}
+        </Button>
       </section>
+      {status ? (
+        <p className="detail" role="status" aria-live="polite">
+          {status}
+        </p>
+      ) : null}
       <div className="freshness-row">
-        <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
-        <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
+        <Freshness
+          state={resources.balance}
+          cachedAt={data.freshness?.balance}
+        />
+        <Freshness
+          state={resources.ownOffers}
+          cachedAt={data.freshness?.ownOffers}
+        />
       </div>
-      {resources.balance?.loading && !data.freshness?.balance ? <Skeleton label="Consultando balance" /> : null}
+      {resources.balance?.loading && !data.freshness?.balance ? (
+        <Skeleton label="Consultando balance" />
+      ) : null}
       <div className="market-grid">
         {data.markets.map((market) => {
           const availability = data.availability.fiat[market.code] || {},
@@ -80,31 +110,84 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
           );
         })}
       </div>
-      <Panel title="Consumo de límites globales" kicker="Riesgo" description="Cuánto del margen de seguridad queda antes de frenar en automático." wide>
+      <Panel
+        title="Consumo de límites globales"
+        kicker="Riesgo"
+        description="Cuánto del margen de seguridad queda antes de frenar en automático."
+        wide
+      >
         <div className="risk-meter-grid">
-          <RiskMeter label="Exposición simultánea" value={data.risk.usage.exposureQusd} maximum={data.risk.limits.maxConcurrentQusdExposure} unit="QUSD" />
-          <RiskMeter label="Volumen aplicado hoy" value={data.risk.usage.dailyAppliedQusd} maximum={data.risk.limits.maxDailyAppliedQusd} unit="QUSD" />
-          <RiskMeter label="Operaciones activas" value={data.risk.usage.activeOperations} maximum={data.risk.limits.maxConcurrentOperations} unit="" />
-          <RiskMeter label="Reserva mínima" value={data.availability.qusd.reported} maximum={data.risk.limits.minQusdReserve} unit="QUSD" inverse />
+          <RiskMeter
+            label="Exposición simultánea"
+            value={data.risk.usage.exposureQusd}
+            maximum={data.risk.limits.maxConcurrentQusdExposure}
+            unit="QUSD"
+          />
+          <RiskMeter
+            label="Volumen aplicado hoy"
+            value={data.risk.usage.dailyAppliedQusd}
+            maximum={data.risk.limits.maxDailyAppliedQusd}
+            unit="QUSD"
+          />
+          <RiskMeter
+            label="Operaciones activas"
+            value={data.risk.usage.activeOperations}
+            maximum={data.risk.limits.maxConcurrentOperations}
+            unit=""
+          />
+          <RiskMeter
+            label="Reserva mínima"
+            value={data.availability.qusd.reported}
+            maximum={data.risk.limits.minQusdReserve}
+            unit="QUSD"
+            inverse
+          />
         </div>
       </Panel>
-      <Panel title="Cobertura del escáner" kicker="Vigilancia" description="Qué revisó la última ronda y si el presupuesto de aplicación está libre." wide>
+      <Panel
+        title="Cobertura del escáner"
+        kicker="Vigilancia"
+        description="Qué revisó la última ronda y si el presupuesto de aplicación está libre."
+        wide
+      >
         <div className="market-grid">
           {(data.state.scanCoverage?.markets || []).map((market) => (
             <article className="market-card" key={market.coin}>
-              <span>{label(market.coin)} · {market.sides.map((side) => side === "sell" ? "compras" : "ventas").join(" + ")}</span>
+              <span>
+                {label(market.coin)} ·{" "}
+                {market.sides
+                  .map((side) => (side === "sell" ? "compras" : "ventas"))
+                  .join(" + ")}
+              </span>
               <strong>{market.total} ofertas revisadas</strong>
-              <p><b>{market.eligible} elegibles</b> · {market.blocked} bloqueadas</p>
-              <small>Última cobertura {new Date(data.state.scanCoverage.at).toLocaleTimeString("es-CU")}</small>
+              <p>
+                <b>{market.eligible} elegibles</b> · {market.blocked} bloqueadas
+              </p>
+              <small>
+                Última cobertura{" "}
+                {new Date(data.state.scanCoverage.at).toLocaleTimeString(
+                  "es-CU",
+                )}
+              </small>
             </article>
           ))}
           {!data.state.scanCoverage?.markets?.length ? (
-            <article className="market-card"><span>Sin ronda registrada</span><strong>Esperando al escáner</strong><small>Se conservará aquí la última lectura completa.</small></article>
+            <article className="market-card">
+              <span>Sin ronda registrada</span>
+              <strong>Esperando al escáner</strong>
+              <small>Se conservará aquí la última lectura completa.</small>
+            </article>
           ) : null}
           <article className="market-card">
             <span>Presupuesto de aplicación</span>
-            <strong>{Date.now() >= applyReadyAt ? "Disponible" : "En espera segura"}</strong>
-            <p>{Date.now() >= applyReadyAt ? "Puede aplicar a una oportunidad" : `Disponible en ${Math.ceil((applyReadyAt - Date.now()) / 1000)} s`}</p>
+            <strong>
+              {Date.now() >= applyReadyAt ? "Disponible" : "En espera segura"}
+            </strong>
+            <p>
+              {Date.now() >= applyReadyAt
+                ? "Puede aplicar a una oportunidad"
+                : `Disponible en ${Math.ceil((applyReadyAt - Date.now()) / 1000)} s`}
+            </p>
           </article>
         </div>
       </Panel>
@@ -135,7 +218,6 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
           />
         </Panel>
       </div>
-      {confirmReal ? <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="real-mode-title"><div><ShieldCheck aria-hidden="true" /><p className="eyebrow">CAMBIO CRÍTICO</p><h2 id="real-mode-title">Activar capacidad de operar con dinero real</h2><p>El modo real habilita aplicaciones automáticas dentro de todos los límites configurados. Los pagos fiat seguirán siendo manuales.</p><div className="review-actions"><Button variant="ghost" onClick={closeReal}>Volver</Button><Button variant="primary" onClick={() => control({ mode: "real", paused: true })}>Confirmar modo real, aún pausado</Button></div></div></section> : null}
     </div>
   );
 }
@@ -144,5 +226,24 @@ function RiskMeter({ label, value, maximum, unit, inverse = false }) {
   const raw = maximum > 0 ? value / maximum : value > 0 ? 1 : 0;
   const percent = Math.max(0, Math.min(100, raw * 100));
   const danger = inverse ? value < maximum : value >= maximum;
-  return <div className={`risk-meter ${danger ? "at-limit" : ""}`}><span>{label}</span><strong>{money(value)} {unit}</strong><small>de {money(maximum)} {unit}</small><div aria-label={`${label}: ${money(percent)} por ciento`} role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percent}><i style={{ width: `${percent}%` }} /></div></div>;
+  return (
+    <div className={`risk-meter ${danger ? "at-limit" : ""}`}>
+      <span>{label}</span>
+      <strong>
+        {money(value)} {unit}
+      </strong>
+      <small>
+        de {money(maximum)} {unit}
+      </small>
+      <div
+        aria-label={`${label}: ${money(percent)} por ciento`}
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow={percent}
+      >
+        <i style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
 }

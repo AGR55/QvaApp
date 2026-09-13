@@ -48,6 +48,6 @@ La normalización decimal de `GET /p2p` también se comprobó mediante una lectu
 
 El plan inicial mencionaba Vitest, Testing Library, Playwright y ESLint. La implementación final usa el runner nativo de Node con `tsx`, pruebas de integración Fastify, TypeScript con todas las opciones estrictas, pruebas de fronteras arquitectónicas y Chromium/WebDriver con axe-core. Esta combinación reduce dependencias y cubre los mismos riesgos relevantes para esta aplicación local. Prettier y ESLint no forman parte del gate; formato, código no usado, tipos y límites entre módulos se verifican mediante TypeScript y las pruebas de arquitectura.
 
-## Validación humana antes del modo real
+## Validación humana antes de operar
 
-No se ejecutó ninguna mutación real contra QvaPay. Antes de activar dinero real, el propietario debe seguir la lista de `docs/OPERATIONS.md`, iniciar sesión con `pnpm login`, confirmar que el panel muestra la integridad correcta y hacer primero una ronda completa en simulación. La primera operación real debe ser de importe mínimo y supervisada; el pago continúa siendo exclusivamente manual.
+No se ejecutó ninguna mutación real contra QvaPay durante esta verificación. Antes de iniciar el servicio, el propietario debe seguir la lista de `docs/OPERATIONS.md`, iniciar sesión con `pnpm login` y confirmar que el panel muestra la integridad correcta. La primera operación tras cambios debe ser de importe mínimo y supervisada; el pago continúa siendo exclusivamente manual.

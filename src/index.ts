@@ -12,6 +12,12 @@ import { DashboardReadModel } from "./dashboard.js";
 import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
+import { NotificationDispatcher } from "./notification-dispatcher.js";
+
+if (!config.realTradingAllowed)
+  throw new Error(
+    "QvaApply opera únicamente en real; configura CONFIRM_REAL_TRADING=true antes de iniciar.",
+  );
 
 const store = new Store(config.dataDir);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
@@ -21,12 +27,40 @@ const qva = new QvaPayClient(() => session.token(), {
 });
 const bot = new Bot(config.telegramToken);
 const webPush = new WebPushService(store);
+const notifications = new NotificationDispatcher(store, {
+  telegram: async (notification) => {
+    const keyboard = notification.operationUuid && notification.kind === "operation-applied"
+      ? new InlineKeyboard()
+          .text("✅ Voy a pagar", `ack:${notification.operationUuid}`)
+          .text("✖ Cancelar", `cancel:${notification.operationUuid}`)
+      : undefined;
+    await bot.api.sendMessage(String(config.adminChatId), notification.message, {
+      ...(keyboard ? { reply_markup: keyboard } : {}),
+    });
+  },
+  webPush: async (notification) => {
+    const event = notification.payload;
+    if (notification.kind === "blocked-offer")
+      await webPush.notifyBlocked(event.alert as never);
+    else if (notification.kind === "rebalance-completed" || notification.kind === "rebalance-attention")
+      await webPush.notifyRebalance(event as never);
+    else await webPush.notifyOperation(event as never);
+  },
+});
 const trading = new TradingEngine(
   store,
   qva,
   config,
   marketConfig,
   async (message, uuid, event) => {
+    if (event) {
+      await notifications.publish({
+        message,
+        ...(uuid ? { operationUuid: uuid } : {}),
+        event,
+      });
+      return;
+    }
     const keyboard = uuid
       ? new InlineKeyboard()
           .text("✅ Voy a pagar", `ack:${uuid}`)
@@ -36,23 +70,39 @@ const trading = new TradingEngine(
       bot.api.sendMessage(String(config.adminChatId), message, {
         ...(keyboard ? { reply_markup: keyboard } : {}),
       }),
-      event?.kind === "blocked-offer"
-        ? webPush.notifyBlocked(event.alert)
-        : event
-          ? webPush.notifyOperation(event)
-          : Promise.resolve(),
     ]);
-    deliveries.forEach((result, index) => {
+    deliveries.forEach((result) => {
       if (result.status === "rejected") store.audit(
         "notification_warning",
-        `${index === 0 ? "Telegram" : "Web Push"}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
+        `Telegram: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
         uuid,
       );
     });
   },
 );
+const dashboardReadModel = new DashboardReadModel(
+  trading,
+  qva,
+  config,
+  store,
+  marketConfig,
+  async (job, event) => {
+    const completed = job.adjustments.filter((item) => item.state === "completed").length;
+    const message = event === "completed"
+      ? `✅ Reajuste completado: ${completed} oferta(s) actualizadas.`
+      : `⚠️ El reajuste aplicó ${completed} de ${job.adjustments.length} cambio(s) y requiere atención.`;
+    await notifications.publish({
+      message,
+      event: {
+        kind: event === "completed" ? "rebalance-completed" : "rebalance-attention",
+        uuid: job.id,
+        alert: { uuid: job.id, reason: job.error ?? message },
+      },
+    });
+  },
+);
 const dashboardServer = await startDashboard(
-  new DashboardReadModel(trading, qva, config, store, marketConfig),
+  dashboardReadModel,
   config.dashboardPort,
   {
     password: config.dashboardAdminPassword,
@@ -85,7 +135,7 @@ bot.command("balance", (ctx) =>
 bot.command("activate", (ctx) =>
   execute(ctx, async () => {
     await trading.activate();
-    return `▶️ <b>Automatización activada</b>\nModo: ${trading.mode().toUpperCase()}.`;
+    return "▶️ <b>Automatización activada</b>";
   }),
 );
 bot.command("pause", (ctx) => {
@@ -111,18 +161,9 @@ bot.command("fiat", (ctx) =>
     const coin = parseMarket(marketText);
     const amount = Number(amountText);
     if (!coin || !Number.isFinite(amount) || amount < 0)
-      throw new Error("Uso: /fiat cup|prepago|clasica IMPORTE");
+      throw new Error(`Uso: /fiat ${marketHint()} IMPORTE`);
     trading.setFiatBalance(coin, amount);
     return `💳 <b>Saldo ${trading.marketLabel(coin)} actualizado</b>\n${money(amount)} ${trading.marketCurrency(coin)} disponibles para comprar QUSD.`;
-  }),
-);
-bot.command("mode", (ctx) =>
-  execute(ctx, async () => {
-    const mode = argument(ctx.msg?.text);
-    if (mode !== "simulation" && mode !== "real")
-      throw new Error("Uso: /mode simulation|real");
-    trading.setMode(mode);
-    return `⚙️ <b>Modo ${mode === "real" ? "REAL" : "SIMULACIÓN"}</b>\nLa automatización continúa ${trading.isPaused() ? "pausada" : "activa"}; pulsa ▶️ Activar cuando estés listo.`;
   }),
 );
 bot.command("refresh", (ctx) =>
@@ -138,7 +179,7 @@ bot.command("offers", (ctx) => void showOwnOffers(ctx));
 bot.command(
   "market",
   (ctx) =>
-    void showMarket(ctx, parseMarket(argument(ctx.msg?.text)) ?? "BANK_CUP"),
+    void showMarket(ctx, parseMarket(argument(ctx.msg?.text)) ?? defaultMarket()),
 );
 bot.command("apply", (ctx) =>
   execute(ctx, async () => trading.applyManually(argument(ctx.msg?.text))),
@@ -261,17 +302,20 @@ scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );
 scheduler.register("mutation_reconcile", 60_000, () =>
-  trading.reconcilePendingStandaloneApplications().then(() => undefined),
+  trading.reconcilePendingStandaloneMutations().then(() => undefined),
 );
 scheduler.register("refresh", 5_000, () => trading.refreshOwnOffers());
 scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),
 );
+scheduler.register("notifications", 15_000, () => notifications.deliverDue());
+scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudgetRebalances());
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
+  trading.initializeProductionState();
   const standaloneReconciled =
-    await trading.reconcilePendingStandaloneApplications();
+    await trading.reconcilePendingStandaloneMutations();
   const reconciliations = await trading.reconcilePendingWorkflows();
   const unresolved = reconciliations.filter((item) => item.outcome === "unresolved");
   if (reconciliations.length)
@@ -282,9 +326,11 @@ async function bootstrap(): Promise<void> {
   if (standaloneReconciled)
     store.audit(
       "startup_mutation_reconciliation",
-      `${standaloneReconciled} aplicación(es) incierta(s) resuelta(s) con QvaPay.`,
+      `${standaloneReconciled} mutación(es) independiente(s) resuelta(s) con QvaPay.`,
     );
   scheduler.start();
+  void scheduler.run("notifications");
+  void scheduler.run("capital_rebalance");
   void scheduler.run("fiat_sync");
   void scheduler.run("operation_sync");
   void startPolling();
@@ -298,7 +344,7 @@ async function bootstrap(): Promise<void> {
 async function showPanelAction(ctx: Context, view: string): Promise<void> {
   if (view === "status" || view === "home") return showDashboard(ctx);
   if (view === "mine") return showOwnOffers(ctx);
-  if (view === "market") return showMarket(ctx, "BANK_CUP");
+  if (view === "market") return showMarket(ctx, defaultMarket());
   if (view.startsWith("market:")) {
     const coin = resolveMarket(view.slice("market:".length));
     if (!coin) throw new Error("Mercado no configurado.");
@@ -346,7 +392,7 @@ async function showDashboard(ctx: Context, notice?: string): Promise<void> {
   const text = [
     "<b>QvaApply · Centro de operaciones</b>",
     "━━━━━━━━━━━━━━━━━━━━",
-    `${state.paused ? "⏸ <b>PAUSADO</b>" : "▶️ <b>ACTIVO</b>"} · Modo: <b>${state.mode.toUpperCase()}</b>`,
+    `${state.paused ? "⏸ <b>INACTIVO</b>" : "▶️ <b>ACTIVO</b>"}`,
     `💰 QvaPay: <b>${balance}</b>`,
     `💳 ${fiat}`,
     movements,
@@ -423,7 +469,7 @@ async function showStrategy(ctx: Context): Promise<void> {
     `🛡 Reserva QUSD: <b>${money(trading.strategy().reserve)} QUSD</b>`,
     `⏱ Autocancelación: <b>${marketConfig.current().automation.autoCancelMinutes} min</b>`,
     `🔄 Refresco de propias: <b>${state.refresh ? "activo" : "apagado"}</b>`,
-    "\nUsa /fiat cup|prepago|clasica, /mode y /refresh para modificar la estrategia.",
+    `\nUsa /fiat ${marketHint()} IMPORTE y /refresh para modificar la estrategia.`,
   ].join("\n");
   return render(ctx, text, backKeyboard());
 }
@@ -494,7 +540,7 @@ function ownOfferCard(offer: {
   updated_at?: string;
 }): string {
   const label = offer.type === "buy" ? "🔵 COMPRA" : "🟢 VENTA";
-  const coin = trading.isMarket(offer.coin) ? offer.coin : "BANK_CUP";
+  const coin = trading.isMarket(offer.coin) ? offer.coin : defaultMarket();
   const currency = trading.marketCurrency(coin);
   const refreshed = trading.lastRefresh(offer.uuid);
   return `${label} · <b>${money(offer.amount)} QUSD</b> · ${trading.marketLabel(coin)}\nTasa: <b>${money(offer.receive / offer.amount)} ${currency}/QUSD</b> · Total: ${money(offer.receive)} ${currency}\nEstado: ${escapeHtml(offer.status)} · ${relativeTime(offer.updated_at)}\nRefresco local: ${refreshed ? relativeTime(refreshed) : "pendiente"}`;
@@ -508,7 +554,7 @@ function marketCard(item: MarketItem): string {
       : item.decision === "manual_sell"
         ? "👆 Acción manual"
         : "— Descartada";
-  const coin = trading.isMarket(item.offer.coin) ? item.offer.coin : "BANK_CUP";
+  const coin = trading.isMarket(item.offer.coin) ? item.offer.coin : defaultMarket();
   const currency = trading.marketCurrency(coin);
   return `${title} · <b>${money(item.offer.amount)} QUSD</b>\nTasa: <b>${money(item.rate)} ${currency}/QUSD</b> · Total: ${money(item.offer.receive)} ${currency}\n${tag}: ${escapeHtml(item.reason)}\n<code>${item.offer.uuid}</code>`;
 }
@@ -554,7 +600,7 @@ async function createOffer(ctx: Context, type: "buy" | "sell"): Promise<void> {
     const amount = Number(amountText),
       fiatRate = Number(rateText);
     if (!coin || !Number.isFinite(amount) || !Number.isFinite(fiatRate))
-      throw new Error(`Uso: /create${type} cup|prepago|clasica QUSD TASA_FIAT`);
+      throw new Error(`Uso: /create${type} ${marketHint()} QUSD TASA_FIAT`);
     const offer = await trading.createOwnOffer(coin, type, amount, fiatRate);
     return `✅ Oferta ${type} en ${trading.marketLabel(coin)} creada\n<code>${offer.uuid}</code>`;
   });
@@ -620,11 +666,25 @@ function resolveMarket(value: string): FiatMarket | undefined {
     clasica: "CLASICA",
     clásica: "CLASICA",
   };
-  const code = aliases[normalized] ?? value.trim().toUpperCase();
+  const configured = trading.markets().find(
+    (market) =>
+      market.code.toLowerCase() === normalized ||
+      market.label.trim().toLowerCase() === normalized,
+  );
+  const code = configured?.code ?? aliases[normalized] ?? value.trim().toUpperCase();
   return trading.isMarket(code) ? code : undefined;
 }
+function defaultMarket(): FiatMarket {
+  const market = trading.activeMarkets()[0] ?? trading.markets()[0];
+  if (!market) throw new Error("No hay mercados configurados.");
+  return market.code;
+}
+function marketHint(): string {
+  return trading.markets().map((market) => market.code.toLowerCase()).join("|");
+}
 function helpText(): string {
-  return "<b>QvaApply · ayuda rápida</b>\n\n/start — panel operativo\n/activate — activar tras elegir modo\n/scan — escanear mercados activos\n/logs — eventos recientes\n/fiat cup|prepago|clasica IMPORTE — declarar saldo\n/market cup|prepago|clasica — ver mercado\n/createbuy cup|prepago|clasica QUSD TASA — crear compra\n/createsell cup|prepago|clasica QUSD TASA — crear venta\n/mode simulation|real — cambiar modo\n/offers — ofertas propias\n\nLas acciones con fondos solo funcionan en modo real, tras activar la automatización.";
+  const markets = marketHint();
+  return `<b>QvaApply · ayuda rápida</b>\n\n/start — panel operativo\n/activate — activar la automatización\n/pause — desactivar la automatización\n/scan — escanear mercados activos\n/logs — eventos recientes\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — ver mercado\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/offers — ofertas propias`;
 }
 
 let stopping = false;

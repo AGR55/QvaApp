@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { QvaConnectionError, QvaPayClient } from "../src/qvapay.js";
+import { QvaConnectionError, QvaMutationUncertainError, QvaPayClient } from "../src/qvapay.js";
 
 test("normaliza un Peer vacío como contraparte ausente en una oferta abierta", async () => {
   const client = new QvaPayClient(() => "token", {
@@ -183,5 +183,19 @@ test("clasifica un fetch fallido de lectura como conexión con QvaPay", async ()
       error instanceof QvaConnectionError &&
       error.reason === "network" &&
       /QvaPay/.test(error.message),
+  );
+});
+
+test("interrumpe una edición remota colgada y exige conciliación", async () => {
+  const client = new QvaPayClient(() => "token", {
+    mutationTimeoutMs: 5,
+    fetch: async (_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    }),
+  });
+
+  await assert.rejects(
+    () => client.editOffer("offer-timeout", { amount: 10, receive: 9_000 }),
+    (error: unknown) => error instanceof QvaMutationUncertainError,
   );
 });

@@ -42,6 +42,38 @@ function setup() {
   return { dataDir, store, cfg, markets };
 }
 
+test("producción arranca activa y respeta una parada de emergencia", () => {
+  const first = setup();
+  first.store.set("paused", "true");
+  first.store.set("mode", "simulation");
+  const active = new TradingEngine(
+    first.store,
+    {} as never,
+    first.cfg as never,
+    first.markets,
+    async () => undefined,
+  );
+  active.initializeProductionState();
+  assert.equal(active.mode(), "real");
+  assert.equal(active.isPaused(), false);
+  first.store.close();
+
+  const second = setup();
+  second.store.set("emergency_stop", "true");
+  second.store.set("paused", "false");
+  const stopped = new TradingEngine(
+    second.store,
+    {} as never,
+    second.cfg as never,
+    second.markets,
+    async () => undefined,
+  );
+  stopped.initializeProductionState();
+  assert.equal(stopped.mode(), "real");
+  assert.equal(stopped.isPaused(), true);
+  second.store.close();
+});
+
 test("el escaneo real cancela liquidez peor y aplica a la mejor compra externa", async () => {
   const { store, cfg, markets } = setup();
   const target: P2pOffer = { uuid: "target-buy", type: "buy", coin: "BANK_CUP", amount: 20, receive: 20_400, status: "open", User: { uuid: "peer" } };
@@ -130,21 +162,27 @@ test("ignora ofertas exclusivas VIP sin intentar aplicar ni sumar errores", asyn
     User: { uuid: "peer" },
   };
   let applications = 0;
+  const notifications: string[] = [];
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
     p2pAverages: async () => ({}),
     apply: async () => void (applications += 1),
   };
-  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async (message) => void notifications.push(message),
+  );
 
   await trading.scan();
 
   assert.equal(applications, 0);
   assert.equal(Number(store.get("consecutive_errors") ?? 0), 0);
-  assert.match(
-    store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
-    /exclusiva para usuarios VIP/i,
-  );
+  assert.equal(store.decisionEvents({ page: 1, pageSize: 10 }).items.length, 0);
+  assert.equal(store.recentTradingAlerts().length, 0);
+  assert.deepEqual(notifications, []);
   store.close();
 });
 
@@ -239,7 +277,7 @@ test("concilia una aplicación incierta cuando QvaPay confirma la restricción V
   };
   const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
 
-  const reconciled = await trading.reconcilePendingStandaloneApplications();
+  const reconciled = await trading.reconcilePendingStandaloneMutations();
 
   assert.equal(reconciled, 1);
   assert.equal(store.hasUnresolvedMutation(), false);

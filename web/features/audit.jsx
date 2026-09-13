@@ -49,15 +49,29 @@ export function Audit({ data, onChanged }) {
   };
   const dismiss = async () => {
     if (!dialog?.offer) return;
-    setBusy(true);
+    const offer = dialog.offer;
+    const previousEvents = events;
+    setEvents((current) => current ? {
+      ...current,
+      items: current.items.filter((item) => item.id !== offer.id && item.uuid !== offer.uuid),
+      total: Math.max(0, current.total - 1),
+      pending: Math.max(0, current.pending - 1),
+    } : current);
+    setDialog(null);
+    setPreview(null);
+    setMessage("");
+    setBusy(false);
     try {
-      const path = dialog.offer.id
-        ? `/api/decision-events/${dialog.offer.id}/dismiss`
-        : `/api/blocked-offers/${encodeURIComponent(dialog.offer.uuid)}/dismiss`;
+      const path = offer.id
+        ? `/api/decision-events/${offer.id}/dismiss`
+        : `/api/blocked-offers/${encodeURIComponent(offer.uuid)}/dismiss`;
       await requestJson(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
-      await Promise.all([onChanged(), loadEvents()]); setDialog(null);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "No se pudo descartar la oferta."); }
-    finally { setBusy(false); }
+      void onChanged();
+      void loadEvents();
+    } catch (error) {
+      setEvents(previousEvents);
+      setEventsError(error instanceof Error ? error.message : "No se pudo descartar la oferta.");
+    }
   };
 
   return <>

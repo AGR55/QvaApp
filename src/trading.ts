@@ -297,6 +297,16 @@ export class TradingEngine {
     this.store.audit("mode", `Modo ${mode} seleccionado`);
   }
 
+  initializeProductionState(): void {
+    // El modo queda fijado internamente; no forma parte del estado operativo
+    // que puede seleccionar o consultar el usuario.
+    this.store.set("mode", "real");
+    this.setPaused(
+      this.store.get("emergency_stop") === "true",
+      "arranque del servicio",
+    );
+  }
+
   setEmergencyStop(enabled: boolean, source = "panel"): void {
     this.store.set("emergency_stop", String(enabled));
     if (enabled) this.store.set("paused", "true");
@@ -314,7 +324,7 @@ export class TradingEngine {
     this.setPaused(false);
     this.store.audit(
       "automation_activated",
-      `Automatización activada en modo ${this.mode()}`,
+      "Automatización activada",
     );
   }
 
@@ -322,18 +332,50 @@ export class TradingEngine {
     return this.opportunityOrchestrator.reconcilePending();
   }
 
-  async reconcilePendingStandaloneApplications(): Promise<number> {
+  async reconcilePendingStandaloneMutations(): Promise<number> {
     let reconciled = 0;
     const pending = this.store
       .recentMutationIntents(500)
       .filter(
         (intent) =>
-          intent.kind === "apply" &&
           ["submitted", "uncertain"].includes(intent.state) &&
-          intent.operationUuid &&
-          !this.store.findWorkflowByTarget(intent.operationUuid),
+          (!intent.operationUuid ||
+            !this.store.findWorkflowByTarget(intent.operationUuid)),
       );
+    const ownOfferKinds = new Set([
+      "create_offer",
+      "edit_offer",
+      "cancel_offer",
+    ]);
+    const pendingOwnOffers = pending.filter((intent) =>
+      ownOfferKinds.has(intent.kind)
+    );
+    let ownOffers: P2pOffer[] | undefined;
+    if (pendingOwnOffers.length) {
+      try {
+        ownOffers = await this.listOwnOffers();
+      } catch (error) {
+        this.store.audit(
+          "standalone_offer_reconciliation_pending",
+          qvaPayFailureDetail("consultar las ofertas propias", error),
+        );
+      }
+    }
     for (const intent of pending) {
+      if (ownOfferKinds.has(intent.kind)) {
+        if (!ownOffers) continue;
+        const remote = reconcileOwnOfferMutation(intent, ownOffers);
+        if (!remote) continue;
+        this.store.updateMutationIntent(intent.intentId, "reconciled", remote);
+        this.store.audit(
+          "standalone_offer_mutation_reconciled",
+          `QvaPay confirmó el resultado de ${intent.kind}; la mutación incierta ya no bloquea el motor.`,
+          intent.operationUuid,
+        );
+        reconciled += 1;
+        continue;
+      }
+      if (intent.kind !== "apply" || !intent.operationUuid) continue;
       const uuid = intent.operationUuid!;
       try {
         const remote = await this.qva.getOffer(uuid);
@@ -1424,6 +1466,30 @@ export class TradingEngine {
       offer.type,
       market?.currency ?? "",
     );
+    const recentlyConfirmed = this.store.recentMutationIntents(20).some(
+      (intent) => {
+        const request = isRecord(intent.request) ? intent.request : undefined;
+        return intent.kind === "edit_offer" &&
+          intent.operationUuid === uuid &&
+          intent.state === "confirmed" &&
+          Date.now() - intent.updatedAt <= 60_000 &&
+          request !== undefined &&
+          sameObservableAmount(request.amount, amount) &&
+          sameObservableAmount(request.receive, receive);
+      },
+    );
+    if (
+      recentlyConfirmed &&
+      sameObservableAmount(offer.amount, amount) &&
+      sameObservableAmount(offer.receive, receive)
+    ) {
+      this.store.audit(
+        "edit_offer_unchanged",
+        "QvaPay ya refleja el importe y el total solicitados; se omitió una edición duplicada.",
+        uuid,
+      );
+      return;
+    }
     await this.executeMutation(
       "edit_offer",
       uuid,
@@ -1435,6 +1501,38 @@ export class TradingEngine {
       `Oferta propia ${offer.coin} actualizada: ${amount} QUSD a tasa solicitada ${fiatPerQusd}; total fiat ${receive} (tasa efectiva ${receive / amount})`,
       uuid,
     );
+  }
+
+  async editOwnOfferFromSnapshot(
+    offer: { uuid: string; coin: string; type: "buy"; rate: number },
+    amount: number,
+  ): Promise<void> {
+    this.requireRealMode();
+    if (offer.type !== "buy" || !this.isMarket(offer.coin))
+      throw new Error("El reajuste solo admite ofertas propias de compra configuradas.");
+    const market = this.market(offer.coin)!;
+    if (amount <= 0 || (market.purchaseMaxQusd > 0 && amount > market.purchaseMaxQusd))
+      throw new Error(`Importe de reajuste inválido para ${market.label}.`);
+    const receive = ownOfferFiatTotal(amount, offer.rate, "buy", market.currency);
+    await this.executeMutation(
+      "edit_offer",
+      offer.uuid,
+      { uuid: offer.uuid, amount, receive },
+      () => this.qva.editOffer(offer.uuid, { amount, receive }),
+    );
+    this.store.audit(
+      "edit_offer",
+      `Oferta propia ${offer.coin} reajustada a ${amount} QUSD; total fiat ${receive}`,
+      offer.uuid,
+    );
+  }
+
+  async cancelOwnOfferFromSnapshot(uuid: string): Promise<void> {
+    this.requireRealMode();
+    await this.executeMutation("cancel_offer", uuid, { uuid }, () =>
+      this.qva.cancel(uuid),
+    );
+    this.store.audit("cancel_own_offer", "Oferta propia cancelada por reajuste", uuid);
   }
 
   async cancelOwnOffer(uuid: string): Promise<void> {
@@ -1472,7 +1570,6 @@ export class TradingEngine {
 
   operationalState(): {
     paused: boolean;
-    mode: "simulation" | "real";
     fiat: Record<FiatMarket, number>;
     refresh: boolean;
     active: number;
@@ -1519,7 +1616,6 @@ export class TradingEngine {
       Number(this.store.get(`qva_throttle:${policy}`) ?? 0);
     return {
       paused: this.isPaused(),
-      mode: this.mode(),
       fiat: Object.fromEntries(
         this.markets().map((market) => [
           market.code,
@@ -1595,9 +1691,11 @@ export class TradingEngine {
   status(): string {
     const active = this.store.activeOperations();
     return [
-      `Modo: ${this.mode()}${this.isPaused() ? " (PAUSADO)" : " (activo)"}`,
-      `Saldo CUP declarado: ${this.fiatBalance("BANK_CUP").toFixed(2)} CUP`,
-      `Saldo Prepago declarado: ${this.fiatBalance("BANDECPREPAGO").toFixed(2)} USD`,
+      `Estado: ${this.isPaused() ? "INACTIVO" : "ACTIVO"}`,
+      ...this.markets().map(
+        (market) =>
+          `Saldo ${market.label}: ${this.fiatBalance(market.code).toFixed(2)} ${market.currency}`,
+      ),
       `Refresco: ${this.refreshEnabled() ? "activo" : "apagado"}`,
       `Operaciones activas: ${active.length}`,
     ].join("\n");
@@ -1623,7 +1721,7 @@ export class TradingEngine {
       return {
         offer,
         rate: value,
-        decision: "blocked",
+        decision: "ignored",
         reason:
           "Oferta exclusiva para usuarios VIP; QvaPay no permite aplicarla con esta cuenta.",
       };
@@ -2043,12 +2141,12 @@ export class TradingEngine {
     await this.notify(
       `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} en ${this.marketLabel(this.offerMarket(offer))}.\nTasa nominal ${rate(offer).toFixed(2)} · comisión ${transfer.fee.toFixed(2)} · tasa efectiva ${transfer.effectiveRate.toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? `Cancelaré automáticamente en ${this.automationConfig().autoCancelMinutes} min si no indicas que pagarás: /ack ${offer.uuid}` : ""}`,
       offer.uuid,
-      automatic ? {
+      {
         kind: "operation-applied",
         uuid: offer.uuid,
         coin: this.offerMarket(offer),
         amount: offer.amount,
-      } : undefined,
+      },
     );
   }
 
@@ -2135,7 +2233,7 @@ export class TradingEngine {
   private requireRealMode(): void {
     if (this.mode() !== "real" || !this.cfg.realTradingAllowed)
       throw new Error(
-        "Acción bloqueada: activa /mode real y CONFIRM_REAL_TRADING=true.",
+        "Acción bloqueada: configura CONFIRM_REAL_TRADING=true y reinicia QvaApply.",
       );
   }
 
@@ -2316,6 +2414,73 @@ function qvaPayFailureDetail(action: string, error: unknown): string {
 
 /** @deprecated Use TradingEngine. Kept while Telegram and HTTP adapters migrate. */
 export { TradingEngine as TradingService };
+
+function reconcileOwnOfferMutation(
+  intent: ReturnType<TradingRepository["recentMutationIntents"]>[number],
+  ownOffers: P2pOffer[],
+): Record<string, unknown> | undefined {
+  const request = isRecord(intent.request) ? intent.request : undefined;
+  if (!request) return undefined;
+
+  if (intent.kind === "cancel_offer" && intent.operationUuid) {
+    if (ownOffers.some((offer) => offer.uuid === intent.operationUuid))
+      return undefined;
+    // listOwnOffers solicita 20 posiciones. Si la página está llena, la
+    // ausencia no demuestra que la oferta haya dejado de estar abierta.
+    if (ownOffers.length >= 20) return undefined;
+    return { outcome: "not_open" };
+  }
+
+  if (intent.kind === "edit_offer" && intent.operationUuid) {
+    const remote = ownOffers.find((offer) => offer.uuid === intent.operationUuid);
+    if (!remote) return undefined;
+    if (request.refresh === true)
+      return { outcome: "open", remoteStatus: remote.status };
+    if (
+      !sameObservableAmount(remote.amount, request.amount) ||
+      !sameObservableAmount(remote.receive, request.receive)
+    ) return undefined;
+    return {
+      outcome: "matched",
+      remoteStatus: remote.status,
+      remoteAmount: remote.amount,
+      remoteReceive: remote.receive,
+    };
+  }
+
+  if (intent.kind === "create_offer") {
+    const remote = ownOffers.find((offer) => {
+      const createdAt = offer.created_at ? Date.parse(offer.created_at) : Number.NaN;
+      return offer.type === request.type &&
+        offer.coin === request.coin &&
+        sameObservableAmount(offer.amount, request.amount) &&
+        sameObservableAmount(offer.receive, request.receive) &&
+        Number.isFinite(createdAt) &&
+        createdAt >= intent.createdAt - 60_000;
+    });
+    if (!remote) return undefined;
+    return {
+      outcome: "matched",
+      remoteUuid: remote.uuid,
+      remoteStatus: remote.status,
+    };
+  }
+
+  return undefined;
+}
+
+function sameObservableAmount(left: unknown, right: unknown): boolean {
+  const a = Number(left);
+  const b = Number(right);
+  return Number.isFinite(a) &&
+    Number.isFinite(b) &&
+    Math.round((a + Number.EPSILON) * 100) ===
+      Math.round((b + Number.EPSILON) * 100);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 export const rate = (offer: Pick<P2pOffer, "amount" | "receive">): number =>
   offer.receive / offer.amount;

@@ -1,9 +1,15 @@
+import { randomUUID } from "node:crypto";
 import type { config as Config } from "./config.js";
-import { QvaPayClient } from "./qvapay.js";
+import { QvaApiError, QvaMutationUncertainError, QvaPayClient } from "./qvapay.js";
 import { rate, type TradingService } from "./trading.js";
 import { MarketConfigService, type TradingConfig } from "./market-config.js";
 import type { FiatMarket, P2pOffer } from "./types.js";
-import type { Store } from "./store.js";
+import type {
+  RebalanceJob,
+  RebalanceJobAdjustment,
+  RebalanceJobState,
+  Store,
+} from "./store.js";
 import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
 import { ownOfferFiatTotal } from "./market-math.js";
 
@@ -67,13 +73,31 @@ export function allocateBudget(
     });
 }
 
+function rebalanceIntentMatches(
+  request: unknown,
+  adjustment: RebalanceJobAdjustment,
+): boolean {
+  if (!request || typeof request !== "object" || Array.isArray(request))
+    return false;
+  const record = request as Record<string, unknown>;
+  if (adjustment.action === "cancel") return record.uuid === adjustment.uuid;
+  return Number(record.amount).toFixed(2) === adjustment.targetAmount.toFixed(2) &&
+    Number(record.receive).toFixed(2) === adjustment.receive.toFixed(2);
+}
+
 export class DashboardReadModel {
+  private rebalanceExecution: Promise<void> | undefined;
+
   constructor(
     private readonly trading: TradingService,
     private readonly qva: QvaPayClient,
     _cfg: RuntimeConfig,
     private readonly store: Store,
     private readonly marketConfig: MarketConfigService,
+    private readonly onRebalanceEvent?: (
+      job: RebalanceJob,
+      event: "completed" | "attention",
+    ) => void | Promise<void>,
   ) {}
 
   updateStrategy(
@@ -97,6 +121,24 @@ export class DashboardReadModel {
       reason?.trim() || "Configuración actualizada desde el panel local",
     );
   }
+  saveMarketIcon(input: {
+    name: string;
+    mimeType: string;
+    base64: string;
+  }): { url: string } {
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(input.base64))
+      throw new Error("El contenido del icono no usa Base64 válido.");
+    const content = Buffer.from(input.base64, "base64");
+    const saved = this.marketConfig.saveMarketIcon(
+      input.name,
+      input.mimeType,
+      content,
+    );
+    return { url: saved.url };
+  }
+  marketIcon(name: string) {
+    return this.marketConfig.marketIcon(name);
+  }
   async createOwnOffer(
     coin: FiatMarket,
     type: "buy" | "sell",
@@ -119,11 +161,13 @@ export class DashboardReadModel {
     await this.refreshOwnOffers();
     return this.currentBudgetDeficits();
   }
-  async applyBudgetRebalance(
+  startBudgetRebalance(
     requested: { uuid: string; amount: number }[],
-  ): Promise<{ applied: string[] }> {
+  ): RebalanceJob {
     if (!requested.length) throw new Error("No hay ajustes para aplicar.");
-    await this.refreshOwnOffers();
+    const current = this.store.pendingRebalanceJobs(1)[0];
+    if (current)
+      throw new Error(`Ya existe un reajuste en curso (${current.id}). Espera a que termine o requiera atención.`);
     const snapshot = this.localSnapshot();
     const deficits = Object.values(snapshot.budget)
       .filter((plan): plan is BudgetPlan => (plan as BudgetPlan).deficit > 0);
@@ -173,21 +217,141 @@ export class DashboardReadModel {
         );
     }
 
-    const applied: string[] = [];
-    try {
-      for (const [uuid, amount] of changes) {
+    const adjustments: RebalanceJobAdjustment[] = [...changes].map(
+      ([uuid, targetAmount]) => {
         const offer = offers.find((item) => item.uuid === uuid)!;
-        if (amount === 0) await this.trading.cancelOwnOffer(uuid);
-        else await this.trading.editOwnOffer(uuid, amount, offer.rate);
-        applied.push(uuid);
+        return {
+          uuid,
+          coin: offer.coin,
+          currentAmount: offer.amount,
+          targetAmount,
+          rate: offer.rate,
+          receive: targetAmount > 0
+            ? ownOfferFiatTotal(targetAmount, offer.rate, "buy", this.marketConfig.find(offer.coin)?.currency ?? "")
+            : 0,
+          action: targetAmount === 0 ? "cancel" : "edit",
+          state: "pending",
+        };
+      },
+    );
+    const job = this.store.createRebalanceJob(randomUUID(), adjustments);
+    void this.runBudgetRebalances();
+    return job;
+  }
+
+  rebalanceJob(id: string): RebalanceJob | undefined {
+    return this.store.rebalanceJob(id);
+  }
+
+  async runBudgetRebalances(): Promise<void> {
+    if (this.rebalanceExecution) return this.rebalanceExecution;
+    this.rebalanceExecution = this.processBudgetRebalances();
+    try {
+      await this.rebalanceExecution;
+    } finally {
+      this.rebalanceExecution = undefined;
+    }
+  }
+
+  private async processBudgetRebalances(): Promise<void> {
+    for (const stored of this.store.pendingRebalanceJobs()) {
+      let job = stored;
+      let adjustments = job.adjustments.map((item) =>
+        item.state === "applying"
+          ? { ...item, state: "reconciliation_required" as const }
+          : item,
+      );
+      if (adjustments.some((item) => item.state === "reconciliation_required")) {
+        await this.trading.reconcilePendingStandaloneMutations();
+        const intents = this.store.recentMutationIntents(500);
+        adjustments = adjustments.map((item) => {
+          if (item.state !== "reconciliation_required") return item;
+          const intent = intents.find((candidate) =>
+            candidate.operationUuid === item.uuid &&
+            candidate.kind === (item.action === "edit" ? "edit_offer" : "cancel_offer") &&
+            rebalanceIntentMatches(candidate.request, item)
+          );
+          if (intent?.state === "confirmed" || intent?.state === "reconciled") {
+            const { error: _error, ...confirmed } = item;
+            return { ...confirmed, state: "completed" as const };
+          }
+          if (intent?.state === "rejected")
+            return { ...item, state: "failed" as const, error: intent.error ?? "QvaPay rechazó el cambio." };
+          return item;
+        });
+        if (adjustments.some((item) => item.state === "reconciliation_required")) {
+          this.store.updateRebalanceJob(job.id, "reconciliation_required", adjustments, "Esperando confirmación remota.");
+          continue;
+        }
       }
-      await this.refreshOwnOffers();
-      return { applied };
-    } catch (error) {
-      const progress = applied.length
-        ? ` Se aplicaron ${applied.length} cambios antes del fallo; actualiza la vista antes de reintentar.`
-        : "";
-      throw new Error(`${error instanceof Error ? error.message : "No se pudo reajustar el capital."}${progress}`);
+
+      for (let index = 0; index < adjustments.length; index += 1) {
+        const adjustment = adjustments[index]!;
+        if (adjustment.state !== "pending") continue;
+        adjustments[index] = { ...adjustment, state: "applying" };
+        this.store.updateRebalanceJob(job.id, "applying", adjustments);
+        try {
+          if (adjustment.action === "cancel")
+            await this.trading.cancelOwnOfferFromSnapshot(adjustment.uuid);
+          else
+            await this.trading.editOwnOfferFromSnapshot(
+              {
+                uuid: adjustment.uuid,
+                coin: adjustment.coin,
+                type: "buy",
+                rate: adjustment.rate,
+              },
+              adjustment.targetAmount,
+            );
+          adjustments[index] = { ...adjustment, state: "completed" };
+          this.store.updateRebalanceJob(job.id, "applying", adjustments);
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          if (
+            error instanceof QvaMutationUncertainError ||
+            (error instanceof QvaApiError && error.status >= 500)
+          ) {
+            adjustments[index] = {
+              ...adjustment,
+              state: "reconciliation_required",
+              error: detail,
+            };
+            this.store.updateRebalanceJob(job.id, "reconciliation_required", adjustments, detail);
+            job = this.store.rebalanceJob(job.id)!;
+            await this.onRebalanceEvent?.(job, "attention");
+          } else {
+            adjustments[index] = { ...adjustment, state: "failed", error: detail };
+            const state: RebalanceJobState = adjustments.some((item) => item.state === "completed")
+              ? "partial"
+              : "failed";
+            this.store.updateRebalanceJob(job.id, state, adjustments, detail);
+            job = this.store.rebalanceJob(job.id)!;
+            await this.onRebalanceEvent?.(job, "attention");
+          }
+          break;
+        }
+      }
+
+      if (adjustments.every((item) => item.state === "completed")) {
+        this.store.updateRebalanceJob(job.id, "completed", adjustments);
+        job = this.store.rebalanceJob(job.id)!;
+        await this.refreshOwnOffers().catch(() => undefined);
+        await this.onRebalanceEvent?.(job, "completed");
+      } else if (adjustments.some((item) => item.state === "failed")) {
+        const currentState = this.store.rebalanceJob(job.id)?.state;
+        if (currentState !== "partial" && currentState !== "failed") {
+          const state: RebalanceJobState = adjustments.some(
+            (item) => item.state === "completed",
+          )
+            ? "partial"
+            : "failed";
+          const detail = adjustments.find((item) => item.state === "failed")
+            ?.error ?? "Uno de los cambios fue rechazado.";
+          this.store.updateRebalanceJob(job.id, state, adjustments, detail);
+          job = this.store.rebalanceJob(job.id)!;
+          await this.onRebalanceEvent?.(job, "attention");
+        }
+      }
     }
   }
   async setPaused(paused: boolean): Promise<void> {
@@ -196,9 +360,6 @@ export class DashboardReadModel {
       return;
     }
     await this.trading.activate();
-  }
-  setMode(mode: "simulation" | "real"): void {
-    this.trading.setMode(mode);
   }
   setRefresh(enabled: boolean): void {
     this.trading.setRefresh(enabled);
@@ -242,6 +403,34 @@ export class DashboardReadModel {
       throw new Error("El evento ya fue resuelto o no existe.");
     if (event) this.store.resolveTradingAlert(event.uuid, "dismissed");
     if (event) this.store.audit("blocked_offer_dismissed", "Versión de decisión descartada por el usuario.", event.uuid);
+  }
+
+  notifications() {
+    return this.store.pendingUserNotifications().map((item) => {
+      const event = item.payload;
+      const alert = event.alert ?? {
+            uuid: event.uuid,
+            coin: event.coin,
+            amount: event.amount,
+          };
+      const view = item.kind.startsWith("rebalance-")
+        ? "ofertas"
+        : item.kind === "operation-applied"
+          ? "operaciones"
+          : "auditoria";
+      return {
+        id: item.id,
+        type: item.kind,
+        message: item.message,
+        alert,
+        url: `/?view=${view}&operation=${encodeURIComponent(item.operationUuid ?? "")}`,
+        createdAt: item.createdAt,
+      };
+    });
+  }
+
+  acknowledgeNotification(id: string): void {
+    this.store.acknowledgeNotification(id);
   }
 
   localSnapshot() {

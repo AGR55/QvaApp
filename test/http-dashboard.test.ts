@@ -53,6 +53,14 @@ test("Fastify protege datos, origen y mutaciones con sesión y CSRF", async () =
   });
   assert.equal(accepted.statusCode, 204);
   assert.deepEqual(controls, [true]);
+
+  const simulation = await app.inject({
+    method: "PUT",
+    url: "/api/control",
+    headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf },
+    payload: { mode: "simulation" },
+  });
+  assert.equal(simulation.statusCode, 400);
   await app.close();
 });
 
@@ -60,9 +68,9 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const page = await app.inject({ method: "GET", url: "/" });
   assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
-  const icon = await app.inject({ method: "GET", url: "/icons/qvaapply-mark.svg" });
+  const icon = await app.inject({ method: "GET", url: "/icons/qusd.png" });
   assert.equal(icon.statusCode, 200);
-  assert.match(String(icon.headers["content-type"]), /image\/svg\+xml/);
+  assert.match(String(icon.headers["content-type"]), /image\/png/);
   const logo = await app.inject({ method: "GET", url: "/logo/logotipo.webp" });
   assert.equal(logo.statusCode, 200);
   assert.match(String(logo.headers["content-type"]), /image\/webp/);
@@ -73,6 +81,39 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
   assert.equal(traversal.statusCode, 404);
   const imageTraversal = await app.inject({ method: "GET", url: "/images/%2e%2e%2fpackage.json" });
   assert.equal(imageTraversal.statusCode, 404);
+  await app.close();
+});
+
+test("permite subir un icono de mercado desde Estrategia", async () => {
+  const uploads: unknown[] = [];
+  const readModel = {
+    saveMarketIcon: (input: unknown) => {
+      uploads.push(input);
+      return { url: "/market-icons/hash.png" };
+    },
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/market-icons",
+    headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf },
+    payload: {
+      name: "etecsa.png",
+      mimeType: "image/png",
+      base64: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+    },
+  });
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.json<{ data: { url: string } }>().data.url, "/market-icons/hash.png");
+  assert.equal(uploads.length, 1);
   await app.close();
 });
 
@@ -98,12 +139,14 @@ test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () =
 
 test("previsualiza y aplica un reajuste de capital con confirmación CSRF", async () => {
   const calls: unknown[] = [];
+  const job = { id: "rebalance-1", state: "pending", adjustments: [], createdAt: 1, updatedAt: 1 };
   const readModel = {
     previewBudgetRebalance: async () => [{ coin: "CLASICA", deficit: 2.5, adjustments: [] }],
-    applyBudgetRebalance: async (adjustments: unknown) => {
+    startBudgetRebalance: (adjustments: unknown) => {
       calls.push(adjustments);
-      return { applied: ["offer-1"] };
+      return job;
     },
+    rebalanceJob: (id: string) => id === job.id ? job : undefined,
   };
   const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
   const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
@@ -121,8 +164,11 @@ test("previsualiza y aplica un reajuste de capital con confirmación CSRF", asyn
     headers,
     payload: { adjustments: [{ uuid: "offer-1", amount: 8.25 }] },
   });
-  assert.equal(applied.statusCode, 200);
+  assert.equal(applied.statusCode, 202);
   assert.deepEqual(calls, [[{ uuid: "offer-1", amount: 8.25 }]]);
+  const progress = await app.inject({ method: "GET", url: "/api/offers/rebalance/rebalance-1", headers: { cookie } });
+  assert.equal(progress.statusCode, 200);
+  assert.equal(progress.json<{ data: { id: string } }>().data.id, "rebalance-1");
   await app.close();
 });
 
@@ -336,6 +382,41 @@ test("expone decisiones paginadas y protege la resolución con CSRF", async () =
   const accepted = await app.inject({ method: "POST", url: "/api/decision-events/7/dismiss", headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf }, payload: {} });
   assert.equal(accepted.statusCode, 204);
   assert.deepEqual(dismissed, [7]);
+  await app.close();
+});
+
+test("expone avisos persistentes y permite confirmarlos", async () => {
+  const acknowledged: string[] = [];
+  const readModel = {
+    notifications: () => [{ id: "operation-applied:one", type: "operation-applied" }],
+    acknowledgeNotification: (id: string) => void acknowledged.push(id),
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+
+  const listed = await app.inject({ method: "GET", url: "/api/notifications", headers: { cookie } });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json<{ data: { id: string }[] }>().data[0]?.id, "operation-applied:one");
+
+  const accepted = await app.inject({
+    method: "POST",
+    url: "/api/notifications/operation-applied%3Aone/ack",
+    headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf },
+    payload: {},
+  });
+  assert.equal(accepted.statusCode, 204);
+  assert.deepEqual(acknowledged, ["operation-applied:one"]);
+  await app.close();
+});
+
+test("el service worker usa la identidad de QvaApply en avisos persistentes", async () => {
+  const app = buildDashboard({} as never, { password, trustedOrigin: origin });
+  const worker = await app.inject({ method: "GET", url: "/service-worker.js" });
+  assert.equal(worker.statusCode, 200);
+  assert.match(worker.body, /icon:\s*"\/logo\/isotipo\.webp"/);
+  assert.match(worker.body, /requireInteraction:\s*payload\.type === "operation-applied"/);
   await app.close();
 });
 

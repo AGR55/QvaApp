@@ -16,7 +16,13 @@ export function useDashboard(view, market, setMarket) {
       const payload = await requestJson("/api/dashboard", { timeoutMs: 5_000 });
       if (activeGeneration !== generation.current || !payload.data) return;
       setData(payload.data);
-      setMarket((current) => current || payload.data.markets[0]?.code || "");
+      setMarket((current) =>
+        payload.data.markets.some((item) => item.code === current)
+          ? current
+          : payload.data.markets.find((item) => item.active)?.code ||
+            payload.data.markets[0]?.code ||
+            "",
+      );
       setStatus("Datos locales disponibles");
     },
     [setMarket],

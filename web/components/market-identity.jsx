@@ -1,27 +1,21 @@
 import React from "react";
 
-const MARKET_META = {
-  BANK_CUP: { icon: "/icons/cup.png", tone: "cup" },
-  BANDECPREPAGO: { icon: "/icons/tropical.png", tone: "prepago" },
-  CLASICA: { icon: "/icons/clasica.png", tone: "clasica" },
-};
-
-export function MarketIdentity({ code, label, size = "md", showCode = true }) {
-  const meta = MARKET_META[code] || { tone: "default" };
+export function MarketIdentity({ market, code, label, iconUrl, color, size = "md" }) {
+  const identity = market || { code, label, iconUrl, color };
   return (
     <span
-      className={`market-identity market-identity-${size} market-identity-${meta.tone}`}
+      className={`market-identity market-identity-${size}`}
+      style={{ "--market-accent": identity.color || "#6f8494" }}
     >
-      {meta.icon ? (
-        <img src={meta.icon} alt="" aria-hidden="true" width="40" height="40" />
+      {identity.iconUrl ? (
+        <img src={identity.iconUrl} alt="" aria-hidden="true" width="40" height="40" />
       ) : (
         <span className="market-identity-fallback" aria-hidden="true">
-          {String(code || "?").slice(0, 1)}
+          {String(identity.label || identity.code || "?").trim().slice(0, 1).toUpperCase()}
         </span>
       )}
       <span className="market-identity-copy">
-        <strong>{label || code}</strong>
-        {showCode ? <small>{code}</small> : null}
+        <strong>{identity.label || identity.code}</strong>
       </span>
     </span>
   );

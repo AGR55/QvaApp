@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Scale, X } from "lucide-react";
 import { Offers } from "../components/offers.jsx";
 import { Freshness, Panel, Skeleton, ViewHead } from "../components/common.jsx";
@@ -29,6 +29,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
+        timeoutMs: 25_000,
       });
       setRebalance({ plans: payload.data, error: "" });
     } catch (error) {
@@ -88,7 +89,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
             const availability = data.availability.fiat[market.code] || {};
             return (
               <article className="market-card capital-card" key={market.code}>
-                <MarketIdentity code={market.code} label={label(market.code)} size="sm" />
+                <MarketIdentity market={market} size="sm" />
                 <strong>{money(availability.available)} {unit(market.code)}</strong>
                 <small>{money(availability.committed)} comprometidos · {money(availability.declared)} declarados</small>
                 {market.outgoingTransferFee > 0 ? <em>{money(market.outgoingTransferFee)} {unit(market.code)} por cada salida</em> : null}
@@ -122,6 +123,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
         ) : (
           <Offers
             offers={data.ownOffers}
+            markets={data.markets}
             label={label}
             unit={unit}
             editable
@@ -160,24 +162,43 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
           label={label}
           unit={unit}
           onClose={() => setRebalance(undefined)}
-          onApplied={async () => {
-            setRebalance(undefined);
-            await onChanged?.();
-          }}
+          onChanged={onChanged}
         />
       ) : null}
     </div>
   );
 }
 
-function RebalanceDialog({ initial, data, label, unit, onClose, onApplied }) {
+function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
   const [values, setValues] = useState(() => Object.fromEntries(
     initial.plans.flatMap((plan) => plan.adjustments.map((item) => [item.uuid, String(item.proposedQusd)])),
   ));
   const [error, setError] = useState(initial.error || "");
   const [applying, setApplying] = useState(false);
-  const close = useCallback(() => { if (!applying) onClose(); }, [applying, onClose]);
+  const [job, setJob] = useState();
+  const close = useCallback(() => onClose(), [onClose]);
   const dialogRef = useDialog(true, close);
+  useEffect(() => {
+    if (!job?.id || ["completed", "partial", "failed"].includes(job.state)) return undefined;
+    let active = true;
+    const poll = async () => {
+      try {
+        const payload = await requestJson(`/api/offers/rebalance/${encodeURIComponent(job.id)}`, { timeoutMs: 5_000 });
+        if (!active) return;
+        setJob(payload.data);
+        if (payload.data.state !== job.state && ["completed", "partial", "failed", "reconciliation_required"].includes(payload.data.state))
+          await onChanged?.();
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "No se pudo consultar el progreso.");
+      }
+    };
+    void poll();
+    const timer = window.setInterval(() => void poll(), 2_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [job?.id, job?.state, onChanged]);
   const summaries = initial.plans.map((plan) => {
     const market = data.markets.find((item) => item.code === plan.coin);
     const proposed = plan.committed - plan.adjustments.reduce((sum, item) => sum + item.currentFiat, 0)
@@ -198,7 +219,7 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onApplied }) {
     setApplying(true);
     setError("");
     try {
-      await requestJson("/api/offers/rebalance/apply", {
+      const payload = await requestJson("/api/offers/rebalance/apply", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -207,9 +228,10 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onApplied }) {
             amount: Number(values[item.uuid]),
           }))),
         }),
-        timeoutMs: 60_000,
+        timeoutMs: 10_000,
       });
-      await onApplied();
+      setJob(payload.data);
+      setApplying(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo aplicar el reajuste.");
       setApplying(false);
@@ -228,7 +250,7 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onApplied }) {
         {summaries.map(({ plan, market, proposed, valid: marketValid }) => (
           <section className="rebalance-market" key={plan.coin}>
             <div className="rebalance-market-summary">
-              <MarketIdentity code={plan.coin} label={label(plan.coin)} size="sm" />
+              <MarketIdentity market={market || { code: plan.coin, label: label(plan.coin) }} size="sm" />
               <span className={marketValid ? "positive-value" : "negative-value"}>{money(proposed, market?.currency === "USD" ? 2 : 0)} / {money(plan.available, market?.currency === "USD" ? 2 : 0)} {unit(plan.coin)}</span>
             </div>
             <div className="rebalance-adjustments">
@@ -253,9 +275,34 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onApplied }) {
         {invalidAmount ? <p className="form-error" role="alert">Cada cantidad debe estar entre cero y su importe actual.</p> : null}
         {!invalidAmount && summaries.some((item) => !item.valid) ? <p className="form-error" role="alert">Todavía hay más fiat comprometido que declarado. Reduce un poco más las cantidades.</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
-        <div className="offer-modal-actions"><Button variant="ghost" onClick={close} disabled={applying}>Cancelar</Button><Button variant="primary" onClick={apply} disabled={!valid || applying}>{applying ? "Aplicando…" : "Aceptar reajuste"}</Button></div>
+        {job ? <RebalanceProgress job={job} /> : null}
+        <div className="offer-modal-actions">
+          <Button variant="ghost" onClick={close}>{job ? "Cerrar" : "Cancelar"}</Button>
+          {!job ? <Button variant="primary" onClick={apply} disabled={!valid || applying}>{applying ? "Enviando…" : "Aceptar reajuste"}</Button> : null}
+        </div>
       </div>
     </section>
+  );
+}
+
+function RebalanceProgress({ job }) {
+  const completed = job.adjustments.filter((item) => item.state === "completed").length;
+  const labels = {
+    pending: "Reajuste en cola",
+    applying: "Aplicando reajuste",
+    completed: "Reajuste completado",
+    partial: "Reajuste completado parcialmente",
+    reconciliation_required: "Esperando confirmación de QvaPay",
+    failed: "No se pudo completar el reajuste",
+  };
+  return (
+    <div className={`rebalance-progress state-${job.state}`} role="status" aria-live="polite">
+      <strong>{labels[job.state] || "Procesando reajuste"}</strong>
+      <span>{completed} de {job.adjustments.length} ofertas procesadas</span>
+      <div aria-hidden="true"><span style={{ width: `${job.adjustments.length ? completed / job.adjustments.length * 100 : 0}%` }} /></div>
+      {job.error ? <small>{job.error}</small> : null}
+      {["pending", "applying", "reconciliation_required"].includes(job.state) ? <small>Puedes cerrar esta ventana; QvaApply continuará en segundo plano.</small> : null}
+    </div>
   );
 }
 

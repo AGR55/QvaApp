@@ -31,6 +31,10 @@ export function Charts({ markets }) {
       active = false;
     };
   }, [coin, retry]);
+  useEffect(() => {
+    if (!markets.some((market) => market.code === coin))
+      setCoin(markets.find((market) => market.active)?.code || markets[0]?.code || "");
+  }, [coin, markets]);
   const rows = useMemo(
     () =>
       data?.history.map((item) => ({
@@ -57,7 +61,7 @@ export function Charts({ markets }) {
         description="Medianas de compra y venta por mercado. La curva es la memoria del libro."
       />
       <Panel title="Fluctuación de precios" kicker="Medianas" wide>
-          <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: <MarketIdentity code={market.code} label={market.label} size="sm" showCode={false} /> }))} />
+          <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: <MarketIdentity market={market} size="sm" /> }))} />
         {error ? <div className="resource-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((value) => value + 1)}>Reintentar</Button></div> : null}
         {data && values.length ? (
           <>

@@ -5,12 +5,12 @@
 1. Abre el panel y comprueba **Auditoría → Salud e integridad**.
 2. Confirma que la cadena de configuración es íntegra y no hay mutaciones pendientes.
 3. Revisa saldo QUSD, saldos fiat declarados, reservas y operaciones activas.
-4. Ejecuta primero en simulación y comprueba las decisiones explicadas.
-5. Para operar: selecciona modo real; el sistema seguirá pausado. Reanuda en una acción separada.
+4. Confirma que `CONFIRM_REAL_TRADING=true` y que los límites fueron revisados.
+5. El sistema arranca activo; usa **Inactivar** o la parada de emergencia si no deben iniciarse nuevas operaciones.
 
 En **Cockpit → Cobertura del escáner** comprueba que aparezcan los mercados activos, los lados consultados, las ofertas elegibles/bloqueadas y el presupuesto de aplicación. Una ronda que muestre solo compras de QUSD es normal: las ventas de QUSD se consultan en la ronda alterna.
 
-No habilites modo real si `pnpm check` falla, la documentación de QvaPay cambió, existe una conciliación pendiente o los saldos declarados no coinciden.
+No mantengas activa la automatización si `pnpm check` falla, la documentación de QvaPay cambió, existe una conciliación pendiente o los saldos declarados no coinciden.
 
 Para el panel local se aceptan `http://127.0.0.1:3000`, `http://localhost:3000` y el loopback IPv6 equivalente. Deben conservar el protocolo y puerto de `DASHBOARD_TRUSTED_ORIGIN`; IPs LAN, dominios y otros puertos se rechazan.
 
@@ -59,7 +59,7 @@ cp -a data/qvaapply.sqlite data/backups/qvaapply-manual-AAAA-MM-DD.sqlite
 systemctl --user start qvaapply
 ```
 
-Las migraciones crean automáticamente una copia previa en `data/backups`. Para restaurar, mantén el proceso detenido, conserva primero la base dañada con otro nombre, copia el backup como `data/qvaapply.sqlite`, verifica permisos `600` y arranca en simulación/pausa. Comprueba Auditoría antes de modo real.
+Las migraciones crean automáticamente una copia previa en `data/backups`. Para restaurar, mantén el proceso detenido, conserva primero la base dañada con otro nombre, copia el backup como `data/qvaapply.sqlite` y verifica permisos `600`. Si necesitas inspeccionar antes de operar, conserva una parada de emergencia en la copia restaurada. Comprueba Auditoría al arrancar.
 
 La migración v6 añade configuración operativa y cachés remotas. En una base anterior crea automáticamente `qvaapply-before-v6-*.sqlite` antes de modificar el esquema.
 
@@ -72,7 +72,7 @@ La migración v6 añade configuración operativa y cachés remotas. En una base 
 
 Nunca copies `.env`, `data/`, backups ni capturas con datos financieros a Git o a tickets públicos.
 
-## Checklist de modo real
+## Checklist de operación
 
 - [ ] `pnpm check` verde.
 - [ ] Backup reciente y restauración conocida.
@@ -80,6 +80,5 @@ Nunca copies `.env`, `data/`, backups ni capturas con datos financieros a Git o 
 - [ ] Límites revisados y revisión visible en Estrategia.
 - [ ] Saldos fiat declarados verificados.
 - [ ] Sin mutaciones o workflows pendientes.
-- [ ] Prueba de simulación coherente.
-- [ ] Primera operación real limitada a un importe deliberadamente pequeño.
+- [ ] Primera operación tras cambios limitada a un importe deliberadamente pequeño.
 - [ ] Pago/recepción comprobados fuera del sistema antes de confirmar.

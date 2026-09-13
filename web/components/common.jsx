@@ -2,13 +2,15 @@ import React from "react";
 import { Activity } from "lucide-react";
 import { CardTitle } from "./ui.jsx";
 
-export function Panel({ title, children, wide = false, kicker, description }) {  return (
-    <section className={`panel ui-section ${wide ? "wide" : ""}`} data-ui="panel">
+export function Panel({ title, children, wide = false, kicker, description }) {
+  return (
+    <section
+      className={`panel ui-section ${wide ? "wide" : ""}`}
+      data-ui="panel"
+    >
       <header className="panel-head ui-section-head">
         <div className="ui-section-titles">
-          {kicker ? <span className="section-kicker">{kicker}</span> : null}
           <CardTitle>{title}</CardTitle>
-          {description ? <p className="ui-section-description">{description}</p> : null}
         </div>
       </header>
       <div className="ui-section-body">{children}</div>
@@ -18,9 +20,7 @@ export function Panel({ title, children, wide = false, kicker, description }) { 
 export function ViewHead({ kicker, title, description, meta }) {
   return (
     <header className="view-head">
-      {kicker ? <span className="view-kicker">{kicker}</span> : null}
       <h1>{title}</h1>
-      {description ? <p>{description}</p> : null}
       {meta ? <div className="view-meta">{meta}</div> : null}
     </header>
   );
@@ -36,7 +36,9 @@ export function Empty({ children }) {
 export function Skeleton({ rows = 3, label = "Cargando datos" }) {
   return (
     <div className="skeleton" role="status" aria-label={label}>
-      {Array.from({ length: rows }, (_, index) => <i key={index} />)}
+      {Array.from({ length: rows }, (_, index) => (
+        <i key={index} />
+      ))}
       <span className="sr-only">{label}</span>
     </div>
   );
@@ -48,8 +50,11 @@ export function Freshness({ state, cachedAt }) {
   if (!updatedAt)
     return <span className="freshness stale">Sin datos guardados</span>;
   return (
-    <span className={`freshness ${state?.stale || state?.error ? "stale" : ""}`}>
-      {state?.stale || state?.error ? "Dato guardado" : "Actualizado"} · {new Date(updatedAt).toLocaleString("es-CU")}
+    <span
+      className={`freshness ${state?.stale || state?.error ? "stale" : ""}`}
+    >
+      {state?.stale || state?.error ? "Dato guardado" : "Actualizado"} ·{" "}
+      {new Date(updatedAt).toLocaleString("es-CU")}
     </span>
   );
 }

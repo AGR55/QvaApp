@@ -16,7 +16,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 10;
+const LATEST_SCHEMA_VERSION = 12;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -135,6 +135,61 @@ export interface DecisionEventPage {
   pending: number;
   page: number;
   pageSize: number;
+}
+
+export type NotificationKind =
+  | "blocked-offer"
+  | "operation-applied"
+  | "reconciliation-required"
+  | "rebalance-completed"
+  | "rebalance-attention";
+
+export interface DurableNotification {
+  id: string;
+  kind: NotificationKind;
+  message: string;
+  operationUuid?: string;
+  payload: Record<string, unknown>;
+  telegramDeliveredAt: number | null;
+  telegramAttempts: number;
+  telegramNextAttemptAt: number;
+  telegramLastError?: string;
+  pushDeliveredAt: number | null;
+  pushAttempts: number;
+  pushNextAttemptAt: number;
+  pushLastError?: string;
+  acknowledgedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type RebalanceJobState =
+  | "pending"
+  | "applying"
+  | "completed"
+  | "partial"
+  | "reconciliation_required"
+  | "failed";
+
+export interface RebalanceJobAdjustment {
+  uuid: string;
+  coin: FiatMarket;
+  currentAmount: number;
+  targetAmount: number;
+  rate: number;
+  receive: number;
+  action: "edit" | "cancel";
+  state: "pending" | "applying" | "completed" | "reconciliation_required" | "failed";
+  error?: string;
+}
+
+export interface RebalanceJob {
+  id: string;
+  state: RebalanceJobState;
+  adjustments: RebalanceJobAdjustment[];
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface MutationIntent {
@@ -469,6 +524,66 @@ export class Store {
           "INSERT INTO schema_migrations(version, applied_at) VALUES (10, ?)",
         ).run(Date.now());
       }
+      if (this.currentSchemaVersion() < 11) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS notification_events (
+            id TEXT PRIMARY KEY,
+            kind TEXT NOT NULL,
+            message TEXT NOT NULL,
+            operation_uuid TEXT,
+            payload_json TEXT NOT NULL,
+            telegram_delivered_at INTEGER,
+            telegram_attempts INTEGER NOT NULL DEFAULT 0,
+            telegram_next_attempt_at INTEGER NOT NULL DEFAULT 0,
+            telegram_last_error TEXT,
+            push_delivered_at INTEGER,
+            push_attempts INTEGER NOT NULL DEFAULT 0,
+            push_next_attempt_at INTEGER NOT NULL DEFAULT 0,
+            push_last_error TEXT,
+            acknowledged_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_notification_delivery
+            ON notification_events(telegram_delivered_at, push_delivered_at,
+              telegram_next_attempt_at, push_next_attempt_at);
+          CREATE INDEX IF NOT EXISTS idx_notification_unacknowledged
+            ON notification_events(acknowledged_at, created_at DESC);
+        `);
+        const now = Date.now();
+        this.db.prepare(
+          `UPDATE decision_events
+           SET resolved_at = ?, resolution = 'resolved', updated_at = ?
+           WHERE resolved_at IS NULL AND lower(reason) LIKE '%vip%'`,
+        ).run(now, now);
+        this.db.prepare(
+          `UPDATE trading_alerts
+           SET resolved_at = ?, resolution = 'resolved', updated_at = ?
+           WHERE resolved_at IS NULL AND lower(reason) LIKE '%vip%'`,
+        ).run(now, now);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (11, ?)",
+        ).run(now);
+      }
+      if (this.currentSchemaVersion() < 12) {
+        this.ensureColumn("market_config", "icon_url", "TEXT");
+        this.ensureColumn("market_config", "color", "TEXT");
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS capital_rebalance_jobs (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL,
+            adjustments_json TEXT NOT NULL,
+            error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_capital_rebalance_jobs_state
+            ON capital_rebalance_jobs(state, updated_at);
+        `);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (12, ?)",
+        ).run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -518,7 +633,7 @@ export class Store {
       .get() as Record<string, unknown> | undefined;
     const marketRows = this.db
       .prepare(
-        "SELECT code, label, currency, active, hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee FROM market_config ORDER BY rowid",
+        "SELECT code, label, currency, icon_url, color, active, hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee FROM market_config ORDER BY rowid",
       )
       .all() as Record<string, unknown>[];
     const details = this.db
@@ -582,6 +697,8 @@ export class Store {
         code: String(row.code),
         label: String(row.label),
         currency: String(row.currency),
+        ...(row.icon_url === null ? {} : { iconUrl: String(row.icon_url) }),
+        ...(row.color === null ? {} : { color: String(row.color) }),
         active: Boolean(row.active),
         huntBuyEnabled: Boolean(row.hunt_buy_enabled),
         huntSellEnabled: Boolean(row.hunt_sell_enabled),
@@ -684,7 +801,7 @@ export class Store {
       this.db.prepare("DELETE FROM fiat_accounts").run();
       this.db.prepare("DELETE FROM market_config").run();
       const insertMarket = this.db.prepare(
-        "INSERT INTO market_config(code, label, currency, active, hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO market_config(code, label, currency, icon_url, color, active, hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const insertDetail = this.db.prepare(
         "INSERT INTO payment_details(market_code, position, name, value) VALUES (?, ?, ?, ?)",
@@ -698,6 +815,8 @@ export class Store {
           market.code,
           market.label,
           market.currency,
+          market.iconUrl ?? null,
+          market.color ?? null,
           Number(market.active),
           Number(market.huntBuyEnabled),
           Number(market.huntSellEnabled),
@@ -1565,6 +1684,139 @@ export class Store {
     return row ? this.readDecisionEvent(row) : undefined;
   }
 
+  enqueueNotification(input: {
+    id: string;
+    kind: NotificationKind;
+    message: string;
+    operationUuid?: string;
+    payload: Record<string, unknown>;
+    createdAt?: number;
+  }): DurableNotification {
+    const now = input.createdAt ?? Date.now();
+    this.db.prepare(
+      `INSERT INTO notification_events(
+        id, kind, message, operation_uuid, payload_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING`,
+    ).run(
+      input.id,
+      input.kind,
+      input.message,
+      input.operationUuid ?? null,
+      JSON.stringify(input.payload),
+      now,
+      now,
+    );
+    const row = this.db.prepare(
+      "SELECT * FROM notification_events WHERE id = ?",
+    ).get(input.id) as Record<string, unknown>;
+    return notificationFromRow(row);
+  }
+
+  pendingNotificationDeliveries(
+    now = Date.now(),
+    limit = 50,
+  ): DurableNotification[] {
+    return (
+      this.db.prepare(
+        `SELECT * FROM notification_events
+         WHERE (telegram_delivered_at IS NULL AND telegram_next_attempt_at <= ?)
+            OR (push_delivered_at IS NULL AND push_next_attempt_at <= ?)
+         ORDER BY created_at ASC LIMIT ?`,
+      ).all(now, now, limit) as Record<string, unknown>[]
+    ).map(notificationFromRow);
+  }
+
+  markNotificationDelivered(
+    id: string,
+    channel: "telegram" | "push",
+    deliveredAt = Date.now(),
+  ): void {
+    const prefix = channel === "telegram" ? "telegram" : "push";
+    this.db.prepare(
+      `UPDATE notification_events
+       SET ${prefix}_delivered_at = ?, ${prefix}_last_error = NULL, updated_at = ?
+       WHERE id = ?`,
+    ).run(deliveredAt, deliveredAt, id);
+  }
+
+  markNotificationFailed(
+    id: string,
+    channel: "telegram" | "push",
+    error: string,
+    nextAttemptAt: number,
+  ): void {
+    const prefix = channel === "telegram" ? "telegram" : "push";
+    this.db.prepare(
+      `UPDATE notification_events
+       SET ${prefix}_attempts = ${prefix}_attempts + 1,
+           ${prefix}_next_attempt_at = ?, ${prefix}_last_error = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(nextAttemptAt, error, Date.now(), id);
+  }
+
+  pendingUserNotifications(limit = 20): DurableNotification[] {
+    return (
+      this.db.prepare(
+        `SELECT * FROM notification_events
+         WHERE acknowledged_at IS NULL
+           AND kind IN ('operation-applied', 'reconciliation-required', 'rebalance-completed', 'rebalance-attention')
+         ORDER BY created_at DESC LIMIT ?`,
+      ).all(limit) as Record<string, unknown>[]
+    ).map(notificationFromRow);
+  }
+
+  acknowledgeNotification(id: string): boolean {
+    const now = Date.now();
+    return this.db.prepare(
+      `UPDATE notification_events SET acknowledged_at = ?, updated_at = ?
+       WHERE id = ? AND acknowledged_at IS NULL`,
+    ).run(now, now, id).changes > 0;
+  }
+
+  createRebalanceJob(
+    id: string,
+    adjustments: RebalanceJobAdjustment[],
+    createdAt = Date.now(),
+  ): RebalanceJob {
+    this.db.prepare(
+      `INSERT INTO capital_rebalance_jobs(
+        id, state, adjustments_json, created_at, updated_at
+      ) VALUES (?, 'pending', ?, ?, ?)`,
+    ).run(id, JSON.stringify(adjustments), createdAt, createdAt);
+    return this.rebalanceJob(id)!;
+  }
+
+  rebalanceJob(id: string): RebalanceJob | undefined {
+    const row = this.db.prepare(
+      "SELECT * FROM capital_rebalance_jobs WHERE id = ?",
+    ).get(id) as Record<string, unknown> | undefined;
+    return row ? rebalanceJobFromRow(row) : undefined;
+  }
+
+  pendingRebalanceJobs(limit = 10): RebalanceJob[] {
+    return (
+      this.db.prepare(
+        `SELECT * FROM capital_rebalance_jobs
+         WHERE state IN ('pending', 'applying', 'reconciliation_required')
+         ORDER BY created_at ASC LIMIT ?`,
+      ).all(limit) as Record<string, unknown>[]
+    ).map(rebalanceJobFromRow);
+  }
+
+  updateRebalanceJob(
+    id: string,
+    state: RebalanceJobState,
+    adjustments: RebalanceJobAdjustment[],
+    error?: string,
+  ): void {
+    this.db.prepare(
+      `UPDATE capital_rebalance_jobs
+       SET state = ?, adjustments_json = ?, error = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(state, JSON.stringify(adjustments), error ?? null, Date.now(), id);
+  }
+
   resolveDecisionEvent(
     id: number,
     resolution: NonNullable<DecisionEvent["resolution"]>,
@@ -1835,4 +2087,56 @@ function restoreIdempotencyKey(workflowId: string, offerUuid: string): string {
   return createHash("sha256")
     .update(`restore:${workflowId}:${offerUuid}`)
     .digest("hex");
+}
+
+function notificationFromRow(row: Record<string, unknown>): DurableNotification {
+  let payload: Record<string, unknown> = {};
+  try {
+    const parsed = JSON.parse(String(row.payload_json));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+      payload = parsed as Record<string, unknown>;
+  } catch {
+    /* Un payload antiguo no debe ocultar el aviso persistido. */
+  }
+  return {
+    id: String(row.id),
+    kind: String(row.kind) as NotificationKind,
+    message: String(row.message),
+    ...(row.operation_uuid === null || row.operation_uuid === undefined
+      ? {}
+      : { operationUuid: String(row.operation_uuid) }),
+    payload,
+    telegramDeliveredAt:
+      row.telegram_delivered_at === null ? null : Number(row.telegram_delivered_at),
+    telegramAttempts: Number(row.telegram_attempts),
+    telegramNextAttemptAt: Number(row.telegram_next_attempt_at),
+    ...(row.telegram_last_error === null
+      ? {}
+      : { telegramLastError: String(row.telegram_last_error) }),
+    pushDeliveredAt:
+      row.push_delivered_at === null ? null : Number(row.push_delivered_at),
+    pushAttempts: Number(row.push_attempts),
+    pushNextAttemptAt: Number(row.push_next_attempt_at),
+    ...(row.push_last_error === null
+      ? {}
+      : { pushLastError: String(row.push_last_error) }),
+    acknowledgedAt:
+      row.acknowledged_at === null ? null : Number(row.acknowledged_at),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
+}
+
+function rebalanceJobFromRow(row: Record<string, unknown>): RebalanceJob {
+  const adjustments = JSON.parse(String(row.adjustments_json)) as RebalanceJobAdjustment[];
+  return {
+    id: String(row.id),
+    state: String(row.state) as RebalanceJobState,
+    adjustments,
+    ...(row.error === null || row.error === undefined
+      ? {}
+      : { error: String(row.error) }),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }

@@ -125,6 +125,16 @@ export function buildDashboard(
       .header("cache-control", "public, max-age=86400")
       .send(readFileSync(file));
   });
+  app.get<{ Params: { name: string } }>("/market-icons/:name", async (request, reply) => {
+    const icon = typeof readModel.marketIcon === "function"
+      ? readModel.marketIcon(request.params.name)
+      : undefined;
+    if (!icon)
+      return reply.status(404).type("text/plain").send("Icono no encontrado.");
+    return reply.type(icon.mimeType)
+      .header("cache-control", "public, max-age=31536000, immutable")
+      .send(readFileSync(icon.path));
+  });
   app.get<{ Params: { "*": string } }>("/dashboard/*", async (request, reply) => {
     const relative = request.params["*"];
     const file = resolve(publicRoot, relative);
@@ -232,6 +242,27 @@ export function buildDashboard(
   );
   app.get("/api/config", async () => ({ data: readModel.config() }));
   app.get("/api/config-revisions", async () => ({ data: readModel.configRevisions() }));
+  app.post<{
+    Body: { name: string; mimeType: string; base64: string };
+  }>("/api/market-icons", {
+    bodyLimit: 750_000,
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "mimeType", "base64"],
+        properties: {
+          name: { type: "string", minLength: 1, maxLength: 120 },
+          mimeType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/svg+xml"] },
+          base64: { type: "string", minLength: 1, maxLength: 700_000 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    const saved = await clientAction(() => readModel.saveMarketIcon(request.body));
+    reply.status(201);
+    return { data: saved };
+  });
   app.put<{ Body: TradingConfig | { config: TradingConfig; reason?: string } }>("/api/config", async (request, reply) => {
     await clientAction(async () => {
       const payload = request.body;
@@ -277,14 +308,14 @@ export function buildDashboard(
     await clientAction(() => readModel.updateHunting(request.body));
     reply.status(204);
   });
-  app.put<{ Body: { paused?: boolean; mode?: "simulation" | "real"; refresh?: boolean; emergencyStop?: boolean } }>("/api/control", {
+  app.put<{ Body: { paused?: boolean; refresh?: boolean; emergencyStop?: boolean; mode?: string } }>("/api/control", {
     schema: {
       body: {
         type: "object",
         additionalProperties: false,
         properties: {
           paused: { type: "boolean" },
-          mode: { type: "string", enum: ["simulation", "real"] },
+          mode: { not: {} },
           refresh: { type: "boolean" },
           emergencyStop: { type: "boolean" },
         },
@@ -297,7 +328,6 @@ export function buildDashboard(
       throw new ClientInputError("La parada de emergencia debe enviarse como una acción independiente.");
     await clientAction(async () => {
       if (body.emergencyStop !== undefined) readModel.setEmergencyStop(body.emergencyStop);
-      if (body.mode !== undefined) readModel.setMode(body.mode);
       if (body.refresh !== undefined) readModel.setRefresh(body.refresh);
       if (body.paused !== undefined) await readModel.setPaused(body.paused);
     });
@@ -342,10 +372,25 @@ export function buildDashboard(
         },
       },
     },
-  }, async (request) => ({
-    data: await clientAction(() =>
-      readModel.applyBudgetRebalance(request.body.adjustments)),
-  }));
+  }, async (request, reply) => {
+    const job = await clientAction(() =>
+      readModel.startBudgetRebalance(request.body.adjustments));
+    reply.status(202);
+    return { data: job };
+  });
+  app.get<{ Params: { id: string } }>("/api/offers/rebalance/:id", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["id"],
+        properties: { id: { type: "string", minLength: 1, maxLength: 100 } },
+      },
+    },
+  }, async (request) => {
+    const job = readModel.rebalanceJob(request.params.id);
+    if (!job) throw new ClientInputError("Reajuste no encontrado.");
+    return { data: job, source: "sqlite" };
+  });
   app.post<{ Body: { coin: FiatMarket; type: "buy" | "sell"; amount: number; rate: number } }>("/api/offers", {
     schema: {
       body: {
@@ -488,6 +533,20 @@ export function buildDashboard(
     await clientAction(() => readModel.dismissBlockedOffer(request.params.uuid));
     reply.status(204);
   });
+  app.get("/api/notifications", async () => ({ data: readModel.notifications() }));
+  app.post<{ Params: { id: string } }>("/api/notifications/:id/ack", {
+    schema: {
+      params: {
+        type: "object",
+        required: ["id"],
+        properties: { id: { type: "string", minLength: 1, maxLength: 200 } },
+      },
+      body: { type: "object", additionalProperties: false },
+    },
+  }, async (request, reply) => {
+    readModel.acknowledgeNotification(request.params.id);
+    reply.status(204);
+  });
   app.get("/api/openapi.json", async () => openApiDocument());
   return app;
 }
@@ -544,13 +603,28 @@ function serviceWorkerScript(): string {
     let payload = {};
     try { payload = event.data ? event.data.json() : {}; } catch {}
     const alert = payload.alert || {};
-    const title = payload.type === "blocked-offer" ? "Oferta requiere revisión" : "Actividad de QvaApply";
+    const title = payload.type === "blocked-offer"
+      ? "Oferta requiere revisión"
+      : payload.type === "operation-applied"
+        ? "Aplicación confirmada"
+        : payload.type === "rebalance-completed"
+          ? "Reajuste completado"
+          : payload.type === "rebalance-attention"
+            ? "Reajuste requiere atención"
+        : "Actividad de QvaApply";
     const body = [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
     const url = payload.url || "/?view=auditoria";
     event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       const visible = clients.find((client) => client.visibilityState === "visible");
       if (visible) { visible.postMessage({ type: "qvaapply-notification", payload }); return; }
-      return self.registration.showNotification(title, { body, tag: payload.version || payload.type, data: { url } });
+      return self.registration.showNotification(title, {
+        body,
+        tag: payload.version || payload.type,
+        data: { url },
+        icon: "/logo/isotipo.webp",
+        badge: "/logo/isotipo.webp",
+        requireInteraction: payload.type === "operation-applied" || payload.type === "rebalance-attention"
+      });
     }));
   });
   self.addEventListener("notificationclick", (event) => {
@@ -606,10 +680,12 @@ function openApiDocument() {
       "/api/live/operations": { get: { summary: "Conciliar operaciones activas con QvaPay" } },
       "/api/live/markets/{coin}": { get: { summary: "Actualizar un mercado" } },
       "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },
-      "/api/control": { put: { summary: "Pausa, modo, refresco y emergencia" } },
+      "/api/control": { put: { summary: "Pausa, refresco y emergencia" } },
       "/api/offers": { post: { summary: "Crear oferta propia" } },
       "/api/offers/rebalance/preview": { post: { summary: "Previsualizar un reajuste del capital fiat" } },
-      "/api/offers/rebalance/apply": { post: { summary: "Aplicar un reajuste validado de ofertas propias" } },
+      "/api/offers/rebalance/apply": { post: { summary: "Iniciar un reajuste persistente de ofertas propias" } },
+      "/api/offers/rebalance/{id}": { get: { summary: "Consultar el progreso de un reajuste" } },
+      "/api/market-icons": { post: { summary: "Cargar un icono administrado para un mercado" } },
       "/api/offers/{uuid}": { put: { summary: "Editar oferta propia" }, delete: { summary: "Cancelar oferta propia" } },
       "/api/workflows/{workflowId}/reconcile": { post: { summary: "Conciliar un resultado remoto ambiguo" } },
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
@@ -619,6 +695,8 @@ function openApiDocument() {
       "/api/decision-events/{id}/dismiss": { post: { summary: "Descartar una versión de decisión" } },
       "/api/push/public-key": { get: { summary: "Obtener la clave pública Web Push" } },
       "/api/push/subscriptions": { post: { summary: "Registrar el navegador para avisos" }, delete: { summary: "Eliminar la suscripción del navegador" } },
+      "/api/notifications": { get: { summary: "Consultar avisos persistentes pendientes" } },
+      "/api/notifications/{id}/ack": { post: { summary: "Confirmar la lectura de un aviso persistente" } },
       "/api/blocked-offers/{uuid}/preview": { post: { summary: "Previsualizar una oferta bloqueada sin mutaciones" } },
       "/api/blocked-offers/{uuid}/apply": { post: { summary: "Aplicar tras omitir solo el bloqueo de precio" } },
       "/api/blocked-offers/{uuid}/dismiss": { post: { summary: "Descartar una oferta bloqueada" } },

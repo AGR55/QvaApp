@@ -60,6 +60,8 @@ export interface QvaPayRuntime {
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
   authTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  mutationTimeoutMs?: number;
   throttleState?: {
     get(key: string): string | undefined;
     set(key: string, value: string): void;
@@ -94,6 +96,8 @@ export class QvaPayClient {
   private readonly now: () => number;
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly authTimeoutMs: number;
+  private readonly requestTimeoutMs: number;
+  private readonly mutationTimeoutMs: number;
   private readonly throttleState?: QvaPayRuntime["throttleState"];
   private queue = Promise.resolve();
   private lastRequestAt = 0;
@@ -107,6 +111,8 @@ export class QvaPayClient {
     this.now = runtime.now ?? Date.now;
     this.sleep = runtime.sleep ?? sleep;
     this.authTimeoutMs = runtime.authTimeoutMs ?? 20_000;
+    this.requestTimeoutMs = runtime.requestTimeoutMs ?? 5_000;
+    this.mutationTimeoutMs = runtime.mutationTimeoutMs ?? 25_000;
     this.throttleState = runtime.throttleState;
   }
 
@@ -399,7 +405,10 @@ export class QvaPayClient {
       try {
         response = options.retryRead
           ? await this.fetchRead(`${API}${path}`, init)
-          : await this.fetchImpl(`${API}${path}`, init);
+          : await this.fetchImpl(`${API}${path}`, {
+              ...init,
+              signal: AbortSignal.timeout(this.mutationTimeoutMs),
+            });
       } catch (error) {
         if (policy !== "read" && policy !== "list")
           throw new QvaMutationUncertainError(policy, error);
@@ -416,7 +425,10 @@ export class QvaPayClient {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        const response = await this.fetchImpl(input, init);
+        const response = await this.fetchImpl(input, {
+          ...init,
+          signal: AbortSignal.timeout(this.requestTimeoutMs),
+        });
         if (response.status !== 429 || attempt === 2) return response;
         await this.sleep(800 * 2 ** attempt);
       } catch (error) {

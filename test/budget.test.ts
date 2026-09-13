@@ -93,3 +93,34 @@ test("usa el total fiat remoto y respeta el redondeo transferible del mercado", 
   assert.ok(plan.adjustments[0]!.proposedFiat <= 9_000);
   assert.equal(plan.adjustments[0]!.rate, 973.7);
 });
+
+test("cancela una compra CUP si el presupuesto no alcanza una decena", () => {
+  const plan = proportionalBudgetPlan(
+    [{
+      uuid: "cup-underflow",
+      coin: "BANK_CUP",
+      type: "buy",
+      status: "open",
+      amount: 10,
+      rate: 973.7,
+      receive: 9_730,
+    }],
+    "BANK_CUP",
+    10,
+    980,
+    0,
+    "CUP",
+  );
+
+  assert.deepEqual(plan.adjustments, [{
+    uuid: "cup-underflow",
+    coin: "BANK_CUP",
+    rate: 973.7,
+    currentQusd: 10,
+    proposedQusd: 0,
+    currentFiat: 9_730,
+    proposedFiat: 0,
+    releasedFiat: 9_730,
+    action: "cancel",
+  }]);
+});

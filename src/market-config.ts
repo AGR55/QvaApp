@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import type { config as RuntimeConfig } from "./config.js";
 import { conservativeRiskLimits, type RiskLimits } from "./core/risk-policy.js";
@@ -10,6 +11,8 @@ export interface MarketConfig {
   code: string;
   label: string;
   currency: string;
+  iconUrl?: string;
+  color?: string;
   active: boolean;
   huntBuyEnabled: boolean;
   huntSellEnabled: boolean;
@@ -50,6 +53,7 @@ type LegacyConfig = typeof RuntimeConfig;
 export class MarketConfigService {
   private value: TradingConfig;
   readonly path: string;
+  readonly iconDirectory: string;
 
   constructor(
     dataDir: string,
@@ -57,6 +61,7 @@ export class MarketConfigService {
     private readonly store: Store,
   ) {
     this.path = join(dataDir, "trading-config.json");
+    this.iconDirectory = join(dataDir, "market-icons");
     const hadBotConfig = this.store.hasBotConfig();
     const persisted = this.store.loadTradingConfig();
     const loaded =
@@ -110,6 +115,43 @@ export class MarketConfigService {
     }));
   }
 
+  saveMarketIcon(
+    originalName: string,
+    declaredMime: string,
+    content: Uint8Array,
+  ): { url: string; path: string; mimeType: string } {
+    if (!content.byteLength || content.byteLength > 512 * 1024)
+      throw new Error("El icono debe pesar entre 1 byte y 512 KB.");
+    const detected = detectIcon(content);
+    if (!detected || detected.mimeType !== declaredMime)
+      throw new Error("El contenido no coincide con un formato de imagen permitido.");
+    if (detected.extension === "svg") validateSvg(content);
+    const digest = createHash("sha256").update(content).digest("hex").slice(0, 32);
+    const name = `${digest}.${detected.extension}`;
+    mkdirSync(this.iconDirectory, { recursive: true, mode: 0o700 });
+    const path = join(this.iconDirectory, name);
+    if (!existsSync(path)) writeFileSync(path, content, { mode: 0o600 });
+    this.store.audit(
+      "market_icon_uploaded",
+      `Icono ${originalName.slice(0, 100)} guardado como recurso administrado`,
+    );
+    return { url: `/market-icons/${name}`, path, mimeType: detected.mimeType };
+  }
+
+  marketIcon(name: string): { path: string; mimeType: string } | undefined {
+    const match = /^([a-f0-9]{32})\.(png|jpg|webp|svg)$/.exec(name);
+    if (!match) return undefined;
+    const path = join(this.iconDirectory, name);
+    if (!existsSync(path)) return undefined;
+    const mimeTypes: Record<string, string> = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      webp: "image/webp",
+      svg: "image/svg+xml",
+    };
+    return { path, mimeType: mimeTypes[match[2]!]! };
+  }
+
   save(next: TradingConfig, source = "system", reason?: string): TradingConfig {
     validate(next);
     const normalized = harmonize(next);
@@ -154,6 +196,8 @@ export class MarketConfigService {
           code: "BANK_CUP",
           label: "Transferencia CUP",
           currency: "CUP",
+          iconUrl: "/icons/cup.png",
+          color: "#79b64a",
           active: true,
           huntBuyEnabled: true,
           huntSellEnabled: true,
@@ -172,6 +216,8 @@ export class MarketConfigService {
           code: "BANDECPREPAGO",
           label: "USD Prepago",
           currency: "USD",
+          iconUrl: "/icons/tropical.png",
+          color: "#3976b8",
           active: true,
           huntBuyEnabled: true,
           huntSellEnabled: true,
@@ -187,6 +233,8 @@ export class MarketConfigService {
           code: "CLASICA",
           label: "Tarjeta Clásica",
           currency: "USD",
+          iconUrl: "/icons/clasica.png",
+          color: "#4f83a5",
           active: true,
           huntBuyEnabled: true,
           huntSellEnabled: true,
@@ -232,6 +280,10 @@ function validate(value: unknown): asserts value is TradingConfig {
     codes.add(market.code);
     if (!market.label?.trim() || !market.currency?.trim())
       throw new Error(`Nombre o moneda inválidos para ${market.code}.`);
+    if (market.iconUrl && !/^\/(?:icons|market-icons)\/[a-zA-Z0-9._-]+$/.test(market.iconUrl))
+      throw new Error(`Icono inválido para ${market.code}.`);
+    if (market.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(market.color))
+      throw new Error(`Color inválido para ${market.code}.`);
     if (typeof market.active !== "boolean")
       throw new Error(`Estado inválido para ${market.code}.`);
     if (
@@ -311,15 +363,48 @@ function normalize(value: unknown): TradingConfig {
 }
 
 function withMarketDefaults(markets: MarketConfig[]): MarketConfig[] {
-  return markets.map((market) => ({
-    ...market,
-    huntBuyEnabled: booleanOr(market.huntBuyEnabled, market.active),
-    huntSellEnabled: booleanOr(market.huntSellEnabled, market.active),
-    outgoingTransferFee: numberOr(
-      market.outgoingTransferFee,
-      market.code === "CLASICA" ? 0.08 : 0,
-    ),
-  }));
+  return markets.map((market) => {
+    const legacy = legacyMarketIdentity(market.code);
+    const iconUrl = market.iconUrl !== undefined ? market.iconUrl : legacy.iconUrl;
+    return {
+      ...market,
+      ...(iconUrl !== undefined ? { iconUrl } : {}),
+      color: market.color ?? legacy.color,
+      huntBuyEnabled: booleanOr(market.huntBuyEnabled, market.active),
+      huntSellEnabled: booleanOr(market.huntSellEnabled, market.active),
+      outgoingTransferFee: numberOr(
+        market.outgoingTransferFee,
+        market.code === "CLASICA" ? 0.08 : 0,
+      ),
+    };
+  });
+}
+
+function legacyMarketIdentity(code: string): { iconUrl?: string; color: string } {
+  if (code === "BANK_CUP") return { iconUrl: "/icons/cup.png", color: "#79b64a" };
+  if (code === "BANDECPREPAGO") return { iconUrl: "/icons/tropical.png", color: "#3976b8" };
+  if (code === "CLASICA") return { iconUrl: "/icons/clasica.png", color: "#4f83a5" };
+  return { color: "#6f8494" };
+}
+
+function detectIcon(content: Uint8Array): { extension: "png" | "jpg" | "webp" | "svg"; mimeType: string } | undefined {
+  const bytes = Buffer.from(content);
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
+    return { extension: "png", mimeType: "image/png" };
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+    return { extension: "jpg", mimeType: "image/jpeg" };
+  if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP")
+    return { extension: "webp", mimeType: "image/webp" };
+  const text = bytes.toString("utf8").trimStart();
+  if (/^(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(text))
+    return { extension: "svg", mimeType: "image/svg+xml" };
+  return undefined;
+}
+
+function validateSvg(content: Uint8Array): void {
+  const svg = Buffer.from(content).toString("utf8");
+  if (/<(?:script|foreignObject|iframe|object|embed|image|style)\b|\son[a-z]+\s*=|(?:href|src)\s*=|@import|url\s*\(/i.test(svg))
+    throw new Error("El SVG contiene elementos activos o referencias externas no permitidas.");
 }
 
 function withHuntingDefaults(
@@ -422,6 +507,7 @@ function harmonize(config: TradingConfig): TradingConfig {
   const normalized = structuredClone(config);
   normalized.qusdReserve = normalized.risk.minQusdReserve;
   normalized.hunting = withHuntingDefaults(normalized.hunting);
+  normalized.markets = withMarketDefaults(normalized.markets);
   for (const market of normalized.markets) {
     market.huntBuyEnabled = booleanOr(market.huntBuyEnabled, market.active);
     market.huntSellEnabled = booleanOr(market.huntSellEnabled, market.active);

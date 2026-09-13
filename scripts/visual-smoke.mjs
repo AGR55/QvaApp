@@ -57,7 +57,7 @@ try {
     execute("return document.querySelectorAll('.header-metrics .currency-badge').length === 4"),
   );
   await waitFor(() =>
-    execute("return document.querySelector('.connection-state p')?.textContent === 'Vista actualizada'"),
+    execute("return document.querySelector('.connection-state span')?.textContent === 'Conectado'"),
   );
   await screenshot("/tmp/qvaapply-dashboard-desktop.png");
   const desktop = await assertPageQuality("Cockpit");
@@ -248,7 +248,7 @@ try {
     })(); return true;`);
   const usdChart = await find(
     "xpath",
-    "//button[normalize-space(.)='USD Prepago']",
+    "//button[contains(normalize-space(.), 'USD Prepago')]",
   );
   await command("POST", `/session/${sessionId}/element/${usdChart}/click`, {});
   await new Promise((resolve) => setTimeout(resolve, 2_100));
@@ -319,6 +319,7 @@ try {
     );
   await screenshot("/tmp/qvaapply-settings-desktop.png");
   const settingsDesktop = await assertPageQuality("Estrategia");
+  await assertSettingsCardsContained("Estrategia");
 
   const audit = await find(
     "xpath",
@@ -410,6 +411,8 @@ try {
       );
     await screenshot(imagePath);
     mobile[navLabel] = await assertPageQuality(`${navLabel} móvil`);
+    if (navLabel === "Estrategia")
+      await assertSettingsCardsContained("Estrategia móvil");
   }
   console.log(
     JSON.stringify(
@@ -490,6 +493,26 @@ async function assertPageQuality(name) {
   if (accessibility.serious.length > 0)
     throw new Error(`WCAG ${name}: ${JSON.stringify(accessibility.serious)}`);
   return { ...pageMetrics, accessibility };
+}
+
+async function assertSettingsCardsContained(name) {
+  const layout = await execute(`return {
+    visibleNativeFileInputs: Array.from(document.querySelectorAll('.market-settings input[type=file]'))
+      .filter(input => input.getBoundingClientRect().width > 2 || input.getBoundingClientRect().height > 2)
+      .length,
+    cards: Array.from(document.querySelectorAll('.market-settings')).map(card => ({
+      label: card.querySelector('legend')?.textContent?.trim(),
+      clientWidth: card.clientWidth,
+      scrollWidth: card.scrollWidth
+    }))
+  }`);
+  const overflowing = layout.cards.filter(
+    (card) => card.scrollWidth > card.clientWidth + 1,
+  );
+  if (layout.visibleNativeFileInputs || overflowing.length)
+    throw new Error(
+      `${name} contiene controles fuera de sus tarjetas: ${JSON.stringify(layout)}`,
+    );
 }
 
 async function accessibilityAudit() {

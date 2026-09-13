@@ -575,6 +575,180 @@ test("marca como incierta una creación sin respuesta remota", async () => {
   assert.equal(store.recentMutationIntents(1)[0]?.state, "uncertain");
 });
 
+test("concilia una edición incierta cuando la oferta propia ya coincide", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-uncertain-edit-reconcile-")),
+  );
+  store.createMutationIntent({
+    intentId: "uncertain-edit",
+    operationUuid: "own-edit",
+    kind: "edit_offer",
+    request: { uuid: "own-edit", amount: 1.49, receive: 1.57514286 },
+  });
+  store.updateMutationIntent(
+    "uncertain-edit",
+    "uncertain",
+    undefined,
+    "No se recibió confirmación",
+  );
+  const qva = {
+    listOffers: async () => [{
+      uuid: "own-edit",
+      type: "buy",
+      coin: "CLASICA",
+      amount: 1.49,
+      receive: 1.58,
+      status: "open",
+    }],
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.reconcilePendingStandaloneMutations(), 1);
+  assert.equal(store.hasUnresolvedMutation(), false);
+  assert.equal(store.recentMutationIntents(1)[0]?.state, "reconciled");
+  assert.equal(store.countAudit("standalone_offer_mutation_reconciled"), 1);
+  store.close();
+});
+
+test("mantiene incierta una edición cuando la oferta remota no coincide", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-uncertain-edit-mismatch-")),
+  );
+  store.createMutationIntent({
+    intentId: "uncertain-edit-mismatch",
+    operationUuid: "own-edit-mismatch",
+    kind: "edit_offer",
+    request: { uuid: "own-edit-mismatch", amount: 1.49, receive: 1.58 },
+  });
+  store.updateMutationIntent("uncertain-edit-mismatch", "uncertain");
+  const qva = {
+    listOffers: async () => [{
+      uuid: "own-edit-mismatch",
+      type: "buy",
+      coin: "CLASICA",
+      amount: 10,
+      receive: 10.6,
+      status: "open",
+    }],
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.reconcilePendingStandaloneMutations(), 0);
+  assert.equal(store.hasUnresolvedMutation(), true);
+  assert.equal(store.recentMutationIntents(1)[0]?.state, "uncertain");
+  store.close();
+});
+
+test("concilia creación y cancelación propias solo con evidencia remota", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-own-mutations-reconcile-")),
+  );
+  store.createMutationIntent({
+    intentId: "uncertain-create-own",
+    kind: "create_offer",
+    idempotencyKey: "create-key",
+    request: {
+      type: "sell",
+      coin: "BANK_CUP",
+      amount: 5,
+      receive: 4_900,
+    },
+  });
+  store.updateMutationIntent("uncertain-create-own", "uncertain");
+  store.createMutationIntent({
+    intentId: "uncertain-cancel-own",
+    operationUuid: "cancelled-own",
+    kind: "cancel_offer",
+    request: { uuid: "cancelled-own" },
+  });
+  store.updateMutationIntent("uncertain-cancel-own", "uncertain");
+  const qva = {
+    listOffers: async () => [{
+      uuid: "created-own",
+      type: "sell",
+      coin: "BANK_CUP",
+      amount: 5,
+      receive: 4_900,
+      status: "open",
+      created_at: new Date().toISOString(),
+    }],
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.reconcilePendingStandaloneMutations(), 2);
+  assert.equal(store.hasUnresolvedMutation(), false);
+  assert.deepEqual(
+    store.recentMutationIntents(2).map((intent) => intent.state),
+    ["reconciled", "reconciled"],
+  );
+  assert.equal(store.countAudit("standalone_offer_mutation_reconciled"), 2);
+  store.close();
+});
+
+test("omite una edición si QvaPay ya refleja el mismo importe y total", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-duplicate-edit-")),
+  );
+  store.set("mode", "real");
+  store.createMutationIntent({
+    intentId: "recent-confirmed-edit",
+    operationUuid: "own-already-edited",
+    kind: "edit_offer",
+    request: {
+      uuid: "own-already-edited",
+      amount: 1.49,
+      receive: 1.57514286,
+    },
+  });
+  store.updateMutationIntent("recent-confirmed-edit", "confirmed");
+  let edits = 0;
+  const qva = {
+    listOffers: async () => [{
+      uuid: "own-already-edited",
+      type: "buy",
+      coin: "CLASICA",
+      amount: 1.49,
+      receive: 1.58,
+      status: "open",
+    }],
+    editOffer: async () => {
+      edits += 1;
+    },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    { realTradingAllowed: true } as never,
+    async () => undefined,
+  );
+
+  await trading.editOwnOffer(
+    "own-already-edited",
+    1.49,
+    1.57514286 / 1.49,
+  );
+
+  assert.equal(edits, 0);
+  assert.equal(store.recentMutationIntents().length, 1);
+  assert.equal(store.countAudit("edit_offer_unchanged"), 1);
+  store.close();
+});
+
 test("no reintenta automáticamente una cancelación cuyo resultado remoto es incierto", async () => {
   const store = new Store(
     mkdtempSync(join(tmpdir(), "qvaapply-uncertain-cancel-")),

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, History, Plus, Save, Trash2 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, History, ImagePlus, Plus, Save, Trash2, X } from "lucide-react";
 import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
 import { useDialog } from "../hooks/use-dialog.js";
@@ -78,7 +78,7 @@ export function Settings({ onChanged }) {
         position === index
           ? {
               ...market,
-              [key]: ["active", "label", "currency", "code"].includes(key)
+              [key]: ["active", "label", "currency", "code", "iconUrl", "color"].includes(key)
                 ? value
                 : Number(value),
             }
@@ -129,14 +129,19 @@ export function Settings({ onChanged }) {
       ),
     }));
   const addMarket = () =>
-    setDraft((current) => ({
-      ...current,
-      markets: [
-        ...current.markets,
-        {
-          code: "NUEVO",
+    setDraft((current) => {
+      const codes = new Set(current.markets.map((market) => market.code));
+      let suffix = 1;
+      while (codes.has(suffix === 1 ? "NUEVO" : `NUEVO_${suffix}`)) suffix += 1;
+      return {
+        ...current,
+        markets: [
+          ...current.markets,
+          {
+          code: suffix === 1 ? "NUEVO" : `NUEVO_${suffix}`,
           label: "Nuevo mercado",
           currency: "",
+          color: "#6f8494",
           active: false,
           huntBuyEnabled: false,
           huntSellEnabled: false,
@@ -149,7 +154,8 @@ export function Settings({ onChanged }) {
           paymentDetails: [],
         },
       ],
-    }));
+      };
+    });
   const removeMarket = (index) =>
     setDraft((current) => ({
       ...current,
@@ -326,6 +332,23 @@ export function Settings({ onChanged }) {
                     updateMarket(index, "label", event.target.value)
                   }
                 />
+              </label>
+              <MarketIconEditor
+                market={market}
+                onChange={(iconUrl) => updateMarket(index, "iconUrl", iconUrl)}
+              />
+              <label>
+                Color identificativo
+                <span className="market-color-field">
+                  <input
+                    type="color"
+                    value={market.color || "#6f8494"}
+                    onChange={(event) =>
+                      updateMarket(index, "color", event.target.value)
+                    }
+                  />
+                  <code>{market.color || "#6f8494"}</code>
+                </span>
               </label>
               <label>
                 Moneda fiat
@@ -568,6 +591,115 @@ export function Settings({ onChanged }) {
   );
 }
 
+function MarketIconEditor({ market, onChange }) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
+  const choose = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setUploading(true);
+    setError("");
+    try {
+      const base64 = await fileBase64(file);
+      const payload = await requestJson("/api/market-icons", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: file.name,
+          mimeType: file.type || imageMimeFromName(file.name),
+          base64,
+        }),
+        timeoutMs: 20_000,
+      });
+      onChange(payload.data.url);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "No se pudo subir el icono.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+  const initial = String(market.label || market.code || "?")
+    .trim()
+    .slice(0, 1)
+    .toUpperCase();
+  return (
+    <div className="market-icon-editor">
+      <strong>Icono del mercado</strong>
+      <div>
+        {market.iconUrl ? (
+          <img src={market.iconUrl} alt="" width="44" height="44" />
+        ) : (
+          <span aria-hidden="true">{initial}</span>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          <ImagePlus aria-hidden="true" />
+          {uploading ? "Subiendo…" : "Elegir icono"}
+        </Button>
+        {market.iconUrl ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={uploading}
+            aria-label="Quitar icono"
+            onClick={() => onChange("")}
+          >
+            <X aria-hidden="true" />
+          </Button>
+        ) : null}
+        <input
+          ref={inputRef}
+          className="sr-only"
+          type="file"
+          aria-label={`Seleccionar icono para ${market.label}`}
+          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          onChange={(event) => void choose(event)}
+        />
+      </div>
+      <small>PNG, WebP, JPEG o SVG seguro · máximo 512 KB</small>
+      {error ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function fileBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new Error("No se pudo leer el archivo seleccionado."));
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      resolve(value.slice(value.indexOf(",") + 1));
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function imageMimeFromName(name) {
+  const extension = name.split(".").pop()?.toLowerCase();
+  return {
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    svg: "image/svg+xml",
+  }[extension] || "";
+}
+
 function diffConfig(saved, draft) {
   if (!saved || !draft) return [];
   const rootChanges = [["maxOpenOffers", "Máximo de ofertas propias"]].flatMap(
@@ -611,6 +743,8 @@ function diffConfig(saved, draft) {
       "code",
       "label",
       "currency",
+      "iconUrl",
+      "color",
       "active",
       "huntBuyEnabled",
       "huntSellEnabled",

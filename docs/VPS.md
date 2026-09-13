@@ -19,7 +19,7 @@ Internet → firewall → Caddy/Nginx (TLS + autenticación adicional opcional)
 7. Termina TLS en Caddy/Nginx y limita el acceso por VPN, Tailscale o allowlist cuando sea posible.
 8. Ejecuta exactamente una instancia con reinicio controlado. No uses balanceo horizontal con esta base.
 9. Automatiza backups cifrados y prueba restauraciones fuera de producción.
-10. Mantén el modo real pausado después de cada despliegue hasta revisar Salud e integridad.
+10. Activa la parada de emergencia antes del despliegue si necesitas revisar Salud e integridad sin nuevas operaciones al reiniciar.
 
 ## Unidad systemd de referencia
 

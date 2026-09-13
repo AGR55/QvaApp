@@ -4,8 +4,8 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 
 ## Garantías de seguridad
 
-- El modo inicial es simulación y la automatización permanece pausada.
-- El modo real requiere `CONFIRM_REAL_TRADING=true`, límites revisados en el panel y activación humana.
+- Producción opera únicamente en real y arranca activa, salvo que exista una parada de emergencia persistente.
+- El proceso exige `CONFIRM_REAL_TRADING=true` y límites revisados antes de iniciar.
 - Toda mutación se registra antes de enviarse a QvaPay.
 - Las aplicaciones, cancelaciones y ediciones pasan por una cola única; sus separaciones se conservan en SQLite incluso tras reiniciar.
 - Un timeout de una mutación bloquea nuevas operaciones hasta conciliar por lectura.
@@ -49,7 +49,7 @@ En operación local también puedes entrar mediante [http://localhost:3000](http
 
 `pnpm login` admite el TOTP de seis dígitos de una aplicación autenticadora. La contraseña y el código se introducen ocultos; ante fallos transitorios de conexión se hacen tres intentos y el token solo se guarda cifrado después de validarlo con `GET /user`.
 
-La primera revisión de límites debe hacerse en **Estrategia**. Empieza en simulación, revisa Mercados, Capital, Operaciones y Auditoría, y solo después considera el modo real.
+La primera revisión de límites debe hacerse en **Estrategia** antes de iniciar el servicio. Revisa también Mercados, Capital, Operaciones y Auditoría; usa la parada de emergencia si necesitas inspeccionar el sistema sin nuevas aplicaciones.
 
 El escáner revisa cada 15 segundos hasta 100 ofertas de venta por mercado ordenadas por la mejor tasa. El lado de compra se intercala cada dos rondas para respetar la cuota de lectura. Ejecuta como máximo una oportunidad por ronda, con prioridad a comprar QUSD barato; si va a vender y necesita liberar QUSD, el workflow compensable puede cancelar ofertas propias peores y restaurarlas ante un rechazo confirmado. Los pagos y las confirmaciones de recepción siguen siendo manuales.
 
