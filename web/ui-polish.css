@@ -1671,11 +1671,7 @@ tbody td small {
 .hunt-master-grid {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--line-soft);
-  border-radius: calc(var(--r-control) + 2px);
-  background: var(--surface);
+  gap: 6px;
 }
 .hunt-master {
   display: inline-flex;

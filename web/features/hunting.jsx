@@ -98,7 +98,11 @@ export function Hunting({ data, label, unit, onChanged }) {
               : "Aún no hay escaneos registrados"}
           </small>
         </div>
-        <div className="hunt-master-grid" role="group" aria-label="Lados de cacería">
+        <div
+          className="hunt-master-grid"
+          role="group"
+          aria-label="Lados de cacería"
+        >
           <MasterControl
             side="buy"
             running={data.hunting.buyRunning}
@@ -154,10 +158,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                 key={market.code}
               >
                 <header>
-                  <MarketIdentity
-                    market={market}
-                    size="lg"
-                  />
+                  <MarketIdentity market={market} size="lg" />
                   <strong>
                     {market.active ? "Disponible" : "Mercado inactivo"}
                   </strong>
@@ -431,7 +432,9 @@ function MasterControl({ side, running, paused, busy, disabled, onToggle }) {
   const Icon = buying ? ShoppingCart : Tags;
   const label = buying ? "Compra" : "Venta";
   const active = running && !paused;
-  const action = running ? `Pausar cacería de ${label.toLowerCase()}` : `Reanudar cacería de ${label.toLowerCase()}`;
+  const action = running
+    ? `Pausar cacería de ${label.toLowerCase()}`
+    : `Reanudar cacería de ${label.toLowerCase()}`;
   return (
     <Button
       variant="ghost"
@@ -444,7 +447,6 @@ function MasterControl({ side, running, paused, busy, disabled, onToggle }) {
       onClick={onToggle}
       disabled={disabled}
     >
-      <span className="hunt-master-dot" aria-hidden="true" />
       <Icon aria-hidden="true" />
       <span>{busy ? "Actualizando…" : label}</span>
     </Button>
