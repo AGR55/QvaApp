@@ -1642,7 +1642,9 @@ export class TradingEngine {
     try {
       const now = Date.now();
       const lastGlobalEdit = Number(this.store.get("last_offer_edit_at") ?? 0);
-      if (now - lastGlobalEdit < 20_000) return;
+      const refreshSpacingMs =
+        this.automationConfig().offerRefreshSpacingSeconds * 1_000;
+      if (now - lastGlobalEdit < refreshSpacingMs) return;
       const due = (await this.listOwnOffers())
         .map((offer) => {
           const remoteUpdatedAt = offer.updated_at

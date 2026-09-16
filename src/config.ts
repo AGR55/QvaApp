@@ -33,6 +33,8 @@ export const config = {
   autoCancelMs: numberValue("AUTO_CANCEL_MINUTES", 10, 1) * 60_000,
   offerRefreshIntervalMs:
     numberValue("OFFER_REFRESH_INTERVAL_MINUTES", 5, 1) * 60_000,
+  offerRefreshSpacingMs:
+    numberValue("OFFER_REFRESH_SPACING_SECONDS", 20, 20) * 1_000,
   maxOpenOwnOffers: numberValue("MAX_OPEN_OWN_OFFERS", 10, 1),
   qusdReserve: numberValue("QUSD_RESERVE", 0),
   priceGuardPercent: numberValue("PRICE_GUARD_PERCENT", 15, 1),

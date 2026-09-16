@@ -16,7 +16,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 13;
+const LATEST_SCHEMA_VERSION = 14;
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -589,6 +589,16 @@ export class Store {
           "INSERT INTO schema_migrations(version, applied_at) VALUES (13, ?)",
         ).run(Date.now());
       }
+      if (this.currentSchemaVersion() < 14) {
+        this.ensureColumn(
+          "bot_config",
+          "offer_refresh_spacing_seconds",
+          "REAL NOT NULL DEFAULT 20",
+        );
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (14, ?)",
+        ).run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -664,6 +674,9 @@ export class Store {
             offerRefreshIntervalMinutes: Number(
               automation.offer_refresh_interval_minutes,
             ),
+            offerRefreshSpacingSeconds: Number(
+              automation.offer_refresh_spacing_seconds,
+            ),
             priceGuardPercent: Number(automation.price_guard_percent),
             welcomeMessage: String(automation.welcome_message),
           }
@@ -671,6 +684,7 @@ export class Store {
             scanIntervalSeconds: 15,
             autoCancelMinutes: 10,
             offerRefreshIntervalMinutes: 5,
+            offerRefreshSpacingSeconds: 20,
             priceGuardPercent: 15,
             welcomeMessage:
               "Oferta aplicada por bot. El usuario atenderá y realizará el pago manualmente.",
@@ -744,13 +758,15 @@ export class Store {
         .prepare(
           `INSERT INTO bot_config(
             id, scan_interval_seconds, auto_cancel_minutes,
-            offer_refresh_interval_minutes, price_guard_percent, welcome_message,
+            offer_refresh_interval_minutes, offer_refresh_spacing_seconds,
+            price_guard_percent, welcome_message,
             hunt_buy_running, hunt_sell_running
-          ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             scan_interval_seconds = excluded.scan_interval_seconds,
             auto_cancel_minutes = excluded.auto_cancel_minutes,
             offer_refresh_interval_minutes = excluded.offer_refresh_interval_minutes,
+            offer_refresh_spacing_seconds = excluded.offer_refresh_spacing_seconds,
             price_guard_percent = excluded.price_guard_percent,
             welcome_message = excluded.welcome_message,
             hunt_buy_running = excluded.hunt_buy_running,
@@ -760,6 +776,7 @@ export class Store {
           config.automation.scanIntervalSeconds,
           config.automation.autoCancelMinutes,
           config.automation.offerRefreshIntervalMinutes,
+          config.automation.offerRefreshSpacingSeconds,
           config.automation.priceGuardPercent,
           config.automation.welcomeMessage,
           Number(config.hunting.buyRunning),

@@ -43,7 +43,9 @@ test("persiste la configuración nueva únicamente en SQLite", () => {
   const next = config.current();
   next.risk.minQusdReserve = 7;
   next.automation.scanIntervalSeconds = 33;
-  next.automation.welcomeMessage = "Pago fiat manual; el bot solo aplica la oferta.";
+  next.automation.offerRefreshSpacingSeconds = 45;
+  next.automation.welcomeMessage =
+    "Pago fiat manual; el bot solo aplica la oferta.";
   next.hunting.buyRunning = false;
   next.markets[0]!.huntSellEnabled = false;
   config.save(next);
@@ -51,14 +53,18 @@ test("persiste la configuración nueva únicamente en SQLite", () => {
   assert.equal(existsSync(join(dataDir, "trading-config.json")), false);
   assert.equal(store.loadTradingConfig()?.qusdReserve, 7);
   assert.equal(store.loadTradingConfig()?.automation.scanIntervalSeconds, 33);
-  assert.match(store.loadTradingConfig()?.automation.welcomeMessage ?? "", /manual/);
+  assert.equal(
+    store.loadTradingConfig()?.automation.offerRefreshSpacingSeconds,
+    45,
+  );
+  assert.match(
+    store.loadTradingConfig()?.automation.welcomeMessage ?? "",
+    /manual/,
+  );
   assert.equal(store.loadTradingConfig()?.hunting.buyRunning, false);
   assert.equal(store.loadTradingConfig()?.markets[0]?.huntSellEnabled, false);
   assert.ok(store.hasBotConfig());
-  assert.equal(
-    store.loadTradingConfig()?.risk.maxQusdPerOperation,
-    25,
-  );
+  assert.equal(store.loadTradingConfig()?.risk.maxQusdPerOperation, 25);
   assert.ok(store.verifyConfigRevisionChain());
   store.close();
 });
@@ -66,7 +72,11 @@ test("persiste la configuración nueva únicamente en SQLite", () => {
 test("persiste la identidad visual de mercados añadidos desde Estrategia", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-market-identity-"));
   const store = new Store(dataDir);
-  const config = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  const config = new MarketConfigService(
+    dataDir,
+    legacyRuntime as never,
+    store,
+  );
   const next = config.current();
   next.markets.push({
     code: "ETECSA",
@@ -87,8 +97,15 @@ test("persiste la identidad visual de mercados añadidos desde Estrategia", () =
   });
   config.save(next, "panel");
 
-  const reopened = new MarketConfigService(dataDir, legacyRuntime as never, store);
-  assert.equal(reopened.find("ETECSA")?.iconUrl, "/market-icons/etecsa-identity.png");
+  const reopened = new MarketConfigService(
+    dataDir,
+    legacyRuntime as never,
+    store,
+  );
+  assert.equal(
+    reopened.find("ETECSA")?.iconUrl,
+    "/market-icons/etecsa-identity.png",
+  );
   assert.equal(reopened.find("ETECSA")?.color, "#2f8fcb");
   store.close();
 });
@@ -96,14 +113,19 @@ test("persiste la identidad visual de mercados añadidos desde Estrategia", () =
 test("guarda iconos de mercado administrados y rechaza contenido disfrazado", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-market-icon-"));
   const store = new Store(dataDir);
-  const config = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  const config = new MarketConfigService(
+    dataDir,
+    legacyRuntime as never,
+    store,
+  );
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "base64");
   const icon = config.saveMarketIcon("etecsa.png", "image/png", png);
 
   assert.match(icon.url, /^\/market-icons\/[a-f0-9]{32}\.png$/);
   assert.equal(existsSync(icon.path), true);
   assert.throws(
-    () => config.saveMarketIcon("falso.png", "image/png", Buffer.from("no es png")),
+    () =>
+      config.saveMarketIcon("falso.png", "image/png", Buffer.from("no es png")),
     /contenido no coincide/i,
   );
   store.close();
@@ -138,7 +160,11 @@ test("persiste el progreso de un reajuste para retomarlo después de reiniciar",
 test("unifica la reserva e impide configuraciones financieras incoherentes", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-config-invariants-"));
   const store = new Store(dataDir);
-  const config = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  const config = new MarketConfigService(
+    dataDir,
+    legacyRuntime as never,
+    store,
+  );
   const valid = config.current();
   valid.risk.minQusdReserve = 8;
   config.save(valid);
@@ -149,8 +175,16 @@ test("unifica la reserva e impide configuraciones financieras incoherentes", () 
   assert.throws(() => config.save(excessiveMarketLimit), /máximo global/);
 
   const negativeSpread = config.current();
-  negativeSpread.markets[0]!.sellMinRate = negativeSpread.markets[0]!.buyMaxRate;
+  negativeSpread.markets[0]!.sellMinRate =
+    negativeSpread.markets[0]!.buyMaxRate;
   assert.throws(() => config.save(negativeSpread), /mínimo de venta neto/);
+
+  const unsafeRefreshSpacing = config.current();
+  unsafeRefreshSpacing.automation.offerRefreshSpacingSeconds = 9;
+  assert.throws(
+    () => config.save(unsafeRefreshSpacing),
+    /Separación entre refrescos.*10/,
+  );
   store.close();
 });
 
@@ -234,7 +268,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v13-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v14-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });
@@ -245,11 +279,11 @@ test("repara una base v12 registrada sin la tabla de reajustes", () => {
   initial.close();
   const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"));
   db.exec("DROP TABLE capital_rebalance_jobs");
-  db.prepare("DELETE FROM schema_migrations WHERE version = 13").run();
+  db.prepare("DELETE FROM schema_migrations WHERE version >= 13").run();
   db.close();
 
   const migrated = new Store(dataDir);
-  assert.equal(migrated.schemaVersion(), 13);
+  assert.equal(migrated.schemaVersion(), 14);
   const job = migrated.createRebalanceJob("repair-check", [], 1);
   assert.equal(job.id, "repair-check");
   migrated.close();
@@ -292,7 +326,14 @@ test("pagina eventos de decisión y descarta solamente una versión", () => {
     rate: 1_000,
     decision: "blocked" as const,
     reason: "Capital insuficiente",
-    checks: [{ code: "fiat_capital", label: "Capital", status: "fail" as const, reason: "Capital insuficiente" }],
+    checks: [
+      {
+        code: "fiat_capital",
+        label: "Capital",
+        status: "fail" as const,
+        reason: "Capital insuficiente",
+      },
+    ],
   };
   const first = store.recordDecisionEvent(base);
   assert.equal(store.resolveDecisionEvent(first.id, "dismissed"), true);
@@ -300,7 +341,11 @@ test("pagina eventos de decisión y descarta solamente una versión", () => {
   assert.equal(same.id, first.id);
   assert.equal(same.resolution, "dismissed");
 
-  const changed = store.recordDecisionEvent({ ...base, rate: 999, receive: 9_990 });
+  const changed = store.recordDecisionEvent({
+    ...base,
+    rate: 999,
+    receive: 9_990,
+  });
   assert.notEqual(changed.id, first.id);
   store.recordDecisionEvent({
     ...base,
@@ -308,7 +353,11 @@ test("pagina eventos de decisión y descarta solamente una versión", () => {
     decision: "applied",
     reason: "Aplicación confirmada",
   });
-  const pending = store.decisionEvents({ decision: "blocked", status: "pending", pageSize: 1 });
+  const pending = store.decisionEvents({
+    decision: "blocked",
+    status: "pending",
+    pageSize: 1,
+  });
   assert.equal(pending.total, 1);
   assert.equal(pending.pending, 1);
   assert.equal(pending.items[0]?.id, changed.id);
@@ -317,7 +366,9 @@ test("pagina eventos de decisión y descarta solamente una versión", () => {
 });
 
 test("conserva estados terminales en el historial pero los excluye de la proyección operativa", () => {
-  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-visible-operations-")));
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-visible-operations-")),
+  );
   const base = {
     offerType: "sell" as const,
     coin: "CLASICA",
@@ -332,8 +383,14 @@ test("conserva estados terminales en el historial pero los excluye de la proyecc
   store.createOperation({ ...base, uuid: "cancelled", state: "cancelled" });
   store.createOperation({ ...base, uuid: "completed", state: "completed" });
 
-  assert.deepEqual(store.visibleOperations().map((item) => item.uuid), ["active"]);
-  assert.deepEqual(new Set(store.operations().map((item) => item.uuid)), new Set(["active", "cancelled", "completed"]));
+  assert.deepEqual(
+    store.visibleOperations().map((item) => item.uuid),
+    ["active"],
+  );
+  assert.deepEqual(
+    new Set(store.operations().map((item) => item.uuid)),
+    new Set(["active", "cancelled", "completed"]),
+  );
   store.close();
 });
 
@@ -397,7 +454,10 @@ test("persiste workflow, snapshots y una reserva QUSD exclusiva", () => {
   );
 
   assert.equal(store.getTradeWorkflow("workflow-1")?.state, "planned");
-  assert.equal(store.workflowOwnOffers("workflow-1")[0]?.snapshot.uuid, "own-1");
+  assert.equal(
+    store.workflowOwnOffers("workflow-1")[0]?.snapshot.uuid,
+    "own-1",
+  );
   assert.equal(store.reserveQusd("workflow-1", "BANK_CUP", 20, 25), true);
   assert.equal(store.activeReservedQusd(), 20);
 

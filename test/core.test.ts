@@ -434,15 +434,23 @@ test("cada turno de refresco actualiza como máximo una oferta vencida", async (
   const trading = new TradingService(
     store,
     qva as never,
-    { initialUsdFiatBalance: 110, offerRefreshIntervalMs: 5 * 60_000 } as never,
+    {
+      initialUsdFiatBalance: 110,
+      offerRefreshIntervalMs: 5 * 60_000,
+      offerRefreshSpacingMs: 60_000,
+    } as never,
     async () => undefined,
   );
 
   await trading.refreshOwnOffers();
   assert.deepEqual(refreshed, ["one"]);
 
-  // Simula que ya transcurrió la separación global exigida por QvaPay.
+  // El mínimo técnico de QvaPay no basta si Estrategia exige más separación.
   store.set("last_offer_edit_at", String(Date.now() - 20_001));
+  await trading.refreshOwnOffers();
+  assert.deepEqual(refreshed, ["one"]);
+
+  store.set("last_offer_edit_at", String(Date.now() - 60_001));
   await trading.refreshOwnOffers();
   assert.deepEqual(refreshed, ["one", "two"]);
 });

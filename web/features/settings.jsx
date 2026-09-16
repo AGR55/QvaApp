@@ -22,6 +22,7 @@ const automationFields = [
   ["scanIntervalSeconds", "Intervalo de escaneo", "segundos", 5],
   ["autoCancelMinutes", "Cancelación automática", "minutos", 1],
   ["offerRefreshIntervalMinutes", "Refresco de ofertas propias", "minutos", 1],
+  ["offerRefreshSpacingSeconds", "Separación entre refrescos", "segundos", 20],
   ["priceGuardPercent", "Cortafuegos frente a la mediana", "%", 1],
 ];
 

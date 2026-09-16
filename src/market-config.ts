@@ -37,6 +37,7 @@ export interface TradingConfig {
     scanIntervalSeconds: number;
     autoCancelMinutes: number;
     offerRefreshIntervalMinutes: number;
+    offerRefreshSpacingSeconds: number;
     priceGuardPercent: number;
     welcomeMessage: string;
   };
@@ -124,9 +125,14 @@ export class MarketConfigService {
       throw new Error("El icono debe pesar entre 1 byte y 512 KB.");
     const detected = detectIcon(content);
     if (!detected || detected.mimeType !== declaredMime)
-      throw new Error("El contenido no coincide con un formato de imagen permitido.");
+      throw new Error(
+        "El contenido no coincide con un formato de imagen permitido.",
+      );
     if (detected.extension === "svg") validateSvg(content);
-    const digest = createHash("sha256").update(content).digest("hex").slice(0, 32);
+    const digest = createHash("sha256")
+      .update(content)
+      .digest("hex")
+      .slice(0, 32);
     const name = `${digest}.${detected.extension}`;
     mkdirSync(this.iconDirectory, { recursive: true, mode: 0o700 });
     const path = join(this.iconDirectory, name);
@@ -280,7 +286,10 @@ function validate(value: unknown): asserts value is TradingConfig {
     codes.add(market.code);
     if (!market.label?.trim() || !market.currency?.trim())
       throw new Error(`Nombre o moneda inválidos para ${market.code}.`);
-    if (market.iconUrl && !/^\/(?:icons|market-icons)\/[a-zA-Z0-9._-]+$/.test(market.iconUrl))
+    if (
+      market.iconUrl &&
+      !/^\/(?:icons|market-icons)\/[a-zA-Z0-9._-]+$/.test(market.iconUrl)
+    )
       throw new Error(`Icono inválido para ${market.code}.`);
     if (market.color !== undefined && !/^#[0-9a-fA-F]{6}$/.test(market.color))
       throw new Error(`Color inválido para ${market.code}.`);
@@ -335,6 +344,10 @@ function normalize(value: unknown): TradingConfig {
   const raw = value as Partial<TradingConfig> & { version?: number };
   if (raw.version === 3) {
     const config = structuredClone(raw) as TradingConfig;
+    config.automation.offerRefreshSpacingSeconds = numberOr(
+      config.automation.offerRefreshSpacingSeconds,
+      20,
+    );
     config.markets = withMarketDefaults(config.markets);
     config.hunting = withHuntingDefaults(config.hunting);
     return config;
@@ -365,7 +378,8 @@ function normalize(value: unknown): TradingConfig {
 function withMarketDefaults(markets: MarketConfig[]): MarketConfig[] {
   return markets.map((market) => {
     const legacy = legacyMarketIdentity(market.code);
-    const iconUrl = market.iconUrl !== undefined ? market.iconUrl : legacy.iconUrl;
+    const iconUrl =
+      market.iconUrl !== undefined ? market.iconUrl : legacy.iconUrl;
     return {
       ...market,
       ...(iconUrl !== undefined ? { iconUrl } : {}),
@@ -380,20 +394,40 @@ function withMarketDefaults(markets: MarketConfig[]): MarketConfig[] {
   });
 }
 
-function legacyMarketIdentity(code: string): { iconUrl?: string; color: string } {
-  if (code === "BANK_CUP") return { iconUrl: "/icons/cup.png", color: "#79b64a" };
-  if (code === "BANDECPREPAGO") return { iconUrl: "/icons/tropical.png", color: "#3976b8" };
-  if (code === "CLASICA") return { iconUrl: "/icons/clasica.png", color: "#4f83a5" };
+function legacyMarketIdentity(code: string): {
+  iconUrl?: string;
+  color: string;
+} {
+  if (code === "BANK_CUP")
+    return { iconUrl: "/icons/cup.png", color: "#79b64a" };
+  if (code === "BANDECPREPAGO")
+    return { iconUrl: "/icons/tropical.png", color: "#3976b8" };
+  if (code === "CLASICA")
+    return { iconUrl: "/icons/clasica.png", color: "#4f83a5" };
   return { color: "#6f8494" };
 }
 
-function detectIcon(content: Uint8Array): { extension: "png" | "jpg" | "webp" | "svg"; mimeType: string } | undefined {
+function detectIcon(
+  content: Uint8Array,
+): { extension: "png" | "jpg" | "webp" | "svg"; mimeType: string } | undefined {
   const bytes = Buffer.from(content);
-  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
+  if (
+    bytes.length >= 8 &&
+    bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  )
     return { extension: "png", mimeType: "image/png" };
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)
+  if (
+    bytes.length >= 3 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  )
     return { extension: "jpg", mimeType: "image/jpeg" };
-  if (bytes.length >= 12 && bytes.toString("ascii", 0, 4) === "RIFF" && bytes.toString("ascii", 8, 12) === "WEBP")
+  if (
+    bytes.length >= 12 &&
+    bytes.toString("ascii", 0, 4) === "RIFF" &&
+    bytes.toString("ascii", 8, 12) === "WEBP"
+  )
     return { extension: "webp", mimeType: "image/webp" };
   const text = bytes.toString("utf8").trimStart();
   if (/^(?:<\?xml[^>]*>\s*)?<svg[\s>]/i.test(text))
@@ -403,8 +437,14 @@ function detectIcon(content: Uint8Array): { extension: "png" | "jpg" | "webp" | 
 
 function validateSvg(content: Uint8Array): void {
   const svg = Buffer.from(content).toString("utf8");
-  if (/<(?:script|foreignObject|iframe|object|embed|image|style)\b|\son[a-z]+\s*=|(?:href|src)\s*=|@import|url\s*\(/i.test(svg))
-    throw new Error("El SVG contiene elementos activos o referencias externas no permitidas.");
+  if (
+    /<(?:script|foreignObject|iframe|object|embed|image|style)\b|\son[a-z]+\s*=|(?:href|src)\s*=|@import|url\s*\(/i.test(
+      svg,
+    )
+  )
+    throw new Error(
+      "El SVG contiene elementos activos o referencias externas no permitidas.",
+    );
 }
 
 function withHuntingDefaults(
@@ -422,6 +462,8 @@ function automationFromRuntime(cfg: LegacyConfig): TradingConfig["automation"] {
     autoCancelMinutes: numberOr(cfg.autoCancelMs, 600_000) / 60_000,
     offerRefreshIntervalMinutes:
       numberOr(cfg.offerRefreshIntervalMs, 300_000) / 60_000,
+    offerRefreshSpacingSeconds:
+      numberOr(cfg.offerRefreshSpacingMs, 20_000) / 1_000,
     priceGuardPercent: numberOr(cfg.priceGuardPercent, 15),
     welcomeMessage: (typeof cfg.welcomeMessage === "string"
       ? cfg.welcomeMessage
@@ -435,6 +477,7 @@ function defaultAutomation(): TradingConfig["automation"] {
     scanIntervalSeconds: 15,
     autoCancelMinutes: 10,
     offerRefreshIntervalMinutes: 5,
+    offerRefreshSpacingSeconds: 20,
     priceGuardPercent: 15,
     welcomeMessage:
       "Oferta aplicada por bot. El usuario atenderá y realizará el pago manualmente.",
@@ -450,6 +493,11 @@ function validateAutomation(
   finite(automation.scanIntervalSeconds, "Intervalo de escaneo", 3);
   finite(automation.autoCancelMinutes, "Plazo de cancelación", 1);
   finite(automation.offerRefreshIntervalMinutes, "Intervalo de refresco", 1);
+  finite(
+    automation.offerRefreshSpacingSeconds,
+    "Separación entre refrescos",
+    10,
+  );
   finite(automation.priceGuardPercent, "Cortafuegos de precio", 1);
   if (Number(automation.priceGuardPercent) > 100)
     throw new Error("El cortafuegos de precio no puede superar 100%.");
@@ -505,6 +553,10 @@ function validateRisk(value: unknown): asserts value is TradingConfig["risk"] {
 
 function harmonize(config: TradingConfig): TradingConfig {
   const normalized = structuredClone(config);
+  normalized.automation.offerRefreshSpacingSeconds = numberOr(
+    normalized.automation.offerRefreshSpacingSeconds,
+    20,
+  );
   normalized.qusdReserve = normalized.risk.minQusdReserve;
   normalized.hunting = withHuntingDefaults(normalized.hunting);
   normalized.markets = withMarketDefaults(normalized.markets);
