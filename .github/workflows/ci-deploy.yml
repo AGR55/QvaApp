@@ -1,0 +1,104 @@
+name: CI and production deployment
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qvaapply-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
+      - name: Enable pnpm from packageManager
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify application
+        run: pnpm check
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 24
+
+      - name: Enable pnpm from packageManager
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build application
+        run: pnpm build
+
+      - name: Build deployment archive
+        run: >-
+          tar --create --gzip
+          --file "qvaapply-${GITHUB_SHA}.tar.gz"
+          package.json pnpm-lock.yaml dist public deploy scripts/deploy-vps.sh
+
+      - name: Configure production SSH
+        env:
+          VPS_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          test -n "$VPS_PRIVATE_KEY"
+          test -n "$VPS_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Deploy production release
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT }}
+        run: |
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          ssh_port="${VPS_SSH_PORT:-22}"
+          remote="${VPS_USER}@${VPS_HOST}"
+          archive="qvaapply-${GITHUB_SHA}.tar.gz"
+          remote_root="/root/Adriano/QvaApply"
+          ssh -p "$ssh_port" "$remote" "mkdir -p '$remote_root/uploads'"
+          scp -P "$ssh_port" "$archive" "$remote:$remote_root/uploads/$archive"
+          ssh -p "$ssh_port" "$remote" \
+            "if [ -x \"$remote_root/current/scripts/deploy-vps.sh\" ]; then
+               bash \"$remote_root/current/scripts/deploy-vps.sh\" \"$remote_root/uploads/$archive\" \"$GITHUB_SHA\"
+             else
+               tmp=\"$remote_root/bootstrap-$GITHUB_SHA\"
+               mkdir -p \"\$tmp\"
+               tar -xzf \"$remote_root/uploads/$archive\" -C \"\$tmp\"
+               bash \"\$tmp/scripts/deploy-vps.sh\" \"$remote_root/uploads/$archive\" \"$GITHUB_SHA\"
+             fi"
