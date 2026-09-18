@@ -1,52 +1,105 @@
-# Despliegue futuro en VPS
+# Despliegue continuo en la VPS compartida
 
-Este despliegue sigue siendo para un solo administrador y una sola instancia. SQLite no debe compartirse entre réplicas.
+QvaApply se publica automáticamente desde `main` mediante
+`.github/workflows/ci-deploy.yml`. Los pushes y pull requests de `main` y
+`develop` ejecutan todas las verificaciones, pero únicamente un commit de `main`
+puede actualizar producción.
 
-## Modelo recomendado
+## Arquitectura
 
 ```text
-Internet → firewall → Caddy/Nginx (TLS + autenticación adicional opcional)
-                         → 127.0.0.1:3000 QvaApply
-                         → SQLite local en volumen cifrado/respaldado
+GitHub main → Actions → SSH → /root/Adriano/QvaApply/releases/<sha>
+                                      ↓
+                              Docker (Node 24)
+                                      ↓
+Nginx HTTPS → 127.0.0.1:8782 → contenedor:3000 → SQLite persistente
 ```
 
-1. Crea un usuario de sistema sin privilegios para QvaApply.
-2. Instala Node 24 LTS y pnpm 11; usa `pnpm install --frozen-lockfile` y `pnpm build`.
-3. Guarda `.env` fuera del repositorio con permisos `600`.
-4. Mantén `DASHBOARD_PORT=3000`; la aplicación escucha deliberadamente solo en loopback.
-5. Configura `DASHBOARD_TRUSTED_ORIGIN=https://panel.tu-dominio` y `DASHBOARD_SECURE_COOKIES=true`.
-6. Expón únicamente 22/80/443 según necesidad; nunca el puerto 3000.
-7. Termina TLS en Caddy/Nginx y limita el acceso por VPN, Tailscale o allowlist cuando sea posible.
-8. Ejecuta exactamente una instancia con reinicio controlado. No uses balanceo horizontal con esta base.
-9. Automatiza backups cifrados y prueba restauraciones fuera de producción.
-10. Activa la parada de emergencia antes del despliegue si necesitas revisar Salud e integridad sin nuevas operaciones al reiniciar.
+Docker aísla la versión de Node del resto de la VPS. Solo existe una instancia,
+porque la base SQLite no debe compartirse entre réplicas.
 
-## Unidad systemd de referencia
+Toda la instalación propia queda agrupada dentro de:
 
-```ini
-[Unit]
-Description=QvaApply
-After=network-online.target
-
-[Service]
-Type=simple
-User=qvaapply
-WorkingDirectory=/opt/qvaapply
-EnvironmentFile=/etc/qvaapply.env
-ExecStart=/usr/bin/node --enable-source-maps dist/index.js
-Restart=on-failure
-RestartSec=10
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ReadWritePaths=/var/lib/qvaapply
-
-[Install]
-WantedBy=multi-user.target
+```text
+/root/Adriano/QvaApply/
+├── config/       # entorno y puerto; permisos 600
+├── data/         # SQLite y archivos persistentes
+├── releases/     # una carpeta por commit
+├── uploads/      # artefactos entrantes de Actions
+└── current       # enlace a la release activa
 ```
 
-Ajusta `DATA_DIR=/var/lib/qvaapply`. Verifica en una copia de la VPS que `ProtectSystem` y las rutas coinciden antes de habilitar el servicio.
+## Preparación inicial
 
-## Cuándo migrar a PostgreSQL
+El servidor ya dispone de Docker Compose y Nginx. El puerto reservado es `8782`,
+escuchando únicamente en loopback. Copia el asistente y ejecútalo como `root`:
 
-Solo si aparecen múltiples instancias, múltiples administradores concurrentes o reporting externo que compita con el proceso financiero. Esa migración exige un nuevo ADR, bloqueo distribuido y pruebas de aislamiento; cambiar de base por anticipación añade riesgo sin beneficio local.
+```bash
+scp scripts/bootstrap-vps.sh root@inventory.cloudns.be:/tmp/qvaapply-bootstrap-vps.sh
+ssh root@inventory.cloudns.be
+chmod 700 /tmp/qvaapply-bootstrap-vps.sh
+/tmp/qvaapply-bootstrap-vps.sh 8782 https://qvaapply.inventory.cloudns.be
+```
+
+El asistente solicita la contraseña del panel y las credenciales de Telegram sin
+incluirlas en el historial. Genera automáticamente la clave local de
+cifrado. `CONFIRM_REAL_TRADING` queda en `false` hasta revisar producción.
+
+## Configuración de GitHub
+
+Crea un entorno `production` y añade:
+
+| Nombre | Valor |
+| --- | --- |
+| `VPS_HOST` | `inventory.cloudns.be` |
+| `VPS_USER` | `root` |
+| `VPS_SSH_PRIVATE_KEY` | clave Ed25519 privada exclusiva del despliegue |
+| `VPS_KNOWN_HOSTS` | claves verificadas del host SSH |
+
+La variable `VPS_SSH_PORT` puede omitirse porque el servidor utiliza el puerto 22.
+La clave privada no se guarda en el repositorio ni dentro de la VPS.
+
+## Nginx y TLS
+
+El sitio debe tener un virtual host explícito para no caer en el proxy comodín ya
+existente:
+
+```nginx
+server {
+    listen 80;
+    server_name qvaapply.inventory.cloudns.be;
+
+    location / {
+        proxy_pass http://127.0.0.1:8782;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Después se emite el certificado con Certbot y se deja que este añada el bloque
+HTTPS. El puerto 8782 nunca se abre en el firewall de DigitalOcean.
+
+## Despliegue y rollback
+
+Actions compila y valida la aplicación, transmite un archivo versionado, construye
+una imagen Node 24 y cambia atómicamente el enlace `current`. El contenedor utiliza
+`restart: unless-stopped`, filesystem de solo lectura, capacidades eliminadas y un
+volumen persistente exclusivo para los datos.
+
+Tras cada actualización se consulta `/api/session`. Si no responde correctamente,
+el script restaura la release anterior y Actions termina en error.
+
+Comandos útiles:
+
+```bash
+docker ps --filter name=qvaapply-adriano
+docker logs -f qvaapply-adriano
+curl http://127.0.0.1:8782/api/session
+```
+
+Los backups deben incluir `/root/Adriano/QvaApply/data` y
+`/root/Adriano/QvaApply/config`, cifrados y con restauraciones probadas.
