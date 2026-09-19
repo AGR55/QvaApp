@@ -13,6 +13,14 @@ import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
+import {
+  HuntingRateSessions,
+  TELEGRAM_COMMANDS,
+  decodeHuntingAction,
+  encodeHuntingAction,
+  type HuntingSide,
+  type PendingRateEdit,
+} from "./telegram-menu.js";
 
 if (!config.realTradingAllowed)
   throw new Error(
@@ -26,6 +34,7 @@ const qva = new QvaPayClient(() => session.token(), {
   throttleState: store,
 });
 const bot = new Bot(config.telegramToken);
+const huntingRates = new HuntingRateSessions();
 const webPush = new WebPushService(store);
 const notifications = new NotificationDispatcher(store, {
   telegram: async (notification) => {
@@ -123,6 +132,12 @@ bot.use(async (ctx, next) => {
   }
   await next();
 });
+bot.use(async (ctx, next) => {
+  const text = ctx.msg?.text;
+  if (text?.startsWith("/") && !text.startsWith("/cancel"))
+    huntingRates.cancel(chatKey(ctx));
+  await next();
+});
 
 bot.command(["start", "panel", "status"], (ctx) => void showDashboard(ctx));
 bot.command("help", (ctx) => ctx.reply(helpText(), { parse_mode: "HTML" }));
@@ -177,6 +192,11 @@ bot.command("refresh", (ctx) =>
   }),
 );
 bot.command("offers", (ctx) => void showOwnOffers(ctx));
+bot.command("hunting", (ctx) => void showHunting(ctx));
+bot.command("markets", (ctx) => void showMarkets(ctx));
+bot.command("operations", (ctx) => void showOperations(ctx));
+bot.command("strategy", (ctx) => void showStrategy(ctx));
+bot.command("automation", (ctx) => void showAutomation(ctx));
 bot.command(
   "market",
   (ctx) =>
@@ -206,12 +226,14 @@ bot.command("received", (ctx) =>
     return "✅ <b>Recepción confirmada</b>\nQUSD liberado.";
   }),
 );
-bot.command("cancel", (ctx) =>
-  execute(ctx, async () => {
+bot.command("cancel", (ctx) => {
+  if (!argument(ctx.msg?.text) && huntingRates.cancel(chatKey(ctx)))
+    return void showHunting(ctx, "Edición de tasa cancelada.");
+  return execute(ctx, async () => {
     await trading.cancel(argument(ctx.msg?.text));
     return "✖ Operación cancelada.";
-  }),
-);
+  });
+});
 bot.command("editoffer", (ctx) =>
   execute(ctx, async () => {
     const [uuid, amountText, rateText] = argumentsOf(ctx.msg?.text);
@@ -232,14 +254,41 @@ bot.command("canceloffer", (ctx) =>
 bot.command("createbuy", (ctx) => createOffer(ctx, "buy"));
 bot.command("createsell", (ctx) => createOffer(ctx, "sell"));
 
+bot.on("message:text", async (ctx) => {
+  if (ctx.msg.text.startsWith("/")) return;
+  const pending = huntingRates.current(chatKey(ctx));
+  if (!pending) return;
+  try {
+    const confirmation = huntingRates.propose(chatKey(ctx), ctx.msg.text);
+    await showRateConfirmation(ctx, confirmation);
+  } catch (error) {
+    await ctx.reply(
+      `⚠️ ${escapeHtml(errorMessage(error))}\n\nEscribe la tasa exacta o usa /cancel.`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          force_reply: true,
+          input_field_placeholder: "Ejemplo: 930 o 1,125",
+        },
+      },
+    );
+  }
+});
+
 bot.on("callback_query:data", async (ctx) => {
   const [action, uuid] = splitCallbackData(ctx.callbackQuery.data);
+  if (action !== "hunt") huntingRates.cancel(chatKey(ctx));
   // Telegram expira estos callbacks rápidamente; se responde antes de consultar QvaPay.
   await answerCallbackSafely(() => ctx.answerCallbackQuery());
   try {
     switch (action) {
       case "panel":
         return showPanelAction(ctx, uuid ?? "home");
+      case "hunt":
+        return handleHuntingAction(ctx, ctx.callbackQuery.data);
+      case "automation":
+        trading.setRefresh(!trading.refreshEnabled());
+        return showAutomation(ctx, "Estado del refresco actualizado.");
       case "ack":
         await trading.acknowledge(requiredUuid(uuid));
         return showDashboard(
@@ -249,6 +298,9 @@ bot.on("callback_query:data", async (ctx) => {
       case "cancel":
         await trading.cancel(requiredUuid(uuid));
         return showDashboard(ctx, "✖ Operación cancelada.");
+      case "received":
+        await trading.confirmReceived(requiredUuid(uuid));
+        return showOperations(ctx, "✅ Recepción confirmada y QUSD liberado.");
       case "refresh":
         await trading.refreshOwnOffer(requiredUuid(uuid));
         return showOwnOffers(ctx, "🔄 Oferta refrescada.");
@@ -316,8 +368,29 @@ scheduler.register("dashboard_cache", 30_000, () =>
 );
 void bootstrap();
 
+async function installTelegramMenu(): Promise<void> {
+  const chatId = Number(config.adminChatId);
+  if (!Number.isSafeInteger(chatId)) {
+    store.audit("telegram_menu_error", "El chat administrador no es representable por Telegram.");
+    return;
+  }
+  const results = await Promise.allSettled([
+    bot.api.setMyCommands(TELEGRAM_COMMANDS, {
+      scope: { type: "chat", chat_id: chatId },
+    }),
+    bot.api.setChatMenuButton({
+      chat_id: chatId,
+      menu_button: { type: "commands" },
+    }),
+  ]);
+  for (const result of results)
+    if (result.status === "rejected")
+      store.audit("telegram_menu_error", errorMessage(result.reason));
+}
+
 async function bootstrap(): Promise<void> {
   trading.initializeProductionState();
+  await installTelegramMenu();
   const standaloneReconciled =
     await trading.reconcilePendingStandaloneMutations();
   const reconciliations = await trading.reconcilePendingWorkflows();
@@ -349,13 +422,16 @@ async function bootstrap(): Promise<void> {
 async function showPanelAction(ctx: Context, view: string): Promise<void> {
   if (view === "status" || view === "home") return showDashboard(ctx);
   if (view === "mine") return showOwnOffers(ctx);
-  if (view === "market") return showMarket(ctx, defaultMarket());
+  if (view === "market" || view === "markets") return showMarkets(ctx);
   if (view.startsWith("market:")) {
     const coin = resolveMarket(view.slice("market:".length));
     if (!coin) throw new Error("Mercado no configurado.");
     return showMarket(ctx, coin);
   }
   if (view === "strategy") return showStrategy(ctx);
+  if (view === "hunting") return showHunting(ctx);
+  if (view === "operations") return showOperations(ctx);
+  if (view === "automation") return showAutomation(ctx);
   if (view === "logs") return render(ctx, logsText(), backKeyboard());
   if (view === "activate") {
     await trading.activate();
@@ -370,6 +446,309 @@ async function showPanelAction(ctx: Context, view: string): Promise<void> {
     return showDashboard(ctx, scanSummary(result));
   }
   throw new Error("Vista desconocida.");
+}
+
+async function showHunting(ctx: Context, notice?: string): Promise<void> {
+  const current = marketConfig.current();
+  const text = [
+    "<b>🎯 Cacería automática</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `Compra global: <b>${current.hunting.buyRunning ? "ACTIVA" : "DETENIDA"}</b>`,
+    `Venta global: <b>${current.hunting.sellRunning ? "ACTIVA" : "DETENIDA"}</b>`,
+    "",
+    ...current.markets.map(
+      (market) =>
+        `${market.active ? "🟢" : "⚪"} <b>${escapeHtml(market.label)}</b> · compra ${market.huntBuyEnabled ? "ON" : "OFF"} · venta ${market.huntSellEnabled ? "ON" : "OFF"}`,
+    ),
+    notice ? `\n${escapeHtml(notice)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const keyboard = new InlineKeyboard()
+    .text(
+      current.hunting.buyRunning ? "⏸ Detener compra" : "▶️ Iniciar compra",
+      encodeHuntingAction({ type: "global-toggle", side: "buy" }),
+    )
+    .text(
+      current.hunting.sellRunning ? "⏸ Detener venta" : "▶️ Iniciar venta",
+      encodeHuntingAction({ type: "global-toggle", side: "sell" }),
+    )
+    .row();
+  for (const market of current.markets)
+    keyboard
+      .text(
+        `${market.active ? "🟢" : "⚪"} ${market.label}`,
+        encodeHuntingAction({ type: "market", coin: market.code }),
+      )
+      .row();
+  keyboard.text("‹ Volver al panel", "panel:home");
+  return render(ctx, text, keyboard);
+}
+
+async function showHuntingMarket(
+  ctx: Context,
+  coin: FiatMarket,
+  notice?: string,
+): Promise<void> {
+  const current = marketConfig.current();
+  const market = current.markets.find((item) => item.code === coin);
+  if (!market) throw new Error("Mercado de cacería inválido.");
+  const buyEffective =
+    market.active && current.hunting.buyRunning && market.huntBuyEnabled;
+  const sellEffective =
+    market.active && current.hunting.sellRunning && market.huntSellEnabled;
+  const text = [
+    `<b>🎯 Cacería · ${escapeHtml(market.label)}</b>`,
+    "━━━━━━━━━━━━━━━━━━━━",
+    `Mercado: <b>${market.active ? "ACTIVO" : "INACTIVO"}</b>`,
+    `Compra: <b>${market.huntBuyEnabled ? "ON" : "OFF"}</b> · ${buyEffective ? "buscando" : "detenida"}`,
+    `Máximo de compra: <b>${rateText(market.buyMaxRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+    "",
+    `Venta: <b>${market.huntSellEnabled ? "ON" : "OFF"}</b> · ${sellEffective ? "buscando" : "detenida"}`,
+    `Mínimo de venta: <b>${rateText(market.sellMinRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+    notice ? `\n${escapeHtml(notice)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const keyboard = new InlineKeyboard()
+    .text(
+      market.huntBuyEnabled ? "⏸ Compra" : "▶️ Compra",
+      encodeHuntingAction({
+        type: "market-toggle",
+        side: "buy",
+        coin,
+      }),
+    )
+    .text(
+      market.huntSellEnabled ? "⏸ Venta" : "▶️ Venta",
+      encodeHuntingAction({
+        type: "market-toggle",
+        side: "sell",
+        coin,
+      }),
+    )
+    .row()
+    .text(
+      "✏️ Máximo de compra",
+      encodeHuntingAction({ type: "rate-edit", side: "buy", coin }),
+    )
+    .row()
+    .text(
+      "✏️ Mínimo de venta",
+      encodeHuntingAction({ type: "rate-edit", side: "sell", coin }),
+    )
+    .row()
+    .text("‹ Todas las monedas", encodeHuntingAction({ type: "home" }));
+  return render(ctx, text, keyboard);
+}
+
+async function handleHuntingAction(
+  ctx: Context,
+  callbackData: string,
+): Promise<void> {
+  try {
+    const action = decodeHuntingAction(callbackData);
+    if (
+      action.type !== "rate-edit" &&
+      action.type !== "rate-confirm" &&
+      action.type !== "rate-cancel"
+    )
+      huntingRates.cancel(chatKey(ctx));
+    if (action.type === "home") return showHunting(ctx);
+    if (action.type === "global-toggle") {
+      const current = marketConfig.current().hunting;
+      const running =
+        action.side === "buy" ? current.buyRunning : current.sellRunning;
+      trading.updateHunting(
+        action.side === "buy"
+          ? { buyRunning: !running }
+          : { sellRunning: !running },
+      );
+      return showHunting(
+        ctx,
+        `Cacería global de ${sideLabel(action.side).toLowerCase()} ${running ? "detenida" : "iniciada"}.`,
+      );
+    }
+    if (action.type === "market") return showHuntingMarket(ctx, action.coin);
+    if (action.type === "market-toggle") {
+      const market = requiredHuntingMarket(action.coin);
+      const enabled =
+        action.side === "buy"
+          ? market.huntBuyEnabled
+          : market.huntSellEnabled;
+      trading.updateHunting({
+        market:
+          action.side === "buy"
+            ? { code: action.coin, huntBuyEnabled: !enabled }
+            : { code: action.coin, huntSellEnabled: !enabled },
+      });
+      return showHuntingMarket(
+        ctx,
+        action.coin,
+        `${sideLabel(action.side)} ${enabled ? "detenida" : "iniciada"} para ${market.label}.`,
+      );
+    }
+    if (action.type === "rate-edit") {
+      const market = requiredHuntingMarket(action.coin);
+      const previousRate =
+        action.side === "buy" ? market.buyMaxRate : market.sellMinRate;
+      huntingRates.begin(
+        chatKey(ctx),
+        action.coin,
+        action.side,
+        previousRate,
+      );
+      await ctx.reply(
+        `<b>${sideRateLabel(action.side)} · ${escapeHtml(market.label)}</b>\n\nValor actual: <b>${rateText(previousRate)} ${escapeHtml(market.currency)}/QUSD</b>\n\nEscribe la nueva tasa exacta o usa /cancel.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            force_reply: true,
+            input_field_placeholder: "Ejemplo: 930 o 1,125",
+          },
+        },
+      );
+      return;
+    }
+    if (action.type === "rate-cancel") {
+      const pending = huntingRates.cancel(chatKey(ctx), action.token);
+      return pending
+        ? showHuntingMarket(ctx, pending.coin, "Edición de tasa cancelada.")
+        : showHunting(ctx, "No había una edición pendiente.");
+    }
+    const confirmed = huntingRates.confirm(chatKey(ctx), action.token);
+    trading.updateHunting({
+      market:
+        confirmed.side === "buy"
+          ? { code: confirmed.coin, buyMaxRate: confirmed.proposedRate }
+          : { code: confirmed.coin, sellMinRate: confirmed.proposedRate },
+    });
+    return showHuntingMarket(
+      ctx,
+      confirmed.coin,
+      `${sideRateLabel(confirmed.side)} actualizada a ${rateText(confirmed.proposedRate)}.`,
+    );
+  } catch (error) {
+    return showHunting(ctx, `No se pudo completar: ${errorMessage(error)}`);
+  }
+}
+
+async function showRateConfirmation(
+  ctx: Context,
+  pending: PendingRateEdit & { stage: "confirm" },
+): Promise<void> {
+  const market = requiredHuntingMarket(pending.coin);
+  return render(
+    ctx,
+    [
+      "<b>Confirmar nueva tasa de caza</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      `Mercado: <b>${escapeHtml(market.label)}</b>`,
+      `Lado: <b>${sideLabel(pending.side)}</b>`,
+      `Anterior: <b>${rateText(pending.previousRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+      `Nueva: <b>${rateText(pending.proposedRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+      "",
+      "La estrategia no cambiará hasta que confirmes.",
+    ].join("\n"),
+    new InlineKeyboard()
+      .text(
+        "✅ Guardar tasa",
+        encodeHuntingAction({
+          type: "rate-confirm",
+          token: pending.token,
+        }),
+      )
+      .text(
+        "✖ Cancelar",
+        encodeHuntingAction({ type: "rate-cancel", token: pending.token }),
+      ),
+  );
+}
+
+async function showMarkets(ctx: Context): Promise<void> {
+  const markets = trading.markets();
+  const text = [
+    "<b>🔎 Mercados P2P</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    ...markets.map(
+      (market) =>
+        `${market.active ? "🟢" : "⚪"} ${escapeHtml(market.label)} · ${escapeHtml(market.currency)}`,
+    ),
+    "",
+    "Elige un mercado para consultar sus ofertas.",
+  ].join("\n");
+  const keyboard = new InlineKeyboard();
+  for (const market of markets)
+    keyboard
+      .text(
+        `${market.active ? "🟢" : "⚪"} ${market.label}`,
+        `panel:market:${market.code}`,
+      )
+      .row();
+  keyboard.text("‹ Volver al panel", "panel:home");
+  return render(ctx, text, keyboard);
+}
+
+async function showOperations(ctx: Context, notice?: string): Promise<void> {
+  const operations = dashboardReadModel.localSnapshot().operations.slice(0, 8);
+  const text = [
+    "<b>📦 Operaciones activas</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    operations.length
+      ? operations
+          .map(
+            (operation) =>
+              `${operation.offerType === "sell" ? "🟢 COMPRA" : "🔵 VENTA"} · <b>${money(operation.amount)} QUSD</b> · ${escapeHtml(trading.marketLabel(operation.coin))}\nEstado: <b>${escapeHtml(operation.state)}</b> · Tasa: ${rateText(operation.rate)}\n<code>${operation.uuid}</code>`,
+          )
+          .join("\n\n")
+      : "No hay operaciones activas.",
+    notice ?? "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const keyboard = new InlineKeyboard();
+  for (const operation of operations) {
+    if (operation.state === "applied")
+      keyboard.text("✅ Voy a pagar", `ack:${operation.uuid}`);
+    if (operation.state === "paid")
+      keyboard.text("✅ Confirmar recepción", `received:${operation.uuid}`);
+    if (operation.state === "applied" || operation.state === "acknowledged")
+      keyboard.text("✖ Cancelar", `cancel:${operation.uuid}`);
+    keyboard.row();
+  }
+  keyboard.text("‹ Volver al panel", "panel:home");
+  return render(ctx, text, keyboard);
+}
+
+async function showAutomation(ctx: Context, notice?: string): Promise<void> {
+  const state = trading.operationalState();
+  const text = [
+    "<b>🤖 Automatización</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `Motor: <b>${state.paused ? "PAUSADO" : "ACTIVO"}</b>`,
+    `Refresco de ofertas propias: <b>${state.refresh ? "ON" : "OFF"}</b>`,
+    notice ? `\n${escapeHtml(notice)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return render(
+    ctx,
+    text,
+    new InlineKeyboard()
+      .text(
+        state.paused ? "▶️ Activar motor" : "⏸ Pausar motor",
+        state.paused ? "panel:activate" : "panel:pause",
+      )
+      .row()
+      .text(
+        state.refresh ? "⏸ Detener refresco" : "▶️ Activar refresco",
+        "automation:refresh",
+      )
+      .row()
+      .text("🔄 Escanear ahora", "panel:scan")
+      .row()
+      .text("‹ Volver al panel", "panel:home"),
+  );
 }
 
 async function showDashboard(ctx: Context, notice?: string): Promise<void> {
@@ -517,12 +896,15 @@ function mainKeyboard(paused: boolean): InlineKeyboard {
   const keyboard = new InlineKeyboard()
     .text("📊 Estado", "panel:status")
     .text("💼 Mis ofertas", "panel:mine")
-    .row();
-  for (const market of trading.markets())
-    keyboard.text(`🔎 ${market.label}`, `panel:market:${market.code}`);
+    .row()
+    .text("🎯 Cacería", "panel:hunting")
+    .text("📦 Operaciones", "panel:operations")
+    .row()
+    .text("🔎 Mercados", "panel:markets")
+    .text("⚙️ Estrategia", "panel:strategy");
   return keyboard
     .row()
-    .text("⚙️ Estrategia", "panel:strategy")
+    .text("🤖 Automatización", "panel:automation")
     .text("📜 Logs", "panel:logs")
     .row()
     .text(
@@ -620,10 +1002,30 @@ function requiredUuid(value?: string): string {
   if (!value) throw new Error("Identificador de oferta inválido.");
   return value;
 }
+function requiredHuntingMarket(coin: FiatMarket) {
+  const market = trading.market(coin);
+  if (!market) throw new Error("Mercado de cacería inválido.");
+  return market;
+}
+function chatKey(ctx: Context): string {
+  return String(ctx.chat?.id ?? config.adminChatId);
+}
+function sideLabel(side: HuntingSide): string {
+  return side === "buy" ? "Compra" : "Venta";
+}
+function sideRateLabel(side: HuntingSide): string {
+  return side === "buy" ? "Máximo de compra" : "Mínimo de venta";
+}
 function money(value: number): string {
   return new Intl.NumberFormat("es-CU", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
+  }).format(value);
+}
+function rateText(value: number): string {
+  return new Intl.NumberFormat("es-CU", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 6,
   }).format(value);
 }
 function relativeTime(value?: string | number): string {
@@ -689,7 +1091,7 @@ function marketHint(): string {
 }
 function helpText(): string {
   const markets = marketHint();
-  return `<b>QvaApply · ayuda rápida</b>\n\n/start — panel operativo\n/activate — activar la automatización\n/pause — desactivar la automatización\n/scan — escanear mercados activos\n/logs — eventos recientes\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — ver mercado\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/offers — ofertas propias`;
+  return `<b>QvaApply · ayuda rápida</b>\n\nUsa el botón <b>Menú</b> de Telegram para acceder a todas las áreas sin memorizar comandos.\n\n<b>Comandos avanzados</b>\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — abrir un mercado concreto\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/editoffer UUID QUSD TASA — editar una oferta\n/canceloffer UUID — cancelar una oferta\n/paid UUID REFERENCIA — registrar un pago\n/received UUID — confirmar recepción`;
 }
 
 let stopping = false;
