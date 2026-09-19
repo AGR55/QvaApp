@@ -311,6 +311,9 @@ scheduler.register("fiat_sync", 30_000, () =>
 );
 scheduler.register("notifications", 15_000, () => notifications.deliverDue());
 scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudgetRebalances());
+scheduler.register("dashboard_cache", 30_000, () =>
+  dashboardReadModel.refreshCache(),
+);
 void bootstrap();
 
 async function bootstrap(): Promise<void> {
@@ -334,6 +337,7 @@ async function bootstrap(): Promise<void> {
   void scheduler.run("capital_rebalance");
   void scheduler.run("fiat_sync");
   void scheduler.run("operation_sync");
+  void scheduler.run("dashboard_cache");
   void startPolling();
   console.log(
     unresolved.length

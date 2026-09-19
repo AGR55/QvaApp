@@ -676,8 +676,8 @@ export class DashboardReadModel {
     return { data, updatedAt, average: current.average };
   }
 
-  async snapshot() {
-    await Promise.all([
+  async refreshCache(): Promise<void> {
+    const results = await Promise.allSettled([
       this.refreshBalance(),
       this.refreshOwnOffers(),
       this.refreshTransactions(),
@@ -685,6 +685,18 @@ export class DashboardReadModel {
         this.refreshMarket(market.code),
       ),
     ]);
+    const errors = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (errors.length)
+      throw new AggregateError(
+        errors,
+        `No se pudieron actualizar ${errors.length} recurso(s) del panel.`,
+      );
+  }
+
+  async snapshot() {
+    await this.refreshCache();
     return this.localSnapshot();
   }
 

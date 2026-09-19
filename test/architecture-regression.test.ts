@@ -162,3 +162,45 @@ test("el dashboard persiste una sola observación completa por mercado", async (
   assert.equal(history[0]?.eligible, 1);
   assert.equal(history[0]?.medianSell, 930);
 });
+
+test("el refresco autónomo intenta todos los recursos aunque uno falle", async () => {
+  const calls: string[] = [];
+  const dashboard = new DashboardService(
+    {
+      activeMarkets: () => [
+        { code: "BANK_CUP" },
+        { code: "BANDECPREPAGO" },
+      ],
+    } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+  dashboard.refreshBalance = async () => {
+    calls.push("balance");
+    throw new Error("saldo no disponible");
+  };
+  dashboard.refreshOwnOffers = async () => {
+    calls.push("own-offers");
+    return { data: [], updatedAt: Date.now() };
+  };
+  dashboard.refreshTransactions = async () => {
+    calls.push("transactions");
+    return { data: [], updatedAt: Date.now() };
+  };
+  dashboard.refreshMarket = async (coin: string) => {
+    calls.push(`market:${coin}`);
+    return { data: { offers: [], total: 0 }, updatedAt: Date.now() } as never;
+  };
+
+  await assert.rejects(() => dashboard.refreshCache(), AggregateError);
+
+  assert.deepEqual(calls.sort(), [
+    "balance",
+    "market:BANDECPREPAGO",
+    "market:BANK_CUP",
+    "own-offers",
+    "transactions",
+  ]);
+});

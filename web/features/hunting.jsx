@@ -16,13 +16,23 @@ import { MarketIdentity } from "../components/market-identity.jsx";
 const cancellableStates = new Set(["applied", "acknowledged"]);
 
 export function Hunting({ data, label, unit, onChanged }) {
-  const [busy, setBusy] = useState("");
+  const [busyActions, setBusyActions] = useState(() => new Set());
   const [status, setStatus] = useState("");
   const [pendingCancel, setPendingCancel] = useState();
   const [rates, setRates] = useState(() => rateDraft(data.markets));
+  const isBusy = useCallback((key) => busyActions.has(key), [busyActions]);
+  const setActionBusy = useCallback((key, active) => {
+    setBusyActions((current) => {
+      const next = new Set(current);
+      if (active) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
   const closeCancel = useCallback(() => {
-    if (!busy) setPendingCancel(undefined);
-  }, [busy]);
+    if (!pendingCancel || !isBusy(`cancel:${pendingCancel.uuid}`))
+      setPendingCancel(undefined);
+  }, [isBusy, pendingCancel]);
   const dialogRef = useDialog(Boolean(pendingCancel), closeCancel);
   const captured = useMemo(
     () => (data.operations || []).filter((operation) => operation.autoApplied),
@@ -30,7 +40,7 @@ export function Hunting({ data, label, unit, onChanged }) {
   );
 
   const update = async (key, payload, success) => {
-    setBusy(key);
+    setActionBusy(key, true);
     setStatus("");
     try {
       await requestJson("/api/hunting", {
@@ -47,13 +57,13 @@ export function Hunting({ data, label, unit, onChanged }) {
           : "No se pudo actualizar la cacería.",
       );
     } finally {
-      setBusy("");
+      setActionBusy(key, false);
     }
   };
   const cancel = async () => {
     if (!pendingCancel) return;
     const key = `cancel:${pendingCancel.uuid}`;
-    setBusy(key);
+    setActionBusy(key, true);
     setStatus("");
     try {
       await requestJson(
@@ -74,7 +84,7 @@ export function Hunting({ data, label, unit, onChanged }) {
           : "No se pudo cancelar la aplicación.",
       );
     } finally {
-      setBusy("");
+      setActionBusy(key, false);
     }
   };
 
@@ -107,8 +117,8 @@ export function Hunting({ data, label, unit, onChanged }) {
             side="buy"
             running={data.hunting.buyRunning}
             paused={data.state.paused}
-            busy={busy === "master:buy"}
-            disabled={Boolean(busy)}
+            busy={isBusy("master:buy")}
+            disabled={isBusy("master:buy")}
             onToggle={() =>
               update(
                 "master:buy",
@@ -123,8 +133,8 @@ export function Hunting({ data, label, unit, onChanged }) {
             side="sell"
             running={data.hunting.sellRunning}
             paused={data.state.paused}
-            busy={busy === "master:sell"}
-            disabled={Boolean(busy)}
+            busy={isBusy("master:sell")}
+            disabled={isBusy("master:sell")}
             onToggle={() =>
               update(
                 "master:sell",
@@ -151,7 +161,7 @@ export function Hunting({ data, label, unit, onChanged }) {
               sellMinRate: market.sellMinRate,
             };
             const stats = data.averages?.[market.code] || {};
-            const savingRates = busy === `rates:${market.code}`;
+            const savingRates = isBusy(`rates:${market.code}`);
             return (
               <article
                 className={`hunt-market ${market.active ? "" : "disabled"}`}
@@ -170,7 +180,9 @@ export function Hunting({ data, label, unit, onChanged }) {
                     enabled={market.huntBuyEnabled}
                     running={data.hunting.buyRunning}
                     paused={data.state.paused}
-                    disabled={!market.active || Boolean(busy)}
+                    disabled={
+                      !market.active || isBusy(`market:${market.code}:buy`)
+                    }
                     median={stats.median_sell}
                     rate={draft.buyMaxRate}
                     unit={unit(market.code)}
@@ -203,7 +215,9 @@ export function Hunting({ data, label, unit, onChanged }) {
                     enabled={market.huntSellEnabled}
                     running={data.hunting.sellRunning}
                     paused={data.state.paused}
-                    disabled={!market.active || Boolean(busy)}
+                    disabled={
+                      !market.active || isBusy(`market:${market.code}:sell`)
+                    }
                     median={stats.median_buy}
                     rate={draft.sellMinRate}
                     unit={unit(market.code)}
@@ -238,7 +252,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                     size="sm"
                     disabled={
                       !market.active ||
-                      Boolean(busy) ||
+                      savingRates ||
                       !validRates(draft) ||
                       ratesEqual(draft, market)
                     }
@@ -334,7 +348,6 @@ export function Hunting({ data, label, unit, onChanged }) {
                       type="button"
                       variant="destructive"
                       size="sm"
-                      disabled={Boolean(busy)}
                       onClick={() => setPendingCancel(operation)}
                     >
                       Cancelar aplicación
@@ -407,7 +420,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                 variant="ghost"
                 type="button"
                 onClick={closeCancel}
-                disabled={Boolean(busy)}
+                disabled={isBusy(`cancel:${pendingCancel.uuid}`)}
               >
                 Mantener aplicación
               </Button>
@@ -415,9 +428,11 @@ export function Hunting({ data, label, unit, onChanged }) {
                 variant="destructive"
                 type="button"
                 onClick={cancel}
-                disabled={Boolean(busy)}
+                disabled={isBusy(`cancel:${pendingCancel.uuid}`)}
               >
-                {busy ? "Cancelando…" : "Sí, cancelar aplicación"}
+                {isBusy(`cancel:${pendingCancel.uuid}`)
+                  ? "Cancelando…"
+                  : "Sí, cancelar aplicación"}
               </Button>
             </div>
           </div>
