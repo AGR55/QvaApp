@@ -26,10 +26,12 @@ const automationFields = [
   ["priceGuardPercent", "Cortafuegos frente a la mediana", "%", 1],
 ];
 
-export function Settings({ onChanged }) {
-  const [saved, setSaved] = useState();
-  const [draft, setDraft] = useState();
-  const [revisions, setRevisions] = useState([]);
+export function Settings({ initialConfig, initialRevisions, onChanged }) {
+  const [saved, setSaved] = useState(() => initialConfig);
+  const [draft, setDraft] = useState(() =>
+    initialConfig ? structuredClone(initialConfig) : undefined,
+  );
+  const [revisions, setRevisions] = useState(() => initialRevisions || []);
   const [reviewing, setReviewing] = useState(false);
   const [reason, setReason] = useState(
     "Revisión de límites y mercados desde la mesa de operaciones",
@@ -56,7 +58,9 @@ export function Settings({ onChanged }) {
       setStatus(error instanceof Error ? error.message : "No se pudo cargar.");
     }
   };
-  useEffect(() => void load(), []);
+  useEffect(() => {
+    if (!initialConfig) void load();
+  }, []);
 
   const changes = useMemo(() => diffConfig(saved, draft), [saved, draft]);
   const requiresInitialReview = draft?.risk.reviewedAt === null;

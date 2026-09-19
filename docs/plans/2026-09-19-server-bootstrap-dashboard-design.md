@@ -11,11 +11,13 @@ El mensaje que afirma conservar datos guardados tampoco describe el comportamien
 La ruta HTML inicial incorporará un bootstrap JSON generado por la VPS con:
 
 - el estado de sesión y el token CSRF cuando exista una sesión válida;
-- el snapshot producido exclusivamente por `DashboardReadModel.localSnapshot()`.
+- el snapshot producido exclusivamente por `DashboardReadModel.localSnapshot()`;
+- la configuración y su historial local para que Estrategia también sea utilizable
+  desde el primer render.
 
 El JSON se incluirá dentro de un elemento `template`, escapando caracteres con significado HTML para impedir que contenido almacenado pueda cerrar el elemento o inyectar marcado. La respuesta seguirá usando `Cache-Control: no-store`.
 
-React consumirá y eliminará ese bootstrap antes del primer render. Una sesión autenticada empezará con datos disponibles, por lo que nunca mostrará la compuerta de carga observada. Una visita no autenticada seguirá mostrando el formulario normal.
+React consumirá y eliminará ese bootstrap antes del primer render. Una sesión autenticada empezará con datos y configuración disponibles, por lo que nunca mostrará la compuerta de carga observada. Una visita no autenticada seguirá mostrando el formulario normal.
 
 ## Inicio de sesión
 
