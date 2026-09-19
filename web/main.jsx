@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
+import { readDashboardBootstrap } from "./lib/dashboard-bootstrap.js";
 import { money } from "./lib/format.js";
 import { useDashboard } from "./hooks/use-dashboard.js";
 import { Capital } from "./features/capital.jsx";
@@ -48,6 +49,10 @@ import "./audit.css";
 import "./components.css";
 import "./ui-polish.css";
 import "./identity.css";
+
+const initialBootstrap = readDashboardBootstrap();
+if (initialBootstrap?.session?.authenticated)
+  setCsrfToken(initialBootstrap.session.csrfToken);
 
 const Charts = lazy(() =>
   import("./features/charts.jsx").then((module) => ({
@@ -82,7 +87,7 @@ const navigationGroups = [
 const navigation = navigationGroups.flatMap((group) => group.items);
 
 function App() {
-  const [session, setSession] = useState();
+  const [session, setSession] = useState(() => initialBootstrap?.session);
   const [view, setView] = useState(() => initialView());
   const [market, setMarket] = useState("");
   const [notice, setNotice] = useState(null);
@@ -95,6 +100,8 @@ function App() {
     view,
     market,
     setMarket,
+    initialBootstrap?.dashboard,
+    Boolean(session?.authenticated),
   );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -167,6 +174,7 @@ function App() {
     window.history.replaceState({}, "", url);
   }, []);
   useEffect(() => {
+    if (initialBootstrap?.session) return;
     void requestJson("/api/session")
       .then((payload) => {
         if (payload.data.authenticated) setCsrfToken(payload.data.csrfToken);
@@ -190,10 +198,7 @@ function App() {
   if (!session.authenticated)
     return (
       <Login
-        onAuthenticated={(value) => {
-          setSession(value);
-          void refresh();
-        }}
+        onAuthenticated={() => window.location.reload()}
       />
     );
   const logout = async () => {
@@ -504,7 +509,13 @@ function App() {
               <Charts markets={data.markets} />
             </Suspense>
           ) : null}
-          {view === "configuracion" ? <Settings onChanged={refresh} /> : null}
+          {view === "configuracion" ? (
+            <Settings
+              initialConfig={initialBootstrap?.config}
+              initialRevisions={initialBootstrap?.configRevisions}
+              onChanged={refresh}
+            />
+          ) : null}
           {view === "auditoria" ? (
             <Audit data={data} onChanged={refresh} />
           ) : null}

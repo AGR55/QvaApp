@@ -84,6 +84,80 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
   await app.close();
 });
 
+test("el documento autenticado incluye sesión y snapshot local sin una segunda lectura", async () => {
+  let localReads = 0;
+  const config = { risk: {}, markets: [] };
+  const snapshot = {
+    generatedAt: 123,
+    markets: [],
+    freshness: {},
+    marker: "</template><script>alert('no')</script>",
+  };
+  const app = buildDashboard(
+    {
+      localSnapshot: () => {
+        localReads += 1;
+        return snapshot;
+      },
+      snapshot: async () => {
+        throw new Error("El HTML no debe consultar QvaPay.");
+      },
+      config: () => config,
+      configRevisions: () => [{ id: "revision-1" }],
+    } as never,
+    { password, trustedOrigin: origin },
+  );
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const page = await app.inject({ method: "GET", url: "/", headers: { cookie } });
+
+  assert.equal(page.statusCode, 200);
+  assert.equal(page.headers["cache-control"], "no-store");
+  assert.equal(page.headers.vary, "Cookie");
+  assert.equal(localReads, 1);
+  assert.doesNotMatch(page.body, /<script>alert\('no'\)<\/script>/);
+  const encoded = page.body.match(
+    /<template id="qvaapply-bootstrap">([^]*?)<\/template>/,
+  )?.[1];
+  assert.ok(encoded);
+  const bootstrap = JSON.parse(encoded) as {
+    session: { authenticated: boolean; csrfToken: string };
+    dashboard: typeof snapshot;
+    config: typeof config;
+    configRevisions: { id: string }[];
+  };
+  assert.equal(bootstrap.session.authenticated, true);
+  assert.equal(bootstrap.dashboard.marker, snapshot.marker);
+  assert.deepEqual(bootstrap.config, config);
+  assert.deepEqual(bootstrap.configRevisions, [{ id: "revision-1" }]);
+  await app.close();
+});
+
+test("el documento público no incluye información operativa", async () => {
+  const app = buildDashboard(
+    {
+      localSnapshot: () => {
+        throw new Error("Un visitante anónimo no debe leer el snapshot.");
+      },
+    } as never,
+    { password, trustedOrigin: origin },
+  );
+  const page = await app.inject({ method: "GET", url: "/" });
+  const encoded = page.body.match(
+    /<template id="qvaapply-bootstrap">([^]*?)<\/template>/,
+  )?.[1];
+  assert.ok(encoded);
+  assert.deepEqual(JSON.parse(encoded), {
+    session: { authenticated: false },
+  });
+  await app.close();
+});
+
 test("permite subir un icono de mercado desde Estrategia", async () => {
   const uploads: unknown[] = [];
   const readModel = {

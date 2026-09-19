@@ -3,66 +3,108 @@ import { requestJson } from "../lib/http.js";
 
 const EMPTY_RESOURCES = Object.freeze({});
 
-export function useDashboard(view, market, setMarket) {
-  const [data, setData] = useState();
-  const [status, setStatus] = useState("Leyendo datos preparados por la VPS…");
+export function useDashboard(
+  view,
+  market,
+  setMarket,
+  initialData,
+  enabled = true,
+) {
+  const [data, setData] = useState(() => initialData);
+  const [status, setStatus] = useState(() =>
+    initialData
+      ? "Datos preparados por la VPS"
+      : "Leyendo datos preparados por la VPS…",
+  );
   const [online, setOnline] = useState(() => navigator.onLine);
   const generation = useRef(0);
+  const inFlight = useRef();
+  const hasData = useRef(Boolean(initialData));
 
-  const loadLocal = useCallback(
-    async (activeGeneration = generation.current) => {
-      const payload = await requestJson("/api/dashboard", { timeoutMs: 5_000 });
-      if (activeGeneration !== generation.current || !payload.data) return;
-      setData(payload.data);
+  const selectAvailableMarket = useCallback(
+    (snapshot) => {
       setMarket((current) =>
-        payload.data.markets.some((item) => item.code === current)
+        snapshot.markets.some((item) => item.code === current)
           ? current
-          : payload.data.markets.find((item) => item.active)?.code ||
-            payload.data.markets[0]?.code ||
+          : snapshot.markets.find((item) => item.active)?.code ||
+            snapshot.markets[0]?.code ||
             "",
       );
-      setStatus("Vista actualizada desde la VPS");
     },
     [setMarket],
   );
 
+  const loadLocal = useCallback(
+    async (activeGeneration = generation.current) => {
+      const payload = await requestJson("/api/dashboard", {
+        timeoutMs: 30_000,
+      });
+      if (activeGeneration !== generation.current || !payload.data) return;
+      hasData.current = true;
+      setData(payload.data);
+      selectAvailableMarket(payload.data);
+      setStatus("Vista actualizada desde la VPS");
+    },
+    [selectAvailableMarket],
+  );
+
   const refresh = useCallback(async () => {
+    if (!enabled) return;
+    if (inFlight.current) return inFlight.current;
     const activeGeneration = ++generation.current;
-    setStatus("Leyendo datos preparados por la VPS…");
+    setStatus(
+      hasData.current
+        ? "Actualizando en segundo plano…"
+        : "Leyendo datos preparados por la VPS…",
+    );
+    const operation = (async () => {
+      try {
+        await loadLocal(activeGeneration);
+      } catch (error) {
+        if (activeGeneration !== generation.current || error?.status === 401)
+          return;
+        setStatus(
+          navigator.onLine
+            ? error instanceof Error
+              ? error.message
+              : "No se pudo actualizar el panel"
+            : "Sin conexión · la vista actual sigue disponible",
+        );
+      }
+    })();
+    inFlight.current = operation;
     try {
-      await loadLocal(activeGeneration);
-    } catch (error) {
-      if (activeGeneration !== generation.current || error?.status === 401)
-        return;
-      setStatus(
-        navigator.onLine
-          ? error instanceof Error
-            ? error.message
-            : "No se pudo leer el panel"
-          : "Sin conexión · conservando la última vista",
-      );
+      await operation;
+    } finally {
+      if (inFlight.current === operation) inFlight.current = undefined;
     }
-  }, [loadLocal]);
+  }, [enabled, loadLocal]);
 
   useEffect(() => {
+    if (data) selectAvailableMarket(data);
+  }, [data, selectAvailableMarket]);
+
+  useEffect(() => {
+    if (!enabled) return undefined;
     void refresh();
     return () => {
       generation.current += 1;
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   useEffect(() => {
-    if (!data) return;
+    if (!enabled || !data) return;
     void refresh();
     // Cambiar de vista o mercado solo relee el snapshot local de la VPS.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, market]);
+  }, [view, market, enabled]);
 
   useEffect(() => {
+    if (!enabled) return undefined;
     const updateConnection = () => {
       setOnline(navigator.onLine);
       if (navigator.onLine) void refresh();
-      else setStatus("Sin conexión · conservando la última vista");
+      else setStatus("Sin conexión · la vista actual sigue disponible");
     };
     const onVisibility = () => {
       if (!document.hidden) void refresh();
@@ -79,7 +121,7 @@ export function useDashboard(view, market, setMarket) {
       document.removeEventListener("visibilitychange", onVisibility);
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [enabled, refresh]);
 
   return {
     data,

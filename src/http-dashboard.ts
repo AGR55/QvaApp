@@ -87,9 +87,25 @@ export function buildDashboard(
     });
   });
 
-  app.get("/", async (_request, reply) =>
-    reply.type("text/html; charset=utf-8").send(reactPage()),
-  );
+  app.get("/", async (request, reply) => {
+    const session = auth.session(request.headers.cookie);
+    const bootstrap = session
+      ? {
+          session: {
+            authenticated: true,
+            csrfToken: session.csrfToken,
+            expiresAt: session.expiresAt,
+          },
+          dashboard: readModel.localSnapshot(),
+          config: readModel.config(),
+          configRevisions: readModel.configRevisions(),
+        }
+      : { session: { authenticated: false } };
+    return reply
+      .type("text/html; charset=utf-8")
+      .header("vary", "Cookie")
+      .send(reactPage(bootstrap));
+  });
   app.get("/service-worker.js", async (_request, reply) =>
     reply.type("text/javascript; charset=utf-8").send(serviceWorkerScript()),
   );
@@ -670,8 +686,14 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : "No se pudo actualizar QvaPay.";
 }
 
-function reactPage(): string {
-  return "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><meta name=\"theme-color\" content=\"#123b70\"><link rel=\"icon\" href=\"/logo/isotipo.webp\" type=\"image/webp\"><link rel=\"apple-touch-icon\" href=\"/logo/isotipo.webp\"><title>QvaApply · Mesa de trading</title><link rel=\"preconnect\" href=\"https://fonts.googleapis.com\"><link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin><link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap\"><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><div id=\"root\"></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>";
+function reactPage(bootstrap: unknown): string {
+  const encoded = JSON.stringify(bootstrap)
+    .replaceAll("&", "\\u0026")
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="apple-touch-icon" href="/logo/isotipo.webp"><title>QvaApply · Mesa de trading</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
 }
 
 function openApiDocument() {
