@@ -47,6 +47,21 @@ terminales separadas.
 
 En operación local también puedes entrar mediante [http://localhost:3000](http://localhost:3000). La protección de origen considera equivalentes únicamente `127.0.0.1`, `localhost` e IPv6 loopback cuando protocolo y puerto coinciden; cualquier dirección externa continúa bloqueada.
 
+### Preview de UI aislado
+
+Para trabajar en la interfaz sin iniciar Telegram, QvaPay ni leer las
+credenciales reales, usa:
+
+```bash
+pnpm preview:ui
+```
+
+Abre [http://127.0.0.1:3100](http://127.0.0.1:3100) e inicia sesión con
+`preview-segura-2026`. El preview usa un modelo en memoria con datos de
+demostración. No ejecutes `pnpm dev` ni `pnpm dev:all` con el mismo `.env` que
+utiliza la VPS: dos procesos competirían por el bot de Telegram y podrían usar
+la misma sesión operativa de QvaPay.
+
 `pnpm login` admite el TOTP de seis dígitos de una aplicación autenticadora. La contraseña y el código se introducen ocultos; ante fallos transitorios de conexión se hacen tres intentos y el token solo se guarda cifrado después de validarlo con `GET /user`.
 
 La primera revisión de límites debe hacerse en **Estrategia** antes de iniciar el servicio. Revisa también Mercados, Capital, Operaciones y Auditoría; usa la parada de emergencia si necesitas inspeccionar el sistema sin nuevas aplicaciones.

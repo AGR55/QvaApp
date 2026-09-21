@@ -112,7 +112,6 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
       reason: "El saldo QUSD disponible cubre la oportunidad sin cancelar ofertas propias.",
     };
 
-  const externalRate = offerRate(target);
   const targetProfitability = profitability(target, input.marketEconomics?.[target.coin]);
   const candidates = input.ownOffers
     .filter(
@@ -121,10 +120,9 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
         offer.status === "open" &&
         offer.amount > 0 &&
         offer.receive > 0 &&
-        isInferiorLiquidity(
+        isComparableLiquidity(
           offer,
           target.coin,
-          externalRate,
           targetProfitability,
           input.marketEconomics,
         ),
@@ -161,7 +159,7 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
       potentialReleaseQusd: plannedReleaseQusd,
       cancel: [],
       reason:
-        `Las ventas propias menos rentables liberarían ${roundQusd(plannedReleaseQusd)} QUSD, pero se requieren ${roundQusd(requiredReleaseQusd)}; no se cancelará ninguna.`,
+        `Las ventas propias disponibles liberarían ${roundQusd(plannedReleaseQusd)} QUSD, pero se requieren ${roundQusd(requiredReleaseQusd)}; no se cancelará ninguna.`,
     };
 
   let remainingConsumption = requiredReleaseQusd;
@@ -188,17 +186,17 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
   };
 }
 
-function isInferiorLiquidity(
+function isComparableLiquidity(
   offer: P2pOffer,
   targetCoin: string,
-  targetRate: number,
   targetProfitability: number | undefined,
   economics: LiquidityPlanInput["marketEconomics"],
 ): boolean {
   const ownProfitability = profitability(offer, economics?.[offer.coin]);
-  if (targetProfitability !== undefined && ownProfitability !== undefined)
-    return ownProfitability + 0.0000001 < targetProfitability;
-  return offer.coin === targetCoin && offerRate(offer) < targetRate;
+  return (
+    offer.coin === targetCoin ||
+    (targetProfitability !== undefined && ownProfitability !== undefined)
+  );
 }
 
 function profitability(

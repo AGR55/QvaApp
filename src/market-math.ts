@@ -15,6 +15,9 @@ export interface OutgoingFiatCost {
   effectiveRate: number;
 }
 
+/** Minimum QUSD amount accepted by QvaPay for creating or editing an offer. */
+export const MIN_OFFER_QUSD = 0.1;
+
 export function outgoingFiatCost(
   qusdAmount: number,
   fiatPerQusd: number,

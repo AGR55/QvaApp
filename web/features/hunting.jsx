@@ -7,11 +7,24 @@ import {
   Tags,
 } from "lucide-react";
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
-import { useDialog } from "../hooks/use-dialog.js";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { Badge, Button, Input } from "../components/ui.jsx";
+import { Field, FieldContent, FieldLabel, FieldTitle } from "../components/ui/field.tsx";
 import { MarketIdentity } from "../components/market-identity.jsx";
+import { Switch } from "../components/ui/switch.tsx";
+import { ToggleGroup, ToggleGroupItem } from "../components/ui/toggle-group.tsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogMedia,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog.tsx";
 
 const cancellableStates = new Set(["applied", "acknowledged"]);
 
@@ -20,6 +33,12 @@ export function Hunting({ data, label, unit, onChanged }) {
   const [status, setStatus] = useState("");
   const [pendingCancel, setPendingCancel] = useState();
   const [rates, setRates] = useState(() => rateDraft(data.markets));
+  const [optimistic, setOptimistic] = useState({ hunting: {}, markets: {} });
+  const hunting = { ...data.hunting, ...optimistic.hunting };
+  const markets = data.markets.map((market) => ({
+    ...market,
+    ...(optimistic.markets[market.code] || {}),
+  }));
   const isBusy = useCallback((key) => busyActions.has(key), [busyActions]);
   const setActionBusy = useCallback((key, active) => {
     setBusyActions((current) => {
@@ -29,17 +48,18 @@ export function Hunting({ data, label, unit, onChanged }) {
       return next;
     });
   }, []);
-  const closeCancel = useCallback(() => {
+  const closeCancel = () => {
     if (!pendingCancel || !isBusy(`cancel:${pendingCancel.uuid}`))
       setPendingCancel(undefined);
-  }, [isBusy, pendingCancel]);
-  const dialogRef = useDialog(Boolean(pendingCancel), closeCancel);
+  };
   const captured = useMemo(
     () => (data.operations || []).filter((operation) => operation.autoApplied),
     [data.operations],
   );
 
   const update = async (key, payload, success) => {
+    const previous = optimistic;
+    setOptimistic((current) => applyOptimisticHunting(current, payload));
     setActionBusy(key, true);
     setStatus("");
     try {
@@ -49,8 +69,10 @@ export function Hunting({ data, label, unit, onChanged }) {
         body: JSON.stringify(payload),
       });
       await onChanged?.();
+      setOptimistic({ hunting: {}, markets: {} });
       setStatus(success);
     } catch (error) {
+      setOptimistic(previous);
       setStatus(
         error instanceof Error
           ? error.message
@@ -87,13 +109,35 @@ export function Hunting({ data, label, unit, onChanged }) {
       setActionBusy(key, false);
     }
   };
+  const masterSides = [
+    ...(hunting.buyRunning ? ["buy"] : []),
+    ...(hunting.sellRunning ? ["sell"] : []),
+  ];
+  const updateMasterSides = (nextSides) => {
+    if (isBusy("master:buy") || isBusy("master:sell")) return;
+    const buyRunning = nextSides.includes("buy");
+    if (buyRunning !== hunting.buyRunning) {
+      update(
+        "master:buy",
+        { buyRunning },
+        buyRunning ? "Cacería de compra iniciada." : "Cacería de compra detenida.",
+      );
+      return;
+    }
+    const sellRunning = nextSides.includes("sell");
+    if (sellRunning !== hunting.sellRunning) {
+      update(
+        "master:sell",
+        { sellRunning },
+        sellRunning ? "Cacería de venta iniciada." : "Cacería de venta detenida.",
+      );
+    }
+  };
 
   return (
     <div className="hunting-stack">
       <ViewHead
-        kicker="Automatismo"
         title="Cacería"
-        description="Estado general, precios por mercado y el registro de capturas."
       />
       <section className="hunting-command" aria-label="Controles de cacería">
         <div className="hunt-scan-status">
@@ -108,54 +152,36 @@ export function Hunting({ data, label, unit, onChanged }) {
               : "Aún no hay escaneos registrados"}
           </small>
         </div>
-        <div
+        <ToggleGroup
+          type="multiple"
+          value={masterSides}
+          onValueChange={updateMasterSides}
           className="hunt-master-grid"
-          role="group"
           aria-label="Lados de cacería"
         >
-          <MasterControl
+          <MasterToggle
             side="buy"
-            running={data.hunting.buyRunning}
+            running={hunting.buyRunning}
             paused={data.state.paused}
             busy={isBusy("master:buy")}
             disabled={isBusy("master:buy")}
-            onToggle={() =>
-              update(
-                "master:buy",
-                { buyRunning: !data.hunting.buyRunning },
-                data.hunting.buyRunning
-                  ? "Cacería de compra detenida."
-                  : "Cacería de compra iniciada.",
-              )
-            }
           />
-          <MasterControl
+          <MasterToggle
             side="sell"
-            running={data.hunting.sellRunning}
+            running={hunting.sellRunning}
             paused={data.state.paused}
             busy={isBusy("master:sell")}
             disabled={isBusy("master:sell")}
-            onToggle={() =>
-              update(
-                "master:sell",
-                { sellRunning: !data.hunting.sellRunning },
-                data.hunting.sellRunning
-                  ? "Cacería de venta detenida."
-                  : "Cacería de venta iniciada.",
-              )
-            }
           />
-        </div>
+        </ToggleGroup>
       </section>
 
       <Panel
         title="Mercados de cacería"
-        kicker="Precios objetivo"
-        description="Activa cada lado y fija el máximo de compra o el mínimo de venta. Nada se guarda hasta pulsar Guardar precios."
         wide
       >
         <div className="hunt-market-list">
-          {data.markets.map((market) => {
+          {markets.map((market) => {
             const draft = rates[market.code] || {
               buyMaxRate: market.buyMaxRate,
               sellMinRate: market.sellMinRate,
@@ -178,11 +204,9 @@ export function Hunting({ data, label, unit, onChanged }) {
                     icon={ShoppingCart}
                     title="Comprar QUSD"
                     enabled={market.huntBuyEnabled}
-                    running={data.hunting.buyRunning}
+                    running={hunting.buyRunning}
                     paused={data.state.paused}
-                    disabled={
-                      !market.active || isBusy(`market:${market.code}:buy`)
-                    }
+                    disabled={!market.active || isBusy(`market:${market.code}:buy`)}
                     median={stats.median_sell}
                     rate={draft.buyMaxRate}
                     unit={unit(market.code)}
@@ -213,11 +237,9 @@ export function Hunting({ data, label, unit, onChanged }) {
                     icon={Tags}
                     title="Vender QUSD"
                     enabled={market.huntSellEnabled}
-                    running={data.hunting.sellRunning}
+                    running={hunting.sellRunning}
                     paused={data.state.paused}
-                    disabled={
-                      !market.active || isBusy(`market:${market.code}:sell`)
-                    }
+                    disabled={!market.active || isBusy(`market:${market.code}:sell`)}
                     median={stats.median_buy}
                     rate={draft.sellMinRate}
                     unit={unit(market.code)}
@@ -252,7 +274,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                     size="sm"
                     disabled={
                       !market.active ||
-                      savingRates ||
+                      isBusy(`rates:${market.code}`) ||
                       !validRates(draft) ||
                       ratesEqual(draft, market)
                     }
@@ -270,7 +292,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                       )
                     }
                   >
-                    <Save aria-hidden="true" />{" "}
+                    <Save aria-hidden="true" data-icon="inline-start" />{" "}
                     {savingRates ? "Guardando…" : "Guardar precios"}
                   </Button>
                 </footer>
@@ -282,8 +304,6 @@ export function Hunting({ data, label, unit, onChanged }) {
 
       <Panel
         title="Ofertas cazadas"
-        kicker="Registro"
-        description="Aplicaciones automáticas con su tasa capturada frente a la mediana de referencia."
         wide
       >
         <div className="capture-heading">
@@ -348,6 +368,7 @@ export function Hunting({ data, label, unit, onChanged }) {
                       type="button"
                       variant="destructive"
                       size="sm"
+                      disabled={isBusy(`cancel:${operation.uuid}`)}
                       onClick={() => setPendingCancel(operation)}
                     >
                       Cancelar aplicación
@@ -369,24 +390,21 @@ export function Hunting({ data, label, unit, onChanged }) {
           {status}
         </p>
       ) : null}
-      {pendingCancel ? (
-        <section
-          ref={dialogRef}
-          className="offer-modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="cancel-capture-title"
-        >
-          <div className="offer-modal cancel-offer-dialog">
-            <div className="dialog-icon danger-icon">
-              <AlertTriangle aria-hidden="true" />
-            </div>
-            <p className="eyebrow">OPERACIÓN CAZADA</p>
-            <h2 id="cancel-capture-title">Cancelar esta aplicación</h2>
-            <p>
-              QvaApply pedirá a QvaPay cancelar la operación. Detener la cacería
-              no es necesario y no se modificarán otras capturas.
-            </p>
+      <AlertDialog
+        open={Boolean(pendingCancel)}
+        onOpenChange={(open) => !open && closeCancel()}
+      >
+        {pendingCancel ? (
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogMedia>
+                <AlertTriangle aria-hidden="true" />
+              </AlertDialogMedia>
+              <AlertDialogTitle>Cancelar esta aplicación</AlertDialogTitle>
+              <AlertDialogDescription>
+              Solo se cancelará esta operación; la cacería continuará activa.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
             <dl className="offer-summary">
               <div>
                 <dt>Flujo</dt>
@@ -415,56 +433,48 @@ export function Hunting({ data, label, unit, onChanged }) {
                 </dd>
               </div>
             </dl>
-            <div className="offer-modal-actions">
-              <Button
-                variant="ghost"
-                type="button"
-                onClick={closeCancel}
+            <AlertDialogFooter>
+              <AlertDialogCancel
                 disabled={isBusy(`cancel:${pendingCancel.uuid}`)}
+                onClick={closeCancel}
               >
                 Mantener aplicación
-              </Button>
-              <Button
+              </AlertDialogCancel>
+              <AlertDialogAction
                 variant="destructive"
-                type="button"
-                onClick={cancel}
+                onClick={(event) => {
+                  event.preventDefault();
+                  cancel();
+                }}
                 disabled={isBusy(`cancel:${pendingCancel.uuid}`)}
               >
-                {isBusy(`cancel:${pendingCancel.uuid}`)
-                  ? "Cancelando…"
-                  : "Sí, cancelar aplicación"}
-              </Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
+                {isBusy(`cancel:${pendingCancel.uuid}`) ? "Cancelando…" : "Sí, cancelar aplicación"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        ) : null}
+      </AlertDialog>
     </div>
   );
 }
 
-function MasterControl({ side, running, paused, busy, disabled, onToggle }) {
+function MasterToggle({ side, running, paused, busy, disabled }) {
   const buying = side === "buy";
   const Icon = buying ? ShoppingCart : Tags;
   const label = buying ? "Compra" : "Venta";
   const active = running && !paused;
-  const action = running
-    ? `Pausar cacería de ${label.toLowerCase()}`
-    : `Reanudar cacería de ${label.toLowerCase()}`;
   return (
-    <Button
-      variant="ghost"
+    <ToggleGroupItem
+      value={side}
+      variant={active ? "default" : "outline"}
       size="sm"
       className={`hunt-master ${active ? "running" : "stopped"}`}
-      type="button"
-      aria-pressed={running}
-      aria-label={action}
-      title={action}
-      onClick={onToggle}
+      aria-label={`Alternar cacería de ${label.toLowerCase()}`}
       disabled={disabled}
     >
-      <Icon aria-hidden="true" />
+      <Icon aria-hidden="true" data-icon="inline-start" />
       <span>{busy ? "Actualizando…" : label}</span>
-    </Button>
+    </ToggleGroupItem>
   );
 }
 
@@ -498,18 +508,18 @@ function HuntSide({
           <h4>{title}</h4>
         </div>
       </div>
-      <Button
-        variant={enabled ? "secondary" : "ghost"}
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        className="hunt-switch"
-        onClick={onToggle}
+      <Field orientation="horizontal" className="hunt-switch">
+        <Switch
+        id={`hunt-${title.replaceAll(" ", "-").toLowerCase()}`}
+        checked={enabled}
+        aria-label={`Activar ${title}`}
+        onCheckedChange={onToggle}
         disabled={disabled}
-      >
-        <span />
-        {enabled ? "Seleccionado" : "No cazar"}
-      </Button>
+      />
+        <FieldContent>
+          <FieldTitle>{enabled ? "Seleccionado" : "No cazar"}</FieldTitle>
+        </FieldContent>
+      </Field>
       <dl>
         <div>
           <dt>Mediana actual</dt>
@@ -524,10 +534,13 @@ function HuntSide({
           <dd>{state}</dd>
         </div>
       </dl>
-      <label>
-        {limitLabel}
+      <Field
+        className="hunt-rate-field"
+      >
+        <FieldLabel htmlFor={`rate-${title.replaceAll(" ", "-").toLowerCase()}`}>{limitLabel}</FieldLabel>
         <span className="input-unit">
           <Input
+            id={`rate-${title.replaceAll(" ", "-").toLowerCase()}`}
             type="number"
             min="0.0001"
             step="0.0001"
@@ -537,7 +550,7 @@ function HuntSide({
           />
           <small>{unit}/QUSD</small>
         </span>
-      </label>
+      </Field>
     </section>
   );
 }
@@ -567,6 +580,23 @@ function rateDraft(markets) {
     ]),
   );
 }
+
+function applyOptimisticHunting(current, payload) {
+  const next = {
+    hunting: { ...current.hunting },
+    markets: { ...current.markets },
+  };
+  if (payload.buyRunning !== undefined)
+    next.hunting.buyRunning = payload.buyRunning;
+  if (payload.sellRunning !== undefined)
+    next.hunting.sellRunning = payload.sellRunning;
+  if (payload.market?.code) {
+    const { code, ...changes } = payload.market;
+    next.markets[code] = { ...(next.markets[code] || {}), ...changes };
+  }
+  return next;
+}
+
 function validRates(value) {
   return (
     Number(value.buyMaxRate) > 0 &&

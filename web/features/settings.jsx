@@ -2,8 +2,29 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Check, History, ImagePlus, Plus, Save, Trash2, X } from "lucide-react";
 import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
-import { useDialog } from "../hooks/use-dialog.js";
-import { Button, Input, Textarea } from "../components/ui.jsx";
+import { Button, Field, Input, Textarea } from "../components/ui.jsx";
+import { Checkbox } from "../components/ui/checkbox.tsx";
+import {
+  FieldContent,
+  Field as ShadcnField,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "../components/ui/field.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog.tsx";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../components/ui/popover.tsx";
 
 const riskFields = [
   ["maxQusdPerOperation", "Máximo por operación", "QUSD"],
@@ -38,7 +59,6 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
   );
   const [status, setStatus] = useState("Cargando configuración…");
   const closeReview = useCallback(() => setReviewing(false), []);
-  const dialogRef = useDialog(reviewing, closeReview);
 
   const load = async () => {
     try {
@@ -153,6 +173,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
           fiatBalance: 0,
           buyMaxRate: 1,
           sellMinRate: 1,
+          priceGuardPercent: undefined,
           purchaseMaxQusd: 0,
           sellFeePercent: 0,
           outgoingTransferFee: 0,
@@ -189,19 +210,15 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
   return (
     <div className="settings-stack">
       <ViewHead
-        kicker="Configuración activa"
         title="Estrategia"
-        description="Límites de riesgo, comportamiento del bot y mercados. Cada cambio se revisa y queda auditado."
       />
-      <Panel title="Límites de riesgo" kicker="Protección" wide>
-        <form
-          className="settings-form"
-          onSubmit={(event) => event.preventDefault()}
-        >
-          <label>
-            Máximo de ofertas propias
+      <Panel title="Límites de riesgo" wide>
+        <form onSubmit={(event) => event.preventDefault()}>
+          <FieldGroup className="settings-form">
+          <SettingField label="Máximo de ofertas propias" htmlFor="max-open-offers">
             <span className="input-unit">
               <Input
+                id="max-open-offers"
                 type="number"
                 min="1"
                 step="1"
@@ -215,12 +232,12 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
               />
               <small>ofertas</small>
             </span>
-          </label>
+          </SettingField>
           {riskFields.map(([key, label, unit]) => (
-            <label key={key}>
-              {label}
+            <SettingField key={key} label={label} htmlFor={`risk-${key}`}>
               <span className="input-unit">
                 <Input
+                  id={`risk-${key}`}
                   type="number"
                   min="0"
                   step={
@@ -233,7 +250,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                 />
                 <small>{unit}</small>
               </span>
-            </label>
+            </SettingField>
           ))}
           <div className="form-actions" aria-live="polite">
             <Button
@@ -242,26 +259,25 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
               disabled={!changes.length && !requiresInitialReview}
               onClick={() => setReviewing(true)}
             >
-              <Save aria-hidden="true" />{" "}
+              <Save aria-hidden="true" data-icon="inline-start" />{" "}
               {requiresInitialReview && !changes.length
                 ? "Revisar y aprobar límites"
                 : `Revisar ${changes.length} cambio(s)`}
             </Button>
             <span>{status}</span>
           </div>
+          </FieldGroup>
         </form>
       </Panel>
 
-      <Panel title="Comportamiento del bot" kicker="Ritmo" wide>
-        <form
-          className="settings-form"
-          onSubmit={(event) => event.preventDefault()}
-        >
+      <Panel title="Comportamiento del bot" wide>
+        <form onSubmit={(event) => event.preventDefault()}>
+          <FieldGroup className="settings-form">
           {automationFields.map(([key, label, unit, minimum]) => (
-            <label key={key}>
-              {label}
+            <SettingField key={key} label={label} htmlFor={`automation-${key}`}>
               <span className="input-unit">
                 <Input
+                  id={`automation-${key}`}
                   type="number"
                   min={minimum}
                   step="1"
@@ -278,11 +294,15 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                 />
                 <small>{unit}</small>
               </span>
-            </label>
+            </SettingField>
           ))}
-          <label className="message-setting">
-            Mensaje automático en el chat P2P
+          <SettingField
+            className="message-setting"
+            label="Mensaje automático en el chat P2P"
+            htmlFor="automation-welcome-message"
+          >
             <Textarea
+              id="automation-welcome-message"
               maxLength="79"
               rows="3"
               value={draft.automation.welcomeMessage}
@@ -297,28 +317,33 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
               }
             />
             <small>{draft.automation.welcomeMessage.length}/79</small>
-          </label>
+          </SettingField>
+          </FieldGroup>
         </form>
       </Panel>
 
-      <Panel title="Mercados y precios" kicker="Terreno" wide>
+      <Panel title="Mercados y precios" wide>
         <div className="market-settings-grid">
           {draft.markets.map((market, index) => (
-            <fieldset key={market.code} className="market-settings">
-              <legend>{market.label}</legend>
-              <label className="toggle-field">
-                <input
-                  type="checkbox"
-                  checked={market.active}
-                  onChange={(event) =>
-                    updateMarket(index, "active", event.target.checked)
-                  }
-                />
-                Mercado activo
-              </label>
-              <label>
-                Código QvaPay
+            <section key={market.code} className="market-settings" aria-labelledby={`market-settings-${index}`}>
+              <header className="market-settings-head">
+                <h3 id={`market-settings-${index}`}>{market.label}</h3>
+                <ShadcnField orientation="horizontal" className="toggle-field">
+                  <Checkbox
+                    id={`market-active-${index}`}
+                    checked={market.active}
+                    aria-label={`Activar ${market.label}`}
+                    onCheckedChange={(checked) => updateMarket(index, "active", checked === true)}
+                  />
+                  <FieldContent>
+                    <FieldLabel htmlFor={`market-active-${index}`}>Activo</FieldLabel>
+                  </FieldContent>
+                </ShadcnField>
+              </header>
+              <FieldGroup className="market-settings-content">
+              <MarketField label="Código QvaPay" htmlFor={`market-code-${index}`}>
                 <Input
+                  id={`market-code-${index}`}
                   value={market.code}
                   onChange={(event) =>
                     updateMarket(
@@ -328,36 +353,59 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     )
                   }
                 />
-              </label>
-              <label>
-                Nombre visible
+              </MarketField>
+              <MarketField label="Nombre visible" htmlFor={`market-label-${index}`}>
                 <Input
+                  id={`market-label-${index}`}
                   value={market.label}
                   onChange={(event) =>
                     updateMarket(index, "label", event.target.value)
                   }
                 />
-              </label>
+              </MarketField>
               <MarketIconEditor
                 market={market}
                 onChange={(iconUrl) => updateMarket(index, "iconUrl", iconUrl)}
               />
-              <label>
-                Color identificativo
+              <MarketField label="Color identificativo">
                 <span className="market-color-field">
-                  <input
-                    type="color"
-                    value={market.color || "#6f8494"}
-                    onChange={(event) =>
-                      updateMarket(index, "color", event.target.value)
-                    }
-                  />
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="color-picker-trigger"
+                        aria-label={`Cambiar color de ${market.label}`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="color-swatch"
+                          style={{ backgroundColor: market.color || "#6f8494" }}
+                        />
+                        Elegir
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="color-picker-popover">
+                      <Field label="Color identificativo" htmlFor={`market-color-${index}`}>
+                        <Input
+                          id={`market-color-${index}`}
+                          className="color-input"
+                          type="color"
+                          value={market.color || "#6f8494"}
+                          onChange={(event) =>
+                            updateMarket(index, "color", event.target.value)
+                          }
+                        />
+                      </Field>
+                    </PopoverContent>
+                  </Popover>
                   <code>{market.color || "#6f8494"}</code>
                 </span>
-              </label>
-              <label>
-                Moneda fiat
+              </MarketField>
+              <MarketField label="Moneda fiat" htmlFor={`market-currency-${index}`}>
                 <Input
+                  id={`market-currency-${index}`}
                   value={market.currency}
                   onChange={(event) =>
                     updateMarket(
@@ -367,10 +415,10 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     )
                   }
                 />
-              </label>
-              <label>
-                Saldo fiat declarado
+              </MarketField>
+              <MarketField label="Saldo fiat declarado" htmlFor={`market-balance-${index}`}>
                 <Input
+                  id={`market-balance-${index}`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -379,10 +427,10 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     updateMarket(index, "fiatBalance", event.target.value)
                   }
                 />
-              </label>
-              <label>
-                Máximo de compra
+              </MarketField>
+              <MarketField label="Máximo de compra" htmlFor={`market-buy-rate-${index}`}>
                 <Input
+                  id={`market-buy-rate-${index}`}
                   type="number"
                   min="0.0000001"
                   step="0.0001"
@@ -391,10 +439,10 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     updateMarket(index, "buyMaxRate", event.target.value)
                   }
                 />
-              </label>
-              <label>
-                Mínimo de venta
+              </MarketField>
+              <MarketField label="Mínimo de venta" htmlFor={`market-sell-rate-${index}`}>
                 <Input
+                  id={`market-sell-rate-${index}`}
                   type="number"
                   min="0.0000001"
                   step="0.0001"
@@ -403,10 +451,30 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     updateMarket(index, "sellMinRate", event.target.value)
                   }
                 />
-              </label>
-              <label>
-                Máximo QUSD por compra
+              </MarketField>
+              <MarketField label="Cortafuegos del mercado (%)" htmlFor={`market-guard-${index}`}>
                 <Input
+                  id={`market-guard-${index}`}
+                  type="number"
+                  min="1"
+                  max="100"
+                  step="0.1"
+                  value={
+                    market.priceGuardPercent ??
+                    draft.automation.priceGuardPercent
+                  }
+                  onChange={(event) =>
+                    updateMarket(
+                      index,
+                      "priceGuardPercent",
+                      event.target.value,
+                    )
+                  }
+                />
+              </MarketField>
+              <MarketField label="Máximo QUSD por compra" htmlFor={`market-max-amount-${index}`}>
+                <Input
+                  id={`market-max-amount-${index}`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -415,10 +483,10 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     updateMarket(index, "purchaseMaxQusd", event.target.value)
                   }
                 />
-              </label>
-              <label>
-                Comisión de venta (%)
+              </MarketField>
+              <MarketField label="Comisión de venta (%)" htmlFor={`market-fee-${index}`}>
                 <Input
+                  id={`market-fee-${index}`}
                   type="number"
                   min="0"
                   max="99.99"
@@ -428,11 +496,11 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                     updateMarket(index, "sellFeePercent", event.target.value)
                   }
                 />
-              </label>
-              <label>
-                Comisión fija de salida
+              </MarketField>
+              <MarketField label="Comisión fija de salida" htmlFor={`market-outgoing-fee-${index}`}>
                 <span className="input-unit">
                   <Input
+                    id={`market-outgoing-fee-${index}`}
                     type="number"
                     min="0"
                     step="0.01"
@@ -447,37 +515,43 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                   />
                   <small>{market.currency}</small>
                 </span>
-              </label>
-              <div className="payment-details">
-                <strong>Datos de cobro</strong>
+              </MarketField>
+              <FieldSet className="payment-details">
+                <FieldLegend>Datos de cobro</FieldLegend>
                 {market.paymentDetails.map((detail, detailIndex) => (
                   <div key={detailIndex}>
-                    <Input
-                      aria-label={`Nombre del dato ${detailIndex + 1}`}
-                      placeholder="Campo"
-                      value={detail.name}
-                      onChange={(event) =>
-                        updateDetail(
-                          index,
-                          detailIndex,
-                          "name",
-                          event.target.value,
-                        )
-                      }
-                    />
-                    <Input
-                      aria-label={`Valor del dato ${detailIndex + 1}`}
-                      placeholder="Valor"
-                      value={detail.value}
-                      onChange={(event) =>
-                        updateDetail(
-                          index,
-                          detailIndex,
-                          "value",
-                          event.target.value,
-                        )
-                      }
-                    />
+                    <ShadcnField className="contents">
+                      <FieldLabel className="sr-only" htmlFor={`payment-detail-name-${index}-${detailIndex}`}>Nombre del dato {detailIndex + 1}</FieldLabel>
+                      <Input
+                        id={`payment-detail-name-${index}-${detailIndex}`}
+                        placeholder="Campo"
+                        value={detail.name}
+                        onChange={(event) =>
+                          updateDetail(
+                            index,
+                            detailIndex,
+                            "name",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </ShadcnField>
+                    <ShadcnField className="contents">
+                      <FieldLabel className="sr-only" htmlFor={`payment-detail-value-${index}-${detailIndex}`}>Valor del dato {detailIndex + 1}</FieldLabel>
+                      <Input
+                        id={`payment-detail-value-${index}-${detailIndex}`}
+                        placeholder="Valor"
+                        value={detail.value}
+                        onChange={(event) =>
+                          updateDetail(
+                            index,
+                            detailIndex,
+                            "value",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </ShadcnField>
                     <Button
                       variant="ghost"
                       size="icon"
@@ -495,18 +569,21 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                   type="button"
                   onClick={() => addDetail(index)}
                 >
-                  <Plus aria-hidden="true" /> Añadir dato
+                  <Plus aria-hidden="true" data-icon="inline-start" /> Añadir dato
                 </Button>
-              </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                type="button"
-                onClick={() => removeMarket(index)}
-              >
-                <Trash2 aria-hidden="true" /> Eliminar mercado
-              </Button>
-            </fieldset>
+              </FieldSet>
+              </FieldGroup>
+              <footer className="market-settings-footer">
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  type="button"
+                  onClick={() => removeMarket(index)}
+                >
+                  <Trash2 aria-hidden="true" /> Eliminar mercado
+                </Button>
+              </footer>
+            </section>
           ))}
         </div>
         <Button
@@ -515,21 +592,18 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
           className="add-market"
           onClick={addMarket}
         >
-          <Plus aria-hidden="true" /> Añadir mercado
+          <Plus aria-hidden="true" data-icon="inline-start" /> Añadir mercado
         </Button>
       </Panel>
 
-      {reviewing ? (
-        <section
-          ref={dialogRef}
-          className="review-panel"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="review-title"
-        >
-          <div>
-            <p className="eyebrow">CONFIRMACIÓN CRÍTICA</p>
-            <h2 id="review-title">Revisa el impacto antes de activar</h2>
+      <Dialog open={reviewing} onOpenChange={setReviewing}>
+        <DialogContent className="review-dialog" showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Revisa el impacto antes de activar</DialogTitle>
+            <DialogDescription>
+              Los cambios se aplicarán a la configuración activa.
+            </DialogDescription>
+          </DialogHeader>
             <ul className="change-list">
               {requiresInitialReview && !changes.length ? (
                 <li>
@@ -546,16 +620,16 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                 </li>
               ))}
             </ul>
-            <label className="reason-field">
-              Motivo de la revisión
+            <Field label="Motivo de la revisión" htmlFor="review-reason" className="reason-field">
               <Input
+                id="review-reason"
                 value={reason}
                 minLength="5"
                 required
                 onChange={(event) => setReason(event.target.value)}
               />
-            </label>
-            <div className="review-actions">
+            </Field>
+            <DialogFooter>
               <Button variant="ghost" type="button" onClick={closeReview}>
                 Volver
               </Button>
@@ -565,14 +639,13 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                 disabled={reason.trim().length < 5}
                 onClick={save}
               >
-                <Check aria-hidden="true" /> Confirmar y activar
+                <Check aria-hidden="true" data-icon="inline-start" /> Confirmar y activar
               </Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
+            </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <Panel title="Historial de revisiones" kicker="Versiones" wide>
+      <Panel title="Historial de revisiones" wide>
         {revisions.length ? (
           <ol className="revision-list">
             {revisions.slice(0, 10).map((revision) => (
@@ -593,6 +666,22 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
         )}
       </Panel>
     </div>
+  );
+}
+
+function SettingField({ label, htmlFor, children, className }) {
+  return (
+    <Field label={label} htmlFor={htmlFor} className={`settings-field ${className || ""}`}>
+      {children}
+    </Field>
+  );
+}
+
+function MarketField({ label, htmlFor, children }) {
+  return (
+    <Field label={label} htmlFor={htmlFor} className="market-setting-field">
+      {children}
+    </Field>
   );
 }
 
@@ -647,7 +736,7 @@ function MarketIconEditor({ market, onChange }) {
           disabled={uploading}
           onClick={() => inputRef.current?.click()}
         >
-          <ImagePlus aria-hidden="true" />
+          <ImagePlus aria-hidden="true" data-icon="inline-start" />
           {uploading ? "Subiendo…" : "Elegir icono"}
         </Button>
         {market.iconUrl ? (
@@ -662,8 +751,9 @@ function MarketIconEditor({ market, onChange }) {
             <X aria-hidden="true" />
           </Button>
         ) : null}
-        <input
+        <Input
           ref={inputRef}
+          id={`market-icon-file-${market.code}`}
           className="sr-only"
           type="file"
           aria-label={`Seleccionar icono para ${market.label}`}
@@ -756,6 +846,7 @@ function diffConfig(saved, draft) {
       "fiatBalance",
       "buyMaxRate",
       "sellMinRate",
+      "priceGuardPercent",
       "purchaseMaxQusd",
       "sellFeePercent",
       "outgoingTransferFee",

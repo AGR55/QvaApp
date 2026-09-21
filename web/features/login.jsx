@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { requestJson, setCsrfToken } from "../lib/http.js";
 import { Button, Field, Input } from "../components/ui.jsx";
+import { FieldGroup } from "../components/ui/field.tsx";
 
 export function Login({ onAuthenticated }) {
   const [password, setPassword] = useState("");
@@ -49,6 +50,7 @@ export function Login({ onAuthenticated }) {
             <p>Todo el control de tus mercados, en un solo lugar.</p>
           </div>
           <form onSubmit={submit}>
+            <FieldGroup className="login-form-fields">
             <Field
               label="Contraseña administrativa"
               htmlFor="dashboard-password"
@@ -74,6 +76,7 @@ export function Login({ onAuthenticated }) {
             <p className="detail" role="status" aria-live="polite">
               {status}
             </p>
+            </FieldGroup>
           </form>
         </div>
       </section>

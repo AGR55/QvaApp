@@ -23,11 +23,18 @@ import {
   Moon,
   Sun,
   Menu,
-  ChevronDown,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
 import { readDashboardBootstrap } from "./lib/dashboard-bootstrap.js";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "./components/ui/sheet.tsx";
 import { money } from "./lib/format.js";
 import { useDashboard } from "./hooks/use-dashboard.js";
 import { Capital } from "./features/capital.jsx";
@@ -39,14 +46,7 @@ import { Operations } from "./features/operations.jsx";
 import { Hunting } from "./features/hunting.jsx";
 import { Audit } from "./features/audit.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
-import "./settings.css";
-import "./cockpit.css";
-import "./offer-actions.css";
-import "./offer-modal.css";
-import "./capital.css";
-import "./hunting.css";
-import "./audit.css";
-import "./components.css";
+import "./globals.css";
 import "./ui-polish.css";
 import "./identity.css";
 
@@ -108,14 +108,6 @@ function App() {
     document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("qvaapply-theme", theme);
   }, [theme]);
-  useEffect(() => {
-    if (!mobileNavOpen) return undefined;
-    const onKeyDown = (event) => {
-      if (event.key === "Escape") setMobileNavOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mobileNavOpen]);
   const showNotification = useCallback((incoming) => {
     if (!incoming) return;
     const id = incoming.id || incoming.version;
@@ -284,6 +276,57 @@ function App() {
       </aside>
       <main className="main-area" id="main-content" tabIndex="-1">
         <header className="topbar">
+          <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+            <SheetTrigger asChild>
+              <IconButton
+                variant="ghost"
+                className="mobile-nav-trigger"
+                aria-label="Abrir navegación"
+                title="Abrir navegación"
+              >
+                <Menu aria-hidden="true" />
+                <span className="sr-only">Secciones</span>
+              </IconButton>
+            </SheetTrigger>
+            <SheetContent
+              side="left"
+              showCloseButton={false}
+              className="mobile-nav-panel"
+              aria-label="Navegación principal"
+            >
+              <SheetHeader className="mobile-nav-heading">
+                <SheetTitle>Secciones</SheetTitle>
+                <SheetClose asChild>
+                  <IconButton
+                    variant="ghost"
+                    aria-label="Cerrar menú"
+                    title="Cerrar menú"
+                  >
+                    <X aria-hidden="true" />
+                  </IconButton>
+                </SheetClose>
+              </SheetHeader>
+              <nav id="mobile-navigation" aria-label="Secciones">
+                {navigationGroups.map((group) => (
+                  <div key={group.label} className="mobile-nav-group">
+                    <p className="nav-group-label">{group.label}</p>
+                    {group.items.map(([key, text, Icon]) => (
+                      <Button
+                        key={key}
+                        variant="ghost"
+                        className={view === key ? "active" : ""}
+                        aria-current={view === key ? "page" : undefined}
+                        onClick={() => navigate(key)}
+                      >
+                        <Icon data-icon="inline-start" aria-hidden="true" />
+                        <span>{text}</span>
+                      </Button>
+                    ))}
+                  </div>
+                ))}
+              </nav>
+            </SheetContent>
+          </Sheet>
           <div
             className="header-metrics"
             role="region"
@@ -313,17 +356,6 @@ function App() {
             })}
           </div>
           <div className="top-actions">
-            <Button
-              variant="secondary"
-              className="mobile-nav-trigger"
-              onClick={() => setMobileNavOpen((open) => !open)}
-              aria-expanded={mobileNavOpen}
-              aria-controls="mobile-navigation"
-            >
-              <Menu aria-hidden="true" />
-              <span>Secciones</span>
-              <ChevronDown aria-hidden="true" />
-            </Button>
             <PushControl onNotification={showNotification} />
             <IconButton
               className="theme-toggle"
@@ -371,45 +403,6 @@ function App() {
               <LogOut aria-hidden="true" />
             </IconButton>
           </div>
-          {mobileNavOpen ? (
-            <div className="mobile-nav-layer">
-              <button
-                className="mobile-nav-backdrop"
-                type="button"
-                aria-label="Cerrar navegación"
-                onClick={() => setMobileNavOpen(false)}
-              />
-              <nav
-                id="mobile-navigation"
-                className="mobile-nav-panel"
-                aria-label="Navegación principal"
-              >
-                <div className="mobile-nav-heading">
-                  <span>Ir a</span>
-                  <IconButton
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setMobileNavOpen(false)}
-                    aria-label="Cerrar menú"
-                  >
-                    <X aria-hidden="true" />
-                  </IconButton>
-                </div>
-                {navigation.map(([key, text, Icon]) => (
-                  <Button
-                    key={key}
-                    variant="ghost"
-                    className={view === key ? "active" : ""}
-                    aria-current={view === key ? "page" : undefined}
-                    onClick={() => navigate(key)}
-                  >
-                    <Icon aria-hidden="true" />
-                    <span>{text}</span>
-                  </Button>
-                ))}
-              </nav>
-            </div>
-          ) : null}
         </header>
         <div className="content">
           {notice ? (

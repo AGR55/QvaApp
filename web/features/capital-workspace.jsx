@@ -1,12 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Scale, X } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Scale, X } from "lucide-react";
 import { Offers } from "../components/offers.jsx";
 import { Freshness, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
-import { useDialog } from "../hooks/use-dialog.js";
 import { indexDecimalPlaces, median, ownOfferFiatTotal, roundRateForIndex } from "../../src/market-math.js";
 import { Button, IconButton, Input, Select } from "../components/ui.jsx";
+import { Field, FieldGroup, FieldLabel } from "../components/ui/field.tsx";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog.tsx";
 import { MarketIdentity } from "../components/market-identity.jsx";
 
 export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
@@ -19,7 +28,6 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
   const closeCancel = useCallback(() => {
     if (!cancelling) setPendingCancel(undefined);
   }, [cancelling]);
-  const cancelDialogRef = useDialog(Boolean(pendingCancel), closeCancel);
   const hasDeficit = Object.values(data.budget || {}).some((plan) => Number(plan.deficit) > 0.000001);
 
   const openRebalance = async () => {
@@ -77,11 +85,9 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
   return (
     <div className="capital-stack">
       <ViewHead
-        kicker="Fondos propios"
         title="Capital"
-        description="Lo declarado frente a lo comprometido por mercado, y tus ofertas abiertas listas para ajustar."
       />
-      <Panel title="Capital disponible" kicker="Saldos" wide>
+      <Panel title="Capital disponible" wide>
         <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
         {resources.balance?.loading && !data.freshness?.balance ? <Skeleton label="Consultando saldo QUSD" /> : null}
         <div className="market-grid capital-grid">
@@ -99,7 +105,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
         </div>
       </Panel>
 
-      <Panel title="Mis ofertas" kicker="Posiciones abiertas" description="Edita importe y tasa, o reajusta cuando un mercado quede por encima de lo declarado." wide>
+      <Panel title="Mis ofertas" wide>
         <div className="capital-toolbar">
           <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
           <Button variant={hasDeficit ? "destructive" : "secondary"} onClick={openRebalance} disabled={!hasDeficit || loadingRebalance}>
@@ -131,16 +137,16 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
             onCancel={(offer) => { setCancelError(""); setPendingCancel(offer); }}
           />
         )}
-        {resources.ownOffers?.error ? <p className="inline-error">{resources.ownOffers.error}</p> : null}
+        {resources.ownOffers?.error ? <p className="inline-error" role="alert">{resources.ownOffers.error}</p> : null}
       </Panel>
 
-      {pendingCancel ? (
-        <section ref={cancelDialogRef} className="offer-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="cancel-offer-title">
-          <div className="offer-modal cancel-offer-dialog">
-            <div className="dialog-icon danger-icon"><AlertTriangle aria-hidden="true" /></div>
-            <p className="eyebrow">ACCIÓN DESTRUCTIVA</p>
-            <h2 id="cancel-offer-title">Eliminar esta oferta</h2>
-            <p>La oferta dejará de estar disponible en QvaPay. Esta acción no modifica las operaciones ya iniciadas.</p>
+      <Dialog open={Boolean(pendingCancel)} onOpenChange={(open) => !open && closeCancel()}>
+        {pendingCancel ? (
+          <DialogContent className="review-dialog cancel-offer-dialog">
+            <DialogHeader>
+              <DialogTitle>Eliminar esta oferta</DialogTitle>
+              <DialogDescription>La oferta dejará de estar disponible en QvaPay. Las operaciones iniciadas no cambian.</DialogDescription>
+            </DialogHeader>
             <dl className="offer-summary">
               <div><dt>Mercado</dt><dd>{label(pendingCancel.coin)}</dd></div>
               <div><dt>Lado</dt><dd>{pendingCancel.type === "buy" ? "Compra" : "Venta"}</dd></div>
@@ -148,13 +154,13 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
               <div><dt>Tasa</dt><dd>{money(pendingCancel.rate, unit(pendingCancel.coin) === "USD" ? 4 : 2)} {unit(pendingCancel.coin)}</dd></div>
             </dl>
             {cancelError ? <p className="form-error" role="alert">{cancelError}</p> : null}
-            <div className="offer-modal-actions">
+            <DialogFooter>
               <Button variant="ghost" type="button" onClick={closeCancel} disabled={cancelling}>Conservar oferta</Button>
               <Button variant="destructive" type="button" onClick={cancelOffer} disabled={cancelling}>{cancelling ? "Eliminando…" : "Sí, eliminar oferta"}</Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
       {rebalance ? (
         <RebalanceDialog
           initial={rebalance}
@@ -179,7 +185,6 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
   const [refreshing, setRefreshing] = useState(false);
   const [job, setJob] = useState();
   const close = useCallback(() => onClose(), [onClose]);
-  const dialogRef = useDialog(true, close);
   const refreshPreview = useCallback(async () => {
     setRefreshing(true);
     try {
@@ -280,14 +285,15 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
   };
 
   return (
-    <section ref={dialogRef} className="offer-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="rebalance-title">
-      <div className="offer-modal rebalance-dialog">
-        <header className="rebalance-heading">
-          <div className="dialog-icon warning-icon"><Scale aria-hidden="true" /></div>
-          <div><p className="eyebrow">CONTROL DE EXPOSICIÓN</p><h2 id="rebalance-title">Reajustar ofertas de compra</h2></div>
-          <IconButton variant="ghost" onClick={close} aria-label="Cerrar reajuste"><X aria-hidden="true" /></IconButton>
-        </header>
-        <p>Reduce las cantidades para que cada mercado vuelva a quedar dentro del fiat declarado. Las tasas actuales se conservan.</p>
+    <Dialog open onOpenChange={(open) => !open && close()}>
+      <DialogContent className="offer-modal rebalance-dialog" showCloseButton={false}>
+        <DialogHeader>
+          <DialogTitle>Reajustar ofertas de compra</DialogTitle>
+          <DialogDescription>Reduce cantidades hasta quedar dentro del fiat disponible; las tasas se conservan.</DialogDescription>
+        </DialogHeader>
+        <DialogClose asChild>
+          <IconButton variant="ghost" className="absolute top-2 right-2" aria-label="Cerrar reajuste" title="Cerrar reajuste"><X aria-hidden="true" /></IconButton>
+        </DialogClose>
         <p className={`rebalance-freshness ${previewIsStale ? "stale" : ""}`}>
           {refreshing
             ? "Actualizando ofertas con QvaPay…"
@@ -309,12 +315,19 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
                   : 0;
                 const index = market?.buyMaxRate || item.rate;
                 const shownRate = amount > 0 ? roundRateForIndex(effective, "buy", index) : 0;
+                const amountId = `rebalance-amount-${item.uuid}`;
                 return (
-                  <label className="rebalance-row" key={item.uuid}>
-                    <span><strong>{money(item.currentQusd)} QUSD</strong><small>Tasa {money(shownRate, indexDecimalPlaces(index))} {unit(plan.coin)} · se conserva {item.rate}</small></span>
-                    <span className="input-unit"><Input type="number" min="0" max={item.currentQusd} step="0.01" inputMode="decimal" value={values[item.uuid]} onChange={(event) => setValues((current) => ({ ...current, [item.uuid]: event.target.value }))} /><small>QUSD</small></span>
-                    <em>{amount === 0 ? "Se cancelará" : `Nuevo importe`}</em>
-                  </label>
+                  <Field className="rebalance-row" key={item.uuid}>
+                    <div className="rebalance-offer">
+                      <strong>{money(item.currentQusd)} QUSD</strong>
+                      <small>Tasa {money(shownRate, indexDecimalPlaces(index))} {unit(plan.coin)} · se conserva {item.rate}</small>
+                    </div>
+                    <div className="rebalance-amount">
+                      <FieldLabel htmlFor={amountId}>Nuevo importe</FieldLabel>
+                      <span className="input-unit"><Input id={amountId} type="number" min="0" max={item.currentQusd} step="0.01" inputMode="decimal" value={values[item.uuid]} onChange={(event) => setValues((current) => ({ ...current, [item.uuid]: event.target.value }))} /><small>QUSD</small></span>
+                    </div>
+                    <em>{amount === 0 ? "Se cancelará" : "Se mantiene"}</em>
+                  </Field>
                 );
               })}
             </div>
@@ -324,12 +337,12 @@ function RebalanceDialog({ initial, data, label, unit, onClose, onChanged }) {
         {!invalidAmount && summaries.some((item) => !item.valid) ? <p className="form-error" role="alert">Todavía hay más fiat comprometido que declarado. Reduce un poco más las cantidades.</p> : null}
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         {job ? <RebalanceProgress job={job} /> : null}
-        <div className="offer-modal-actions">
+        <DialogFooter>
           <Button variant="ghost" onClick={close}>{job ? "Cerrar" : "Cancelar"}</Button>
           {!job ? <Button variant="primary" onClick={apply} disabled={!valid || applying || (refreshing && previewIsStale)}>{applying ? "Validando…" : previewIsStale ? "Validar y aplicar" : "Aceptar reajuste"}</Button> : null}
-        </div>
-      </div>
-    </section>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -413,12 +426,12 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
               <IconButton variant="ghost" type="button" onClick={onClose} aria-label="Cerrar editor"><X aria-hidden="true" /></IconButton>
       </header>
       <form onSubmit={submit}>
-        <div className="offer-fields">
-          <label><span>Mercado</span><Select value={values.coin} disabled={initial.mode === "edit"} onChange={(event) => setField("coin", event.target.value)}>{data.markets.map((item) => <option key={item.code} value={item.code}>{label(item.code)}</option>)}</Select></label>
-          <label><span>Movimiento</span><Select value={values.type} disabled={initial.mode === "edit"} onChange={(event) => setField("type", event.target.value)}><option value="buy">Comprar QUSD</option><option value="sell">Vender QUSD</option></Select></label>
-          <label><span>Importe</span><span className="input-unit"><Input type="number" min="0.01" step="0.01" inputMode="decimal" value={values.amount} onChange={(event) => setField("amount", event.target.value)} autoFocus /><small>QUSD</small></span></label>
-          <label><span>Tasa</span><span className="input-unit"><Input type="number" min="0.0001" step="0.0001" inputMode="decimal" value={values.rate} onChange={(event) => setField("rate", event.target.value)} /><small>{unit(values.coin)}/QUSD</small></span></label>
-        </div>
+        <FieldGroup className="offer-fields">
+          <Field className="offer-field"><FieldLabel htmlFor="offer-coin">Mercado</FieldLabel><Select id="offer-coin" value={values.coin} disabled={initial.mode === "edit"} onValueChange={(value) => setField("coin", value)} options={data.markets.map((item) => ({ value: item.code, label: label(item.code) }))} /></Field>
+          <Field className="offer-field"><FieldLabel htmlFor="offer-type">Movimiento</FieldLabel><Select id="offer-type" value={values.type} disabled={initial.mode === "edit"} onValueChange={(value) => setField("type", value)} options={[{ value: "buy", label: "Comprar QUSD" }, { value: "sell", label: "Vender QUSD" }]} /></Field>
+          <Field className="offer-field"><FieldLabel htmlFor="offer-amount">Importe</FieldLabel><span className="input-unit"><Input id="offer-amount" type="number" min="0.01" step="0.01" inputMode="decimal" value={values.amount} onChange={(event) => setField("amount", event.target.value)} autoFocus /><small>QUSD</small></span></Field>
+          <Field className="offer-field"><FieldLabel htmlFor="offer-rate">Tasa</FieldLabel><span className="input-unit"><Input id="offer-rate" type="number" min="0.0001" step="0.0001" inputMode="decimal" value={values.rate} onChange={(event) => setField("rate", event.target.value)} /><small>{unit(values.coin)}/QUSD</small></span></Field>
+        </FieldGroup>
         <div className="offer-calculation">
           <div className="calculation-lead">
             {paysFiat ? <ArrowUpFromLine aria-hidden="true" /> : <ArrowDownToLine aria-hidden="true" />}

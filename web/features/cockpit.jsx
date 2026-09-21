@@ -32,9 +32,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
   return (
     <div className="page-stack">
       <ViewHead
-        kicker="Mesa · Resumen operativo"
         title="Cockpit"
-        description="La decisión del momento, el capital por mercado y el consumo de límites. Si algo exige tu atención, está arriba del todo."
       />
       <section className="control-deck" aria-label="Controles operativos">
         <div>
@@ -112,8 +110,6 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
       </div>
       <Panel
         title="Consumo de límites globales"
-        kicker="Riesgo"
-        description="Cuánto del margen de seguridad queda antes de frenar en automático."
         wide
       >
         <div className="risk-meter-grid">
@@ -146,8 +142,6 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
       </Panel>
       <Panel
         title="Cobertura del escáner"
-        kicker="Vigilancia"
-        description="Qué revisó la última ronda y si el presupuesto de aplicación está libre."
         wide
       >
         <div className="market-grid">
@@ -192,7 +186,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
         </div>
       </Panel>
       <div className="dashboard-grid">
-        <Panel title="Oportunidades priorizadas" kicker="Señal">
+        <Panel title="Oportunidades priorizadas">
           <List
             empty="Sin oportunidades por ahora."
             rows={data.rankings.potential}
@@ -201,7 +195,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
             }
           />
         </Panel>
-        <Panel title="Rotación · 24 h" kicker="Ritmo">
+        <Panel title="Rotación · 24 h">
           <List
             empty="Sin rotación registrada."
             rows={data.rankings.rotation}
@@ -210,7 +204,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
             }
           />
         </Panel>
-        <Panel title="Alertas operativas" kicker="Atención" wide>
+        <Panel title="Alertas operativas" wide>
           <List
             empty="Sin alertas."
             rows={data.alerts}

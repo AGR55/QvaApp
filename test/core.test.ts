@@ -408,6 +408,44 @@ test("crea y edita ofertas CUP usando el total fiat conservador", async () => {
   store.close();
 });
 
+test("el reajuste puede reducir una oferta heredada por encima del limite actual", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-rebalance-legacy-limit-")),
+  );
+  store.set("mode", "real");
+  let edited: { amount?: number; receive?: number } | undefined;
+  const qva = {
+    editOffer: async (_uuid: string, request: { amount?: number; receive?: number }) => {
+      edited = request;
+      return undefined;
+    },
+  };
+  const trading = new TradingService(
+    store,
+    qva as never,
+    {
+      realTradingAllowed: true,
+      cupPurchaseMaxQusd: 25,
+      initialCupFiatBalance: 100_000,
+    } as never,
+    async () => undefined,
+  );
+
+  await trading.editOwnOfferFromSnapshot(
+    {
+      uuid: "legacy-buy",
+      coin: "BANK_CUP",
+      type: "buy",
+      rate: 973.7,
+      currentAmount: 40,
+    },
+    30.12,
+  );
+
+  assert.deepEqual(edited, { amount: 30.12, receive: 29_320 });
+  store.close();
+});
+
 test("cada turno de refresco actualiza como máximo una oferta vencida", async () => {
   const store = new Store(
     mkdtempSync(join(tmpdir(), "qvaapply-refresh-round-")),

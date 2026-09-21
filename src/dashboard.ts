@@ -11,7 +11,7 @@ import type {
   Store,
 } from "./store.js";
 import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
-import { ownOfferFiatTotal } from "./market-math.js";
+import { MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -322,6 +322,7 @@ export class DashboardReadModel {
                 coin: adjustment.coin,
                 type: "buy",
                 rate: adjustment.rate,
+                currentAmount: adjustment.currentAmount,
               },
               adjustment.targetAmount,
             );
@@ -729,7 +730,11 @@ export class DashboardReadModel {
 }
 
 function precisionQusd(value: number): number {
-  return Math.max(0, Math.floor((value + Number.EPSILON) * 100) / 100);
+  const amount = Math.max(
+    0,
+    Math.floor((value + Number.EPSILON) * 100) / 100,
+  );
+  return amount < MIN_OFFER_QUSD ? 0 : amount;
 }
 
 function numeric(value: unknown): number | undefined {
