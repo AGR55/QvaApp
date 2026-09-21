@@ -409,7 +409,7 @@ function App() {
         </header>
         <div className="content">
           {notice ? (
-            <aside className="push-toast" role="alert" aria-live="assertive">
+            <aside className="push-toast" role="alert" aria-live="polite">
               <Bell aria-hidden="true" />
               <div>
                 <strong>

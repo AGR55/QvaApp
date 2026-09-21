@@ -1,7 +1,16 @@
 import React, { useState } from "react";
 import { RadioTower, ShieldAlert, UsersRound, Wifi, WifiOff } from "lucide-react";
 import { Panel, ViewHead } from "../components/common.jsx";
-import { Button } from "../components/ui.jsx";
+import { Badge, Button, Field, Input } from "../components/ui.jsx";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card.tsx";
+import { FieldGroup } from "../components/ui/field.tsx";
 import { requestJson } from "../lib/http.js";
 import { money } from "../lib/format.js";
 
@@ -78,27 +87,24 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
   return (
     <div className="view-stack cooperative-network-view">
       <ViewHead
-        kicker="Coordinación entre bots"
         title="Red cooperativa"
-        description="Capacidad fiat compartida en tiempo real mediante NATS. La ejecución conjunta permanece bloqueada hasta que el servidor garantice idempotencia y transacciones."
-        meta={
-          <div className="network-status-row" role="status" aria-live="polite">
-            <ConnectionPill connected={network.httpConnected} label="HTTP" />
-            <ConnectionPill connected={network.natsConnected} label="NATS" />
-            <span className="freshness">
-              {network.lastNatsAt || network.lastHttpAt
-                ? `Último snapshot · ${new Date(network.lastNatsAt || network.lastHttpAt).toLocaleString("es-CU")}`
-                : "Sin snapshot recibido"}
-            </span>
-          </div>
-        }
       />
 
+      <div className="network-status-row" role="status" aria-live="polite">
+        <ConnectionPill connected={network.httpConnected} label="HTTP" />
+        <ConnectionPill connected={network.natsConnected} label="NATS" />
+        <span className="freshness">
+          {network.lastNatsAt || network.lastHttpAt
+            ? `Snapshot · ${new Date(network.lastNatsAt || network.lastHttpAt).toLocaleString("es-CU")}`
+            : "Sin snapshot"}
+        </span>
+      </div>
+
       {!network.enabled ? (
-        <Panel title="Integración desactivada" kicker="Configuración">
+        <Panel title="Sincronización">
           <div className="network-callout">
             <WifiOff aria-hidden="true" />
-            <p>Configura las variables <code>SYNC_*</code> y activa <code>SYNC_ENABLED=true</code> para conectar esta VPS.</p>
+            <p>Configura <code>SYNC_*</code> para conectar Sync Core.</p>
           </div>
         </Panel>
       ) : null}
@@ -112,24 +118,23 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
 
       <Panel
         title="Liquidez global"
-        kicker="Snapshot sincronizado"
-        description="Suma aportada por todos los bots para cada moneda."
         wide
       >
         <div className="network-aggregate-grid">
           {aggregates.length ? aggregates.map((item) => (
-            <article className="network-aggregate" key={item.coin}>
-              <div className="network-aggregate-head">
-                <span>{label(item.coin)}</span>
-                <UsersRound aria-hidden="true" />
-              </div>
-              <strong>{money(item.fiat)} {unit(item.coin)}</strong>
-              <dl>
-                <div><dt>Bots</dt><dd>{item.offersCount}</dd></div>
-                <div><dt>Precio medio</dt><dd>{money(item.price)}</dd></div>
-                <div><dt>Mínimo medio</dt><dd>{money(item.minimal)}</dd></div>
-              </dl>
-            </article>
+            <Card className="network-aggregate" key={item.coin} size="sm">
+              <CardHeader>
+                <CardTitle>{label(item.coin)}</CardTitle>
+                <CardAction>
+                  <Badge variant="neutral">
+                    <UsersRound aria-hidden="true" /> {item.offersCount} bots
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <strong>{money(item.fiat)} {unit(item.coin)}</strong>
+              </CardContent>
+            </Card>
           )) : (
             <div className="network-callout">
               <RadioTower aria-hidden="true" />
@@ -140,9 +145,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
       </Panel>
 
       <Panel
-        title="Nuestra aportación"
-        kicker="Capital disponible"
-        description="Publica cuánto fiat puede aportar este bot a una cacería compartida."
+        title="Aportación"
         wide
       >
         {notice ? <p className="network-notice" role="status">{notice}</p> : null}
@@ -159,34 +162,43 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
                   void publish(market);
                 }}
               >
-                <header>
-                  <div>
-                    <strong>{market.label}</strong>
-                    <span>{current ? (current.state === "confirmed" ? "Confirmada" : "Pendiente") : "Sin publicar"}</span>
-                  </div>
-                </header>
-                <label>
-                  Fiat aportado ({market.currency})
-                  <input type="number" min="0.01" step="0.01" required value={draft.fiat} onChange={(event) => updateDraft(market.code, "fiat", event.target.value)} />
-                </label>
-                <label>
-                  Mínimo por operación
-                  <input type="number" min="0.01" step="0.01" required value={draft.minimal} onChange={(event) => updateDraft(market.code, "minimal", event.target.value)} />
-                </label>
-                <label>
-                  Precio objetivo
-                  <input type="number" min="0.0001" step="any" required value={draft.price} onChange={(event) => updateDraft(market.code, "price", event.target.value)} />
-                </label>
-                <div className="network-actions">
-                  <Button type="submit" variant="primary" disabled={!network.enabled || busy === market.code}>
-                    {current ? "Actualizar" : "Publicar"}
-                  </Button>
-                  {current ? (
-                    <Button type="button" variant="ghost" disabled={busy === market.code} onClick={() => void withdraw(market)}>
-                      Retirar
+                <Card size="sm">
+                  <CardHeader>
+                    <CardTitle>{market.label}</CardTitle>
+                    <CardAction>
+                      <Badge variant="neutral">
+                        {current
+                          ? current.state === "confirmed"
+                            ? "Confirmada"
+                            : "Pendiente"
+                          : "Sin publicar"}
+                      </Badge>
+                    </CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    <FieldGroup className="network-field-group">
+                      <Field label={`Fiat (${market.currency})`} htmlFor={`${market.code}-fiat`}>
+                        <Input id={`${market.code}-fiat`} name="fiat" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required value={draft.fiat} onChange={(event) => updateDraft(market.code, "fiat", event.target.value)} />
+                      </Field>
+                      <Field label="Mínimo" htmlFor={`${market.code}-minimal`}>
+                        <Input id={`${market.code}-minimal`} name="minimal" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required value={draft.minimal} onChange={(event) => updateDraft(market.code, "minimal", event.target.value)} />
+                      </Field>
+                      <Field label="Precio" htmlFor={`${market.code}-price`}>
+                        <Input id={`${market.code}-price`} name="price" type="number" min="0.0001" step="any" inputMode="decimal" autoComplete="off" required value={draft.price} onChange={(event) => updateDraft(market.code, "price", event.target.value)} />
+                      </Field>
+                    </FieldGroup>
+                  </CardContent>
+                  <CardFooter className="network-actions">
+                    <Button type="submit" variant="primary" disabled={!network.enabled || busy === market.code}>
+                      {current ? "Actualizar" : "Publicar"}
                     </Button>
-                  ) : null}
-                </div>
+                    {current ? (
+                      <Button type="button" variant="outline" disabled={busy === market.code} onClick={() => void withdraw(market)}>
+                        Retirar
+                      </Button>
+                    ) : null}
+                  </CardFooter>
+                </Card>
               </form>
             );
           })}

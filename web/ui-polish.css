@@ -61,165 +61,94 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Red cooperativa: una consola sobria de capacidad compartida. */
+/* Red cooperativa */
 .network-status-row,
-.network-actions,
-.network-aggregate-head {
+.network-actions {
   display: flex;
   align-items: center;
-  gap: 0.65rem;
+  gap: var(--s-2);
   flex-wrap: wrap;
 }
-
+.network-status-row { min-height: 32px; }
 .network-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  min-height: 2rem;
-  padding: 0.35rem 0.65rem;
-  border: 1px solid var(--border);
+  min-height: 28px;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  color: var(--muted-foreground);
-  font-size: 0.78rem;
+  color: var(--muted);
+  font-size: 11px;
   font-weight: 700;
 }
-
 .network-pill svg,
 .network-callout svg,
-.network-error svg,
-.network-aggregate-head svg {
-  width: 1rem;
-  height: 1rem;
-}
-
+.network-error svg { width: 1rem; height: 1rem; }
 .network-pill.connected {
-  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+  border-color: color-mix(in srgb, var(--success) 42%, var(--line));
   color: var(--success);
   background: color-mix(in srgb, var(--success) 8%, transparent);
 }
-
 .network-pill.offline {
-  border-color: color-mix(in srgb, var(--warning) 42%, var(--border));
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--line));
   color: var(--warning);
 }
-
 .network-callout,
 .network-error {
   display: flex;
   align-items: flex-start;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px solid var(--border);
-  background: var(--muted);
+  gap: var(--s-2);
+  padding: var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--surface-wash);
 }
-
 .network-callout p,
-.network-error span {
-  margin: 0;
-}
-
+.network-error span { margin: 0; }
 .network-error {
-  border-color: color-mix(in srgb, var(--destructive) 45%, var(--border));
-  color: var(--destructive);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  color: var(--danger-ink);
 }
-
 .network-aggregate-grid,
 .network-contribution-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
-  gap: 0.85rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-3);
 }
-
 .network-aggregate,
-.network-contribution {
-  min-width: 0;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--card) 94%, var(--foreground) 6%);
-  padding: 1rem;
-}
-
-.network-aggregate-head {
-  justify-content: space-between;
-  color: var(--muted-foreground);
-  font-size: 0.8rem;
-  font-weight: 700;
+.network-contribution { min-width: 0; }
+.network-aggregate [data-slot="card-title"] {
+  font-size: 12px;
+  letter-spacing: 0.03em;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
 }
-
-.network-aggregate > strong {
+.network-aggregate strong {
   display: block;
-  margin: 0.65rem 0 0.9rem;
-  font-size: clamp(1.45rem, 3vw, 2.15rem);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
 }
-
-.network-aggregate dl {
+.network-aggregate .ui-badge { gap: 4px; font-size: 10px; }
+.network-aggregate .ui-badge svg { width: 12px; height: 12px; }
+.network-field-group {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-  margin: 0;
+  gap: var(--s-2);
 }
-
-.network-aggregate dl div {
-  min-width: 0;
-}
-
-.network-aggregate dt,
-.network-contribution label,
-.network-contribution header span {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-.network-aggregate dd {
-  margin: 0.2rem 0 0;
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.network-contribution {
-  display: grid;
-  gap: 0.8rem;
-}
-
-.network-contribution header > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.network-contribution label {
-  display: grid;
-  gap: 0.35rem;
-  font-weight: 650;
-}
-
-.network-contribution input {
-  width: 100%;
-  min-height: 2.6rem;
-  border: 1px solid var(--input);
-  border-radius: var(--radius-sm);
-  background: var(--background);
-  color: var(--foreground);
-  padding: 0.55rem 0.7rem;
-  font: inherit;
-}
-
-.network-contribution input:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-
 .network-notice {
-  margin: 0 0 0.9rem;
-  color: var(--muted-foreground);
+  margin: 0 0 var(--s-3);
+  color: var(--muted);
+  font-size: 12.5px;
 }
-
+@media (max-width: 1120px) {
+  .network-aggregate-grid,
+  .network-contribution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @media (max-width: 640px) {
-  .network-aggregate dl {
-    grid-template-columns: 1fr;
-  }
+  .network-aggregate-grid,
+  .network-contribution-grid,
+  .network-field-group { grid-template-columns: 1fr; }
 }
 
 [data-theme="dark"] {
@@ -651,7 +580,8 @@ td,
   top: 76px;
   right: 20px;
   z-index: var(--z-toast);
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: flex-start;
   width: min(420px, calc(100vw - 40px));
@@ -661,6 +591,11 @@ td,
   border-left: 3px solid var(--accent);
   border-radius: var(--r-card);
   box-shadow: var(--shadow-float);
+}
+.push-toast > div { min-width: 0; }
+.push-toast .dialog-close {
+  align-self: start;
+  justify-self: end;
 }
 .push-toast strong {
   display: block;
@@ -2046,9 +1981,11 @@ tbody td small {
   display: grid;
 }
 .workflow-list li {
-  display: flex;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 12px;
+  column-gap: 12px;
+  row-gap: 4px;
   padding: 12px 2px;
   border-top: 1px solid var(--line-soft);
   font-size: 12.8px;
@@ -2057,7 +1994,17 @@ tbody td small {
   border-top: 0;
 }
 .workflow-list li > span {
+  grid-column: 2;
   min-width: 0;
+}
+.workflow-list li > .state {
+  grid-column: 1;
+  white-space: nowrap;
+}
+.workflow-list li > .ui-button,
+.workflow-list li > svg {
+  grid-column: 3;
+  justify-self: end;
 }
 .workflow-list strong {
   display: block;
@@ -2066,6 +2013,7 @@ tbody td small {
 .workflow-list small {
   display: block;
   color: var(--faint);
+  overflow-wrap: anywhere;
 }
 .workflow-list svg {
   flex: none;
@@ -2429,10 +2377,6 @@ tbody td small {
 .blocked-card {
   background: var(--surface);
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-card);
-  padding: 18px;
-  display: grid;
-  gap: 12px;
   box-shadow: 0 1px 2px rgba(14, 22, 30, 0.05);
 }
 .blocked-card header {
@@ -2507,6 +2451,7 @@ tbody td small {
   margin-top: 2px;
 }
 .risk-checks {
+  margin-top: var(--s-3);
   font-size: 12.5px;
 }
 .risk-checks summary {
