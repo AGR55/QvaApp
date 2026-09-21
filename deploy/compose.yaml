@@ -16,6 +16,8 @@ services:
       DASHBOARD_PORT: 3000
     ports:
       - "127.0.0.1:${QVAAPPLY_HOST_PORT:?Falta QVAAPPLY_HOST_PORT}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /root/Adriano/QvaApply/data:/app/data
     read_only: true

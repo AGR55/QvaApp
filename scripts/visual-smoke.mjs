@@ -137,6 +137,17 @@ try {
     {},
   );
 
+  const cooperativeNetwork = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Red cooperativa')]",
+  );
+  await command("POST", `/session/${sessionId}/element/${cooperativeNetwork}/click`, {});
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Liquidez global')"),
+  );
+  const networkDesktop = await assertPageQuality("Red cooperativa");
+  await screenshot("/tmp/qvaapply-cooperative-network-desktop.png");
+
   const capital = await find(
     "xpath",
     "//button[contains(normalize-space(.), 'Capital')]",
@@ -428,6 +439,11 @@ try {
       "Operaciones con dinero",
       "/tmp/qvaapply-operations-mobile.png",
     ],
+    [
+      "Red cooperativa",
+      "Liquidez global",
+      "/tmp/qvaapply-cooperative-network-mobile.png",
+    ],
     ["Gráficas", "Fluctuación de precios", "/tmp/qvaapply-charts-mobile.png"],
     [
       "Estrategia",
@@ -505,6 +521,7 @@ try {
           Mercados: marketsDesktop,
           Operaciones: operationsDesktop,
           Cacería: huntingDesktop,
+          "Red cooperativa": networkDesktop,
           Capital: capitalDesktop,
           Gráficas: chartsDesktop,
           Estrategia: settingsDesktop,
@@ -520,6 +537,7 @@ try {
           "/tmp/qvaapply-hunting-desktop.png",
           "/tmp/qvaapply-hunting-log-desktop.png",
           "/tmp/qvaapply-hunting-cancel-desktop.png",
+          "/tmp/qvaapply-cooperative-network-desktop.png",
           "/tmp/qvaapply-capital-editor-desktop.png",
           "/tmp/qvaapply-capital-cancel-desktop.png",
           "/tmp/qvaapply-charts-desktop.png",

@@ -13,6 +13,7 @@ import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
+import { HuntingSyncCoordinator } from "./hunting-sync.js";
 import {
   HuntingRateSessions,
   TELEGRAM_COMMANDS,
@@ -29,7 +30,13 @@ if (!config.realTradingAllowed)
 
 const store = new Store(config.dataDir);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
-const session = new Session(store, new Vault(config.encryptionKey));
+const vault = new Vault(config.encryptionKey);
+const session = new Session(store, vault);
+const huntingSync = new HuntingSyncCoordinator(
+  config.huntingSync,
+  store,
+  vault,
+);
 const qva = new QvaPayClient(() => session.token(), {
   throttleState: store,
 });
@@ -109,6 +116,7 @@ const dashboardReadModel = new DashboardReadModel(
       },
     });
   },
+  huntingSync,
 );
 const dashboardServer = await startDashboard(
   dashboardReadModel,
@@ -193,6 +201,7 @@ bot.command("refresh", (ctx) =>
 );
 bot.command("offers", (ctx) => void showOwnOffers(ctx));
 bot.command("hunting", (ctx) => void showHunting(ctx));
+bot.command("network", (ctx) => void showCooperativeNetwork(ctx));
 bot.command("markets", (ctx) => void showMarkets(ctx));
 bot.command("operations", (ctx) => void showOperations(ctx));
 bot.command("strategy", (ctx) => void showStrategy(ctx));
@@ -366,6 +375,9 @@ scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudge
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache(),
 );
+scheduler.register("cooperative_reconcile", 60_000, () =>
+  huntingSync.reconcile(),
+);
 void bootstrap();
 
 async function installTelegramMenu(): Promise<void> {
@@ -390,6 +402,7 @@ async function installTelegramMenu(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   trading.initializeProductionState();
+  await huntingSync.start();
   await installTelegramMenu();
   const standaloneReconciled =
     await trading.reconcilePendingStandaloneMutations();
@@ -430,6 +443,7 @@ async function showPanelAction(ctx: Context, view: string): Promise<void> {
   }
   if (view === "strategy") return showStrategy(ctx);
   if (view === "hunting") return showHunting(ctx);
+  if (view === "network") return showCooperativeNetwork(ctx);
   if (view === "operations") return showOperations(ctx);
   if (view === "automation") return showAutomation(ctx);
   if (view === "logs") return render(ctx, logsText(), backKeyboard());
@@ -790,6 +804,37 @@ async function showDashboard(ctx: Context, notice?: string): Promise<void> {
   return render(ctx, text, mainKeyboard(state.paused));
 }
 
+async function showCooperativeNetwork(ctx: Context): Promise<void> {
+  const network = huntingSync.state();
+  const aggregates = Object.values(network.snapshot).sort((a, b) =>
+    a.coin.localeCompare(b.coin),
+  );
+  const text = [
+    "<b>📡 Red cooperativa</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `HTTP: <b>${network.httpConnected ? "CONECTADO" : "SIN CONEXIÓN"}</b> · NATS: <b>${network.natsConnected ? "CONECTADO" : "SIN CONEXIÓN"}</b>`,
+    network.lastNatsAt || network.lastHttpAt
+      ? `Última sincronización: ${relativeTime(network.lastNatsAt ?? network.lastHttpAt ?? undefined)}`
+      : "Aún no se ha recibido un snapshot.",
+    "",
+    aggregates.length
+      ? aggregates
+          .map((item) => {
+            const market = trading.market(item.coin);
+            const marketName = market?.label ?? item.coin;
+            const currency = market?.currency ?? item.coin;
+            return `💱 <b>${escapeHtml(marketName)}</b>: ${money(item.fiat)} ${escapeHtml(currency)} · ${item.offersCount} bot(s)\n   Precio medio: ${money(item.price)} · Mínimo medio: ${money(item.minimal)}`;
+          })
+          .join("\n\n")
+      : "No hay liquidez cooperativa publicada.",
+    network.lastError ? `\n⚠️ ${escapeHtml(network.lastError)}` : "",
+    "\n🛡 La ejecución conjunta está deshabilitada hasta que Sync Core garantice idempotencia y transacciones.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return render(ctx, text, backKeyboard());
+}
+
 async function showOwnOffers(ctx: Context, notice?: string): Promise<void> {
   const offers = await trading.listOwnOffers();
   const text = [
@@ -898,9 +943,11 @@ function mainKeyboard(paused: boolean): InlineKeyboard {
     .text("💼 Mis ofertas", "panel:mine")
     .row()
     .text("🎯 Cacería", "panel:hunting")
-    .text("📦 Operaciones", "panel:operations")
+    .text("📡 Red cooperativa", "panel:network")
     .row()
+    .text("📦 Operaciones", "panel:operations")
     .text("🔎 Mercados", "panel:markets")
+    .row()
     .text("⚙️ Estrategia", "panel:strategy");
   return keyboard
     .row()
@@ -1091,7 +1138,7 @@ function marketHint(): string {
 }
 function helpText(): string {
   const markets = marketHint();
-  return `<b>QvaApply · ayuda rápida</b>\n\nUsa el botón <b>Menú</b> de Telegram para acceder a todas las áreas sin memorizar comandos.\n\n<b>Comandos avanzados</b>\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — abrir un mercado concreto\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/editoffer UUID QUSD TASA — editar una oferta\n/canceloffer UUID — cancelar una oferta\n/paid UUID REFERENCIA — registrar un pago\n/received UUID — confirmar recepción`;
+  return `<b>QvaApply · ayuda rápida</b>\n\nUsa el botón <b>Menú</b> de Telegram para acceder a todas las áreas sin memorizar comandos.\n\n<b>Comandos avanzados</b>\n/network — consultar la red cooperativa\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — abrir un mercado concreto\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/editoffer UUID QUSD TASA — editar una oferta\n/canceloffer UUID — cancelar una oferta\n/paid UUID REFERENCIA — registrar un pago\n/received UUID — confirmar recepción`;
 }
 
 let stopping = false;
@@ -1124,6 +1171,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     /* polling puede no haber iniciado */
   }
   await dashboardServer.close();
+  await huntingSync.stop();
   store.close();
 }
 

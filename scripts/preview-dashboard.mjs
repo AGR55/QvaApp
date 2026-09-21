@@ -83,6 +83,21 @@ const snapshot = {
   risk: { limits: risk, usage: { exposureQusd: 20, dailyAppliedQusd: 35, activeOperations: 1, unresolvedMutation: false, emergencyStop: false } },
   recoverableWorkflows: [], workflows: [workflow], workflowOffers: {},
   capitalReservations: [{ workflowId: workflow.id, market: "BANK_CUP", amount: 20, state: "released", createdAt: now - 120000, releasedAt: now - 90000 }],
+  cooperativeNetwork: {
+    enabled: true,
+    httpConnected: true,
+    natsConnected: true,
+    snapshot: {
+      BANK_CUP: { coin: "BANK_CUP", fiat: 125000, price: 985, minimal: 5000, offersCount: 4 },
+      BANDECPREPAGO: { coin: "BANDECPREPAGO", fiat: 430, price: 1.08, minimal: 20, offersCount: 3 },
+    },
+    contributions: {
+      BANK_CUP: { coin: "BANK_CUP", fiat: 45000, minimal: 5000, price: 980, state: "confirmed", updatedAt: now - 15000 },
+    },
+    lastHttpAt: now - 30000,
+    lastNatsAt: now - 15000,
+    lastError: null,
+  },
   mutationIntents: [{ intentId: "intent-demo", operationUuid: operation.uuid, kind: "apply", state: "confirmed", request: {}, createdAt: now - 100000, updatedAt: now - 90000 }],
   operations: [operation], integrity: { schemaVersion: 10, configRevisionChainValid: true },
   freshness: { balance: now, ownOffers: now, transactions: now, markets: { BANK_CUP: now, BANDECPREPAGO: now } },

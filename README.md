@@ -74,6 +74,28 @@ El panel abre primero con SQLite y actualiza únicamente los recursos de la vist
 
 Los avisos del navegador se activan desde el icono de campana. En la máquina local funcionan mediante `localhost`/`127.0.0.1`; un despliegue futuro en VPS deberá usar HTTPS. Las gráficas leen una ventana móvil de 24 horas alimentada por el escáner y usan un SVG local liviano.
 
+## Red cooperativa de cacerías
+
+QvaApply puede conectarse a Sync Core para compartir capacidad fiat con otros
+bots. HTTP se usa para autenticación, publicar o retirar la aportación y
+reconciliar el estado; los snapshots en tiempo real llegan desde el inicio por
+un consumidor durable de NATS JetStream. La última lectura válida queda guardada
+en SQLite y una caída de la red cooperativa no detiene la cacería local.
+
+Configura `SYNC_ENABLED=true`, `SYNC_BASE_URL`, `SYNC_NATS_URL`, `SYNC_EMAIL` y
+`SYNC_PASSWORD`. La cuenta debe existir previamente en Sync Core. Aunque ambos
+servicios estén en la misma VPS, las direcciones permanecen configurables. En el
+contenedor de producción usa, por ejemplo,
+`http://host.docker.internal:8080` y `nats://host.docker.internal:4222` cuando
+Sync Core corre directamente en el host; si comparten una red Docker, usa el
+nombre DNS de su servicio.
+
+La API key obtenida se cifra con `LOCAL_ENCRYPTION_KEY` antes de persistirla y
+también autentica la conexión NATS. La ejecución conjunta de una cacería está
+deliberadamente deshabilitada: QvaApply no llama a `POST /hunts/perform` hasta
+que Sync Core garantice idempotencia por operación y descuento transaccional de
+la capacidad.
+
 ## Comandos
 
 ```bash

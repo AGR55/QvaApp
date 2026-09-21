@@ -5,6 +5,7 @@ export const TELEGRAM_COMMANDS = [
   { command: "panel", description: "Centro de operaciones" },
   { command: "balance", description: "Saldo disponible en QvaPay" },
   { command: "hunting", description: "Configurar las cacerías" },
+  { command: "network", description: "Red cooperativa entre bots" },
   { command: "markets", description: "Consultar mercados P2P" },
   { command: "offers", description: "Administrar mis ofertas" },
   { command: "operations", description: "Operaciones activas" },

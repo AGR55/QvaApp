@@ -23,6 +23,7 @@ import {
   Moon,
   Sun,
   Menu,
+  RadioTower,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
@@ -45,6 +46,7 @@ import { Login } from "./features/login.jsx";
 import { Operations } from "./features/operations.jsx";
 import { Hunting } from "./features/hunting.jsx";
 import { Audit } from "./features/audit.jsx";
+import { CooperativeNetwork } from "./features/cooperative-network.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
 import "./globals.css";
 import "./ui-polish.css";
@@ -66,6 +68,7 @@ const navigationGroups = [
       ["resumen", "Cockpit", LayoutDashboard],
       ["mercado", "Mercados", CandlestickChart],
       ["caceria", "Cacería", Crosshair],
+      ["red", "Red cooperativa", RadioTower],
       ["operaciones", "Operaciones", Workflow],
     ],
   },
@@ -491,6 +494,14 @@ function App() {
           ) : null}
           {view === "caceria" ? (
             <Hunting
+              data={data}
+              label={label}
+              unit={unit}
+              onChanged={refresh}
+            />
+          ) : null}
+          {view === "red" ? (
+            <CooperativeNetwork
               data={data}
               label={label}
               unit={unit}

@@ -325,6 +325,45 @@ export function buildDashboard(
     await clientAction(() => readModel.updateHunting(request.body));
     reply.status(204);
   });
+  app.put<{
+    Body: { coin: string; fiat: number; minimal: number; price: number };
+  }>("/api/cooperative-network/contributions", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["coin", "fiat", "minimal", "price"],
+        properties: {
+          coin: { type: "string", pattern: "^[A-Z0-9_]{2,40}$" },
+          fiat: { type: "number", exclusiveMinimum: 0 },
+          minimal: { type: "number", exclusiveMinimum: 0 },
+          price: { type: "number", exclusiveMinimum: 0 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    await clientAction(() => readModel.publishCooperativeContribution(request.body));
+    reply.status(204);
+  });
+  app.delete<{ Params: { coin: string } }>(
+    "/api/cooperative-network/contributions/:coin",
+    {
+      schema: {
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["coin"],
+          properties: {
+            coin: { type: "string", pattern: "^[A-Z0-9_]{2,40}$" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      await clientAction(() => readModel.withdrawCooperativeContribution(request.params.coin));
+      reply.status(204);
+    },
+  );
   app.put<{ Body: { paused?: boolean; refresh?: boolean; emergencyStop?: boolean; mode?: string } }>("/api/control", {
     schema: {
       body: {

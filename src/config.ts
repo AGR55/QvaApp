@@ -23,6 +23,30 @@ function dashboardHost(): "127.0.0.1" | "0.0.0.0" {
   return value;
 }
 
+function optional(name: string): string | undefined {
+  return process.env[name]?.trim() || undefined;
+}
+
+function absoluteUrl(name: string, fallback?: string): string | undefined {
+  const value = optional(name) ?? fallback;
+  if (!value) return undefined;
+  try {
+    return new URL(value).toString();
+  } catch {
+    throw new Error(`${name} debe ser una URL absoluta válida`);
+  }
+}
+
+const syncEnabled = process.env.SYNC_ENABLED === "true";
+const syncBaseUrl = absoluteUrl("SYNC_BASE_URL");
+const syncNatsUrl = absoluteUrl("SYNC_NATS_URL", "nats://127.0.0.1:4222");
+const syncEmail = optional("SYNC_EMAIL");
+const syncPassword = optional("SYNC_PASSWORD");
+if (syncEnabled && (!syncBaseUrl || !syncNatsUrl || !syncEmail || !syncPassword))
+  throw new Error(
+    "SYNC_ENABLED=true exige SYNC_BASE_URL, SYNC_NATS_URL, SYNC_EMAIL y SYNC_PASSWORD",
+  );
+
 export type PaymentDetail = { name: string; value: string };
 
 export const config = {
@@ -54,6 +78,15 @@ export const config = {
     process.env.DASHBOARD_TRUSTED_ORIGIN?.trim() ||
     `http://127.0.0.1:${numberValue("DASHBOARD_PORT", 3000, 1)}`,
   dashboardSecureCookies: process.env.DASHBOARD_SECURE_COOKIES === "true",
+  huntingSync: syncEnabled
+    ? {
+        enabled: true as const,
+        baseUrl: syncBaseUrl!,
+        natsUrl: syncNatsUrl!,
+        email: syncEmail!,
+        password: syncPassword!,
+      }
+    : { enabled: false as const },
   welcomeMessage:
     process.env.P2P_WELCOME_MESSAGE?.trim() ||
     "Esta oferta ha sido aplicada por un bot, en los proximos minutos atendera el usuario, de no ser asi en los proximos 10 minutos se cancelara la aplicacion automaticamente.",
