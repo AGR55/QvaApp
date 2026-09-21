@@ -277,14 +277,14 @@ try {
   });
   await waitFor(() =>
     execute(
-      "return Array.from(document.querySelectorAll('.chart-line')).filter(line => line.getAttribute('points')).length >= 2",
+      "return document.querySelectorAll('.recharts-line-curve').length >= 2",
     ),
   );
   const chartRender = await execute(`return {
-    surface: document.querySelector('.market-chart')?.getBoundingClientRect().toJSON(),
-    axes: document.querySelectorAll('.chart-y-label,.chart-x-label').length,
-    curves: Array.from(document.querySelectorAll('.chart-line')).map(path => ({
-      d: path.getAttribute('points'), stroke: getComputedStyle(path).stroke,
+    surface: document.querySelector('.recharts-surface')?.getBoundingClientRect().toJSON(),
+    axes: document.querySelectorAll('.recharts-cartesian-axis-tick').length,
+    curves: Array.from(document.querySelectorAll('.recharts-line-curve')).map(path => ({
+      d: path.getAttribute('d'), stroke: getComputedStyle(path).stroke,
       box: path.getBoundingClientRect().toJSON()
     }))
   }`);
@@ -320,6 +320,29 @@ try {
   await screenshot("/tmp/qvaapply-settings-desktop.png");
   const settingsDesktop = await assertPageQuality("Estrategia");
   await assertSettingsCardsContained("Estrategia");
+  const reviewSettings = await find(
+    "xpath",
+    "//button[contains(normalize-space(.), 'Revisar y aprobar límites')]",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${reviewSettings}/click`,
+    {},
+  );
+  await waitFor(() =>
+    execute("return document.body.innerText.includes('Revisa el impacto antes de activar')"),
+  );
+  await screenshot("/tmp/qvaapply-settings-review-desktop.png");
+  const settingsReviewDesktop = await assertPageQuality("Revisión de estrategia");
+  const closeSettingsReview = await find(
+    "xpath",
+    "//button[normalize-space(.)='Volver']",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/element/${closeSettingsReview}/click`,
+    {},
+  );
 
   const audit = await find(
     "xpath",
@@ -364,6 +387,34 @@ try {
   await new Promise((resolve) => setTimeout(resolve, 500));
   await screenshot("/tmp/qvaapply-dashboard-mobile.png");
   const mobile = { Cockpit: await assertPageQuality("Cockpit móvil") };
+  const mobileMenu = await find(
+    "css selector",
+    "button[aria-label='Abrir navegación']",
+  );
+  await command("POST", `/session/${sessionId}/element/${mobileMenu}/click`, {});
+  await waitFor(() =>
+    execute("return document.querySelector('#mobile-navigation') !== null"),
+  );
+  const mobileNavigation = await execute(`return {
+    panel: document.querySelector('.mobile-nav-panel')?.getBoundingClientRect().toJSON(),
+    header: document.querySelector('.mobile-nav-heading')?.getBoundingClientRect().toJSON(),
+    navigation: document.querySelector('#mobile-navigation')?.getBoundingClientRect().toJSON(),
+    buttons: Array.from(document.querySelectorAll('#mobile-navigation button')).map(button => button.getBoundingClientRect().toJSON())
+  }`);
+  if (
+    !mobileNavigation.panel ||
+    mobileNavigation.panel.right > 391 ||
+    mobileNavigation.buttons.some((button) => button.right > 391)
+  )
+    throw new Error(
+      `La navegación móvil excede el viewport: ${JSON.stringify(mobileNavigation)}`,
+    );
+  await screenshot("/tmp/qvaapply-mobile-navigation.png");
+  const closeMobileNavigation = await find(
+    "css selector",
+    "button[aria-label='Cerrar menú']",
+  );
+  await command("POST", `/session/${sessionId}/element/${closeMobileNavigation}/click`, {});
   const mobileViews = [
     ["Mercados", "Libro ·", "/tmp/qvaapply-markets-mobile.png"],
     ["Capital", "Capital disponible", "/tmp/qvaapply-capital-mobile.png"],
@@ -407,10 +458,40 @@ try {
     );
     if (navLabel === "Gráficas")
       await waitFor(() =>
-        execute("return document.querySelectorAll('.chart-line').length >= 2"),
+        execute("return document.querySelectorAll('.recharts-line-curve').length >= 2"),
       );
     await screenshot(imagePath);
     mobile[navLabel] = await assertPageQuality(`${navLabel} móvil`);
+    if (navLabel === "Capital") {
+      const mobileRebalance = await find(
+        "xpath",
+        "//button[contains(normalize-space(.), 'Reajustar capital')]",
+      );
+      await command("POST", `/session/${sessionId}/element/${mobileRebalance}/click`, {});
+      await waitFor(() =>
+        execute("return document.querySelector('.rebalance-dialog') !== null"),
+      );
+      const rebalanceLayout = await execute(`return (() => {
+        const dialog = document.querySelector('.rebalance-dialog');
+        return {
+          clientWidth: dialog?.clientWidth,
+          scrollWidth: dialog?.scrollWidth,
+          viewport: document.documentElement.clientWidth,
+          bodyOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+        };
+      })()`);
+      if (
+        rebalanceLayout.scrollWidth > rebalanceLayout.clientWidth + 1 ||
+        rebalanceLayout.bodyOverflow
+      )
+        throw new Error(`El reajuste móvil desborda: ${JSON.stringify(rebalanceLayout)}`);
+      await screenshot("/tmp/qvaapply-capital-rebalance-mobile.png");
+      const closeMobileRebalance = await find(
+        "css selector",
+        "button[aria-label='Cerrar reajuste']",
+      );
+      await command("POST", `/session/${sessionId}/element/${closeMobileRebalance}/click`, {});
+    }
     if (navLabel === "Estrategia")
       await assertSettingsCardsContained("Estrategia móvil");
   }
@@ -427,6 +508,7 @@ try {
           Capital: capitalDesktop,
           Gráficas: chartsDesktop,
           Estrategia: settingsDesktop,
+          "Revisión de estrategia": settingsReviewDesktop,
           Auditoría: auditDesktop,
         },
         mobile,
@@ -442,9 +524,12 @@ try {
           "/tmp/qvaapply-capital-cancel-desktop.png",
           "/tmp/qvaapply-charts-desktop.png",
           "/tmp/qvaapply-settings-desktop.png",
+          "/tmp/qvaapply-settings-review-desktop.png",
           "/tmp/qvaapply-audit-desktop.png",
           "/tmp/qvaapply-audit-review-desktop.png",
           "/tmp/qvaapply-dashboard-mobile.png",
+          "/tmp/qvaapply-mobile-navigation.png",
+          "/tmp/qvaapply-capital-rebalance-mobile.png",
           ...mobileViews.map(([, , path]) => path),
         ],
       },

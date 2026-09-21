@@ -2,6 +2,7 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
     "web/main.jsx",
+    "web/components/ui/*.tsx",
     "scripts/*.mjs",
     "test/*.test.ts"
   ],
@@ -11,5 +12,6 @@
     "scripts/**/*.mjs",
     "test/**/*.ts"
   ],
-  "ignoreBinaries": ["wait", "chromedriver"]
+  "ignoreBinaries": ["wait", "chromedriver"],
+  "ignoreDependencies": ["tailwindcss", "tw-animate-css"]
 }

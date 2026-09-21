@@ -16,6 +16,13 @@ function numberValue(name: string, fallback: number, min = 0): number {
   return value;
 }
 
+function dashboardHost(): "127.0.0.1" | "0.0.0.0" {
+  const value = process.env.DASHBOARD_HOST?.trim() || "127.0.0.1";
+  if (value !== "127.0.0.1" && value !== "0.0.0.0")
+    throw new Error("DASHBOARD_HOST debe ser 127.0.0.1 o 0.0.0.0");
+  return value;
+}
+
 export type PaymentDetail = { name: string; value: string };
 
 export const config = {
@@ -41,6 +48,7 @@ export const config = {
   realTradingAllowed: process.env.CONFIRM_REAL_TRADING === "true",
   dataDir: resolve(process.env.DATA_DIR ?? "data"),
   dashboardPort: numberValue("DASHBOARD_PORT", 3000, 1),
+  dashboardHost: dashboardHost(),
   dashboardAdminPassword: required("DASHBOARD_ADMIN_PASSWORD"),
   dashboardTrustedOrigin:
     process.env.DASHBOARD_TRUSTED_ORIGIN?.trim() ||

@@ -1,43 +1,61 @@
 import React from "react";
 import { Activity } from "lucide-react";
 import { CardTitle } from "./ui.jsx";
+import { Card, CardContent, CardDescription, CardHeader } from "./ui/card.tsx";
+import {
+  Empty as ShadcnEmpty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+} from "./ui/empty.tsx";
+import { Skeleton as ShadcnSkeleton } from "./ui/skeleton.tsx";
 
 export function Panel({ title, children, wide = false, kicker, description }) {
   return (
-    <section
+    <Card
       className={`panel ui-section ${wide ? "wide" : ""}`}
       data-ui="panel"
+      role="region"
+      aria-label={title}
     >
-      <header className="panel-head ui-section-head">
+      <CardHeader className="panel-head ui-section-head">
         <div className="ui-section-titles">
+          {kicker ? <p className="eyebrow">{kicker}</p> : null}
           <CardTitle>{title}</CardTitle>
+          {description ? <CardDescription>{description}</CardDescription> : null}
         </div>
-      </header>
-      <div className="ui-section-body">{children}</div>
-    </section>
+      </CardHeader>
+      <CardContent className="ui-section-body">{children}</CardContent>
+    </Card>
   );
 }
 export function ViewHead({ kicker, title, description, meta }) {
   return (
     <header className="view-head">
+      {kicker ? <p className="view-kicker">{kicker}</p> : null}
       <h1>{title}</h1>
+      {description ? <p className="view-description">{description}</p> : null}
       {meta ? <div className="view-meta">{meta}</div> : null}
     </header>
   );
 }
 export function Empty({ children }) {
   return (
-    <div className="empty" data-ui="empty">
-      <Activity />
-      <p>{children}</p>
-    </div>
+    <ShadcnEmpty className="empty" data-ui="empty">
+      <EmptyHeader>
+        <EmptyMedia variant="icon">
+          <Activity />
+        </EmptyMedia>
+        <EmptyDescription>{children}</EmptyDescription>
+      </EmptyHeader>
+    </ShadcnEmpty>
   );
 }
 export function Skeleton({ rows = 3, label = "Cargando datos" }) {
   return (
     <div className="skeleton" role="status" aria-label={label}>
       {Array.from({ length: rows }, (_, index) => (
-        <i key={index} />
+        <ShadcnSkeleton key={index} />
       ))}
       <span className="sr-only">{label}</span>
     </div>

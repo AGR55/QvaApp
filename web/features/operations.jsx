@@ -4,8 +4,25 @@ import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { operationActionBody } from "../lib/operation-actions.js";
-import { useDialog } from "../hooks/use-dialog.js";
-import { Badge, Button, Input } from "../components/ui.jsx";
+import { Badge, Button, Field, Input } from "../components/ui.jsx";
+import { FieldGroup } from "../components/ui/field.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog.tsx";
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table.tsx";
 
 const terminalWorkflow = new Set(["applied", "restored", "blocked"]);
 
@@ -14,7 +31,6 @@ export function Operations({ data, label, unit, onChanged }) {
   const [reference, setReference] = useState("");
   const [status, setStatus] = useState("");
   const closePending = useCallback(() => setPending(undefined), []);
-  const dialogRef = useDialog(Boolean(pending), closePending);
   const run = async (path, body = {}) => {
     setStatus("Enviando acción…");
     try {
@@ -34,9 +50,7 @@ export function Operations({ data, label, unit, onChanged }) {
   return (
     <div className="operations-stack">
       <ViewHead
-        kicker="Dinero en movimiento"
         title="Operaciones"
-        description="Cada aplicación con su estado y la acción manual que le toca: pagar, registrar o conciliar."
       />
       {data.risk.usage.unresolvedMutation ? (
         <div className="alert" role="alert">
@@ -44,40 +58,41 @@ export function Operations({ data, label, unit, onChanged }) {
           Hay una mutación remota sin confirmar. El motor no abrirá otra operación.
         </div>
       ) : null}
-      <div className="dashboard-grid">
-        <Panel title="Operaciones con dinero" kicker="Seguimiento" wide>
+      <div className="dashboard-grid operations-layout">
+        <Panel title="Operaciones con dinero" wide>
           {data.operations?.length ? (
-            <div className="table-scroll" tabIndex="0" role="region" aria-label="Operaciones con dinero, tabla desplazable">
-              <table>
-                <thead><tr><th>Estado</th><th>Flujo</th><th>Mercado</th><th>Importe</th><th>Acciones</th></tr></thead>
-                <tbody>
+            <div className="table-scroll">
+              <Table className="w-full min-w-[900px]" aria-label="Operaciones con dinero">
+                <TableCaption className="sr-only">Operaciones con dinero y sus acciones disponibles</TableCaption>
+                <TableHeader><TableRow><TableHead>Estado</TableHead><TableHead>Flujo</TableHead><TableHead>Mercado</TableHead><TableHead>Importe</TableHead><TableHead>Acciones</TableHead></TableRow></TableHeader>
+                <TableBody>
                   {data.operations.map((operation) => (
-                    <tr key={operation.uuid}>
-                      <td><State value={operation.state} /></td>
-                      <td>{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}</td>
-                      <td>{label(operation.coin)}</td>
-                      <td>{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}</small></td>
-                      <td className="row-actions">
-                        {operation.state === "applied" && operation.offerType === "sell" ? <Button variant="outline" size="sm" onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</Button> : null}
-                        {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <Button variant="outline" size="sm" onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</Button> : null}
-                        {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <Button variant="outline" size="sm" onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</Button> : null}
-                        {["applied", "acknowledged"].includes(operation.state) ? <Button variant="destructive" size="sm" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</Button> : null}
-                      </td>
-                    </tr>
+                    <TableRow key={operation.uuid}>
+                      <TableCell className="whitespace-nowrap"><State value={operation.state} /></TableCell>
+                      <TableCell className="whitespace-nowrap">{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{label(operation.coin)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}</small></TableCell>
+                      <TableCell className="row-actions whitespace-nowrap">
+                        {operation.state === "applied" && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</Button> : null}
+                        {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</Button> : null}
+                        {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</Button> : null}
+                        {["applied", "acknowledged"].includes(operation.state) ? <Button type="button" variant="destructive" size="sm" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</Button> : null}
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           ) : <Empty>No hay operaciones registradas.</Empty>}
         </Panel>
-        <Panel title="Flujos automáticos y compensación" kicker="Motor" description="Concilia cuando el resultado remoto quede ambiguo." wide>
+        <Panel title="Flujos automáticos" wide>
           {data.workflows?.length ? (
             <ol className="workflow-list">
               {data.workflows.map((workflow) => (
                 <li key={workflow.id}>
                   <State value={workflow.state} />
                   <span><strong>{money(workflow.targetOffer.amount)} QUSD · {label(workflow.targetOffer.coin)}</strong><small>{workflow.error || workflow.riskDecision.reasons.join(" · ")}</small></span>
-                  {!terminalWorkflow.has(workflow.state) ? <Button variant="outline" size="sm" onClick={() => run(`/api/workflows/${workflow.id}/reconcile`)}><RefreshCcw aria-hidden="true" /> Conciliar</Button> : <CheckCircle2 aria-hidden="true" />}
+                  {!terminalWorkflow.has(workflow.state) ? <Button type="button" variant="outline" size="sm" onClick={() => run(`/api/workflows/${workflow.id}/reconcile`)}><RefreshCcw aria-hidden="true" data-icon="inline-start" /> Conciliar</Button> : <CheckCircle2 aria-hidden="true" />}
                 </li>
               ))}
             </ol>
@@ -85,20 +100,27 @@ export function Operations({ data, label, unit, onChanged }) {
         </Panel>
       </div>
       {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
-      {pending ? (
-        <section ref={dialogRef} className="review-panel" role="dialog" aria-modal="true" aria-labelledby="operation-review-title">
-          <div>
-            <p className="eyebrow">Acción financiera</p>
-            <h2 id="operation-review-title">{actionTitle(pending.action)}</h2>
-            <p>{money(pending.operation.amount)} QUSD · {label(pending.operation.coin)}.</p>
-            {pending.action === "paid" ? <label>Referencia del pago<Input autoFocus value={reference} onChange={(event) => setReference(event.target.value)} /></label> : null}
-            <div className="review-actions">
-              <Button variant="ghost" onClick={closePending}>Volver</Button>
-              <Button variant="primary" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, operationActionBody(pending.action, reference))}>Confirmar acción</Button>
-            </div>
-          </div>
-        </section>
-      ) : null}
+      <Dialog open={Boolean(pending)} onOpenChange={(open) => !open && closePending()}>
+        {pending ? (
+          <DialogContent className="review-dialog" showCloseButton={false}>
+            <DialogHeader>
+              <DialogTitle>{actionTitle(pending.action)}</DialogTitle>
+              <DialogDescription>{money(pending.operation.amount)} QUSD en {label(pending.operation.coin)}.</DialogDescription>
+            </DialogHeader>
+            {pending.action === "paid" ? (
+              <FieldGroup>
+                <Field label="Referencia del pago" htmlFor="payment-reference">
+                  <Input id="payment-reference" autoFocus value={reference} onChange={(event) => setReference(event.target.value)} />
+                </Field>
+              </FieldGroup>
+            ) : null}
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={closePending}>Volver</Button>
+              <Button type="button" variant="primary" disabled={pending.action === "paid" && !reference.trim()} onClick={() => run(`/api/operations/${pending.operation.uuid}/${pending.action}`, operationActionBody(pending.action, reference))}>Confirmar acción</Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

@@ -24,10 +24,11 @@ export async function startDashboard(
   port = 3000,
   authOptions: AuthOptions,
   pushService?: PushService,
+  host: "127.0.0.1" | "0.0.0.0" = "127.0.0.1",
 ): Promise<FastifyInstance> {
   const app = buildDashboard(readModel, authOptions, pushService);
-  await app.listen({ port, host: "127.0.0.1" });
-  console.log(`Panel web: http://127.0.0.1:${port}`);
+  await app.listen({ port, host });
+  console.log(`Panel web: http://${host}:${port}`);
   return app;
 }
 

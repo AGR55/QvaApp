@@ -110,6 +110,7 @@ const dashboardServer = await startDashboard(
     secureCookies: config.dashboardSecureCookies,
   },
   webPush,
+  config.dashboardHost,
 );
 
 bot.use(async (ctx, next) => {
