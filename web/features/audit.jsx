@@ -1,8 +1,30 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, X, XCircle } from "lucide-react";
+import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, XCircle } from "lucide-react";
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
-import { useDialog } from "../hooks/use-dialog.js";
-import { Button, IconButton } from "../components/ui.jsx";
+import { Button } from "../components/ui.jsx";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog.tsx";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from "../components/ui/card.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog.tsx";
 import { requestJson } from "../lib/http.js";
 
 export function Audit({ data, onChanged }) {
@@ -17,7 +39,6 @@ export function Audit({ data, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const close = useCallback(() => { if (!busy) { setDialog(null); setPreview(null); setMessage(""); } }, [busy]);
-  const dialogRef = useDialog(Boolean(dialog), close);
   const loadEvents = useCallback(async () => {
     setEventsLoading(true); setEventsError("");
     try {
@@ -76,23 +97,21 @@ export function Audit({ data, onChanged }) {
 
   return <>
     <ViewHead
-      kicker="Confianza verificable"
       title="Auditoría"
-      description="Salud del sistema, reservas e intenciones remotas. A la derecha, lo bloqueado que espera tu criterio."
     />
     <div className="audit-layout">
       <div className="audit-main">
         <div className="dashboard-grid audit-health-grid">
-          <Panel title="Salud e integridad" kicker="Sistema"><dl className="health-list">
+          <Panel title="Salud e integridad"><dl className="health-list">
             <Health label="Cadena de configuración" ok={integrity} value={integrity ? "Íntegra" : "Alterada"} />
             <Health label="Esquema de datos" ok value={`v${data.integrity?.schemaVersion}`} />
             <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "Bloqueo activo" : "Ninguna"} />
             <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
           </dl></Panel>
-          <Panel title="Reservas de capital" kicker="Apartado">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
+          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
         </div>
-        <Panel title="Intenciones remotas" kicker="Trazabilidad">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
-        <Panel title="Registro de auditoría" kicker="Historial">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
+        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
+        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
         <div className="blocked-rail-head"><div><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
@@ -102,22 +121,30 @@ export function Audit({ data, onChanged }) {
         {events && events.total > events.pageSize ? <nav className="pagination" aria-label="Páginas de ofertas bloqueadas"><Button variant="outline" size="sm" disabled={page === 1 || eventsLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</Button><span>{page} / {Math.ceil(events.total / events.pageSize)}</span><Button variant="outline" size="sm" disabled={page * events.pageSize >= events.total || eventsLoading} onClick={() => setPage((value) => value + 1)}>Siguiente</Button></nav> : null}
       </aside>
     </div>
-    {dialog ? <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-      <section ref={dialogRef} className="decision-dialog" role="dialog" aria-modal="true" aria-labelledby="blocked-dialog-title">
-        <IconButton variant="ghost" className="dialog-close" onClick={close} disabled={busy} aria-label="Cerrar"><X /></IconButton>
-        {dialog.kind === "dismiss" ? <>
-          <span className="dialog-icon muted"><X /></span><p className="section-kicker">Descartar revisión</p><h2 id="blocked-dialog-title">¿Ocultar esta oferta?</h2>
-          <p>Quedará constancia en Auditoría. Volverá a aparecer únicamente si cambia su precio o su motivo de bloqueo.</p>
+    <AlertDialog open={dialog?.kind === "dismiss"} onOpenChange={(open) => !open && close()}>
+      <AlertDialogContent className="decision-dialog">
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Ocultar esta oferta?</AlertDialogTitle>
+          <AlertDialogDescription>La revisión queda registrada y reaparecerá si cambia el precio o el motivo del bloqueo.</AlertDialogDescription>
           {message ? <p className="dialog-message danger" role="status">{message}</p> : null}
-          <div className="dialog-actions"><Button variant="secondary" onClick={close} disabled={busy}>Conservar</Button><Button variant="destructive" onClick={() => void dismiss()} disabled={busy}>{busy ? "Descartando…" : "Descartar oferta"}</Button></div>
-        </> : <>
-          <span className="dialog-icon warning"><ShieldAlert /></span><p className="section-kicker">Confirmación protegida</p><h2 id="blocked-dialog-title">Revisar antes de aplicar</h2>
-          {preview ? <PreviewDetails preview={preview} /> : null}{message ? <p className="dialog-message" role="status">{message}</p> : null}
-          {preview ? <p className="safety-note"><ShieldAlert /> Solo se omitirá el bloqueo de precio/mediana. Saldo, reserva, exposición, límites y estado remoto se comprobarán nuevamente.</p> : null}
-          <div className="dialog-actions"><Button variant="secondary" onClick={close} disabled={busy}>Cancelar</Button><Button variant="primary" onClick={() => void apply()} disabled={busy || !preview}>{busy ? "Comprobando…" : "Aplicar con protecciones"}</Button></div>
-        </>}
-      </section>
-    </div> : null}
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Conservar</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={busy} onClick={(event) => { event.preventDefault(); void dismiss(); }}>{busy ? "Descartando…" : "Descartar oferta"}</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    <Dialog open={dialog?.kind === "review"} onOpenChange={(open) => !open && close()}>
+      <DialogContent className="decision-dialog">
+        <DialogHeader>
+          <DialogTitle>Revisar antes de aplicar</DialogTitle>
+          <DialogDescription>Se volverán a comprobar saldo, límites y estado remoto.</DialogDescription>
+        </DialogHeader>
+        {preview ? <PreviewDetails preview={preview} /> : null}{message ? <p className="dialog-message" role="status">{message}</p> : null}
+        {preview ? <p className="safety-note"><ShieldAlert /> Solo se omitirá el bloqueo de precio/mediana. Saldo, reserva, exposición, límites y estado remoto se comprobarán nuevamente.</p> : null}
+        <DialogFooter><Button variant="secondary" onClick={close} disabled={busy}>Cancelar</Button><Button variant="primary" onClick={() => void apply()} disabled={busy || !preview}>{busy ? "Comprobando…" : "Aplicar con protecciones"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   </>;
 }
 
@@ -126,12 +153,13 @@ function BlockedCard({ offer, onReview, onDismiss }) {
   const deviation = reference ? ((offer.rate - reference) / reference) * 100 : null;
   const buying = offer.offerType === "sell";
   const Trend = buying ? TrendingDown : TrendingUp;
-  return <article className="blocked-card"><header><span className={`offer-side ${buying ? "buy" : "sell"}`}><Trend />{buying ? "Comprar QUSD" : "Vender QUSD"}</span><time><Clock3 />{relativeTime(offer.updatedAt)}</time></header>
-    <div className="blocked-value"><strong>{offer.amount.toFixed(2)} QUSD</strong><span>{offer.receive.toLocaleString("es-CU")} · {offer.coin}</span></div>
-    <dl className="offer-comparison"><div><dt>Tasa</dt><dd>{offer.rate.toFixed(2)}</dd></div><div><dt>Mediana</dt><dd>{reference ? reference.toFixed(2) : "No disponible"}</dd></div><div><dt>Diferencia</dt><dd className={deviation === null ? "" : Math.abs(deviation) > 1 ? "warning-text" : ""}>{deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(2)}%`}</dd></div></dl>
-    <p className="blocked-reason"><ShieldAlert />{offer.reason}</p>
-    {offer.checks?.length ? <details className="risk-checks"><summary>Ver {offer.checks.length} comprobaciones</summary><ul>{offer.checks.map((check) => <li key={check.code} className={`check-${check.status}`}><span>{check.label}</span><strong>{check.status === "pass" ? "Correcta" : check.status === "warning" ? "Advertencia" : check.status === "fail" ? "Bloqueo" : "No aplica"}</strong><small>{check.reason}{check.actual !== undefined ? ` · observado: ${String(check.actual)}` : ""}{check.limit !== undefined ? ` · límite: ${String(check.limit)}` : ""}</small></li>)}</ul></details> : null}
-    <div className="blocked-actions"><Button variant="ghost" size="sm" onClick={onDismiss}>Descartar</Button><Button variant="primary" size="sm" onClick={onReview}>Revisar y aplicar</Button></div></article>;
+  return <Card className="blocked-card" size="sm"><CardHeader><header><span className={`offer-side ${buying ? "buy" : "sell"}`}><Trend />{buying ? "Comprar QUSD" : "Vender QUSD"}</span><time><Clock3 />{relativeTime(offer.updatedAt)}</time></header></CardHeader>
+    <CardContent><div className="blocked-value"><strong>{offer.amount.toFixed(2)} QUSD</strong><span>{offer.receive.toLocaleString("es-CU")} · {offer.coin}</span></div>
+      <dl className="offer-comparison"><div><dt>Tasa</dt><dd>{offer.rate.toFixed(2)}</dd></div><div><dt>Mediana</dt><dd>{reference ? reference.toFixed(2) : "No disponible"}</dd></div><div><dt>Diferencia</dt><dd className={deviation === null ? "" : Math.abs(deviation) > 1 ? "warning-text" : ""}>{deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(2)}%`}</dd></div></dl>
+      <p className="blocked-reason"><ShieldAlert />{offer.reason}</p>
+      {offer.checks?.length ? <details className="risk-checks"><summary>Ver {offer.checks.length} comprobaciones</summary><ul>{offer.checks.map((check) => <li key={check.code} className={`check-${check.status}`}><span>{check.label}</span><strong>{check.status === "pass" ? "Correcta" : check.status === "warning" ? "Advertencia" : check.status === "fail" ? "Bloqueo" : "No aplica"}</strong><small>{check.reason}{check.actual !== undefined ? ` · observado: ${String(check.actual)}` : ""}{check.limit !== undefined ? ` · límite: ${String(check.limit)}` : ""}</small></li>)}</ul></details> : null}
+      <div className="blocked-actions"><Button variant="outline" size="sm" onClick={onDismiss}>Descartar</Button><Button variant="primary" size="sm" onClick={onReview}>Revisar y aplicar</Button></div>
+    </CardContent></Card>;
 }
 
 function PreviewDetails({ preview }) {

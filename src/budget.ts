@@ -1,5 +1,5 @@
 import type { FiatMarket } from "./types.js";
-import { ownOfferFiatTotal } from "./market-math.js";
+import { MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 
 export interface BudgetOffer {
   uuid: string;
@@ -134,6 +134,9 @@ function fitAmount(
 ): number {
   let amount = precision(desired);
   while (amount > 0) {
+    // QvaPay rejects edits below 0.1 QUSD. A proportional remainder below
+    // that threshold must become a cancellation instead of a doomed edit.
+    if (amount < MIN_OFFER_QUSD) return 0;
     // A CUP purchase must produce at least one transferable ten-peso unit.
     // During budget fitting, falling below it means cancelling, not aborting
     // the complete dashboard snapshot with a domain validation error.

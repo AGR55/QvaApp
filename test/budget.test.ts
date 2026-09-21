@@ -124,3 +124,25 @@ test("cancela una compra CUP si el presupuesto no alcanza una decena", () => {
     action: "cancel",
   }]);
 });
+
+test("cancela en vez de editar por debajo del minimo aceptado por QvaPay", () => {
+  const plan = proportionalBudgetPlan(
+    [{
+      uuid: "cup-below-qvapay-minimum",
+      coin: "BANK_CUP",
+      type: "buy",
+      status: "open",
+      amount: 1,
+      rate: 1_000,
+      receive: 1_000,
+    }],
+    "BANK_CUP",
+    90,
+    1_010,
+    0,
+    "CUP",
+  );
+
+  assert.equal(plan.adjustments[0]?.proposedQusd, 0);
+  assert.equal(plan.adjustments[0]?.action, "cancel");
+});

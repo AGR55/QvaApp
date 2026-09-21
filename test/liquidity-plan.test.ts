@@ -66,7 +66,7 @@ test("elige primero las ventas propias con peor tasa y guarda snapshot", () => {
   assert.equal(plan.cancel[0]?.onlyKyc, true);
 });
 
-test("nunca cancela una oferta propia igual o mejor que la externa", () => {
+test("prioriza la menos rentable pero permite liberar una oferta igual o mejor", () => {
   const plan = planLiquidity({
     target,
     availableQusd: 10,
@@ -74,8 +74,23 @@ test("nunca cancela una oferta propia igual o mejor que la externa", () => {
     ownOffers: [own("equal", 30, 1_020), own("better", 30, 1_030)],
   });
 
-  assert.equal(plan.feasible, false);
-  assert.deepEqual(plan.cancel, []);
+  assert.equal(plan.feasible, true);
+  assert.deepEqual(plan.cancel.map((offer) => offer.uuid), ["equal"]);
+});
+
+test("usa el QUSD retenido en una venta propia aunque su tasa publicada sea mejor", () => {
+  const plan = planLiquidity({
+    target: { ...target, amount: 58.63, receive: 58.63 * 1_020 },
+    availableQusd: 0,
+    reserveQusd: 0,
+    ownOffers: [own("locked-qusd", 100, 1_030)],
+  });
+
+  assert.equal(plan.feasible, true);
+  assert.equal(plan.plannedReleaseQusd, 100);
+  assert.equal(plan.cancel[0]?.uuid, "locked-qusd");
+  assert.equal(plan.cancel[0]?.consumeQusd, 58.63);
+  assert.equal(plan.cancel[0]?.restoreQusd, 41.37);
 });
 
 test("no ejecuta un plan parcial si la suma liberada no alcanza", () => {

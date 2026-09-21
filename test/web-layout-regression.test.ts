@@ -23,7 +23,11 @@ test("las tarjetas de mercados contienen sus campos sin invadir la columna vecin
   );
   assert.match(
     styles,
-    /\.market-settings\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+    /\.market-settings-content\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  );
+  assert.match(
+    settingsSource,
+    /<section\s+key=\{market\.code\}\s+className="market-settings"\s+aria-labelledby=/,
   );
   assert.match(
     styles,

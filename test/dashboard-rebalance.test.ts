@@ -20,7 +20,9 @@ const runtime = {
   paymentDetails: { BANK_CUP: [], BANDECPREPAGO: [] },
 };
 
-function setup(edit: () => Promise<void> = async () => undefined) {
+function setup(
+  edit: (offer?: unknown, amount?: number) => Promise<void> = async () => undefined,
+) {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-dashboard-rebalance-"));
   const store = new Store(dataDir);
   const markets = new MarketConfigService(dataDir, runtime as never, store);
@@ -38,8 +40,8 @@ function setup(edit: () => Promise<void> = async () => undefined) {
     markets: () => markets.markets(),
     strategy: () => ({ reserve: 0, buyMax: { BANK_CUP: 930 }, sellMin: { BANK_CUP: 980 } }),
     operationalState: () => ({ fiat: { BANK_CUP: 10_000 }, active: 0, paused: false, refresh: true }),
-    editOwnOfferFromSnapshot: async (_offer: unknown, amount: number) => {
-      await edit();
+    editOwnOfferFromSnapshot: async (offer: unknown, amount: number) => {
+      await edit(offer, amount);
       remote = { ...remote, amount, receive: amount * 930 };
     },
     cancelOwnOfferFromSnapshot: async () => undefined,
@@ -105,5 +107,25 @@ test("una edición incierta detiene el trabajo para conciliación sin repetirla"
   assert.equal(store.rebalanceJob(job.id)?.state, "reconciliation_required");
   await dashboard.runBudgetRebalances();
   assert.equal(attempts, 1);
+  store.close();
+});
+
+test("el ejecutor conserva el importe original para validar una reduccion heredada", async () => {
+  let receivedSnapshot: unknown;
+  const { dashboard, store } = setup(async (offer) => {
+    receivedSnapshot = offer;
+  });
+
+  const job = dashboard.startBudgetRebalance([{ uuid: "buy-1", amount: 10 }]);
+  await dashboard.runBudgetRebalances();
+
+  assert.deepEqual(receivedSnapshot, {
+    uuid: "buy-1",
+    coin: "BANK_CUP",
+    type: "buy",
+    rate: 930,
+    currentAmount: 20,
+  });
+  assert.equal(store.rebalanceJob(job.id)?.state, "completed");
   store.close();
 });

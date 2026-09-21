@@ -74,10 +74,10 @@ test("producción arranca activa y respeta una parada de emergencia", () => {
   second.store.close();
 });
 
-test("el escaneo real cancela liquidez peor y aplica a la mejor compra externa", async () => {
+test("el escaneo real libera QUSD retenido aunque la venta propia publique mejor tasa", async () => {
   const { store, cfg, markets } = setup();
   const target: P2pOffer = { uuid: "target-buy", type: "buy", coin: "BANK_CUP", amount: 20, receive: 20_400, status: "open", User: { uuid: "peer" } };
-  const own: P2pOffer = { uuid: "own-sell", type: "sell", coin: "BANK_CUP", amount: 20, receive: 19_800, status: "open", details: { cuenta: "123" } };
+  const own: P2pOffer = { uuid: "own-sell", type: "sell", coin: "BANK_CUP", amount: 20, receive: 20_600, status: "open", details: { cuenta: "123" } };
   const calls: string[] = [];
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 20 }),
@@ -145,6 +145,64 @@ test("Clásica bloquea una compra cuya comisión supera la tasa máxima efectiva
   assert.match(
     store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
     /tasa efectiva 1\.10.*máximo de compra 1\.06/i,
+  );
+  store.close();
+});
+
+test("permite ajustar el cortafuegos de mediana por mercado sin relajar los demás", async () => {
+  const { store, cfg, markets } = setup();
+  const next = markets.current();
+  next.automation.priceGuardPercent = 25;
+  const bank = next.markets.find((market) => market.code === "BANK_CUP")!;
+  bank.buyMaxRate = 190;
+  bank.sellMinRate = 200;
+  const etecsa = {
+    ...bank,
+    code: "ETECSA",
+    label: "ETECSA",
+    priceGuardPercent: 60,
+  };
+  next.markets.push(etecsa);
+  markets.save(next);
+
+  const offers = (coin: string): P2pOffer[] =>
+    [200, 210, 220.41, 230, 350].map((offerRate, index) => ({
+      uuid: `${coin}-${index}`,
+      type: "buy",
+      coin,
+      amount: 2,
+      receive: offerRate * 2,
+      status: "open",
+      User: { uuid: `peer-${index}` },
+    }));
+  const qva = {
+    listOffersPage: async ({ coin }: { coin: string }) => ({
+      offers: offers(coin),
+      total: 5,
+      currentPage: 1,
+      perPage: 100,
+    }),
+    p2pAverages: async () => ({}),
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async () => undefined,
+  );
+
+  const etecsaSnapshot = await trading.inspectMarketSide("ETECSA", "buy");
+  const bankSnapshot = await trading.inspectMarketSide("BANK_CUP", "buy");
+
+  assert.equal(etecsaSnapshot.average?.median_buy, 220.41);
+  assert.equal(
+    etecsaSnapshot.items.find((item) => item.offer.uuid === "ETECSA-4")?.decision,
+    "manual_sell",
+  );
+  assert.equal(
+    bankSnapshot.items.find((item) => item.offer.uuid === "BANK_CUP-4")?.decision,
+    "blocked",
   );
   store.close();
 });

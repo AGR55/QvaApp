@@ -19,6 +19,7 @@ import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
 import {
+  MIN_OFFER_QUSD,
   median,
   outgoingFiatCost,
   ownOfferFiatTotal,
@@ -1504,14 +1505,25 @@ export class TradingEngine {
   }
 
   async editOwnOfferFromSnapshot(
-    offer: { uuid: string; coin: string; type: "buy"; rate: number },
+    offer: {
+      uuid: string;
+      coin: string;
+      type: "buy";
+      rate: number;
+      currentAmount: number;
+    },
     amount: number,
   ): Promise<void> {
     this.requireRealMode();
     if (offer.type !== "buy" || !this.isMarket(offer.coin))
       throw new Error("El reajuste solo admite ofertas propias de compra configuradas.");
     const market = this.market(offer.coin)!;
-    if (amount <= 0 || (market.purchaseMaxQusd > 0 && amount > market.purchaseMaxQusd))
+    if (
+      !Number.isFinite(amount) ||
+      amount < MIN_OFFER_QUSD ||
+      !Number.isFinite(offer.currentAmount) ||
+      amount > offer.currentAmount + 0.000001
+    )
       throw new Error(`Importe de reajuste inválido para ${market.label}.`);
     const receive = ownOfferFiatTotal(amount, offer.rate, "buy", market.currency);
     await this.executeMutation(
@@ -1774,7 +1786,9 @@ export class TradingEngine {
           decision: "blocked",
           reason: "Mediana P2P no disponible; compra automática bloqueada",
         };
-      const priceGuardPercent = this.automationConfig().priceGuardPercent;
+      const priceGuardPercent =
+        configured.priceGuardPercent ??
+        this.automationConfig().priceGuardPercent;
       const floor = marketMedian * (1 - priceGuardPercent / 100);
       if (value < floor)
         return {
@@ -1812,7 +1826,9 @@ export class TradingEngine {
         decision: "blocked",
         reason: "Mediana P2P no disponible; venta bloqueada",
       };
-    const priceGuardPercent = this.automationConfig().priceGuardPercent;
+    const priceGuardPercent =
+      configured.priceGuardPercent ??
+      this.automationConfig().priceGuardPercent;
     const ceiling = marketMedian * (1 + priceGuardPercent / 100);
     if (value > ceiling)
       return {

@@ -174,6 +174,13 @@ test("unifica la reserva e impide configuraciones financieras incoherentes", () 
   excessiveMarketLimit.markets[0]!.purchaseMaxQusd = 30;
   assert.throws(() => config.save(excessiveMarketLimit), /máximo global/);
 
+  const excessiveMarketGuard = config.current();
+  excessiveMarketGuard.markets[0]!.priceGuardPercent = 101;
+  assert.throws(
+    () => config.save(excessiveMarketGuard),
+    /cortafuegos de precio.*no puede superar 100%/i,
+  );
+
   const negativeSpread = config.current();
   negativeSpread.markets[0]!.sellMinRate =
     negativeSpread.markets[0]!.buyMaxRate;

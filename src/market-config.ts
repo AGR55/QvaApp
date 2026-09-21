@@ -19,6 +19,8 @@ export interface MarketConfig {
   fiatBalance: number;
   buyMaxRate: number;
   sellMinRate: number;
+  /** Override opcional del cortafuegos global para mercados con volatilidad propia. */
+  priceGuardPercent?: number;
   purchaseMaxQusd: number;
   sellFeePercent: number;
   outgoingTransferFee: number;
@@ -303,6 +305,17 @@ function validate(value: unknown): asserts value is TradingConfig {
     finite(market.fiatBalance, `Saldo de ${market.code}`);
     finite(market.buyMaxRate, `Máximo de compra de ${market.code}`, 0.0000001);
     finite(market.sellMinRate, `Mínimo de venta de ${market.code}`, 0.0000001);
+    if (market.priceGuardPercent !== undefined) {
+      finite(
+        market.priceGuardPercent,
+        `Cortafuegos de precio de ${market.code}`,
+        1,
+      );
+      if (market.priceGuardPercent > 100)
+        throw new Error(
+          `El cortafuegos de precio de ${market.code} no puede superar 100%.`,
+        );
+    }
     finite(market.purchaseMaxQusd, `Límite por compra de ${market.code}`);
     finite(market.sellFeePercent, `Comisión de venta de ${market.code}`);
     finite(
