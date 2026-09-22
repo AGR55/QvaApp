@@ -2079,10 +2079,16 @@ export class TradingEngine {
     reason: string,
     referenceRate?: number,
   ): Promise<void> {
-    const key = `risk_notice_at:${offer.uuid}`;
+    const key = `risk_notice_fingerprint:${offer.uuid}`;
+    const fingerprint = JSON.stringify({
+      amount: offer.amount,
+      receive: offer.receive,
+      rate: rate(offer),
+      reason,
+      referenceRate: referenceRate ?? null,
+    });
+    if (this.store.get(key) === fingerprint) return;
     const now = Date.now();
-    if (now - Number(this.store.get(key) ?? 0) < 5 * 60_000) return;
-    this.store.set(key, String(now));
     const coin = this.offerMarket(offer);
     await this.notify(
       `🛡️ Compra automática bloqueada: ${reason}`,
@@ -2102,6 +2108,7 @@ export class TradingEngine {
         },
       },
     );
+    this.store.set(key, fingerprint);
   }
 
   private async applyBuyQusd(
