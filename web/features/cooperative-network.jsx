@@ -131,7 +131,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
                   </Badge>
                 </CardAction>
               </CardHeader>
-              <CardContent>
+              <CardContent className="network-aggregate-content">
                 <strong>{money(item.fiat)} {unit(item.coin)}</strong>
               </CardContent>
             </Card>

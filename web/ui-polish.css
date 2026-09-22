@@ -69,7 +69,9 @@
   gap: var(--s-2);
   flex-wrap: wrap;
 }
-.network-status-row { min-height: 32px; }
+.network-status-row {
+  min-height: 32px;
+}
 .network-pill {
   display: inline-flex;
   align-items: center;
@@ -84,7 +86,10 @@
 }
 .network-pill svg,
 .network-callout svg,
-.network-error svg { width: 1rem; height: 1rem; }
+.network-error svg {
+  width: 1rem;
+  height: 1rem;
+}
 .network-pill.connected {
   border-color: color-mix(in srgb, var(--success) 42%, var(--line));
   color: var(--success);
@@ -105,7 +110,9 @@
   background: var(--surface-wash);
 }
 .network-callout p,
-.network-error span { margin: 0; }
+.network-error span {
+  margin: 0;
+}
 .network-error {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
   color: var(--danger-ink);
@@ -117,7 +124,9 @@
   gap: var(--s-3);
 }
 .network-aggregate,
-.network-contribution { min-width: 0; }
+.network-contribution {
+  min-width: 0;
+}
 .network-aggregate [data-slot="card-title"] {
   font-size: 12px;
   letter-spacing: 0.03em;
@@ -129,8 +138,17 @@
   letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
 }
-.network-aggregate .ui-badge { gap: 4px; font-size: 10px; }
-.network-aggregate .ui-badge svg { width: 12px; height: 12px; }
+.network-aggregate .ui-badge {
+  gap: 4px;
+  font-size: 10px;
+}
+.network-aggregate .ui-badge svg {
+  width: 12px;
+  height: 12px;
+}
+.network-aggregate-content {
+  padding-bottom: calc(var(--card-spacing) + 2px);
+}
 .network-field-group {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -143,12 +161,16 @@
 }
 @media (max-width: 1120px) {
   .network-aggregate-grid,
-  .network-contribution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .network-contribution-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 @media (max-width: 640px) {
   .network-aggregate-grid,
   .network-contribution-grid,
-  .network-field-group { grid-template-columns: 1fr; }
+  .network-field-group {
+    grid-template-columns: 1fr;
+  }
 }
 
 [data-theme="dark"] {
@@ -592,7 +614,9 @@ td,
   border-radius: var(--r-card);
   box-shadow: var(--shadow-float);
 }
-.push-toast > div { min-width: 0; }
+.push-toast > div {
+  min-width: 0;
+}
 .push-toast .dialog-close {
   align-self: start;
   justify-self: end;
@@ -1952,6 +1976,8 @@ tbody td small {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  row-gap: 6px;
   justify-content: flex-end;
 }
 .hunt-feedback {
