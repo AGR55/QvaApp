@@ -446,6 +446,94 @@ test("consulta hasta cien ofertas por lado y ordena por mejor tasa", async () =>
   store.close();
 });
 
+test("evalúa una página secundaria pero aplica únicamente con el gateway principal", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "secondary-discovery",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+    User: { uuid: "peer" },
+  };
+  const applications: string[] = [];
+  let primaryListings = 0;
+  const qva = {
+    listOffersPage: async () => {
+      primaryListings += 1;
+      return { offers: [], total: 0, currentPage: 1, perPage: 100 };
+    },
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => 100,
+    apply: async (uuid: string) => void applications.push(uuid),
+    sendChat: async () => undefined,
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async () => undefined,
+  );
+  trading.updateHunting({ sellRunning: false });
+
+  const result = await trading.ingestMarketUpdate({
+    coin: "BANK_CUP",
+    side: "sell",
+    page: { offers: [target], total: 1, currentPage: 1, perPage: 100 },
+    scannedAt: Date.now(),
+    sourceAccountId: "secondary-reader",
+  });
+
+  assert.equal(result.action, `aplicada ${target.uuid}`);
+  assert.deepEqual(applications, [target.uuid]);
+  assert.equal(primaryListings, 0);
+  store.close();
+});
+
+test("no evalúa una instantánea multicuentas que ya está obsoleta", async () => {
+  const { store, cfg, markets } = setup();
+  const next = markets.current();
+  next.risk.maxQuoteAgeSeconds = 5;
+  markets.save(next);
+  const target: P2pOffer = {
+    uuid: "stale-secondary-discovery",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+    User: { uuid: "peer" },
+  };
+  let applications = 0;
+  const qva = {
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => 100,
+    apply: async () => void (applications += 1),
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async () => undefined,
+  );
+  trading.updateHunting({ sellRunning: false });
+
+  const result = await trading.ingestMarketUpdate({
+    coin: "BANK_CUP",
+    side: "sell",
+    page: { offers: [target], total: 1, currentPage: 1, perPage: 100 },
+    scannedAt: Date.now() - 5_001,
+    sourceAccountId: "secondary-reader",
+  });
+
+  assert.equal(result.action, "calentando mercado");
+  assert.equal(applications, 0);
+  store.close();
+});
+
 test("el cooldown queda visible como advertencia y no pierde la mejor compra", async () => {
   const { store, cfg, markets } = setup();
   const next = markets.current();

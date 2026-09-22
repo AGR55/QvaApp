@@ -14,8 +14,9 @@ import {
   QvaMutationUncertainError,
 } from "./qvapay.js";
 import type { Store } from "./store.js";
-import type { FiatMarket, OperationState, P2pAverage, P2pOffer } from "./types.js";
+import type { FiatMarket, OperationState, P2pAverage, P2pListPage, P2pOffer } from "./types.js";
 import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
+import type { MarketPageUpdate } from "./market-source.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
 import {
@@ -78,6 +79,10 @@ export class TradingEngine {
     candidates: number;
     action?: string;
   }> | undefined;
+  private readonly marketSnapshotCache = new Map<
+    string,
+    MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }
+  >();
   constructor(
     private readonly store: TradingRepository,
     private readonly qva: QvaPayGateway,
@@ -451,6 +456,15 @@ export class TradingEngine {
       orderBy: "best_rate",
       orderType: "desc",
     });
+    return this.marketSnapshotFromPage(coin, type, page, Date.now());
+  }
+
+  private async marketSnapshotFromPage(
+    coin: FiatMarket,
+    type: "buy" | "sell",
+    page: P2pListPage,
+    scannedAt: number,
+  ): Promise<MarketSnapshot> {
     const averages = await this.getAverages();
     const matchingOffers = page.offers.filter(
       (offer) => offer.type === type && offer.coin === coin,
@@ -472,9 +486,81 @@ export class TradingEngine {
         matchingOffers.length === page.offers.length
           ? page.total
           : matchingOffers.length,
-      scannedAt: Date.now(),
+      scannedAt,
       ...(Object.keys(reference).length ? { average: reference } : {}),
     };
+  }
+
+  async ingestMarketUpdate(update: MarketPageUpdate): Promise<{
+    inspected: number;
+    candidates: number;
+    action?: string;
+  }> {
+    if (this.scanInFlight) return this.scanInFlight;
+    const run = this.ingestMarketUpdateOnce(update);
+    this.scanInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.scanInFlight === run) this.scanInFlight = undefined;
+    }
+  }
+
+  private async ingestMarketUpdateOnce(update: MarketPageUpdate): Promise<{
+    inspected: number;
+    candidates: number;
+    action?: string;
+  }> {
+    if (this.isPaused())
+      return { inspected: 0, candidates: 0, action: "pausado" };
+    try {
+      const snapshot = {
+        ...(await this.marketSnapshotFromPage(
+          update.coin,
+          update.side,
+          update.page,
+          update.scannedAt,
+        )),
+        coin: update.coin,
+        side: update.side,
+      };
+      this.marketSnapshotCache.set(snapshotKey(update.coin, update.side), snapshot);
+      const now = Date.now();
+      const maxAgeMs = this.marketConfig.current().risk.maxQuoteAgeSeconds * 1_000;
+      const snapshots = [...this.marketSnapshotCache.values()].filter(
+        (candidate) =>
+          now - candidate.scannedAt <= maxAgeMs &&
+          this.huntEnabled(
+            candidate.coin,
+            candidate.side === "sell" ? "buy" : "sell",
+          ),
+      );
+      const required = this.activeMarkets().flatMap((market) => [
+        ...(this.huntEnabled(market.code, "buy")
+          ? [snapshotKey(market.code, "sell")]
+          : []),
+        ...(this.huntEnabled(market.code, "sell")
+          ? [snapshotKey(market.code, "buy")]
+          : []),
+      ]);
+      const available = new Set(
+        snapshots.map((candidate) => snapshotKey(candidate.coin, candidate.side)),
+      );
+      if (required.some((key) => !available.has(key)))
+        return {
+          inspected: snapshots.reduce((sum, item) => sum + item.items.length, 0),
+          candidates: 0,
+          action: "calentando mercado",
+        };
+      return this.processSnapshots(
+        snapshots,
+        snapshots.some((candidate) => candidate.side === "buy"),
+        !required.some((key) => key.endsWith(":buy")),
+      );
+    } catch (error) {
+      await this.handleError("scan", error);
+      return { inspected: 0, candidates: 0, action: "error" };
+    }
   }
 
   async scan(): Promise<{
@@ -523,6 +609,28 @@ export class TradingEngine {
           });
         }
       }
+      return await this.processSnapshots(
+        snapshots,
+        includeBuySide,
+        sellHuntMarkets.length === 0,
+      );
+    } catch (error) {
+      await this.handleError("scan", error);
+      return { inspected: 0, candidates: 0, action: "error" };
+    }
+  }
+
+  private async processSnapshots(
+    snapshots: Array<
+      MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }
+    >,
+    includeBuySide: boolean,
+    noSellHuntMarkets: boolean,
+  ): Promise<{
+    inspected: number;
+    candidates: number;
+    action?: string;
+  }> {
       const items = snapshots.flatMap((market) => market.items);
       const offers = items.map((item) => item.offer);
       const candidates = items
@@ -546,7 +654,7 @@ export class TradingEngine {
         .map((item) => item.offer);
 
       const synchronizedOfferTypes: Array<"buy" | "sell"> = ["sell"];
-      if (includeBuySide || sellHuntMarkets.length === 0)
+      if (includeBuySide || noSellHuntMarkets)
         synchronizedOfferTypes.push("buy");
       this.syncWebAlerts(items, synchronizedOfferTypes, snapshots);
       this.persistScanCoverage(snapshots, items, includeBuySide);
@@ -809,10 +917,6 @@ export class TradingEngine {
         candidates: candidates.length,
         ...(blockedUuid ? { action: `bloqueada ${blockedUuid}` } : {}),
       };
-    } catch (error) {
-      await this.handleError("scan", error);
-      return { inspected: 0, candidates: 0, action: "error" };
-    }
   }
 
   async applyManually(uuid: string): Promise<string> {
@@ -2517,6 +2621,8 @@ const numeric = (value: unknown): number | undefined =>
         Number(value) > 0
       ? Number(value)
       : undefined;
+const snapshotKey = (coin: FiatMarket, side: "buy" | "sell"): string =>
+  `${coin}:${side}`;
 const isTerminal = (status: string): boolean =>
   ["cancelled", "canceled", "completed"].includes(
     status.toLowerCase(),

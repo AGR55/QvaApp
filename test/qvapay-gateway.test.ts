@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { QvaConnectionError, QvaMutationUncertainError, QvaPayClient } from "../src/qvapay.js";
+import { QvaApiError, QvaConnectionError, QvaMutationUncertainError, QvaPayClient } from "../src/qvapay.js";
 
 test("normaliza un Peer vacío como contraparte ausente en una oferta abierta", async () => {
   const client = new QvaPayClient(() => "token", {
@@ -184,6 +184,29 @@ test("clasifica un fetch fallido de lectura como conexión con QvaPay", async ()
       error.reason === "network" &&
       /QvaPay/.test(error.message),
   );
+});
+
+test("entrega el 429 de listado al coordinador sin consumir más cupo", async () => {
+  let calls = 0;
+  const client = new QvaPayClient(() => "token", {
+    sleep: async () => undefined,
+    fetch: async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ error: "Demasiadas solicitudes" }), {
+        status: 429,
+        headers: { "retry-after": "7" },
+      });
+    },
+  });
+
+  await assert.rejects(
+    () => client.listOffersPage({ take: 20 }),
+    (error: unknown) =>
+      error instanceof QvaApiError &&
+      error.status === 429 &&
+      error.retryAfterMs === 7_000,
+  );
+  assert.equal(calls, 1);
 });
 
 test("interrumpe una edición remota colgada y exige conciliación", async () => {

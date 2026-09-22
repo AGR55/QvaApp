@@ -320,9 +320,26 @@ try {
   await screenshot("/tmp/qvaapply-settings-desktop.png");
   const settingsDesktop = await assertPageQuality("Estrategia");
   await assertSettingsCardsContained("Estrategia");
+  await waitFor(() => execute(
+    "return document.body.innerText.includes('Exploradora secundaria') && document.body.innerText.includes('1 consulta cada 1.50 s')",
+  ));
+  await execute(`
+    document.querySelector('.market-source-summary')?.scrollIntoView({ block: 'start' });
+    return true;
+  `);
+  await screenshot("/tmp/qvaapply-market-source-desktop.png");
+  await assertPageQuality("Fuente de mercado");
   const reviewSettings = await find(
     "xpath",
     "//button[contains(normalize-space(.), 'Revisar y aprobar límites')]",
+  );
+  await command(
+    "POST",
+    `/session/${sessionId}/execute/sync`,
+    {
+      script: "arguments[0].scrollIntoView({ block: 'center' }); return true;",
+      args: [{ "element-6066-11e4-a52e-4f735466cecf": reviewSettings }],
+    },
   );
   await command(
     "POST",
@@ -524,6 +541,7 @@ try {
           "/tmp/qvaapply-capital-cancel-desktop.png",
           "/tmp/qvaapply-charts-desktop.png",
           "/tmp/qvaapply-settings-desktop.png",
+          "/tmp/qvaapply-market-source-desktop.png",
           "/tmp/qvaapply-settings-review-desktop.png",
           "/tmp/qvaapply-audit-desktop.png",
           "/tmp/qvaapply-audit-review-desktop.png",

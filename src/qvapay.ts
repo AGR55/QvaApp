@@ -11,6 +11,8 @@ export class QvaApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly retryAfterMs?: number,
+    public readonly code?: string,
   ) {
     super(message);
   }
@@ -404,7 +406,11 @@ export class QvaPayClient {
       let response: Response;
       try {
         response = options.retryRead
-          ? await this.fetchRead(`${API}${path}`, init)
+          ? await this.fetchRead(
+              `${API}${path}`,
+              init,
+              policy !== "list",
+            )
           : await this.fetchImpl(`${API}${path}`, {
               ...init,
               signal: AbortSignal.timeout(this.mutationTimeoutMs),
@@ -421,6 +427,7 @@ export class QvaPayClient {
   private async fetchRead(
     input: string,
     init?: RequestInit,
+    retryRateLimit = true,
   ): Promise<Response> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -429,7 +436,11 @@ export class QvaPayClient {
           ...init,
           signal: AbortSignal.timeout(this.requestTimeoutMs),
         });
-        if (response.status !== 429 || attempt === 2) return response;
+        if (
+          response.status !== 429 ||
+          !retryRateLimit ||
+          attempt === 2
+        ) return response;
         await this.sleep(800 * 2 ** attempt);
       } catch (error) {
         lastError = error;
@@ -477,7 +488,12 @@ export class QvaPayClient {
           : typeof data.message === "string"
             ? data.message
             : `Error de QvaPay (${response.status})`;
-      throw new QvaApiError(response.status, message);
+      throw new QvaApiError(
+        response.status,
+        message,
+        retryAfterMilliseconds(response.headers.get("retry-after")),
+        typeof data.code === "string" ? data.code : undefined,
+      );
     }
     return data;
   }
@@ -534,6 +550,15 @@ const isPersistentThrottle = (policy: RequestPolicy): boolean =>
 
 const sleep = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.max(0, timestamp - Date.now());
+}
 
 function isTimeoutFailure(error: unknown): boolean {
   let current = error;

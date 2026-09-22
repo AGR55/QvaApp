@@ -10,6 +10,7 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 - Las aplicaciones, cancelaciones y ediciones pasan por una cola única; sus separaciones se conservan en SQLite incluso tras reiniciar.
 - Un timeout de una mutación bloquea nuevas operaciones hasta conciliar por lectura.
 - Las reservas de capital, workflows, configuración, revisiones y auditoría viven en SQLite.
+- Las cuentas secundarias solo reciben capacidad de listado; la cuenta principal es la única que puede consultar fondos privados o mutar operaciones.
 - Cada oferta candidata conserva en SQLite una decisión versionada con todas sus comprobaciones; Auditoría las consulta con paginación y filtros.
 - El saludo automático se excluye al vigilar el chat: cualquier mensaje propio posterior detiene la autocancelación. Si el chat no responde, la cancelación se aplaza.
 - Telegram y Web Push avisan de aplicaciones, bloqueos y conciliaciones mediante canales independientes.
@@ -66,7 +67,9 @@ la misma sesión operativa de QvaPay.
 
 La primera revisión de límites debe hacerse en **Estrategia** antes de iniciar el servicio. Revisa también Mercados, Capital, Operaciones y Auditoría; usa la parada de emergencia si necesitas inspeccionar el sistema sin nuevas aplicaciones.
 
-El escáner revisa cada 15 segundos hasta 100 ofertas de venta por mercado ordenadas por la mejor tasa. El lado de compra se intercala cada dos rondas para respetar la cuota de lectura. Ejecuta como máximo una oportunidad por ronda, con prioridad a comprar QUSD barato; si va a vender y necesita liberar QUSD, el workflow compensable puede cancelar ofertas propias peores y restaurarlas ante un rechazo confirmado. Los pagos y las confirmaciones de recepción siguen siendo manuales.
+La fuente de mercado consulta hasta 100 ofertas por turno y rota de forma justa entre la cuenta principal y cualquier cantidad de cuentas secundarias. Cada cuenta respeta su intervalo propio; dos cuentas configuradas a 3 segundos producen aproximadamente una lectura global cada 1,5 segundos. La compra de QUSD conserva prioridad y el lado de venta se intercala con menor frecuencia. El motor ejecuta como máximo una oportunidad a la vez; si va a vender y necesita liberar QUSD, el workflow compensable puede cancelar ofertas propias peores y restaurarlas ante un rechazo confirmado. Los pagos y las confirmaciones de recepción siguen siendo manuales.
+
+Las cuentas secundarias se añaden en **Estrategia → Fuente de mercado** mediante tokens de API limitados a `p2p:read`. QvaApply valida cada token con un listado mínimo, lo cifra y nunca vuelve a enviarlo al navegador. Un `429`, timeout o token vencido afecta solo a esa cuenta; las demás continúan. La frontera `MarketDataSource` permite reemplazar posteriormente este polling por el stream oficial de QvaPay sin cambiar el motor de riesgo ni la cuenta operadora.
 
 Precios, límites, mercados, saldos declarados, intervalos, autocancelación, refresco, cortafuegos y mensaje P2P se administran en **Estrategia** y se versionan en SQLite. Los antiguos valores de entorno o `trading-config.json` solo pueden inicializar una base vacía; después SQLite es la fuente de verdad. Credenciales, claves y `CONFIRM_REAL_TRADING` permanecen fuera del panel.
 

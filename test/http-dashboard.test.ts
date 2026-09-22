@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { buildDashboard } from "../src/http-dashboard.js";
+import { MarketAccountService } from "../src/market-accounts.js";
+import { Store } from "../src/store.js";
+import { Vault } from "../src/vault.js";
 
 const password = "contraseña-local-segura-2026";
 const origin = "http://127.0.0.1:3000";
@@ -62,6 +68,100 @@ test("Fastify protege datos, origen y mutaciones con sesión y CSRF", async () =
   });
   assert.equal(simulation.statusCode, 400);
   await app.close();
+});
+
+test("gestiona cuentas lectoras sin exponer sus tokens", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-http-readers-")));
+  const accounts = new MarketAccountService(
+    store,
+    new Vault("a".repeat(64)),
+    () => ({
+      listOffersPage: async () => ({
+        offers: [], total: 0, currentPage: 1, perPage: 1,
+      }),
+    }),
+  );
+  const source = {
+    status: () => ({
+      mode: "polling" as const,
+      accounts: [],
+      healthyAccounts: 1,
+      effectiveCadenceSeconds: 3,
+      estimatedRequestsPerMinute: 20,
+    }),
+  };
+  const app = buildDashboard(
+    {} as never,
+    { password, trustedOrigin: origin },
+    undefined,
+    accounts,
+    source,
+  );
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const headers = {
+    origin,
+    cookie,
+    "content-type": "application/json",
+    "x-csrf-token": csrf,
+  };
+
+  const created = await app.inject({
+    method: "POST",
+    url: "/api/market-readers",
+    headers,
+    payload: {
+      label: "Observadora web",
+      token: "reader-token-from-browser",
+      intervalSeconds: 3,
+    },
+  });
+  assert.equal(created.statusCode, 201);
+  assert.doesNotMatch(created.body, /reader-token|encryptedToken|fingerprint/);
+  const id = created.json<{ data: { id: string } }>().data.id;
+
+  const listed = await app.inject({
+    method: "GET",
+    url: "/api/market-source",
+    headers: { cookie },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.equal(listed.json<{ data: { readers: unknown[] } }>().data.readers.length, 1);
+  assert.doesNotMatch(listed.body, /reader-token|encryptedToken|fingerprint/);
+
+  const disabled = await app.inject({
+    method: "PUT",
+    url: `/api/market-readers/${id}`,
+    headers,
+    payload: { enabled: false },
+  });
+  assert.equal(disabled.statusCode, 200);
+  assert.equal(disabled.json<{ data: { enabled: boolean } }>().data.enabled, false);
+
+  const rotated = await app.inject({
+    method: "PUT",
+    url: `/api/market-readers/${id}/token`,
+    headers,
+    payload: { token: "reader-token-rotated-safely" },
+  });
+  assert.equal(rotated.statusCode, 200);
+  assert.doesNotMatch(rotated.body, /rotated-safely/);
+
+  const removed = await app.inject({
+    method: "DELETE",
+    url: `/api/market-readers/${id}`,
+    headers,
+    payload: {},
+  });
+  assert.equal(removed.statusCode, 204);
+  await app.close();
+  store.close();
 });
 
 test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", async () => {

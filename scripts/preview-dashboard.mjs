@@ -131,7 +131,74 @@ const model = {
   applyBlockedOffer: async () => "Aplicación de demostración confirmada.",
   dismissBlockedOffer: () => undefined,
 };
+let previewReaders = [{
+  id: "reader-demo-01",
+  label: "Exploradora secundaria",
+  role: "reader",
+  enabled: true,
+  intervalSeconds: 3,
+  health: "healthy",
+  lastSuccessAt: now - 1_500,
+  lastAttemptAt: now - 1_500,
+  nextEligibleAt: now + 1_500,
+  consecutiveErrors: 0,
+  lastError: null,
+  createdAt: now - 86_400_000,
+  updatedAt: now - 1_500,
+}];
+const marketAccounts = {
+  list: () => previewReaders,
+  add: async ({ label, intervalSeconds }) => {
+    const account = {
+      id: `reader-preview-${previewReaders.length + 1}`,
+      label,
+      role: "reader",
+      enabled: true,
+      intervalSeconds,
+      health: "healthy",
+      lastSuccessAt: Date.now(),
+      lastAttemptAt: Date.now(),
+      nextEligibleAt: Date.now() + intervalSeconds * 1_000,
+      consecutiveErrors: 0,
+      lastError: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    previewReaders = [...previewReaders, account];
+    return account;
+  },
+  update: async (id, changes) => {
+    previewReaders = previewReaders.map((account) => account.id === id
+      ? { ...account, ...changes, updatedAt: Date.now() }
+      : account);
+    return previewReaders.find((account) => account.id === id);
+  },
+  rotate: async (id) => {
+    const account = previewReaders.find((item) => item.id === id);
+    if (account) account.updatedAt = Date.now();
+    return account;
+  },
+  remove: (id) => { previewReaders = previewReaders.filter((account) => account.id !== id); },
+};
+const marketSource = {
+  status: () => ({
+    mode: "polling",
+    accounts: [
+      { id: "primary", label: "Cuenta principal", role: "primary", enabled: true, intervalSeconds: 3, health: "healthy", lastSuccessAt: Date.now() - 500, lastError: null },
+      ...previewReaders,
+    ],
+    healthyAccounts: 1 + previewReaders.filter((account) => account.enabled && account.health === "healthy").length,
+    effectiveCadenceSeconds: 3 / (1 + previewReaders.filter((account) => account.enabled && account.health === "healthy").length),
+    estimatedRequestsPerMinute: 20 * (1 + previewReaders.filter((account) => account.enabled && account.health === "healthy").length),
+  }),
+};
 const origin = `http://127.0.0.1:${port}`;
-const app = buildDashboard(model, { password: "preview-segura-2026", trustedOrigin: origin });
+const app = buildDashboard(
+  model,
+  { password: "preview-segura-2026", trustedOrigin: origin },
+  undefined,
+  marketAccounts,
+  marketSource,
+);
 await app.listen({ host: "127.0.0.1", port });
 console.log(`Preview: ${origin} · contraseña: preview-segura-2026`);

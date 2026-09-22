@@ -1,5 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, History, ImagePlus, Plus, Save, Trash2, X } from "lucide-react";
+import {
+  Activity,
+  Check,
+  History,
+  ImagePlus,
+  KeyRound,
+  Plus,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Trash2,
+  Wifi,
+  WifiOff,
+  X,
+} from "lucide-react";
 import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { requestJson } from "../lib/http.js";
 import { Button, Field, Input, Textarea } from "../components/ui.jsx";
@@ -40,7 +54,7 @@ const riskFields = [
   ["counterpartyCooldownSeconds", "Enfriamiento por contraparte", "segundos"],
 ];
 const automationFields = [
-  ["scanIntervalSeconds", "Intervalo de escaneo", "segundos", 5],
+  ["scanIntervalSeconds", "Intervalo de escaneo", "segundos", 3],
   ["autoCancelMinutes", "Cancelación automática", "minutos", 1],
   ["offerRefreshIntervalMinutes", "Refresco de ofertas propias", "minutos", 1],
   ["offerRefreshSpacingSeconds", "Separación entre refrescos", "segundos", 20],
@@ -317,6 +331,8 @@ export function Settings({ onChanged }) {
           </FieldGroup>
         </form>
       </Panel>
+
+      <MarketSourceSettings />
 
       <Panel title="Mercados y precios" wide>
         <div className="market-settings-grid">
@@ -663,6 +679,297 @@ export function Settings({ onChanged }) {
       </Panel>
     </div>
   );
+}
+
+function MarketSourceSettings() {
+  const [source, setSource] = useState();
+  const [message, setMessage] = useState("");
+  const [editor, setEditor] = useState();
+  const [removing, setRemoving] = useState();
+  const [form, setForm] = useState({ label: "", token: "", intervalSeconds: 3 });
+  const load = useCallback(async () => {
+    try {
+      const payload = await requestJson("/api/market-source");
+      setSource(payload.data);
+      setMessage("");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo leer la fuente de mercado.");
+    }
+  }, []);
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 5_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
+
+  const openAdd = () => {
+    setForm({ label: "", token: "", intervalSeconds: 3 });
+    setEditor({ mode: "add" });
+  };
+  const openRotate = (account) => {
+    setForm({ label: account.label, token: "", intervalSeconds: account.intervalSeconds });
+    setEditor({ mode: "rotate", account });
+  };
+  const submitToken = async () => {
+    setMessage(editor?.mode === "add" ? "Validando cuenta lectora…" : "Validando token nuevo…");
+    try {
+      if (editor?.mode === "add")
+        await requestJson("/api/market-readers", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(form),
+          timeoutMs: 20_000,
+        });
+      else if (editor?.account)
+        await requestJson(`/api/market-readers/${encodeURIComponent(editor.account.id)}/token`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: form.token }),
+          timeoutMs: 20_000,
+        });
+      setEditor(undefined);
+      setForm({ label: "", token: "", intervalSeconds: 3 });
+      await load();
+      setMessage("Cuenta lectora validada y activa.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo validar la cuenta.");
+    }
+  };
+  const update = async (account, changes) => {
+    setMessage(`Actualizando ${account.label}…`);
+    try {
+      await requestJson(`/api/market-readers/${encodeURIComponent(account.id)}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(changes),
+      });
+      await load();
+      setMessage("Cuenta lectora actualizada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar.");
+    }
+  };
+  const remove = async () => {
+    if (!removing) return;
+    setMessage(`Eliminando ${removing.label}…`);
+    try {
+      await requestJson(`/api/market-readers/${encodeURIComponent(removing.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      setRemoving(undefined);
+      await load();
+      setMessage("Cuenta lectora eliminada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo eliminar.");
+    }
+  };
+
+  const primary = source?.accounts?.find((account) => account.role === "primary");
+  const healthById = new Map((source?.accounts || []).map((account) => [account.id, account]));
+  const readers = (source?.readers || []).map((account) => ({
+    ...account,
+    ...(healthById.get(account.id) || {}),
+  }));
+  return (
+    <Panel title="Fuente de mercado" wide>
+      <div className="market-source-summary">
+        <div>
+          <Activity aria-hidden="true" />
+          <span>
+            <small>Cadencia estimada</small>
+            <strong>
+              {source?.effectiveCadenceSeconds
+                ? `1 consulta cada ${source.effectiveCadenceSeconds.toFixed(2)} s`
+                : "Sin cuentas disponibles"}
+            </strong>
+          </span>
+        </div>
+        <div>
+          <Wifi aria-hidden="true" />
+          <span>
+            <small>Cuentas saludables</small>
+            <strong>{source?.healthyAccounts ?? "—"}</strong>
+          </span>
+        </div>
+        <div>
+          <ShieldCheck aria-hidden="true" />
+          <span>
+            <small>Consumo previsto</small>
+            <strong>{source ? `${Math.round(source.estimatedRequestsPerMinute)} consultas/min` : "—"}</strong>
+          </span>
+        </div>
+      </div>
+      <div className="market-reader-list">
+        <MarketReaderCard account={{
+          id: "primary",
+          label: "Cuenta principal",
+          role: "primary",
+          enabled: true,
+          intervalSeconds: primary?.intervalSeconds || 3,
+          health: primary?.health || "healthy",
+          lastSuccessAt: primary?.lastSuccessAt ?? null,
+          lastError: primary?.lastError,
+        }} />
+        {readers.map((account) => (
+          <MarketReaderCard
+            key={account.id}
+            account={account}
+            onToggle={() => void update(account, { enabled: !account.enabled })}
+            onInterval={(intervalSeconds) => void update(account, { intervalSeconds })}
+            onRotate={() => openRotate(account)}
+            onRemove={() => setRemoving(account)}
+          />
+        ))}
+      </div>
+      <div className="market-source-actions">
+        <Button type="button" variant="primary" onClick={openAdd}>
+          <Plus aria-hidden="true" data-icon="inline-start" /> Añadir cuenta lectora
+        </Button>
+        <p aria-live="polite">{message}</p>
+      </div>
+
+      <Dialog open={Boolean(editor)} onOpenChange={(open) => !open && setEditor(undefined)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{editor?.mode === "add" ? "Añadir cuenta lectora" : "Rotar token de lectura"}</DialogTitle>
+            <DialogDescription>
+              Usa un token de QvaPay limitado a p2p:read. Se validará y cifrará antes de guardarlo.
+            </DialogDescription>
+          </DialogHeader>
+          <FieldGroup>
+            {editor?.mode === "add" ? (
+              <Field label="Etiqueta" htmlFor="reader-label">
+                <Input
+                  id="reader-label"
+                  maxLength="60"
+                  value={form.label}
+                  onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))}
+                />
+              </Field>
+            ) : null}
+            <Field label="Token p2p:read" htmlFor="reader-token">
+              <Input
+                id="reader-token"
+                type="password"
+                autoComplete="off"
+                value={form.token}
+                onChange={(event) => setForm((current) => ({ ...current, token: event.target.value }))}
+              />
+            </Field>
+            {editor?.mode === "add" ? (
+              <Field label="Intervalo mínimo" htmlFor="reader-interval">
+                <span className="input-unit">
+                  <Input
+                    id="reader-interval"
+                    type="number"
+                    min="3"
+                    max="3600"
+                    step="1"
+                    value={form.intervalSeconds}
+                    onChange={(event) => setForm((current) => ({ ...current, intervalSeconds: Number(event.target.value) }))}
+                  />
+                  <small>segundos</small>
+                </span>
+              </Field>
+            ) : null}
+          </FieldGroup>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setEditor(undefined)}>Cancelar</Button>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={form.token.trim().length < 12 || (editor?.mode === "add" && !form.label.trim())}
+              onClick={() => void submitToken()}
+            >
+              <KeyRound aria-hidden="true" data-icon="inline-start" /> Validar y guardar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(removing)} onOpenChange={(open) => !open && setRemoving(undefined)}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>Eliminar cuenta lectora</DialogTitle>
+            <DialogDescription>
+              Se borrará el token cifrado de {removing?.label}. La cuenta principal no se modifica.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setRemoving(undefined)}>Cancelar</Button>
+            <Button type="button" variant="destructive" onClick={() => void remove()}>
+              <Trash2 aria-hidden="true" data-icon="inline-start" /> Eliminar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Panel>
+  );
+}
+
+function MarketReaderCard({ account, onToggle, onInterval, onRotate, onRemove }) {
+  const healthy = account.health === "healthy";
+  return (
+    <article className={`market-reader-card ${healthy ? "healthy" : account.health}`}>
+      <header>
+        <span className="market-reader-icon" aria-hidden="true">
+          {healthy ? <Wifi /> : <WifiOff />}
+        </span>
+        <div>
+          <h3>{account.label}</h3>
+          <p>{account.role === "primary" ? "Opera y observa" : "Solo observa · p2p:read"}</p>
+        </div>
+        <span className="reader-health">{healthLabel(account.health)}</span>
+      </header>
+      <dl>
+        <div><dt>Última lectura</dt><dd>{formatReaderTime(account.lastSuccessAt)}</dd></div>
+        <div><dt>Intervalo</dt><dd>{account.intervalSeconds} s</dd></div>
+      </dl>
+      {account.lastError ? <p className="reader-error" role="status">{account.lastError}</p> : null}
+      {account.role === "reader" ? (
+        <footer>
+          <Field label="Intervalo" htmlFor={`reader-interval-${account.id}`}>
+            <Input
+              id={`reader-interval-${account.id}`}
+              type="number"
+              min="3"
+              max="3600"
+              step="1"
+              defaultValue={account.intervalSeconds}
+              onBlur={(event) => {
+                const value = Number(event.target.value);
+                if (value !== account.intervalSeconds) onInterval?.(value);
+              }}
+            />
+          </Field>
+          <Button type="button" size="sm" variant="outline" onClick={onToggle}>
+            {account.enabled ? "Desactivar" : "Activar"}
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={onRotate}>
+            <RefreshCw aria-hidden="true" data-icon="inline-start" /> Rotar token
+          </Button>
+          <Button type="button" size="icon" variant="ghost" aria-label={`Eliminar ${account.label}`} onClick={onRemove}>
+            <Trash2 aria-hidden="true" />
+          </Button>
+        </footer>
+      ) : null}
+    </article>
+  );
+}
+
+function healthLabel(health) {
+  return {
+    healthy: "Saludable",
+    cooldown: "En espera",
+    requires_attention: "Requiere atención",
+    error: "Reintentando",
+  }[health] || "Sin datos";
+}
+
+function formatReaderTime(value) {
+  return value ? new Date(value).toLocaleTimeString("es-CU") : "Todavía no";
 }
 
 function SettingField({ label, htmlFor, children, className }) {
