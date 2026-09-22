@@ -15,11 +15,11 @@ bloqueo solamente cuando la decisión persistida sea nueva o haya cambiado. Una
 decisión se considera igual cuando conserva el UUID, los datos económicos de la
 oferta, el motivo del bloqueo y la referencia de mercado.
 
-La comparación se hará contra la alerta bloqueada que ya vive en SQLite. Se
-leerá la alerta anterior antes de actualizarla; después se conservarán el evento
-de decisión, la alerta y la auditoría actuales, pero la notificación a Telegram
-solo se enviará si la instantánea cambió. No se usará `seen_offers` para este
-caso, porque eso impediría un intento posterior cuando mejore la liquidez.
+La comparación se hará mediante una huella de la instantánea bloqueada guardada
+en el almacén clave-valor de SQLite. Se conservarán el evento de decisión, la
+alerta y la auditoría actuales, pero la notificación a Telegram solo se enviará
+si la huella cambió. No se usará `seen_offers` para este caso, porque eso
+impediría un intento posterior cuando mejore la liquidez.
 
 ## Flujo
 

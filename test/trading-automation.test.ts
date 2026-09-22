@@ -522,6 +522,100 @@ test("el escaneo no muta si un límite global bloquea la compra automática", as
   store.close();
 });
 
+test("notifica una sola vez mientras una oferta conserve el mismo bloqueo de liquidez", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "same-liquidity-block",
+    type: "buy",
+    coin: "BANK_CUP",
+    amount: 20,
+    receive: 20_400,
+    status: "open",
+    User: { uuid: "peer" },
+  };
+  const notifications: string[] = [];
+  const qva = {
+    listOffersPage: async (params: { type?: string }) => ({
+      offers: params.type === "buy" ? [target] : [],
+      total: params.type === "buy" ? 1 : 0,
+      currentPage: 1,
+      perPage: 100,
+    }),
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => 0,
+    listOffers: async () => [],
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async (message) => void notifications.push(message),
+  );
+
+  await trading.scan();
+  // Simula una nueva ronda después del cooldown temporal que antes permitía
+  // repetir indefinidamente la misma notificación.
+  store.set(
+    `risk_notice_at:${target.uuid}`,
+    String(Date.now() - 5 * 60_000 - 1),
+  );
+  store.set("market_scan_round", "0");
+  await trading.scan();
+
+  assert.equal(
+    notifications.filter((message) =>
+      message.includes("Compra automática bloqueada"),
+    ).length,
+    1,
+  );
+  store.close();
+});
+
+test("reintenta una oferta bloqueada cuando mejora el saldo QUSD", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "liquidity-recovers",
+    type: "buy",
+    coin: "BANK_CUP",
+    amount: 20,
+    receive: 20_400,
+    status: "open",
+    User: { uuid: "peer" },
+  };
+  let balance = 0;
+  const applications: string[] = [];
+  const qva = {
+    listOffersPage: async (params: { type?: string }) => ({
+      offers: params.type === "buy" ? [target] : [],
+      total: params.type === "buy" ? 1 : 0,
+      currentPage: 1,
+      perPage: 100,
+    }),
+    p2pAverages: async () => ({}),
+    qusdBalance: async () => balance,
+    listOffers: async () => [],
+    apply: async (uuid: string) => void applications.push(uuid),
+  };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async () => undefined,
+  );
+
+  const blocked = await trading.scan();
+  balance = 30;
+  store.set("market_scan_round", "0");
+  const applied = await trading.scan();
+
+  assert.equal(blocked.action, `bloqueada ${target.uuid}`);
+  assert.equal(applied.action, `venta aplicada ${target.uuid}`);
+  assert.deepEqual(applications, [target.uuid]);
+  store.close();
+});
+
 test("la revisión manual omite precio pero nunca la parada de emergencia", async () => {
   const { store, cfg, markets } = setup();
   const target: P2pOffer = { uuid: "manual-blocked", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open", User: { uuid: "peer" } };
