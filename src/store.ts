@@ -16,7 +16,31 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 14;
+const LATEST_SCHEMA_VERSION = 15;
+
+export type MarketReaderHealth =
+  | "healthy"
+  | "cooldown"
+  | "requires_attention"
+  | "error";
+
+export interface MarketReaderAccount {
+  id: string;
+  label: string;
+  encryptedToken: string;
+  tokenFingerprint: string;
+  qvaPayUuid?: string;
+  intervalSeconds: number;
+  enabled: boolean;
+  health: MarketReaderHealth;
+  lastSuccessAt: number | null;
+  lastAttemptAt: number | null;
+  nextEligibleAt: number;
+  consecutiveErrors: number;
+  lastError?: string;
+  createdAt: number;
+  updatedAt: number;
+}
 
 export interface CachedRemoteResource<T = unknown> {
   key: string;
@@ -597,6 +621,32 @@ export class Store {
         );
         this.db.prepare(
           "INSERT INTO schema_migrations(version, applied_at) VALUES (14, ?)",
+        ).run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 15) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS market_reader_accounts (
+            id TEXT PRIMARY KEY,
+            label TEXT NOT NULL,
+            encrypted_token TEXT NOT NULL,
+            token_fingerprint TEXT NOT NULL UNIQUE,
+            qvapay_uuid TEXT,
+            interval_seconds REAL NOT NULL CHECK (interval_seconds >= 3),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            health TEXT NOT NULL DEFAULT 'healthy',
+            last_success_at INTEGER,
+            last_attempt_at INTEGER,
+            next_eligible_at INTEGER NOT NULL DEFAULT 0,
+            consecutive_errors INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_market_reader_accounts_schedule
+            ON market_reader_accounts(enabled, health, next_eligible_at);
+        `);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (15, ?)",
         ).run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
@@ -1299,6 +1349,130 @@ export class Store {
         "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(key, value);
+  }
+
+  marketReaderAccounts(): MarketReaderAccount[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM market_reader_accounts
+           ORDER BY created_at ASC, id ASC`,
+        )
+        .all() as Record<string, unknown>[]
+    ).map(marketReaderAccountFromRow);
+  }
+
+  marketReaderAccount(id: string): MarketReaderAccount | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM market_reader_accounts WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    return row ? marketReaderAccountFromRow(row) : undefined;
+  }
+
+  createMarketReaderAccount(input: {
+    id: string;
+    label: string;
+    encryptedToken: string;
+    tokenFingerprint: string;
+    qvaPayUuid?: string;
+    intervalSeconds: number;
+  }): MarketReaderAccount {
+    const now = Date.now();
+    this.db.prepare(
+      `INSERT INTO market_reader_accounts(
+        id, label, encrypted_token, token_fingerprint, qvapay_uuid,
+        interval_seconds, enabled, health, next_eligible_at,
+        consecutive_errors, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, 'healthy', 0, 0, ?, ?)`,
+    ).run(
+      input.id,
+      input.label,
+      input.encryptedToken,
+      input.tokenFingerprint,
+      input.qvaPayUuid ?? null,
+      input.intervalSeconds,
+      now,
+      now,
+    );
+    return this.marketReaderAccount(input.id)!;
+  }
+
+  updateMarketReaderAccount(
+    id: string,
+    input: Partial<{
+      label: string;
+      encryptedToken: string;
+      tokenFingerprint: string;
+      qvaPayUuid: string | null;
+      intervalSeconds: number;
+      enabled: boolean;
+    }>,
+  ): MarketReaderAccount | undefined {
+    const current = this.marketReaderAccount(id);
+    if (!current) return undefined;
+    this.db.prepare(
+      `UPDATE market_reader_accounts SET
+        label = ?, encrypted_token = ?, token_fingerprint = ?, qvapay_uuid = ?,
+        interval_seconds = ?, enabled = ?,
+        health = CASE WHEN ? THEN 'healthy' ELSE health END,
+        consecutive_errors = CASE WHEN ? THEN 0 ELSE consecutive_errors END,
+        last_error = CASE WHEN ? THEN NULL ELSE last_error END,
+        next_eligible_at = CASE WHEN ? THEN 0 ELSE next_eligible_at END,
+        updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      input.label ?? current.label,
+      input.encryptedToken ?? current.encryptedToken,
+      input.tokenFingerprint ?? current.tokenFingerprint,
+      input.qvaPayUuid === undefined
+        ? current.qvaPayUuid ?? null
+        : input.qvaPayUuid,
+      input.intervalSeconds ?? current.intervalSeconds,
+      Number(input.enabled ?? current.enabled),
+      Number(Boolean(input.encryptedToken) || input.enabled === true),
+      Number(Boolean(input.encryptedToken) || input.enabled === true),
+      Number(Boolean(input.encryptedToken) || input.enabled === true),
+      Number(Boolean(input.encryptedToken) || input.enabled === true),
+      Date.now(),
+      id,
+    );
+    return this.marketReaderAccount(id);
+  }
+
+  updateMarketReaderHealth(
+    id: string,
+    input: {
+      health: MarketReaderHealth;
+      lastAttemptAt: number;
+      nextEligibleAt: number;
+      success?: boolean;
+      error?: string;
+    },
+  ): void {
+    this.db.prepare(
+      `UPDATE market_reader_accounts SET
+        health = ?, last_attempt_at = ?, next_eligible_at = ?,
+        last_success_at = CASE WHEN ? THEN ? ELSE last_success_at END,
+        consecutive_errors = CASE WHEN ? THEN 0 ELSE consecutive_errors + 1 END,
+        last_error = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      input.health,
+      input.lastAttemptAt,
+      input.nextEligibleAt,
+      Number(Boolean(input.success)),
+      input.lastAttemptAt,
+      Number(Boolean(input.success)),
+      input.error ?? null,
+      Date.now(),
+      id,
+    );
+  }
+
+  deleteMarketReaderAccount(id: string): boolean {
+    return this.db
+      .prepare("DELETE FROM market_reader_accounts WHERE id = ?")
+      .run(id).changes > 0;
   }
 
   saveRemoteResource<T>(key: string, data: T, updatedAt = Date.now()): void {
@@ -2077,6 +2251,34 @@ function optionalNumber<K extends string>(
 ): Partial<Record<K, number>> {
   const number = numberOrUndefined(value);
   return number === undefined ? {} : ({ [key]: number } as Record<K, number>);
+}
+
+function marketReaderAccountFromRow(
+  row: Record<string, unknown>,
+): MarketReaderAccount {
+  return {
+    id: String(row.id),
+    label: String(row.label),
+    encryptedToken: String(row.encrypted_token),
+    tokenFingerprint: String(row.token_fingerprint),
+    ...(row.qvapay_uuid === null || row.qvapay_uuid === undefined
+      ? {}
+      : { qvaPayUuid: String(row.qvapay_uuid) }),
+    intervalSeconds: Number(row.interval_seconds),
+    enabled: Boolean(row.enabled),
+    health: String(row.health) as MarketReaderHealth,
+    lastSuccessAt:
+      row.last_success_at === null ? null : Number(row.last_success_at),
+    lastAttemptAt:
+      row.last_attempt_at === null ? null : Number(row.last_attempt_at),
+    nextEligibleAt: Number(row.next_eligible_at),
+    consecutiveErrors: Number(row.consecutive_errors),
+    ...(row.last_error === null || row.last_error === undefined
+      ? {}
+      : { lastError: String(row.last_error) }),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }
 
 function configRevisionHash(

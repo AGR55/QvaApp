@@ -1,6 +1,9 @@
 import type { QvaPayClient } from "../qvapay.js";
 import type { Store } from "../store.js";
 
+/** Minimal capability granted to market observers. */
+export type MarketListingGateway = Pick<QvaPayClient, "listOffersPage">;
+
 /** Protocol seam shared by the real QvaPay adapter and deterministic tests. */
 export type QvaPayGateway = Pick<
   QvaPayClient,

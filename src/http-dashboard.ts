@@ -11,6 +11,8 @@ import { QvaApiError } from "./qvapay.js";
 import type { TradingEngine } from "./trading.js";
 import type { FiatMarket } from "./types.js";
 import type { StoredPushSubscription, WebPushService } from "./web-push.js";
+import type { MarketAccountService } from "./market-accounts.js";
+import type { MarketDataSource } from "./market-source.js";
 
 type AuthOptions = {
   password: string;
@@ -25,8 +27,16 @@ export async function startDashboard(
   authOptions: AuthOptions,
   pushService?: PushService,
   host: "127.0.0.1" | "0.0.0.0" = "127.0.0.1",
+  marketAccounts?: MarketAccountService,
+  marketSource?: Pick<MarketDataSource, "status">,
 ): Promise<FastifyInstance> {
-  const app = buildDashboard(readModel, authOptions, pushService);
+  const app = buildDashboard(
+    readModel,
+    authOptions,
+    pushService,
+    marketAccounts,
+    marketSource,
+  );
   await app.listen({ port, host });
   console.log(`Panel web: http://${host}:${port}`);
   return app;
@@ -36,6 +46,8 @@ export function buildDashboard(
   readModel: DashboardReadModel,
   authOptions: AuthOptions,
   pushService?: PushService,
+  marketAccounts?: MarketAccountService,
+  marketSource?: Pick<MarketDataSource, "status">,
 ): FastifyInstance {
   const app = Fastify({
     logger: false,
@@ -258,6 +270,84 @@ export function buildDashboard(
     },
   );
   app.get("/api/config", async () => ({ data: readModel.config() }));
+  app.get("/api/market-source", async () => ({
+    data: {
+      ...(marketSource?.status() ?? {
+        mode: "polling",
+        accounts: [],
+        healthyAccounts: 0,
+        effectiveCadenceSeconds: null,
+        estimatedRequestsPerMinute: 0,
+      }),
+      readers: marketAccounts?.list() ?? [],
+    },
+  }));
+  app.post<{
+    Body: { label: string; token: string; intervalSeconds: number };
+  }>("/api/market-readers", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["label", "token", "intervalSeconds"],
+        properties: {
+          label: { type: "string", minLength: 1, maxLength: 60 },
+          token: { type: "string", minLength: 12, maxLength: 2_048 },
+          intervalSeconds: { type: "number", minimum: 3, maximum: 3_600 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!marketAccounts) throw new ClientInputError("La fuente multicuentas no está disponible.");
+    const account = await clientAction(() => marketAccounts.add(request.body));
+    reply.status(201);
+    return { data: account };
+  });
+  app.put<{
+    Params: { id: string };
+    Body: { label?: string; intervalSeconds?: number; enabled?: boolean };
+  }>("/api/market-readers/:id", {
+    schema: {
+      params: readerIdParamsSchema(),
+      body: {
+        type: "object",
+        additionalProperties: false,
+        minProperties: 1,
+        properties: {
+          label: { type: "string", minLength: 1, maxLength: 60 },
+          intervalSeconds: { type: "number", minimum: 3, maximum: 3_600 },
+          enabled: { type: "boolean" },
+        },
+      },
+    },
+  }, async (request) => {
+    if (!marketAccounts) throw new ClientInputError("La fuente multicuentas no está disponible.");
+    return { data: await clientAction(() => marketAccounts.update(request.params.id, request.body)) };
+  });
+  app.put<{
+    Params: { id: string };
+    Body: { token: string };
+  }>("/api/market-readers/:id/token", {
+    schema: {
+      params: readerIdParamsSchema(),
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["token"],
+        properties: { token: { type: "string", minLength: 12, maxLength: 2_048 } },
+      },
+    },
+  }, async (request) => {
+    if (!marketAccounts) throw new ClientInputError("La fuente multicuentas no está disponible.");
+    return { data: await clientAction(() => marketAccounts.rotate(request.params.id, request.body.token)) };
+  });
+  app.delete<{ Params: { id: string } }>("/api/market-readers/:id", {
+    schema: { params: readerIdParamsSchema() },
+  }, async (request, reply) => {
+    if (!marketAccounts) throw new ClientInputError("La fuente multicuentas no está disponible.");
+    await clientAction(() => marketAccounts.remove(request.params.id));
+    reply.status(204);
+  });
   app.get("/api/config-revisions", async () => ({ data: readModel.configRevisions() }));
   app.post<{
     Body: { name: string; mimeType: string; base64: string };
@@ -583,6 +673,14 @@ function uuidParamsSchema() {
   } as const;
 }
 
+function readerIdParamsSchema() {
+  return {
+    type: "object",
+    required: ["id"],
+    properties: { id: { type: "string", minLength: 1, maxLength: 100 } },
+  } as const;
+}
+
 class ClientInputError extends Error {}
 
 async function clientAction<T>(action: () => T | Promise<T>): Promise<T> {
@@ -716,6 +814,10 @@ function openApiDocument() {
       "/api/offers/rebalance/apply": { post: { summary: "Iniciar un reajuste persistente de ofertas propias" } },
       "/api/offers/rebalance/{id}": { get: { summary: "Consultar el progreso de un reajuste" } },
       "/api/market-icons": { post: { summary: "Cargar un icono administrado para un mercado" } },
+      "/api/market-source": { get: { summary: "Consultar la fuente de mercado y su cadencia" } },
+      "/api/market-readers": { post: { summary: "Añadir y validar una cuenta de solo lectura" } },
+      "/api/market-readers/{id}": { put: { summary: "Actualizar una cuenta lectora" }, delete: { summary: "Eliminar una cuenta lectora" } },
+      "/api/market-readers/{id}/token": { put: { summary: "Rotar el token cifrado de una cuenta lectora" } },
       "/api/offers/{uuid}": { put: { summary: "Editar oferta propia" }, delete: { summary: "Cancelar oferta propia" } },
       "/api/workflows/{workflowId}/reconcile": { post: { summary: "Conciliar un resultado remoto ambiguo" } },
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },

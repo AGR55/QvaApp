@@ -21,6 +21,8 @@ import {
   type HuntingSide,
   type PendingRateEdit,
 } from "./telegram-menu.js";
+import { MarketAccountService } from "./market-accounts.js";
+import { PollingMarketSource, weightedMarketJobs } from "./market-source.js";
 
 if (!config.realTradingAllowed)
   throw new Error(
@@ -29,7 +31,9 @@ if (!config.realTradingAllowed)
 
 const store = new Store(config.dataDir);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
-const session = new Session(store, new Vault(config.encryptionKey));
+const vault = new Vault(config.encryptionKey);
+const session = new Session(store, vault);
+const marketAccounts = new MarketAccountService(store, vault);
 const qva = new QvaPayClient(() => session.token(), {
   throttleState: store,
 });
@@ -89,6 +93,19 @@ const trading = new TradingEngine(
     });
   },
 );
+const marketSource = new PollingMarketSource(
+  store,
+  marketAccounts,
+  qva,
+  () => marketConfig.current().automation.scanIntervalSeconds,
+  () => weightedMarketJobs({
+    markets: trading.activeMarkets().map((market) => ({
+      code: market.code,
+      buyEnabled: trading.huntEnabled(market.code, "buy"),
+      sellEnabled: trading.huntEnabled(market.code, "sell"),
+    })),
+  }),
+);
 const dashboardReadModel = new DashboardReadModel(
   trading,
   qva,
@@ -120,6 +137,8 @@ const dashboardServer = await startDashboard(
   },
   webPush,
   config.dashboardHost,
+  marketAccounts,
+  marketSource,
 );
 
 bot.use(async (ctx, next) => {
@@ -346,8 +365,10 @@ const scheduler = new Scheduler((name, error) => {
   store.audit(`${name}_background_error`, message);
   console.error(`Error de tarea ${name}:`, message);
 });
-scheduler.register("scan", () => marketConfig.current().automation.scanIntervalSeconds * 1_000, async () => {
-  if (!trading.isPaused()) await trading.scan();
+scheduler.register("scan", 250, async () => {
+  if (trading.isPaused()) return;
+  const update = await marketSource.pollNext();
+  if (update) await trading.ingestMarketUpdate(update);
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
 scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());
