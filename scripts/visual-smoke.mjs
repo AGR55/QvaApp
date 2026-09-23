@@ -394,6 +394,17 @@ try {
     {},
   );
 
+  const logs = await find(
+    "xpath",
+    "//button[normalize-space(.)='Logs']",
+  );
+  await command("POST", `/session/${sessionId}/element/${logs}/click`, {});
+  await waitFor(() =>
+    execute("return document.querySelectorAll('.log-list .log-row').length >= 5"),
+  );
+  const logsDesktop = await assertPageQuality("Logs operativos");
+  await screenshot("/tmp/qvaapply-logs-desktop.png");
+
   await command("POST", `/session/${sessionId}/window/rect`, {
     width: 390,
     height: 844,
@@ -452,6 +463,7 @@ try {
       "/tmp/qvaapply-settings-mobile.png",
     ],
     ["Auditoría", "Ofertas bloqueadas", "/tmp/qvaapply-audit-mobile.png"],
+    ["Logs", "Flujo de eventos", "/tmp/qvaapply-logs-mobile.png"],
   ];
   for (const [navLabel, visibleText, imagePath] of mobileViews) {
     const mobileMenu = await find(
@@ -527,6 +539,7 @@ try {
           Estrategia: settingsDesktop,
           "Revisión de estrategia": settingsReviewDesktop,
           Auditoría: auditDesktop,
+          Logs: logsDesktop,
         },
         mobile,
         screenshots: [
@@ -545,6 +558,7 @@ try {
           "/tmp/qvaapply-settings-review-desktop.png",
           "/tmp/qvaapply-audit-desktop.png",
           "/tmp/qvaapply-audit-review-desktop.png",
+          "/tmp/qvaapply-logs-desktop.png",
           "/tmp/qvaapply-dashboard-mobile.png",
           "/tmp/qvaapply-mobile-navigation.png",
           "/tmp/qvaapply-capital-rebalance-mobile.png",

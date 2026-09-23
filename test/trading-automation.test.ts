@@ -534,6 +534,33 @@ test("no evalúa una instantánea multicuentas que ya está obsoleta", async () 
   store.close();
 });
 
+test("no inunda auditoría con resultados de escaneo idénticos", async () => {
+  const { store, cfg, markets } = setup();
+  const qva = { p2pAverages: async () => ({}) };
+  const trading = new TradingEngine(
+    store,
+    qva as never,
+    cfg as never,
+    markets,
+    async () => undefined,
+  );
+  trading.updateHunting({ sellRunning: false });
+  const update = {
+    coin: "BANK_CUP" as const,
+    side: "sell" as const,
+    page: { offers: [], total: 0, currentPage: 1, perPage: 100 },
+    scannedAt: Date.now(),
+    sourceAccountId: "secondary-reader",
+  };
+
+  await trading.ingestMarketUpdate(update);
+  await trading.ingestMarketUpdate({ ...update, scannedAt: Date.now() });
+
+  assert.equal(store.countAudit("scan_complete"), 1);
+  assert.match(store.get("last_scan") ?? "", /Sin aplicación/);
+  store.close();
+});
+
 test("el cooldown queda visible como advertencia y no pierde la mejor compra", async () => {
   const { store, cfg, markets } = setup();
   const next = markets.current();

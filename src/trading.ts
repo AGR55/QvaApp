@@ -2481,9 +2481,16 @@ export class TradingEngine {
     candidates: number,
     result: string,
   ): void {
-    const snapshot = { at: Date.now(), inspected, candidates, result };
+    const now = Date.now();
+    const snapshot = { at: now, inspected, candidates, result };
     this.store.set("consecutive_errors", "0");
     this.store.set("last_scan", JSON.stringify(snapshot));
+    const fingerprint = JSON.stringify({ inspected, candidates, result });
+    const previous = this.store.get("last_scan_audit_fingerprint");
+    const lastAuditAt = Number(this.store.get("last_scan_audit_at") ?? 0);
+    if (previous === fingerprint && now - lastAuditAt < 60_000) return;
+    this.store.set("last_scan_audit_fingerprint", fingerprint);
+    this.store.set("last_scan_audit_at", String(now));
     this.store.audit(
       "scan_complete",
       `${inspected} ofertas · ${candidates} candidatas · ${result}`,

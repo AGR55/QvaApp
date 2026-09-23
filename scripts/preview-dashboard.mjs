@@ -40,6 +40,14 @@ const hunting = { buyRunning: true, sellRunning: true };
 const config = { version: 3, qusdReserve: 10, maxOpenOffers: 10, hunting, automation, risk, markets };
 const operation = { uuid: "op-demo-01", offerType: "buy", coin: "BANK_CUP", amount: 20, receive: 20400, rate: 1020, referenceRate: 1012, state: "applied", autoApplied: true, cancelAt: null, createdAt: now - 120000 };
 const workflow = { id: "workflow-demo-01", targetOffer: { ...operation, type: "buy", status: "processing" }, riskDecision: { kind: "apply", reasons: ["Todos los límites pasaron."], checks: [] }, state: "applied", error: null, createdAt: now - 120000, updatedAt: now - 90000 };
+const previewLogs = [
+  { id: 1, createdAt: now - 280_000, action: "startup_reconciliation", uuid: null, detail: "5 flujos revisados; 5 requieren atención.", level: "warning", component: "system" },
+  { id: 2, createdAt: now - 210_000, action: "scan_complete", uuid: null, detail: "379 ofertas · 0 candidatas · Sin aplicación", level: "info", component: "trading" },
+  { id: 3, createdAt: now - 150_000, action: "opportunity_applied", uuid: "op-demo-01", detail: "Aplicación automática confirmada.", level: "success", component: "trading" },
+  { id: 4, createdAt: now - 92_000, action: "fiat_sync_background_error", uuid: null, detail: "QvaPay no respondió dentro del tiempo esperado. Comprueba tu conexión e inténtalo de nuevo.", level: "error", component: "qvapay" },
+  { id: 5, createdAt: now - 45_000, action: "price_guard_block", uuid: "blocked-demo-01", detail: "4.2% por encima de la mediana de compra.", level: "warning", component: "trading" },
+  { id: 6, createdAt: now - 8_000, action: "market_reader_added", uuid: null, detail: "Cuenta lectora añadida: Exploradora secundaria.", level: "success", component: "system" },
+];
 const snapshot = {
   generatedAt: now,
   balance: 68.5,
@@ -102,6 +110,20 @@ const model = {
   config: () => config,
   configRevisions: () => [{ id: 1, createdAt: now, source: "preview", reason: "Datos de demostración", config, previousHash: null, hash: "0123456789abcdef" }],
   auditLog: () => snapshot.activity,
+  operationalLogs: ({ after = 0, limit = 100, level, component, query } = {}) => {
+    const normalizedQuery = query?.toLowerCase();
+    const items = previewLogs.filter((item) =>
+      item.id > after &&
+      (!level || item.level === level) &&
+      (!component || item.component === component) &&
+      (!normalizedQuery || `${item.action} ${item.detail} ${item.uuid || ""}`.toLowerCase().includes(normalizedQuery))
+    );
+    return {
+      items: after ? items.slice(0, limit) : items.slice(-limit).reverse(),
+      hasMore: items.length > limit,
+      newestId: previewLogs.at(-1).id,
+    };
+  },
   decisionEvents: ({ page = 1, pageSize = 20 } = {}) => ({
     items: [{ id: 1, version: "preview-blocked-v1", ...snapshot.alerts[0], checks: [
       { code: "price_policy", label: "Política de precio", status: "fail", actual: "blocked", limit: "eligible", reason: "Supera la protección extrema de mediana." },

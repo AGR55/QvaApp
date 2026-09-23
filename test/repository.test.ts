@@ -32,6 +32,37 @@ test("versiona el esquema y cierra explícitamente SQLite", () => {
   store.close();
 });
 
+test("pagina logs operativos, clasifica niveles y redacta secretos", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-operational-logs-"));
+  const store = new Store(dataDir);
+  store.audit("scan_complete", "12 ofertas · 0 candidatas · Sin aplicación");
+  store.audit(
+    "fiat_sync_background_error",
+    "Authorization=Bearer secreto-super-sensible token=12345|abcdef",
+  );
+  store.audit("opportunity_applied", "Aplicación confirmada", "offer-1");
+
+  const initial = store.operationalLogs({ limit: 2 });
+  assert.equal(initial.items.length, 2);
+  assert.deepEqual(initial.items.map((item) => item.level), ["success", "error"]);
+  assert.equal(initial.items[1]?.component, "qvapay");
+  assert.doesNotMatch(initial.items[1]?.detail ?? "", /secreto-super-sensible|12345\|abcdef/);
+  assert.match(initial.items[1]?.detail ?? "", /\[redacted\]/);
+  assert.equal(initial.hasMore, true);
+
+  const followed = store.operationalLogs({ after: initial.items[1]!.id, limit: 10 });
+  assert.deepEqual(followed.items.map((item) => item.action), ["opportunity_applied"]);
+
+  const filtered = store.operationalLogs({
+    level: "error",
+    component: "qvapay",
+    query: "Authorization",
+    limit: 10,
+  });
+  assert.equal(filtered.items.length, 1);
+  store.close();
+});
+
 test("persiste la configuración nueva únicamente en SQLite", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-config-sqlite-"));
   const store = new Store(dataDir);

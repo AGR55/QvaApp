@@ -229,6 +229,39 @@ export interface MutationIntent {
   updatedAt: number;
 }
 
+type OperationalLogLevel = "info" | "success" | "warning" | "error";
+type OperationalLogComponent =
+  | "trading"
+  | "qvapay"
+  | "notifications"
+  | "network"
+  | "system";
+
+interface OperationalLogEntry {
+  id: number;
+  createdAt: number;
+  action: string;
+  uuid: string | null;
+  detail: string;
+  level: OperationalLogLevel;
+  component: OperationalLogComponent;
+}
+
+export interface OperationalLogPage {
+  items: OperationalLogEntry[];
+  hasMore: boolean;
+  newestId: number;
+}
+
+export interface OperationalLogOptions {
+  after?: number;
+  limit?: number;
+  level?: OperationalLogLevel;
+  component?: OperationalLogComponent;
+  query?: string;
+  since?: number;
+}
+
 export interface CapitalReservation {
   workflowId: string;
   market: FiatMarket;
@@ -1693,6 +1726,68 @@ export class Store {
     }));
   }
 
+  operationalLogs(options: OperationalLogOptions = {}): OperationalLogPage {
+    const limit = Math.min(200, Math.max(1, Math.trunc(options.limit ?? 100)));
+    const after = Math.max(0, Math.trunc(options.after ?? 0));
+    const clauses: string[] = [];
+    const values: Array<string | number> = [];
+    if (after) {
+      clauses.push("id > ?");
+      values.push(after);
+    }
+    if (options.level) {
+      clauses.push(`${operationalLevelSql("action")} = ?`);
+      values.push(options.level);
+    }
+    if (options.component) {
+      clauses.push(`${operationalComponentSql("action")} = ?`);
+      values.push(options.component);
+    }
+    const query = options.query?.trim();
+    if (query) {
+      clauses.push("(action LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\' OR offer_uuid LIKE ? ESCAPE '\\')");
+      const pattern = `%${escapeSqlLike(query)}%`;
+      values.push(pattern, pattern, pattern);
+    }
+    if (options.since && options.since > 0) {
+      clauses.push("created_at >= ?");
+      values.push(Date.now() - options.since);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+    const direction = after ? "ASC" : "DESC";
+    const rows = this.db
+      .prepare(
+        `SELECT id, created_at, action, offer_uuid, detail,
+                ${operationalLevelSql("action")} AS level,
+                ${operationalComponentSql("action")} AS component
+           FROM audit_log ${where}
+          ORDER BY id ${direction} LIMIT ?`,
+      )
+      .all(...values, limit + 1) as Record<string, unknown>[];
+    const hasMore = rows.length > limit;
+    const selected = rows.slice(0, limit);
+    const globalNewest = Number(
+      (this.db.prepare("SELECT coalesce(max(id), 0) AS id FROM audit_log").get() as { id: number }).id,
+    );
+    const lastSelected = selected.at(-1);
+    return {
+      items: selected.map((row) => ({
+        id: Number(row.id),
+        createdAt: Number(row.created_at),
+        action: String(row.action),
+        uuid: row.offer_uuid === null ? null : String(row.offer_uuid),
+        detail: redactOperationalDetail(String(row.detail)),
+        level: String(row.level) as OperationalLogLevel,
+        component: String(row.component) as OperationalLogComponent,
+      })),
+      hasMore,
+      newestId:
+        after && hasMore && lastSelected
+          ? Number(lastSelected.id)
+          : globalNewest,
+    };
+  }
+
   syncTradingAlerts(
     alerts: Omit<TradingAlert, "createdAt" | "updatedAt" | "resolvedAt">[],
     offerTypes?: P2pType[],
@@ -2363,4 +2458,69 @@ function rebalanceJobFromRow(row: Record<string, unknown>): RebalanceJob {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+function operationalLevelSql(column: string): string {
+  return `CASE
+    WHEN lower(${column}) LIKE '%error%'
+      OR lower(${column}) LIKE '%failed%'
+      OR lower(${column}) LIKE '%uncertain%' THEN 'error'
+    WHEN lower(${column}) LIKE '%warning%'
+      OR lower(${column}) LIKE '%rejected%'
+      OR lower(${column}) LIKE '%blocked%'
+      OR lower(${column}) LIKE '%pending%'
+      OR lower(${column}) LIKE '%retry%'
+      OR lower(${column}) LIKE '%skipped%' THEN 'warning'
+    WHEN lower(${column}) LIKE '%applied%'
+      OR lower(${column}) LIKE '%confirmed%'
+      OR lower(${column}) LIKE '%completed%'
+      OR lower(${column}) LIKE '%reconciled%'
+      OR lower(${column}) LIKE '%activated%'
+      OR lower(${column}) LIKE '%resumed%'
+      OR lower(${column}) LIKE '%created%'
+      OR lower(${column}) LIKE '%added%' THEN 'success'
+    ELSE 'info'
+  END`;
+}
+
+function operationalComponentSql(column: string): string {
+  return `CASE
+    WHEN lower(${column}) LIKE 'scan_%'
+      OR lower(${column}) LIKE 'price_%'
+      OR lower(${column}) LIKE 'risk_%'
+      OR lower(${column}) LIKE 'opportunity_%'
+      OR lower(${column}) LIKE 'hunting_%'
+      OR lower(${column}) LIKE 'sell_%' THEN 'trading'
+    WHEN lower(${column}) LIKE 'fiat_%'
+      OR lower(${column}) LIKE 'qvapay_%'
+      OR lower(${column}) LIKE 'operation_%'
+      OR lower(${column}) LIKE 'remote_operation_%'
+      OR lower(${column}) LIKE 'mutation_%'
+      OR lower(${column}) LIKE 'workflow_%'
+      OR lower(${column}) LIKE 'refresh_%'
+      OR lower(${column}) LIKE 'auto_cancel_%'
+      OR lower(${column}) LIKE 'surplus_%' THEN 'qvapay'
+    WHEN lower(${column}) LIKE 'telegram_%'
+      OR lower(${column}) LIKE 'notification_%'
+      OR lower(${column}) LIKE 'push_%' THEN 'notifications'
+    WHEN lower(${column}) LIKE 'cooperative_%'
+      OR lower(${column}) LIKE 'nats_%' THEN 'network'
+    ELSE 'system'
+  END`;
+}
+
+function escapeSqlLike(value: string): string {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+function redactOperationalDetail(value: string): string {
+  return value
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b\d+\|[A-Za-z0-9._~-]+\b/g, "[redacted]")
+    .replace(
+      /\b(token|password|secret|api[_-]?key|authorization)\s*([=:])\s*\S+/gi,
+      (_match, key: string, separator: string) =>
+        `${key}${separator}[redacted]`,
+    )
+    .slice(0, 2_000);
 }

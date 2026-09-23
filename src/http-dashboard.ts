@@ -581,6 +581,51 @@ export function buildDashboard(
     reply.status(204);
   });
   app.get("/api/audit", async () => ({ data: readModel.auditLog() }));
+  app.get<{
+    Querystring: {
+      after?: string;
+      limit?: string;
+      level?: string;
+      component?: string;
+      query?: string;
+      since?: string;
+    };
+  }>("/api/logs", {
+    schema: {
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          after: { type: "integer", minimum: 0 },
+          limit: { type: "integer", minimum: 1, maximum: 200 },
+          level: { type: "string", enum: ["info", "success", "warning", "error"] },
+          component: { type: "string", enum: ["trading", "qvapay", "notifications", "network", "system"] },
+          query: { type: "string", maxLength: 120 },
+          since: { type: "integer", minimum: 1_000, maximum: 604_800_000 },
+        },
+      },
+    },
+  }, async (request) => {
+    const after = nonNegativeInteger(request.query.after);
+    const limit = boundedPositiveInteger(request.query.limit, 100, 200);
+    const since = optionalPositiveInteger(request.query.since);
+    const query = request.query.query?.trim();
+    return {
+      data: readModel.operationalLogs({
+        ...(after === undefined ? {} : { after }),
+        limit,
+        ...(request.query.level
+          ? { level: request.query.level as "info" | "success" | "warning" | "error" }
+          : {}),
+        ...(request.query.component
+          ? { component: request.query.component as "trading" | "qvapay" | "notifications" | "network" | "system" }
+          : {}),
+        ...(query ? { query } : {}),
+        ...(since === undefined ? {} : { since }),
+      }),
+      source: "sqlite",
+    };
+  });
   app.get<{ Querystring: { decision?: string; status?: string; page?: string; pageSize?: string } }>(
     "/api/decision-events",
     async (request) => {
@@ -720,6 +765,27 @@ function positiveInteger(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function boundedPositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  maximum: number,
+): number {
+  const parsed = positiveInteger(value, fallback);
+  return Math.min(maximum, parsed);
+}
+
+function optionalPositiveInteger(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function nonNegativeInteger(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
 function serviceWorkerScript(): string {
   return `self.addEventListener("push", (event) => {
     let payload = {};
@@ -823,6 +889,7 @@ function openApiDocument() {
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
       "/api/hunting": { put: { summary: "Controlar cacerías y precios por mercado" } },
       "/api/audit": { get: { summary: "Exportar auditoría" } },
+      "/api/logs": { get: { summary: "Consultar logs operativos filtrados por cursor" } },
       "/api/decision-events": { get: { summary: "Consultar decisiones operativas paginadas" } },
       "/api/decision-events/{id}/dismiss": { post: { summary: "Descartar una versión de decisión" } },
       "/api/push/public-key": { get: { summary: "Obtener la clave pública Web Push" } },

@@ -49,7 +49,11 @@ export function Field({ label, htmlFor, description, error, children, className 
 }
 
 export function Badge({ variant = "neutral", className, children }) {
-  const shadcnVariant = variant === "neutral" ? "secondary" : "outline";
+  const shadcnVariant = variant === "danger"
+    ? "destructive"
+    : variant === "neutral" || variant === "info"
+      ? "secondary"
+      : "outline";
   return <ShadcnBadge variant={shadcnVariant} className={cx("ui-badge", `ui-badge-${variant}`, className)}>{children}</ShadcnBadge>;
 }
 

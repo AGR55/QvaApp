@@ -70,6 +70,53 @@ test("Fastify protege datos, origen y mutaciones con sesión y CSRF", async () =
   await app.close();
 });
 
+test("expone logs operativos autenticados con filtros acotados", async () => {
+  const calls: unknown[] = [];
+  const readModel = {
+    operationalLogs: (options: unknown) => {
+      calls.push(options);
+      return { items: [], hasMore: false, newestId: 0 };
+    },
+  };
+  const app = buildDashboard(readModel as never, {
+    password,
+    trustedOrigin: origin,
+  });
+
+  const anonymous = await app.inject({ method: "GET", url: "/api/logs" });
+  assert.equal(anonymous.statusCode, 401);
+
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const listed = await app.inject({
+    method: "GET",
+    url: "/api/logs?after=7&limit=80&level=error&component=qvapay&query=fiat&since=3600000",
+    headers: { cookie },
+  });
+  assert.equal(listed.statusCode, 200);
+  assert.deepEqual(calls, [{
+    after: 7,
+    limit: 80,
+    level: "error",
+    component: "qvapay",
+    query: "fiat",
+    since: 3_600_000,
+  }]);
+
+  const invalid = await app.inject({
+    method: "GET",
+    url: "/api/logs?level=critical&limit=9999",
+    headers: { cookie },
+  });
+  assert.equal(invalid.statusCode, 400);
+  await app.close();
+});
+
 test("gestiona cuentas lectoras sin exponer sus tokens", async () => {
   const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-http-readers-")));
   const accounts = new MarketAccountService(

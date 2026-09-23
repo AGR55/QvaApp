@@ -23,6 +23,7 @@ import {
   Moon,
   Sun,
   Menu,
+  ScrollText,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
@@ -59,6 +60,11 @@ const Charts = lazy(() =>
     default: module.Charts,
   })),
 );
+const Logs = lazy(() =>
+  import("./features/logs.jsx").then((module) => ({
+    default: module.Logs,
+  })),
+);
 const navigationGroups = [
   {
     label: "Operar",
@@ -81,6 +87,7 @@ const navigationGroups = [
     items: [
       ["configuracion", "Estrategia", SlidersHorizontal],
       ["auditoria", "Auditoría", ShieldCheck],
+      ["logs", "Logs", ScrollText],
     ],
   },
 ];
@@ -511,6 +518,11 @@ function App() {
           ) : null}
           {view === "auditoria" ? (
             <Audit data={data} onChanged={refresh} />
+          ) : null}
+          {view === "logs" ? (
+            <Suspense fallback={<Empty>Cargando logs operativos…</Empty>}>
+              <Logs />
+            </Suspense>
           ) : null}
         </div>
       </main>

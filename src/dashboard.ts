@@ -121,6 +121,9 @@ export class DashboardReadModel {
   auditLog() {
     return this.store.recentAudit(1_000);
   }
+  operationalLogs(options: Parameters<Store["operationalLogs"]>[0]) {
+    return this.store.operationalLogs(options);
+  }
   saveConfig(next: TradingConfig, reason?: string): void {
     this.trading.saveConfig(
       next,
