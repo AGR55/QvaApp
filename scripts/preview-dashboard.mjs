@@ -212,6 +212,12 @@ const marketSource = {
     healthyAccounts: 1 + previewReaders.filter((account) => account.enabled && account.health === "healthy").length,
     effectiveCadenceSeconds: 3 / (1 + previewReaders.filter((account) => account.enabled && account.health === "healthy").length),
     estimatedRequestsPerMinute: 20 * (1 + previewReaders.filter((account) => account.enabled && account.health === "healthy").length),
+    webhookUrl: `${origin}/webhooks/qvapay/p2p-feed`,
+    webhookSecretConfigured: false,
+    lastWebhookReceivedAt: null,
+    lastWebhookProcessedAt: null,
+    pendingWebhookEvents: 0,
+    failedWebhookEvents: 0,
   }),
 };
 const origin = `http://127.0.0.1:${port}`;

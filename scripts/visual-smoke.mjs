@@ -321,10 +321,10 @@ try {
   const settingsDesktop = await assertPageQuality("Estrategia");
   await assertSettingsCardsContained("Estrategia");
   await waitFor(() => execute(
-    "return document.body.innerText.includes('Exploradora secundaria') && document.body.innerText.includes('1 consulta cada 1.50 s')",
+    "return document.body.innerText.includes('Exploradora secundaria') && document.body.innerText.includes('1 consulta cada 1.50 s') && document.body.innerText.includes('/webhooks/qvapay/p2p-feed')",
   ));
   await execute(`
-    document.querySelector('.market-source-summary')?.scrollIntoView({ block: 'start' });
+    document.querySelector('.market-source-mode')?.scrollIntoView({ block: 'center' });
     return true;
   `);
   await screenshot("/tmp/qvaapply-market-source-desktop.png");

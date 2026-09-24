@@ -492,6 +492,37 @@ test("evalúa una página secundaria pero aplica únicamente con el gateway prin
   store.close();
 });
 
+test("procesa una oferta del webhook sin esperar listado ni promedios remotos", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "webhook-discovery",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+  };
+  const applications: string[] = [];
+  const qva = {
+    listOffersPage: async () => { throw new Error("no debe listar"); },
+    p2pAverages: async () => { throw new Error("no debe consultar promedios"); },
+    qusdBalance: async () => 100,
+    apply: async (uuid: string) => void applications.push(uuid),
+    sendChat: async () => undefined,
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  trading.updateHunting({ sellRunning: false });
+
+  const result = await trading.ingestMarketOffer(target, Date.now());
+
+  assert.equal(result.action, `aplicada ${target.uuid}`);
+  assert.deepEqual(applications, [target.uuid]);
+  assert.equal(store.getOperation(target.uuid)?.autoApplied, true);
+  const market = store.loadRemoteResource<{ offers: P2pOffer[] }>("market:BANK_CUP");
+  assert.equal(market?.data.offers[0]?.uuid, target.uuid);
+  store.close();
+});
+
 test("no evalúa una instantánea multicuentas que ya está obsoleta", async () => {
   const { store, cfg, markets } = setup();
   const next = markets.current();

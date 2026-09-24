@@ -23,6 +23,7 @@ import {
 } from "./telegram-menu.js";
 import { MarketAccountService } from "./market-accounts.js";
 import { PollingMarketSource, weightedMarketJobs } from "./market-source.js";
+import { MarketSourceCoordinator } from "./market-feed.js";
 
 if (!config.realTradingAllowed)
   throw new Error(
@@ -93,7 +94,7 @@ const trading = new TradingEngine(
     });
   },
 );
-const marketSource = new PollingMarketSource(
+const pollingMarketSource = new PollingMarketSource(
   store,
   marketAccounts,
   qva,
@@ -105,6 +106,14 @@ const marketSource = new PollingMarketSource(
       sellEnabled: trading.huntEnabled(market.code, "sell"),
     })),
   }),
+);
+const marketSource = new MarketSourceCoordinator(
+  store,
+  vault,
+  pollingMarketSource,
+  new URL("/webhooks/qvapay/p2p-feed", config.dashboardTrustedOrigin).toString(),
+  (offer, receivedAt) => trading.ingestMarketOffer(offer, receivedAt),
+  () => !trading.isPaused(),
 );
 const dashboardReadModel = new DashboardReadModel(
   trading,
@@ -369,6 +378,7 @@ scheduler.register("scan", 250, async () => {
   if (trading.isPaused()) return;
   const update = await marketSource.pollNext();
   if (update) await trading.ingestMarketUpdate(update);
+  else if (marketSource.mode() === "webhook") await marketSource.processNext();
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
 scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());

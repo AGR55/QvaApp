@@ -464,8 +464,11 @@ export class TradingEngine {
     type: "buy" | "sell",
     page: P2pListPage,
     scannedAt: number,
+    preferCachedAverages = false,
   ): Promise<MarketSnapshot> {
-    const averages = await this.getAverages();
+    const averages = preferCachedAverages
+      ? this.store.loadRemoteResource<Record<string, P2pAverage>>("averages")?.data
+      : await this.getAverages();
     const matchingOffers = page.offers.filter(
       (offer) => offer.type === type && offer.coin === coin,
     );
@@ -503,6 +506,56 @@ export class TradingEngine {
       return await run;
     } finally {
       if (this.scanInFlight === run) this.scanInFlight = undefined;
+    }
+  }
+
+  async ingestMarketOffer(
+    offer: P2pOffer,
+    receivedAt = Date.now(),
+  ): Promise<{ inspected: number; candidates: number; action?: string }> {
+    if (this.scanInFlight) await this.scanInFlight;
+    const run = this.ingestMarketOfferOnce(offer, receivedAt);
+    this.scanInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.scanInFlight === run) this.scanInFlight = undefined;
+    }
+  }
+
+  private async ingestMarketOfferOnce(
+    offer: P2pOffer,
+    receivedAt: number,
+  ): Promise<{ inspected: number; candidates: number; action?: string }> {
+    if (this.isPaused())
+      return { inspected: 0, candidates: 0, action: "pausado" };
+    if (
+      Date.now() - receivedAt >
+      this.marketConfig.current().risk.maxQuoteAgeSeconds * 1_000
+    ) return { inspected: 0, candidates: 0, action: "obsoleta" };
+    if (offer.status !== "open" || !this.isMarket(offer.coin))
+      return { inspected: 0, candidates: 0, action: "ignorada" };
+    try {
+      const snapshot = {
+        ...(await this.marketSnapshotFromPage(
+          offer.coin,
+          offer.type,
+          { offers: [offer], total: 1, currentPage: 1, perPage: 1 },
+          receivedAt,
+          true,
+        )),
+        coin: offer.coin,
+        side: offer.type,
+      };
+      return await this.processSnapshots(
+        [snapshot],
+        offer.type === "buy",
+        offer.type === "sell",
+        { synchronizedOfferTypes: [offer.type], incremental: true },
+      );
+    } catch (error) {
+      await this.handleError("market_feed", error, offer.uuid);
+      throw error;
     }
   }
 
@@ -626,6 +679,10 @@ export class TradingEngine {
     >,
     includeBuySide: boolean,
     noSellHuntMarkets: boolean,
+    options: {
+      synchronizedOfferTypes?: Array<"buy" | "sell">;
+      incremental?: boolean;
+    } = {},
   ): Promise<{
     inspected: number;
     candidates: number;
@@ -653,11 +710,13 @@ export class TradingEngine {
         )
         .map((item) => item.offer);
 
-      const synchronizedOfferTypes: Array<"buy" | "sell"> = ["sell"];
-      if (includeBuySide || noSellHuntMarkets)
+      const synchronizedOfferTypes: Array<"buy" | "sell"> =
+        options.synchronizedOfferTypes?.slice() ?? ["sell"];
+      if (!options.synchronizedOfferTypes && (includeBuySide || noSellHuntMarkets))
         synchronizedOfferTypes.push("buy");
       this.syncWebAlerts(items, synchronizedOfferTypes, snapshots);
-      this.persistScanCoverage(snapshots, items, includeBuySide);
+      if (options.incremental) this.persistIncrementalMarketOffer(snapshots[0]!, items);
+      else this.persistScanCoverage(snapshots, items, includeBuySide);
 
       for (const item of items.filter(
         (candidate) => candidate.decision === "blocked",
@@ -2176,6 +2235,39 @@ export class TradingEngine {
       "last_scan_coverage",
       JSON.stringify({ at: scannedAt, includedBuySide, markets: coverage }),
     );
+  }
+
+  private persistIncrementalMarketOffer(
+    snapshot: MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" },
+    items: MarketItem[],
+  ): void {
+    const previous = this.store.loadRemoteResource<{
+      offers?: Array<P2pOffer & { rate?: number; decision?: string; reason?: string }>;
+    }>(`market:${snapshot.coin}`)?.data.offers ?? [];
+    const incoming = items.map((item) => ({
+      ...item.offer,
+      rate: item.rate,
+      decision: item.decision,
+      reason: item.reason,
+    }));
+    const incomingIds = new Set(incoming.map((offer) => offer.uuid));
+    const offers = [
+      ...incoming,
+      ...previous.filter((offer) => !incomingIds.has(offer.uuid)),
+    ].slice(0, 100);
+    this.store.saveRemoteResource(
+      `market:${snapshot.coin}`,
+      { total: offers.length, offers },
+      snapshot.scannedAt,
+    );
+    if (snapshot.average && Object.keys(snapshot.average).length) {
+      const averages = this.store.loadRemoteResource<Record<string, P2pAverage>>("averages")?.data ?? {};
+      this.store.saveRemoteResource(
+        "averages",
+        { ...averages, [snapshot.coin]: { ...averages[snapshot.coin], ...snapshot.average } },
+        snapshot.scannedAt,
+      );
+    }
   }
 
   private async notifyRiskBlock(

@@ -13,6 +13,7 @@ import type { FiatMarket } from "./types.js";
 import type { StoredPushSubscription, WebPushService } from "./web-push.js";
 import type { MarketAccountService } from "./market-accounts.js";
 import type { MarketDataSource } from "./market-source.js";
+import { MarketFeedRequestError, type MarketSourceCoordinator } from "./market-feed.js";
 
 type AuthOptions = {
   password: string;
@@ -28,7 +29,7 @@ export async function startDashboard(
   pushService?: PushService,
   host: "127.0.0.1" | "0.0.0.0" = "127.0.0.1",
   marketAccounts?: MarketAccountService,
-  marketSource?: Pick<MarketDataSource, "status">,
+  marketSource?: Pick<MarketSourceCoordinator, "status" | "setMode" | "saveWebhookSecret" | "acceptWebhook">,
 ): Promise<FastifyInstance> {
   const app = buildDashboard(
     readModel,
@@ -47,7 +48,7 @@ export function buildDashboard(
   authOptions: AuthOptions,
   pushService?: PushService,
   marketAccounts?: MarketAccountService,
-  marketSource?: Pick<MarketDataSource, "status">,
+  marketSource?: Pick<MarketSourceCoordinator, "status" | "setMode" | "saveWebhookSecret" | "acceptWebhook"> | Pick<MarketDataSource, "status">,
 ): FastifyInstance {
   const app = Fastify({
     logger: false,
@@ -56,6 +57,20 @@ export function buildDashboard(
     connectionTimeout: 10_000,
     maxRequestsPerSocket: 100,
   });
+  app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer" },
+    (request, body, done) => {
+      const rawBody = Buffer.isBuffer(body) ? body : Buffer.from(body);
+      (request as FastifyRequest & { rawJsonBody?: Buffer }).rawJsonBody = rawBody;
+      try {
+        done(null, JSON.parse(rawBody.toString("utf8")) as unknown);
+      } catch (error) {
+        done(error as Error, undefined);
+      }
+    },
+  );
   const auth = new DashboardAuth(authOptions);
   const publicRoot = resolve("public/dashboard");
   const iconsRoot = resolve("public/icons");
@@ -182,6 +197,28 @@ export function buildDashboard(
         : { authenticated: false },
     };
   });
+  app.post("/webhooks/qvapay/p2p-feed", async (request, reply) => {
+    if (!marketSource || !("acceptWebhook" in marketSource))
+      return reply.status(503).send({ error: "El feed de mercado no está disponible." });
+    try {
+      const result = marketSource.acceptWebhook(
+        (request as FastifyRequest & { rawJsonBody?: Buffer }).rawJsonBody ?? Buffer.alloc(0),
+        {
+          ...(headerValue(request, "x-qvapay-signature")
+            ? { signature: headerValue(request, "x-qvapay-signature")! }
+            : {}),
+          ...(headerValue(request, "x-qvapay-timestamp")
+            ? { timestamp: headerValue(request, "x-qvapay-timestamp")! }
+            : {}),
+        },
+      );
+      return reply.status(202).send({ ok: true, ...result });
+    } catch (error) {
+      if (error instanceof MarketFeedRequestError)
+        return reply.status(error.status).send({ error: error.message });
+      throw error;
+    }
+  });
   app.post<{ Body: { password: string } }>("/api/session", {
     schema: {
       body: {
@@ -282,6 +319,36 @@ export function buildDashboard(
       readers: marketAccounts?.list() ?? [],
     },
   }));
+  app.put<{ Body: { mode: "polling" | "webhook" } }>("/api/market-source", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["mode"],
+        properties: { mode: { type: "string", enum: ["polling", "webhook"] } },
+      },
+    },
+  }, async (request) => {
+    if (!marketSource || !("setMode" in marketSource))
+      throw new ClientInputError("La conmutación de fuente no está disponible.");
+    await clientAction(() => marketSource.setMode(request.body.mode));
+    return { data: marketSource.status() };
+  });
+  app.put<{ Body: { secret: string } }>("/api/market-source/webhook-secret", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["secret"],
+        properties: { secret: { type: "string", minLength: 16, maxLength: 512 } },
+      },
+    },
+  }, async (request) => {
+    if (!marketSource || !("saveWebhookSecret" in marketSource))
+      throw new ClientInputError("La configuración del webhook no está disponible.");
+    await clientAction(() => marketSource.saveWebhookSecret(request.body.secret));
+    return { data: marketSource.status() };
+  });
   app.post<{
     Body: { label: string; token: string; intervalSeconds: number };
   }>("/api/market-readers", {

@@ -27,6 +27,29 @@ Para el panel local se aceptan `http://127.0.0.1:3000`, `http://localhost:3000` 
 
 Ejecuta `pnpm login`, introduce el correo, la contraseña oculta y después el código vigente de seis dígitos de la aplicación autenticadora. El comando usa `remember: true`, verifica el token mediante `GET /user` y solo entonces lo cifra en SQLite. Un timeout de transporte se reintenta hasta tres veces; un TOTP rechazado, bloqueo o rate limit requiere intervención humana y nunca se reintenta automáticamente.
 
+## Feed P2P por webhook
+
+El endpoint de producción que debes registrar en **qvapay.com/dev → Feed del
+mercado P2P** es:
+
+```text
+https://qvaapply.inventory.cloudns.be/webhooks/qvapay/p2p-feed
+```
+
+Selecciona el evento `p2p.created`. Copia el secreto propio del feed, abre
+**Estrategia → Fuente de mercado**, guárdalo y activa **Webhook**. No coloques la
+URL del panel (`https://qvaapply.inventory.cloudns.be/`) ni rutas de API de
+QvaPay en el campo webhook: la única URL receptora es la anterior.
+
+La ruta valida `x-qvapay-signature` sobre el cuerpo crudo y
+`x-qvapay-timestamp`; no utiliza la contraseña del panel. Una entrega aceptada
+responde `202` después de quedar persistida. El panel muestra última recepción,
+último procesamiento, cola y fallos. Si necesitas volver al listado periódico,
+pulsa **Polling**; el secreto cifrado se conserva.
+
+La suscripción y el formato están documentados por QvaPay en
+<https://www.qvapay.com/docs/p2p/webhooks>.
+
 ## Flujo humano de pago
 
 - Compra de QUSD: pulsa **Voy a pagar**, transfiere fuera de QvaApply y luego **Registrar pago** con referencia.
