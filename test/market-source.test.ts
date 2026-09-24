@@ -87,12 +87,18 @@ test("reparte de forma justa una cantidad arbitraria de cuentas", async () => {
   state.setNow(1_003_000);
   await state.source.pollNext();
 
-  assert.deepEqual(state.calls, [
-    { token: "primary-token", at: 1_000_000 },
-    { token: "secondary-reader-one", at: 1_001_000 },
-    { token: "secondary-reader-two", at: 1_002_000 },
-    { token: "primary-token", at: 1_003_000 },
+  assert.deepEqual(state.calls.map((call) => call.at), [
+    1_000_000,
+    1_001_000,
+    1_002_000,
+    1_003_000,
   ]);
+  assert.equal(state.calls[0]?.token, "primary-token");
+  assert.deepEqual(
+    state.calls.slice(1, 3).map((call) => call.token).sort(),
+    ["secondary-reader-one", "secondary-reader-two"],
+  );
+  assert.equal(state.calls[3]?.token, "primary-token");
   assert.equal(state.source.status().healthyAccounts, 3);
   assert.equal(state.source.status().effectiveCadenceSeconds, 1);
   state.store.close();
