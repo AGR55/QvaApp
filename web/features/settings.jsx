@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Activity,
   Check,
+  Copy,
   History,
   ImagePlus,
   KeyRound,
@@ -12,6 +13,7 @@ import {
   Trash2,
   Wifi,
   WifiOff,
+  Webhook,
   X,
 } from "lucide-react";
 import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
@@ -691,6 +693,7 @@ function MarketSourceSettings() {
   const [editor, setEditor] = useState();
   const [removing, setRemoving] = useState();
   const [form, setForm] = useState({ label: "", token: "", intervalSeconds: 3 });
+  const [feedSecret, setFeedSecret] = useState("");
   const load = useCallback(async () => {
     try {
       const payload = await requestJson("/api/market-source");
@@ -769,6 +772,44 @@ function MarketSourceSettings() {
       setMessage(error instanceof Error ? error.message : "No se pudo eliminar.");
     }
   };
+  const changeMode = async (mode) => {
+    setMessage(`Activando ${mode === "webhook" ? "webhook" : "polling"}…`);
+    try {
+      const payload = await requestJson("/api/market-source", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
+      setSource((current) => ({ ...current, ...payload.data }));
+      setMessage(mode === "webhook" ? "Webhook activo: el polling quedó detenido." : "Polling activo.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo cambiar la fuente.");
+    }
+  };
+  const saveFeedSecret = async () => {
+    setMessage("Guardando secreto cifrado…");
+    try {
+      const payload = await requestJson("/api/market-source/webhook-secret", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ secret: feedSecret }),
+      });
+      setFeedSecret("");
+      setSource((current) => ({ ...current, ...payload.data }));
+      setMessage("Secreto del webhook guardado. Ya puedes activar el modo webhook.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar el secreto.");
+    }
+  };
+  const copyWebhookUrl = async () => {
+    if (!source?.webhookUrl) return;
+    try {
+      await navigator.clipboard.writeText(source.webhookUrl);
+      setMessage("URL del webhook copiada.");
+    } catch {
+      setMessage("No se pudo copiar automáticamente; selecciona la URL.");
+    }
+  };
 
   const primary = source?.accounts?.find((account) => account.role === "primary");
   const healthById = new Map((source?.accounts || []).map((account) => [account.id, account]));
@@ -778,13 +819,48 @@ function MarketSourceSettings() {
   }));
   return (
     <Panel title="Fuente de mercado" wide>
+      <div className="market-source-mode" aria-label="Modo de fuente de mercado">
+        <div>
+          <strong>Modo activo</strong>
+          <p>Webhook reacciona al publicar; polling consulta el listado por intervalos.</p>
+        </div>
+        <div className="market-source-mode-buttons">
+          <Button type="button" variant={source?.mode === "polling" ? "primary" : "outline"} onClick={() => void changeMode("polling")}>
+            <RefreshCw aria-hidden="true" data-icon="inline-start" /> Polling
+          </Button>
+          <Button type="button" variant={source?.mode === "webhook" ? "primary" : "outline"} disabled={!source?.webhookSecretConfigured} onClick={() => void changeMode("webhook")}>
+            <Webhook aria-hidden="true" data-icon="inline-start" /> Webhook
+          </Button>
+        </div>
+      </div>
+      <div className="market-webhook-setup">
+        <div className="market-webhook-url">
+          <span>
+            <small>URL para QvaPay · evento p2p.created</small>
+            <code>{source?.webhookUrl || "Cargando…"}</code>
+          </span>
+          <Button type="button" variant="ghost" size="icon" aria-label="Copiar URL del webhook" onClick={() => void copyWebhookUrl()}>
+            <Copy aria-hidden="true" />
+          </Button>
+        </div>
+        <Field label={source?.webhookSecretConfigured ? "Rotar secreto del feed" : "Secreto del feed"} htmlFor="market-feed-secret">
+          <span className="market-webhook-secret">
+            <Input id="market-feed-secret" type="password" autoComplete="off" minLength="16" maxLength="512" placeholder={source?.webhookSecretConfigured ? "Configurado · pega otro para rotarlo" : "Pega el secreto mostrado por QvaPay"} value={feedSecret} onChange={(event) => setFeedSecret(event.target.value)} />
+            <Button type="button" variant="secondary" disabled={feedSecret.trim().length < 16} onClick={() => void saveFeedSecret()}>
+              <KeyRound aria-hidden="true" data-icon="inline-start" /> Guardar
+            </Button>
+          </span>
+        </Field>
+      </div>
       <div className="market-source-summary">
         <div>
-          <Activity aria-hidden="true" />
+          {source?.mode === "webhook" ? <Webhook aria-hidden="true" /> : <Activity aria-hidden="true" />}
           <span>
-            <small>Cadencia estimada</small>
+            <small>{source?.mode === "webhook" ? "Última entrega" : "Cadencia estimada"}</small>
             <strong>
-              {source?.effectiveCadenceSeconds
+              {source?.mode === "webhook"
+                ? formatReaderTime(source?.lastWebhookReceivedAt)
+                : source?.effectiveCadenceSeconds
                 ? `1 consulta cada ${source.effectiveCadenceSeconds.toFixed(2)} s`
                 : "Sin cuentas disponibles"}
             </strong>
@@ -793,18 +869,19 @@ function MarketSourceSettings() {
         <div>
           <Wifi aria-hidden="true" />
           <span>
-            <small>Cuentas saludables</small>
-            <strong>{source?.healthyAccounts ?? "—"}</strong>
+            <small>{source?.mode === "webhook" ? "Último procesamiento" : "Cuentas saludables"}</small>
+            <strong>{source?.mode === "webhook" ? formatReaderTime(source?.lastWebhookProcessedAt) : source?.healthyAccounts ?? "—"}</strong>
           </span>
         </div>
         <div>
           <ShieldCheck aria-hidden="true" />
           <span>
-            <small>Consumo previsto</small>
-            <strong>{source ? `${Math.round(source.estimatedRequestsPerMinute)} consultas/min` : "—"}</strong>
+            <small>{source?.mode === "webhook" ? "Cola del feed" : "Consumo previsto"}</small>
+            <strong>{source?.mode === "webhook" ? `${source?.pendingWebhookEvents || 0} pendientes · ${source?.failedWebhookEvents || 0} fallidos` : source ? `${Math.round(source.estimatedRequestsPerMinute)} consultas/min` : "—"}</strong>
           </span>
         </div>
       </div>
+      {source?.lastWebhookError ? <p className="reader-error" role="status">Webhook: {source.lastWebhookError}</p> : null}
       <div className="market-reader-list">
         <MarketReaderCard account={{
           id: "primary",

@@ -306,7 +306,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v15-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v16-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });
@@ -321,7 +321,7 @@ test("repara una base v12 registrada sin la tabla de reajustes", () => {
   db.close();
 
   const migrated = new Store(dataDir);
-  assert.equal(migrated.schemaVersion(), 15);
+  assert.equal(migrated.schemaVersion(), 16);
   const job = migrated.createRebalanceJob("repair-check", [], 1);
   assert.equal(job.id, "repair-check");
   migrated.close();

@@ -33,11 +33,18 @@ interface MarketSourceAccountStatus {
 }
 
 export interface MarketSourceStatus {
-  mode: "polling";
+  mode: "polling" | "webhook";
   accounts: MarketSourceAccountStatus[];
   healthyAccounts: number;
   effectiveCadenceSeconds: number | null;
   estimatedRequestsPerMinute: number;
+  webhookUrl?: string;
+  webhookSecretConfigured?: boolean;
+  lastWebhookReceivedAt?: number | null;
+  lastWebhookProcessedAt?: number | null;
+  pendingWebhookEvents?: number;
+  failedWebhookEvents?: number;
+  lastWebhookError?: string;
 }
 
 export interface MarketDataSource {

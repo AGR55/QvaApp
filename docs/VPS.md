@@ -93,6 +93,12 @@ volumen persistente exclusivo para los datos.
 Tras cada actualización se consulta `/api/session`. Si no responde correctamente,
 el script restaura la release anterior y Actions termina en error.
 
+El mismo virtual host publica el receptor firmado del feed P2P en
+`/webhooks/qvapay/p2p-feed`. No requiere una regla Nginx separada: la ubicación
+`/` existente lo entrega al proceso Node. No añadas autenticación básica ni una
+redirección específica sobre esa ruta, porque QvaPay autentica cada entrega con
+HMAC.
+
 Comandos útiles:
 
 ```bash

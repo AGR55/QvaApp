@@ -16,7 +16,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 15;
+const LATEST_SCHEMA_VERSION = 16;
 
 export type MarketReaderHealth =
   | "healthy"
@@ -46,6 +46,18 @@ export interface CachedRemoteResource<T = unknown> {
   key: string;
   data: T;
   updatedAt: number;
+}
+
+export interface MarketFeedEvent {
+  key: string;
+  event: string;
+  payload: unknown;
+  state: "pending" | "processed" | "ignored" | "failed";
+  attempts: number;
+  nextAttemptAt: number;
+  lastError: string | null;
+  receivedAt: number;
+  processedAt: number | null;
 }
 
 export type WorkflowState =
@@ -680,6 +692,26 @@ export class Store {
         `);
         this.db.prepare(
           "INSERT INTO schema_migrations(version, applied_at) VALUES (15, ?)",
+        ).run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 16) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS market_feed_events (
+            event_key TEXT PRIMARY KEY,
+            event TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at INTEGER NOT NULL DEFAULT 0,
+            last_error TEXT,
+            received_at INTEGER NOT NULL,
+            processed_at INTEGER
+          );
+          CREATE INDEX IF NOT EXISTS idx_market_feed_events_queue
+            ON market_feed_events(state, next_attempt_at, received_at);
+        `);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (16, ?)",
         ).run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
@@ -1382,6 +1414,78 @@ export class Store {
         "INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       )
       .run(key, value);
+  }
+
+  enqueueMarketFeedEvent(input: {
+    key: string;
+    event: string;
+    payload: unknown;
+    state?: "pending" | "ignored";
+    receivedAt?: number;
+  }): boolean {
+    const inserted = this.db.prepare(
+      `INSERT OR IGNORE INTO market_feed_events(
+        event_key, event, payload_json, state, received_at
+      ) VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      input.key,
+      input.event,
+      JSON.stringify(input.payload),
+      input.state ?? "pending",
+      input.receivedAt ?? Date.now(),
+    );
+    return inserted.changes > 0;
+  }
+
+  nextMarketFeedEvent(now = Date.now()): MarketFeedEvent | undefined {
+    const row = this.db.prepare(
+      `SELECT * FROM market_feed_events
+       WHERE state = 'pending' AND next_attempt_at <= ?
+       ORDER BY received_at ASC LIMIT 1`,
+    ).get(now) as Record<string, unknown> | undefined;
+    return row ? marketFeedEventFromRow(row) : undefined;
+  }
+
+  completeMarketFeedEvent(key: string, state: "processed" | "ignored"): void {
+    this.db.prepare(
+      `UPDATE market_feed_events
+       SET state = ?, processed_at = ?, last_error = NULL
+       WHERE event_key = ?`,
+    ).run(state, Date.now(), key);
+  }
+
+  ignorePendingMarketFeedEvents(): number {
+    return Number(this.db.prepare(
+      `UPDATE market_feed_events
+       SET state = 'ignored', processed_at = ?, last_error = NULL
+       WHERE state = 'pending'`,
+    ).run(Date.now()).changes);
+  }
+
+  failMarketFeedEvent(key: string, error: string, now = Date.now()): void {
+    const event = this.db.prepare(
+      "SELECT attempts FROM market_feed_events WHERE event_key = ?",
+    ).get(key) as { attempts: number } | undefined;
+    if (!event) return;
+    const attempts = Number(event.attempts) + 1;
+    const failed = attempts >= 5;
+    const delay = Math.min(60_000, 1_000 * 2 ** Math.max(0, attempts - 1));
+    this.db.prepare(
+      `UPDATE market_feed_events
+       SET state = ?, attempts = ?, next_attempt_at = ?, last_error = ?
+       WHERE event_key = ?`,
+    ).run(failed ? "failed" : "pending", attempts, now + delay, error.slice(0, 500), key);
+  }
+
+  marketFeedEventCounts(): { pending: number; failed: number } {
+    const rows = this.db.prepare(
+      `SELECT state, COUNT(*) AS total FROM market_feed_events
+       WHERE state IN ('pending', 'failed') GROUP BY state`,
+    ).all() as Array<{ state: string; total: number }>;
+    return {
+      pending: Number(rows.find((row) => row.state === "pending")?.total ?? 0),
+      failed: Number(rows.find((row) => row.state === "failed")?.total ?? 0),
+    };
   }
 
   marketReaderAccounts(): MarketReaderAccount[] {
@@ -2373,6 +2477,21 @@ function marketReaderAccountFromRow(
       : { lastError: String(row.last_error) }),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+  };
+}
+
+function marketFeedEventFromRow(row: Record<string, unknown>): MarketFeedEvent {
+  return {
+    key: String(row.event_key),
+    event: String(row.event),
+    payload: JSON.parse(String(row.payload_json)) as unknown,
+    state: String(row.state) as MarketFeedEvent["state"],
+    attempts: Number(row.attempts),
+    nextAttemptAt: Number(row.next_attempt_at),
+    lastError: row.last_error === null ? null : String(row.last_error),
+    receivedAt: Number(row.received_at),
+    processedAt:
+      row.processed_at === null ? null : Number(row.processed_at),
   };
 }
 
