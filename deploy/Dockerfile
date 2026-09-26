@@ -20,4 +20,4 @@ USER node
 
 EXPOSE 3000
 
-CMD ["node", "--enable-source-maps", "dist/index.js"]
+CMD ["sh", "-c", "umask 077 && exec node --enable-source-maps dist/index.js"]
