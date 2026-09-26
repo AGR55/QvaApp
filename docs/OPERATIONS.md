@@ -33,12 +33,12 @@ El endpoint de producción que debes registrar en **qvapay.com/dev → Feed del
 mercado P2P** es:
 
 ```text
-https://qvaapply.inventory.cloudns.be/webhooks/qvapay/p2p-feed
+https://honux.tech/webhooks/qvapay/p2p-feed
 ```
 
 Selecciona el evento `p2p.created`. Copia el secreto propio del feed, abre
 **Estrategia → Fuente de mercado**, guárdalo y activa **Webhook**. No coloques la
-URL del panel (`https://qvaapply.inventory.cloudns.be/`) ni rutas de API de
+URL del panel (`https://honux.tech/`) ni rutas de API de
 QvaPay en el campo webhook: la única URL receptora es la anterior.
 
 La ruta valida `x-qvapay-signature` sobre el cuerpo crudo y

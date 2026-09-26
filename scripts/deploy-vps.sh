@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 archive=${1:?Falta el archivo de release}
 revision=${2:?Falta la revisión Git}
-app_root="/root/Adriano/QvaApply"
+app_root="/opt/qvaapply"
 release_dir="$app_root/releases/$revision"
 environment_file="$app_root/config/env"
 host_port_file="$app_root/config/host-port"
@@ -11,6 +11,12 @@ host_port_file="$app_root/config/host-port"
 if (( EUID != 0 )); then
   echo "El despliegue debe ejecutarse como root." >&2
   exit 2
+fi
+
+exec 9>"$app_root/deploy.lock"
+if ! flock -n 9; then
+  echo "Ya hay otro despliegue de QvaApply en curso." >&2
+  exit 1
 fi
 if [[ ! $revision =~ ^[0-9a-f]{40}$ ]]; then
   echo "La revisión no es un SHA Git válido." >&2
@@ -68,9 +74,23 @@ if [[ $healthy != true ]]; then
     echo "Se restauró la versión anterior: $previous_release" >&2
   else
     docker compose -f "$release_dir/deploy/compose.yaml" down
+    rm -f "$app_root/current"
   fi
   exit 1
 fi
 
 rm -f "$archive"
+find "$app_root/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+  | sort -nr \
+  | awk 'NR > 5 { sub(/^[^ ]+ /, ""); print }' \
+  | while IFS= read -r stale_release; do
+      if [[ $stale_release != "$release_dir" && $stale_release != "$previous_release" ]]; then
+        stale_revision=$(basename "$stale_release")
+        if [[ $stale_revision =~ ^[0-9a-f]{40}$ ]]; then
+          docker image rm "qvaapply:$stale_revision" >/dev/null 2>&1 || true
+        fi
+        rm -rf -- "$stale_release"
+      fi
+    done
+docker image prune -f --filter "label=qvaapply.release=true" --filter "until=168h" >/dev/null
 echo "QvaApply desplegado en $release_dir"

@@ -1,15 +1,15 @@
-name: qvaapply-adriano
+name: qvaapply
 
 services:
   app:
     build:
       context: ..
       dockerfile: deploy/Dockerfile
-    image: qvaapply-adriano:${QVAAPPLY_REVISION:?Falta QVAAPPLY_REVISION}
-    container_name: qvaapply-adriano
+    image: qvaapply:${QVAAPPLY_REVISION:?Falta QVAAPPLY_REVISION}
+    container_name: qvaapply
     restart: unless-stopped
     env_file:
-      - /root/Adriano/QvaApply/config/env
+      - /opt/qvaapply/config/env
     environment:
       DATA_DIR: /app/data
       DASHBOARD_HOST: 0.0.0.0
@@ -17,7 +17,7 @@ services:
     ports:
       - "127.0.0.1:${QVAAPPLY_HOST_PORT:?Falta QVAAPPLY_HOST_PORT}:3000"
     volumes:
-      - /root/Adriano/QvaApply/data:/app/data
+      - /opt/qvaapply/data:/app/data
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

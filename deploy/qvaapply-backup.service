@@ -1,0 +1,12 @@
+[Unit]
+Description=Consistent QvaApply SQLite backup
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qvaapply-backup
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/qvaapply/data
+NoNewPrivileges=true

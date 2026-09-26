@@ -1,5 +1,7 @@
 FROM node:24-bookworm-slim
 
+LABEL qvaapply.release="true"
+
 ENV NODE_ENV=production
 ENV PNPM_HOME=/pnpm
 ENV PATH=/pnpm:$PATH

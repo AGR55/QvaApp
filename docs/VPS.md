@@ -1,4 +1,4 @@
-# Despliegue continuo en la VPS compartida
+# Despliegue continuo en Hostinger
 
 QvaApply se publica automáticamente desde `main` mediante
 `.github/workflows/ci-deploy.yml`. Los pushes y pull requests de `main` y
@@ -8,7 +8,7 @@ puede actualizar producción.
 ## Arquitectura
 
 ```text
-GitHub main → Actions → SSH → /root/Adriano/QvaApply/releases/<sha>
+GitHub main → Actions → SSH → /opt/qvaapply/releases/<sha>
                                       ↓
                               Docker (Node 24)
                                       ↓
@@ -21,7 +21,7 @@ porque la base SQLite no debe compartirse entre réplicas.
 Toda la instalación propia queda agrupada dentro de:
 
 ```text
-/root/Adriano/QvaApply/
+/opt/qvaapply/
 ├── config/       # entorno y puerto; permisos 600
 ├── data/         # SQLite y archivos persistentes
 ├── releases/     # una carpeta por commit
@@ -31,19 +31,24 @@ Toda la instalación propia queda agrupada dentro de:
 
 ## Preparación inicial
 
-El servidor ya dispone de Docker Compose y Nginx. El puerto reservado es `8782`,
-escuchando únicamente en loopback. Copia el asistente y ejecútalo como `root`:
+La VPS parte de cero. Copia el repositorio de preparación a una carpeta temporal
+y ejecuta el asistente como `root`; instalará Docker Compose, Nginx, Certbot,
+UFW, Fail2ban, actualizaciones automáticas y backups rotativos:
 
 ```bash
-scp scripts/bootstrap-vps.sh root@inventory.cloudns.be:/tmp/qvaapply-bootstrap-vps.sh
-ssh root@inventory.cloudns.be
-chmod 700 /tmp/qvaapply-bootstrap-vps.sh
-/tmp/qvaapply-bootstrap-vps.sh 8782 https://qvaapply.inventory.cloudns.be
+tar -czf /tmp/qvaapply-provision.tar.gz deploy scripts/provision-vps.sh scripts/bootstrap-vps.sh scripts/backup-vps.sh
+scp /tmp/qvaapply-provision.tar.gz root@2.25.247.171:/tmp/
+ssh root@2.25.247.171
+mkdir -p /tmp/qvaapply-release
+tar -xzf /tmp/qvaapply-provision.tar.gz -C /tmp/qvaapply-release
+/tmp/qvaapply-release/scripts/provision-vps.sh honux.tech 8782
 ```
 
-El asistente solicita la contraseña del panel y las credenciales de Telegram sin
-incluirlas en el historial. Genera automáticamente la clave local de
-cifrado. `CONFIRM_REAL_TRADING` queda en `false` hasta revisar producción.
+Después, `scripts/bootstrap-vps.sh 8782 https://honux.tech` solicita la
+contraseña del panel y las credenciales de Telegram sin incluirlas en el
+historial. Genera automáticamente la clave local de cifrado.
+`CONFIRM_REAL_TRADING` queda en `false`; la aplicación no arranca hasta que el
+propietario lo cambie deliberadamente después de revisar la configuración.
 
 ## Configuración de GitHub
 
@@ -51,7 +56,7 @@ Crea un entorno `production` y añade:
 
 | Nombre | Valor |
 | --- | --- |
-| `VPS_HOST` | `inventory.cloudns.be` |
+| `VPS_HOST` | `2.25.247.171` |
 | `VPS_USER` | `root` |
 | `VPS_SSH_PRIVATE_KEY` | clave Ed25519 privada exclusiva del despliegue |
 | `VPS_KNOWN_HOSTS` | claves verificadas del host SSH |
@@ -67,7 +72,7 @@ existente:
 ```nginx
 server {
     listen 80;
-    server_name qvaapply.inventory.cloudns.be;
+    server_name honux.tech;
 
     location / {
         proxy_pass http://127.0.0.1:8782;
@@ -80,8 +85,14 @@ server {
 }
 ```
 
-Después se emite el certificado con Certbot y se deja que este añada el bloque
-HTTPS. El puerto 8782 nunca se abre en el firewall de DigitalOcean.
+Cuando el registro A de `honux.tech` apunte a `2.25.247.171`, emite el
+certificado y verifica la renovación:
+
+```bash
+/opt/qvaapply/current/scripts/enable-vps-tls.sh honux.tech correo@example.com
+```
+
+El puerto 8782 nunca se abre en el firewall de Hostinger ni en UFW.
 
 ## Despliegue y rollback
 
@@ -102,10 +113,11 @@ HMAC.
 Comandos útiles:
 
 ```bash
-docker ps --filter name=qvaapply-adriano
-docker logs -f qvaapply-adriano
+docker ps --filter name=qvaapply
+docker logs -f qvaapply
 curl http://127.0.0.1:8782/api/session
 ```
 
-Los backups deben incluir `/root/Adriano/QvaApply/data` y
-`/root/Adriano/QvaApply/config`, cifrados y con restauraciones probadas.
+El timer `qvaapply-backup.timer` conserva 14 días de copias SQLite consistentes
+en `/opt/qvaapply/data/backups`. También deben existir backups externos cifrados
+de `/opt/qvaapply/data` y `/opt/qvaapply/config`, con restauraciones probadas.

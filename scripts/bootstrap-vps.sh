@@ -3,7 +3,7 @@ set -Eeuo pipefail
 
 host_port=${1:?Uso: scripts/bootstrap-vps.sh PUERTO ORIGEN_HTTPS}
 trusted_origin=${2:?Uso: scripts/bootstrap-vps.sh PUERTO ORIGEN_HTTPS}
-app_root="/root/Adriano/QvaApply"
+app_root="/opt/qvaapply"
 
 if (( EUID != 0 )); then
   echo "Ejecuta este asistente como root." >&2
@@ -68,4 +68,4 @@ printf '\nPreparación inicial completa.\n'
 printf 'Proyecto: %s\n' "$app_root"
 printf 'Puerto interno del host: 127.0.0.1:%s\n' "$host_port"
 printf 'Origen público: %s\n' "$trusted_origin"
-printf 'El primer push a main construirá y arrancará el contenedor.\n'
+printf 'Antes del primer despliegue revisa el entorno y cambia CONFIRM_REAL_TRADING a true.\n'

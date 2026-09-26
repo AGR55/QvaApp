@@ -42,6 +42,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production
+    concurrency:
+      group: qvaapply-production
+      cancel-in-progress: false
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -64,7 +67,8 @@ jobs:
         run: >-
           tar --create --gzip
           --file "qvaapply-${GITHUB_SHA}.tar.gz"
-          package.json pnpm-lock.yaml dist public deploy scripts/deploy-vps.sh
+          package.json pnpm-lock.yaml dist public deploy
+          scripts/deploy-vps.sh scripts/backup-vps.sh scripts/enable-vps-tls.sh
 
       - name: Configure production SSH
         env:
@@ -90,10 +94,12 @@ jobs:
           ssh_port="${VPS_SSH_PORT:-22}"
           remote="${VPS_USER}@${VPS_HOST}"
           archive="qvaapply-${GITHUB_SHA}.tar.gz"
-          remote_root="/root/Adriano/QvaApply"
-          ssh -p "$ssh_port" "$remote" "mkdir -p '$remote_root/uploads'"
-          scp -P "$ssh_port" "$archive" "$remote:$remote_root/uploads/$archive"
-          ssh -p "$ssh_port" "$remote" \
+          remote_root="/opt/qvaapply"
+          ssh_options=(-F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 -p "$ssh_port")
+          ssh "${ssh_options[@]}" "$remote" "install -d -m 700 '$remote_root/uploads'"
+          scp -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+            -P "$ssh_port" "$archive" "$remote:$remote_root/uploads/$archive"
+          ssh "${ssh_options[@]}" "$remote" \
             "if [ -x \"$remote_root/current/scripts/deploy-vps.sh\" ]; then
                bash \"$remote_root/current/scripts/deploy-vps.sh\" \"$remote_root/uploads/$archive\" \"$GITHUB_SHA\"
              else
