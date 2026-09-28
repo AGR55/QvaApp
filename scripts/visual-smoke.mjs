@@ -139,7 +139,7 @@ try {
 
   const cooperativeNetwork = await find(
     "xpath",
-    "//button[contains(normalize-space(.), 'Red cooperativa')]",
+    "//button[contains(normalize-space(.), 'Cacerías conjuntas')]",
   );
   await command("POST", `/session/${sessionId}/element/${cooperativeNetwork}/click`, {});
   await waitFor(() =>
@@ -468,7 +468,7 @@ try {
       "/tmp/qvaapply-operations-mobile.png",
     ],
     [
-      "Red cooperativa",
+      "Cacerías conjuntas",
       "Liquidez global",
       "/tmp/qvaapply-cooperative-network-mobile.png",
     ],
