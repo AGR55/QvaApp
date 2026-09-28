@@ -358,6 +358,80 @@ test("Fastify rechaza cuerpos inválidos antes de llegar al dominio", async () =
   await app.close();
 });
 
+test("la API cooperativa publica y retira aportaciones sin exponer ejecución conjunta", async () => {
+  const published: unknown[] = [];
+  const withdrawn: string[] = [];
+  let reconciliations = 0;
+  const app = buildDashboard(
+    {
+      publishCooperativeContribution: async (input: unknown) => void published.push(input),
+      withdrawCooperativeContribution: async (coin: string) => void withdrawn.push(coin),
+      reconcileCooperativeNetwork: async () => void (reconciliations += 1),
+    } as never,
+    { password, trustedOrigin: origin },
+  );
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const headers = {
+    origin,
+    cookie,
+    "content-type": "application/json",
+    "x-csrf-token": csrf,
+  };
+
+  const invalid = await app.inject({
+    method: "PUT",
+    url: "/api/cooperative-network/contributions",
+    headers,
+    payload: { coin: "BANK_CUP", fiat: 0, minimal: 100, price: 390 },
+  });
+  assert.equal(invalid.statusCode, 400);
+
+  const accepted = await app.inject({
+    method: "PUT",
+    url: "/api/cooperative-network/contributions",
+    headers,
+    payload: { coin: "BANK_CUP", fiat: 12_500, minimal: 1_000, price: 390 },
+  });
+  assert.equal(accepted.statusCode, 204);
+  assert.deepEqual(published, [
+    { coin: "BANK_CUP", fiat: 12_500, minimal: 1_000, price: 390 },
+  ]);
+
+  const removed = await app.inject({
+    method: "DELETE",
+    url: "/api/cooperative-network/contributions/BANK_CUP",
+    headers,
+    payload: {},
+  });
+  assert.equal(removed.statusCode, 204);
+  assert.deepEqual(withdrawn, ["BANK_CUP"]);
+
+  const reconciled = await app.inject({
+    method: "POST",
+    url: "/api/cooperative-network/reconcile",
+    headers,
+    payload: {},
+  });
+  assert.equal(reconciled.statusCode, 204);
+  assert.equal(reconciliations, 1);
+
+  const perform = await app.inject({
+    method: "POST",
+    url: "/api/cooperative-network/perform",
+    headers,
+    payload: { externalId: "unsafe" },
+  });
+  assert.equal(perform.statusCode, 404);
+  await app.close();
+});
+
 test("previsualiza y aplica un reajuste de capital con confirmación CSRF", async () => {
   const calls: unknown[] = [];
   const job = { id: "rebalance-1", state: "pending", adjustments: [], createdAt: 1, updatedAt: 1 };

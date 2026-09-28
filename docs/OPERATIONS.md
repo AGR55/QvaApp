@@ -23,6 +23,15 @@ Para el panel local se aceptan `http://127.0.0.1:3000`, `http://localhost:3000` 
 - No actives ni repitas una acción financiera basándote únicamente en un dato marcado como guardado. Espera una lectura actual o comprueba directamente en QvaPay.
 - Las operaciones activas se concilian periódicamente mediante `GET /p2p/:uuid`. Los estados remotos `completed` y `cancelled` salen de la vista operativa, pero se conservan en SQLite y en la auditoría. Si una aplicación vuelve a `open`, significa que ya no tiene contraparte y también se cierra localmente. `revision` permanece visible porque requiere seguimiento y no es un estado terminal.
 
+En **Red cooperativa**, HTTP y NATS tienen estados independientes. Si NATS cae,
+la reconciliación HTTP mantiene un snapshot eventual; si HTTP cae, NATS puede
+seguir actualizando la vista, pero no publiques ni retires aportaciones hasta
+recuperar HTTP. No uses el total guardado para comprometer dinero y no invoques
+manualmente `POST /hunts/perform`: esa operación permanece fuera de la interfaz
+hasta que la rama idempotente y transaccional de Sync Core sea revisada y
+desplegada. En Telegram usa `/coop` para administrar el aporte técnico y
+`/network` para consultar rápidamente el agregado.
+
 ## Inicio de sesión QvaPay con TOTP
 
 Ejecuta `pnpm login`, introduce el correo, la contraseña oculta y después el código vigente de seis dígitos de la aplicación autenticadora. El comando usa `remember: true`, verifica el token mediante `GET /user` y solo entonces lo cifra en SQLite. Un timeout de transporte se reintenta hasta tres veces; un TOTP rechazado, bloqueo o rate limit requiere intervención humana y nunca se reintenta automáticamente.
@@ -91,6 +100,7 @@ La migración v6 añade configuración operativa y cachés remotas. En una base 
 - Telegram: revoca el token en BotFather, actualiza `.env` y reinicia.
 - Panel: cambia `DASHBOARD_ADMIN_PASSWORD`; todas las sesiones en memoria desaparecen al reiniciar.
 - `LOCAL_ENCRYPTION_KEY`: antes de cambiarla vuelve a ejecutar el login de QvaPay; el token cifrado anterior no será descifrable con la clave nueva.
+- Sync Core: cambia `SYNC_PASSWORD`, revoca las API keys anteriores en Sync Core y reinicia QvaApply para emitir una credencial nueva cifrada.
 - QvaPay: revoca sesiones desde QvaPay y ejecuta `pnpm login` de nuevo.
 
 Nunca copies `.env`, `data/`, backups ni capturas con datos financieros a Git o a tickets públicos.

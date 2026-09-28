@@ -15,6 +15,8 @@ test("el menú nativo expone todas las áreas operativas sin comandos repetidos"
     "panel",
     "balance",
     "hunting",
+    "network",
+    "coop",
     "markets",
     "offers",
     "operations",

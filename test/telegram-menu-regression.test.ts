@@ -14,6 +14,7 @@ test("el arranque instala el menú para el chat administrador sin bloquear el bo
 test("los accesos principales conservan comandos y navegación por botones", () => {
   for (const command of [
     "hunting",
+    "coop",
     "markets",
     "operations",
     "strategy",

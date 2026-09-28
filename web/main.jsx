@@ -24,6 +24,7 @@ import {
   Sun,
   Menu,
   ScrollText,
+  RadioTower,
 } from "lucide-react";
 import { Empty, Skeleton } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
@@ -46,6 +47,7 @@ import { Login } from "./features/login.jsx";
 import { Operations } from "./features/operations.jsx";
 import { Hunting } from "./features/hunting.jsx";
 import { Audit } from "./features/audit.jsx";
+import { CooperativeNetwork } from "./features/cooperative-network.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
 import "./globals.css";
 import "./ui-polish.css";
@@ -72,6 +74,7 @@ const navigationGroups = [
       ["resumen", "Cockpit", LayoutDashboard],
       ["mercado", "Mercados", CandlestickChart],
       ["caceria", "Cacería", Crosshair],
+      ["red", "Cacerías conjuntas", RadioTower],
       ["operaciones", "Operaciones", Workflow],
     ],
   },
@@ -413,7 +416,7 @@ function App() {
         </header>
         <div className="content">
           {notice ? (
-            <aside className="push-toast" role="alert" aria-live="assertive">
+            <aside className="push-toast" role="alert" aria-live="polite">
               <Bell aria-hidden="true" />
               <div>
                 <strong>
@@ -498,6 +501,14 @@ function App() {
           ) : null}
           {view === "caceria" ? (
             <Hunting
+              data={data}
+              label={label}
+              unit={unit}
+              onChanged={refresh}
+            />
+          ) : null}
+          {view === "red" ? (
+            <CooperativeNetwork
               data={data}
               label={label}
               unit={unit}

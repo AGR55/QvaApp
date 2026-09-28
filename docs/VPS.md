@@ -121,3 +121,26 @@ curl http://127.0.0.1:8782/api/session
 El timer `qvaapply-backup.timer` conserva 14 días de copias SQLite consistentes
 en `/opt/qvaapply/data/backups`. También deben existir backups externos cifrados
 de `/opt/qvaapply/data` y `/opt/qvaapply/config`, con restauraciones probadas.
+
+## Sync Core y NATS en la misma VPS
+
+El archivo de entorno de QvaApply admite estas variables sin fijar la topología:
+
+```dotenv
+SYNC_ENABLED=true
+SYNC_BASE_URL=http://host.docker.internal:8080
+SYNC_NATS_URL=nats://host.docker.internal:4223
+SYNC_EMAIL=cuenta-precreada@example.com
+SYNC_PASSWORD=una-clave-exclusiva
+```
+
+Compose registra `host.docker.internal` contra el gateway del host. Si Sync Core
+se ejecuta en otro contenedor dentro de una red Docker compartida, sustituye el
+host por el nombre del servicio. Mantén los puertos HTTP y NATS cerrados al
+Internet: solo Nginx debe publicar el panel y NATS debe ser accesible únicamente
+desde la propia VPS o su red privada.
+
+Tras reiniciar, abre **Red cooperativa** y comprueba por separado los indicadores
+HTTP y NATS. Un snapshot guardado ayuda a diagnosticar, pero no debe interpretarse
+como capacidad disponible en tiempo real. La reconciliación HTTP corre cada 60
+segundos y corrige eliminaciones que Sync Core todavía no emite por NATS.

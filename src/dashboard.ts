@@ -12,6 +12,7 @@ import type {
 } from "./store.js";
 import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
 import { MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
+import type { HuntingSyncCoordinator } from "./hunting-sync.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -105,6 +106,7 @@ export class DashboardReadModel {
       job: RebalanceJob,
       event: "completed" | "attention",
     ) => void | Promise<void>,
+    private readonly huntingSync?: HuntingSyncCoordinator,
   ) {}
 
   updateStrategy(
@@ -148,6 +150,35 @@ export class DashboardReadModel {
   }
   marketIcon(name: string) {
     return this.marketConfig.marketIcon(name);
+  }
+  cooperativeNetwork() {
+    return this.huntingSync?.state() ?? {
+      enabled: false,
+      httpConnected: false,
+      natsConnected: false,
+      snapshot: {},
+      contributions: {},
+      lastHttpAt: null,
+      lastNatsAt: null,
+      lastError: null,
+    };
+  }
+  async publishCooperativeContribution(input: {
+    coin: string;
+    fiat: number;
+    minimal: number;
+    price: number;
+  }): Promise<void> {
+    if (!this.huntingSync) throw new Error("La red cooperativa no está configurada.");
+    await this.huntingSync.publish(input);
+  }
+  async withdrawCooperativeContribution(coin: string): Promise<void> {
+    if (!this.huntingSync) throw new Error("La red cooperativa no está configurada.");
+    await this.huntingSync.withdraw(coin);
+  }
+  async reconcileCooperativeNetwork(): Promise<void> {
+    if (!this.huntingSync) throw new Error("La red cooperativa no está configurada.");
+    await this.huntingSync.reconcile();
   }
   async createOwnOffer(
     coin: FiatMarket,
@@ -581,6 +612,7 @@ export class DashboardReadModel {
           .map((workflow) => [workflow.id, this.store.workflowOwnOffers(workflow.id)]),
       ),
       capitalReservations: this.store.capitalReservations(),
+      cooperativeNetwork: this.cooperativeNetwork(),
       mutationIntents: this.store.recentMutationIntents(100),
       operations: this.store.visibleOperations(),
       integrity: {

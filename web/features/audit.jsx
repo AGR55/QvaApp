@@ -15,6 +15,7 @@ import {
 import {
   Card,
   CardContent,
+  CardFooter,
   CardHeader,
 } from "../components/ui/card.tsx";
 import {
@@ -158,8 +159,7 @@ function BlockedCard({ offer, onReview, onDismiss }) {
       <dl className="offer-comparison"><div><dt>Tasa</dt><dd>{offer.rate.toFixed(2)}</dd></div><div><dt>Mediana</dt><dd>{reference ? reference.toFixed(2) : "No disponible"}</dd></div><div><dt>Diferencia</dt><dd className={deviation === null ? "" : Math.abs(deviation) > 1 ? "warning-text" : ""}>{deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${deviation.toFixed(2)}%`}</dd></div></dl>
       <p className="blocked-reason"><ShieldAlert />{offer.reason}</p>
       {offer.checks?.length ? <details className="risk-checks"><summary>Ver {offer.checks.length} comprobaciones</summary><ul>{offer.checks.map((check) => <li key={check.code} className={`check-${check.status}`}><span>{check.label}</span><strong>{check.status === "pass" ? "Correcta" : check.status === "warning" ? "Advertencia" : check.status === "fail" ? "Bloqueo" : "No aplica"}</strong><small>{check.reason}{check.actual !== undefined ? ` · observado: ${String(check.actual)}` : ""}{check.limit !== undefined ? ` · límite: ${String(check.limit)}` : ""}</small></li>)}</ul></details> : null}
-      <div className="blocked-actions"><Button variant="outline" size="sm" onClick={onDismiss}>Descartar</Button><Button variant="primary" size="sm" onClick={onReview}>Revisar y aplicar</Button></div>
-    </CardContent></Card>;
+    </CardContent><CardFooter className="blocked-actions"><Button variant="outline" size="sm" onClick={onDismiss}>Descartar</Button><Button variant="primary" size="sm" onClick={onReview}>Revisar y aplicar</Button></CardFooter></Card>;
 }
 
 function PreviewDetails({ preview }) {

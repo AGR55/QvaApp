@@ -13,6 +13,7 @@ import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
+import { HuntingSyncCoordinator } from "./hunting-sync.js";
 import {
   HuntingRateSessions,
   TELEGRAM_COMMANDS,
@@ -24,6 +25,12 @@ import {
 import { MarketAccountService } from "./market-accounts.js";
 import { PollingMarketSource, weightedMarketJobs } from "./market-source.js";
 import { MarketSourceCoordinator } from "./market-feed.js";
+import {
+  CooperativeContributionSessions,
+  decodeCooperativeAction,
+  encodeCooperativeAction,
+  type CooperativeDraft,
+} from "./cooperative-menu.js";
 
 if (!config.realTradingAllowed)
   throw new Error(
@@ -35,11 +42,17 @@ const marketConfig = new MarketConfigService(config.dataDir, config, store);
 const vault = new Vault(config.encryptionKey);
 const session = new Session(store, vault);
 const marketAccounts = new MarketAccountService(store, vault);
+const huntingSync = new HuntingSyncCoordinator(
+  config.huntingSync,
+  store,
+  vault,
+);
 const qva = new QvaPayClient(() => session.token(), {
   throttleState: store,
 });
 const bot = new Bot(config.telegramToken);
 const huntingRates = new HuntingRateSessions();
+const cooperativeContributions = new CooperativeContributionSessions();
 const webPush = new WebPushService(store);
 const notifications = new NotificationDispatcher(store, {
   telegram: async (notification) => {
@@ -135,6 +148,7 @@ const dashboardReadModel = new DashboardReadModel(
       },
     });
   },
+  huntingSync,
 );
 const dashboardServer = await startDashboard(
   dashboardReadModel,
@@ -162,8 +176,10 @@ bot.use(async (ctx, next) => {
 });
 bot.use(async (ctx, next) => {
   const text = ctx.msg?.text;
-  if (text?.startsWith("/") && !text.startsWith("/cancel"))
+  if (text?.startsWith("/") && !text.startsWith("/cancel")) {
     huntingRates.cancel(chatKey(ctx));
+    cooperativeContributions.cancel(chatKey(ctx));
+  }
   await next();
 });
 
@@ -221,6 +237,8 @@ bot.command("refresh", (ctx) =>
 );
 bot.command("offers", (ctx) => void showOwnOffers(ctx));
 bot.command("hunting", (ctx) => void showHunting(ctx));
+bot.command("network", (ctx) => void showCooperativeNetwork(ctx));
+bot.command("coop", (ctx) => void showCooperativeNetwork(ctx));
 bot.command("markets", (ctx) => void showMarkets(ctx));
 bot.command("operations", (ctx) => void showOperations(ctx));
 bot.command("strategy", (ctx) => void showStrategy(ctx));
@@ -255,6 +273,8 @@ bot.command("received", (ctx) =>
   }),
 );
 bot.command("cancel", (ctx) => {
+  if (!argument(ctx.msg?.text) && cooperativeContributions.cancel(chatKey(ctx)))
+    return void showCooperativeNetwork(ctx, "Edición del aporte cancelada.");
   if (!argument(ctx.msg?.text) && huntingRates.cancel(chatKey(ctx)))
     return void showHunting(ctx, "Edición de tasa cancelada.");
   return execute(ctx, async () => {
@@ -284,6 +304,24 @@ bot.command("createsell", (ctx) => createOffer(ctx, "sell"));
 
 bot.on("message:text", async (ctx) => {
   if (ctx.msg.text.startsWith("/")) return;
+  const cooperative = cooperativeContributions.current(chatKey(ctx));
+  if (cooperative) {
+    try {
+      await continueCooperativeContribution(ctx, ctx.msg.text);
+    } catch (error) {
+      await ctx.reply(
+        `⚠️ ${escapeHtml(errorMessage(error))}\n\nEscribe un número positivo o usa /cancel.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            force_reply: true,
+            input_field_placeholder: "Ejemplo: 390,5",
+          },
+        },
+      );
+    }
+    return;
+  }
   const pending = huntingRates.current(chatKey(ctx));
   if (!pending) return;
   try {
@@ -306,6 +344,7 @@ bot.on("message:text", async (ctx) => {
 bot.on("callback_query:data", async (ctx) => {
   const [action, uuid] = splitCallbackData(ctx.callbackQuery.data);
   if (action !== "hunt") huntingRates.cancel(chatKey(ctx));
+  if (action !== "coop") cooperativeContributions.cancel(chatKey(ctx));
   // Telegram expira estos callbacks rápidamente; se responde antes de consultar QvaPay.
   await answerCallbackSafely(() => ctx.answerCallbackQuery());
   try {
@@ -314,6 +353,8 @@ bot.on("callback_query:data", async (ctx) => {
         return showPanelAction(ctx, uuid ?? "home");
       case "hunt":
         return handleHuntingAction(ctx, ctx.callbackQuery.data);
+      case "coop":
+        return handleCooperativeAction(ctx, ctx.callbackQuery.data);
       case "automation":
         trading.setRefresh(!trading.refreshEnabled());
         return showAutomation(ctx, "Estado del refresco actualizado.");
@@ -397,6 +438,9 @@ scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudge
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache(),
 );
+scheduler.register("cooperative_reconcile", 60_000, () =>
+  huntingSync.reconcile(),
+);
 void bootstrap();
 
 async function installTelegramMenu(): Promise<void> {
@@ -421,6 +465,7 @@ async function installTelegramMenu(): Promise<void> {
 
 async function bootstrap(): Promise<void> {
   trading.initializeProductionState();
+  await huntingSync.start();
   await installTelegramMenu();
   const standaloneReconciled =
     await trading.reconcilePendingStandaloneMutations();
@@ -461,6 +506,7 @@ async function showPanelAction(ctx: Context, view: string): Promise<void> {
   }
   if (view === "strategy") return showStrategy(ctx);
   if (view === "hunting") return showHunting(ctx);
+  if (view === "network") return showCooperativeNetwork(ctx);
   if (view === "operations") return showOperations(ctx);
   if (view === "automation") return showAutomation(ctx);
   if (view === "logs") return render(ctx, logsText(), backKeyboard());
@@ -821,6 +867,156 @@ async function showDashboard(ctx: Context, notice?: string): Promise<void> {
   return render(ctx, text, mainKeyboard(state.paused));
 }
 
+async function showCooperativeNetwork(ctx: Context, notice?: string): Promise<void> {
+  const network = huntingSync.state();
+  const aggregates = Object.values(network.snapshot).sort((a, b) =>
+    a.coin.localeCompare(b.coin),
+  );
+  const text = [
+    "<b>📡 Red cooperativa</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `HTTP: <b>${network.httpConnected ? "CONECTADO" : "SIN CONEXIÓN"}</b> · NATS: <b>${network.natsConnected ? "CONECTADO" : "SIN CONEXIÓN"}</b>`,
+    network.lastNatsAt || network.lastHttpAt
+      ? `Última sincronización: ${relativeTime(network.lastNatsAt ?? network.lastHttpAt ?? undefined)}`
+      : "Aún no se ha recibido un snapshot.",
+    "",
+    aggregates.length
+      ? aggregates
+          .map((item) => {
+            const market = trading.market(item.coin);
+            const marketName = market?.label ?? item.coin;
+            const currency = market?.currency ?? item.coin;
+            return `💱 <b>${escapeHtml(marketName)}</b>: ${money(item.fiat)} ${escapeHtml(currency)} · ${item.offersCount} bot(s)\n   Precio medio: ${money(item.price)} · Mínimo medio: ${money(item.minimal)}`;
+          })
+          .join("\n\n")
+      : "No hay liquidez cooperativa publicada.",
+    network.lastError ? `\n⚠️ ${escapeHtml(network.lastError)}` : "",
+    notice ? `\n${escapeHtml(notice)}` : "",
+    "\n🛡 Este panel solo gestiona aportes; no ejecuta ni liquida cacerías.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const keyboard = new InlineKeyboard()
+    .text("🔄 Actualizar", encodeCooperativeAction({ type: "refresh" }))
+    .row();
+  for (const market of trading.markets()) {
+    const current = network.contributions[market.code];
+    keyboard.text(
+      `${current ? "✏️" : "➕"} ${market.label}`,
+      encodeCooperativeAction({ type: "edit", coin: market.code }),
+    );
+    if (current)
+      keyboard.text(
+        "🗑 Retirar",
+        encodeCooperativeAction({ type: "withdraw", coin: market.code }),
+      );
+    keyboard.row();
+  }
+  keyboard.text("‹ Volver al panel", "panel:home");
+  return render(ctx, text, keyboard);
+}
+
+async function handleCooperativeAction(ctx: Context, data: string): Promise<void> {
+  const action = decodeCooperativeAction(data);
+  switch (action.type) {
+    case "home":
+      cooperativeContributions.cancel(chatKey(ctx));
+      return showCooperativeNetwork(ctx);
+    case "refresh":
+      await huntingSync.reconcile();
+      return showCooperativeNetwork(ctx, "✅ Red reconciliada con Sync Core.");
+    case "edit": {
+      const market = trading.market(action.coin);
+      if (!market) throw new Error("Ese mercado no está configurado en QvaApply.");
+      cooperativeContributions.begin(chatKey(ctx), market.code);
+      await ctx.reply(
+        `<b>${networkContributionLabel(action.coin)}</b>\n\nEscribe el precio objetivo.`,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            force_reply: true,
+            input_field_placeholder: "Precio objetivo",
+          },
+        },
+      );
+      return;
+    }
+    case "withdraw":
+      if (!huntingSync.state().contributions[action.coin])
+        throw new Error("No existe un aporte local activo para ese mercado.");
+      return render(
+        ctx,
+        `<b>¿Retirar el aporte de ${networkContributionLabel(action.coin)}?</b>\n\nLa capacidad dejará de estar disponible para nuevas cacerías conjuntas.`,
+        new InlineKeyboard()
+          .text(
+            "🗑 Sí, retirar",
+            encodeCooperativeAction({ type: "withdraw-confirm", coin: action.coin }),
+          )
+          .row()
+          .text("‹ Cancelar", encodeCooperativeAction({ type: "home" })),
+      );
+    case "withdraw-confirm":
+      await huntingSync.withdraw(action.coin);
+      return showCooperativeNetwork(ctx, `✅ Aporte de ${networkContributionLabel(action.coin)} retirado.`);
+    case "confirm": {
+      const contribution = cooperativeContributions.confirm(chatKey(ctx), action.token);
+      await huntingSync.publish(contribution);
+      return showCooperativeNetwork(ctx, `✅ Aporte de ${networkContributionLabel(contribution.coin)} confirmado.`);
+    }
+    case "cancel":
+      cooperativeContributions.cancel(chatKey(ctx), action.token);
+      return showCooperativeNetwork(ctx, "Edición del aporte cancelada.");
+  }
+}
+
+async function continueCooperativeContribution(ctx: Context, input: string): Promise<void> {
+  const session = cooperativeContributions.accept(chatKey(ctx), input);
+  if (session.stage === "minimal") {
+    await cooperativePrompt(ctx, "Escribe el importe mínimo que debe tener una operación.", "Importe mínimo");
+    return;
+  }
+  if (session.stage === "fiat") {
+    await cooperativePrompt(ctx, "Escribe el fiat total que QvaApply aportará.", "Fiat disponible");
+    return;
+  }
+  if (session.stage !== "confirm") return;
+  const contribution: CooperativeDraft = {
+    coin: session.coin,
+    price: session.price!,
+    minimal: session.minimal!,
+    fiat: session.fiat!,
+  };
+  await ctx.reply(cooperativeConfirmationText(contribution), {
+    parse_mode: "HTML",
+    reply_markup: new InlineKeyboard()
+      .text("✅ Publicar", encodeCooperativeAction({ type: "confirm", token: session.token }))
+      .text("✖ Cancelar", encodeCooperativeAction({ type: "cancel", token: session.token })),
+  });
+}
+
+async function cooperativePrompt(ctx: Context, text: string, placeholder: string): Promise<void> {
+  await ctx.reply(text, {
+    reply_markup: { force_reply: true, input_field_placeholder: placeholder },
+  });
+}
+
+function cooperativeConfirmationText(contribution: CooperativeDraft): string {
+  const market = trading.market(contribution.coin);
+  const currency = market?.currency ?? contribution.coin;
+  return [
+    "<b>Confirmar aporte cooperativo</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `Mercado: <b>${networkContributionLabel(contribution.coin)}</b>`,
+    `Precio objetivo: <b>${money(contribution.price)}</b>`,
+    `Mínimo: <b>${money(contribution.minimal)} ${escapeHtml(currency)}</b>`,
+    `Fiat disponible: <b>${money(contribution.fiat)} ${escapeHtml(currency)}</b>`,
+  ].join("\n");
+}
+
+function networkContributionLabel(coin: string): string {
+  return escapeHtml(trading.market(coin)?.label ?? coin);
+}
+
 async function showOwnOffers(ctx: Context, notice?: string): Promise<void> {
   const offers = await trading.listOwnOffers();
   const text = [
@@ -929,9 +1125,11 @@ function mainKeyboard(paused: boolean): InlineKeyboard {
     .text("💼 Mis ofertas", "panel:mine")
     .row()
     .text("🎯 Cacería", "panel:hunting")
-    .text("📦 Operaciones", "panel:operations")
+    .text("🤝 Cacerías conjuntas", "panel:network")
     .row()
+    .text("📦 Operaciones", "panel:operations")
     .text("🔎 Mercados", "panel:markets")
+    .row()
     .text("⚙️ Estrategia", "panel:strategy");
   return keyboard
     .row()
@@ -1122,7 +1320,7 @@ function marketHint(): string {
 }
 function helpText(): string {
   const markets = marketHint();
-  return `<b>QvaApply · ayuda rápida</b>\n\nUsa el botón <b>Menú</b> de Telegram para acceder a todas las áreas sin memorizar comandos.\n\n<b>Comandos avanzados</b>\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — abrir un mercado concreto\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/editoffer UUID QUSD TASA — editar una oferta\n/canceloffer UUID — cancelar una oferta\n/paid UUID REFERENCIA — registrar un pago\n/received UUID — confirmar recepción`;
+  return `<b>QvaApply · ayuda rápida</b>\n\nUsa el botón <b>Menú</b> de Telegram para acceder a todas las áreas sin memorizar comandos.\n\n<b>Comandos avanzados</b>\n/network — consultar la red cooperativa\n/coop — gestionar el aporte de QvaApply\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — abrir un mercado concreto\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/editoffer UUID QUSD TASA — editar una oferta\n/canceloffer UUID — cancelar una oferta\n/paid UUID REFERENCIA — registrar un pago\n/received UUID — confirmar recepción`;
 }
 
 let stopping = false;
@@ -1155,6 +1353,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
     /* polling puede no haber iniciado */
   }
   await dashboardServer.close();
+  await huntingSync.stop();
   store.close();
 }
 
