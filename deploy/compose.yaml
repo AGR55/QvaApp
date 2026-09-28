@@ -16,8 +16,9 @@ services:
       DASHBOARD_PORT: 3000
     ports:
       - "127.0.0.1:${QVAAPPLY_HOST_PORT:?Falta QVAAPPLY_HOST_PORT}:3000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - caceria
     volumes:
       - /opt/qvaapply/data:/app/data
     read_only: true
@@ -37,3 +38,8 @@ services:
       timeout: 5s
       retries: 6
       start_period: 15s
+
+networks:
+  caceria:
+    external: true
+    name: caceria-net

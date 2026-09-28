@@ -87,11 +87,11 @@ en SQLite y una caída de la red cooperativa no detiene la cacería local.
 
 Configura `SYNC_ENABLED=true`, `SYNC_BASE_URL`, `SYNC_NATS_URL`, `SYNC_EMAIL` y
 `SYNC_PASSWORD`. La cuenta debe existir previamente en Sync Core. Aunque ambos
-servicios estén en la misma VPS, las direcciones permanecen configurables. En el
-contenedor de producción usa, por ejemplo,
-`http://host.docker.internal:8080` y `nats://host.docker.internal:4223` cuando
-Sync Core corre directamente en el host; si comparten una red Docker, usa el
-nombre DNS de su servicio.
+servicios estén en la misma VPS, las direcciones permanecen configurables. El
+Compose de producción conecta QvaApply a la red privada externa `caceria-net`;
+usa `http://caceria-sync-server:8080` y
+`nats://caceria-sync-server:4222`. Los puertos no necesitan quedar publicados
+para otros equipos.
 
 La API key obtenida se cifra con `LOCAL_ENCRYPTION_KEY` antes de persistirla y
 también autentica la conexión NATS. El panel web y los comandos `/network` y

@@ -128,15 +128,14 @@ El archivo de entorno de QvaApply admite estas variables sin fijar la topología
 
 ```dotenv
 SYNC_ENABLED=true
-SYNC_BASE_URL=http://host.docker.internal:8080
-SYNC_NATS_URL=nats://host.docker.internal:4223
+SYNC_BASE_URL=http://caceria-sync-server:8080
+SYNC_NATS_URL=nats://caceria-sync-server:4222
 SYNC_EMAIL=cuenta-precreada@example.com
 SYNC_PASSWORD=una-clave-exclusiva
 ```
 
-Compose registra `host.docker.internal` contra el gateway del host. Si Sync Core
-se ejecuta en otro contenedor dentro de una red Docker compartida, sustituye el
-host por el nombre del servicio. Mantén los puertos HTTP y NATS cerrados al
+Compose conecta QvaApply a la red Docker privada externa `caceria-net` y usa el
+nombre del contenedor de Sync Core. Mantén los puertos HTTP y NATS cerrados al
 Internet: solo Nginx debe publicar el panel y NATS debe ser accesible únicamente
 desde la propia VPS o su red privada.
 
