@@ -22,3 +22,11 @@ test("los refrescos lentos conservan datos y nunca se solapan", () => {
   assert.match(hookSource, /inFlight\.current/);
   assert.doesNotMatch(hookSource, /setData\(undefined\)/);
 });
+
+test("las vistas secundarias se cargan únicamente al navegar", () => {
+  assert.doesNotMatch(mainSource, /import \{ Settings \} from/);
+  assert.doesNotMatch(mainSource, /import \{ Capital \} from/);
+  assert.match(mainSource, /lazy\(\(\) =>\s*import\("\.\/features\/settings\.jsx"\)/);
+  assert.match(mainSource, /import\("\.\/features\/capital-workspace\.jsx"\)/);
+  assert.match(mainSource, /<Suspense fallback=\{<Empty>Cargando vista…<\/Empty>\}>/);
+});

@@ -16,7 +16,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 16;
+const LATEST_SCHEMA_VERSION = 18;
 
 export type MarketReaderHealth =
   | "healthy"
@@ -231,6 +231,7 @@ export interface RebalanceJob {
 export interface MutationIntent {
   intentId: string;
   operationUuid?: string;
+  workflowId?: string;
   kind: string;
   idempotencyKey?: string;
   state: "submitted" | "confirmed" | "rejected" | "uncertain" | "reconciled";
@@ -239,6 +240,30 @@ export interface MutationIntent {
   error?: string;
   createdAt: number;
   updatedAt: number;
+}
+
+function mutationIntentFromRow(row: Record<string, unknown>): MutationIntent {
+  return {
+    intentId: String(row.intent_id),
+    ...(row.operation_uuid === null
+      ? {}
+      : { operationUuid: String(row.operation_uuid) }),
+    ...(row.workflow_id === null || row.workflow_id === undefined
+      ? {}
+      : { workflowId: String(row.workflow_id) }),
+    kind: String(row.kind),
+    ...(row.idempotency_key === null
+      ? {}
+      : { idempotencyKey: String(row.idempotency_key) }),
+    state: String(row.state) as MutationIntent["state"],
+    request: JSON.parse(String(row.request_json)),
+    ...(row.response_json === null
+      ? {}
+      : { response: JSON.parse(String(row.response_json)) }),
+    ...(row.error === null ? {} : { error: String(row.error) }),
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+  };
 }
 
 type OperationalLogLevel = "info" | "success" | "warning" | "error";
@@ -714,6 +739,33 @@ export class Store {
           "INSERT INTO schema_migrations(version, applied_at) VALUES (16, ?)",
         ).run(Date.now());
       }
+      if (this.currentSchemaVersion() < 17) {
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_dashboard_snapshots_created
+            ON dashboard_snapshots(created_at);
+          CREATE INDEX IF NOT EXISTS idx_market_observations_created
+            ON market_observations(created_at);
+          CREATE INDEX IF NOT EXISTS idx_market_observations_coin_created
+            ON market_observations(coin, created_at);
+        `);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (17, ?)",
+        ).run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 18) {
+        this.ensureColumn("mutation_intents", "workflow_id", "TEXT");
+        this.db.exec(`
+          UPDATE mutation_intents
+          SET workflow_id = json_extract(request_json, '$.workflowId')
+          WHERE workflow_id IS NULL
+            AND json_type(request_json, '$.workflowId') = 'text';
+          CREATE INDEX IF NOT EXISTS idx_mutation_intents_workflow_state
+            ON mutation_intents(workflow_id, state, created_at);
+        `);
+        this.db.prepare(
+          "INSERT INTO schema_migrations(version, applied_at) VALUES (18, ?)",
+        ).run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -732,7 +784,7 @@ export class Store {
   }
 
   private ensureColumn(
-    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts",
+    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts" | "mutation_intents",
     column: string,
     definition: string,
   ): void {
@@ -1054,11 +1106,12 @@ export class Store {
     const now = Date.now();
     this.db
       .prepare(
-        "INSERT INTO mutation_intents(intent_id, operation_uuid, kind, idempotency_key, state, request_json, created_at, updated_at) VALUES (?, ?, ?, ?, 'submitted', ?, ?, ?)",
+        "INSERT INTO mutation_intents(intent_id, operation_uuid, workflow_id, kind, idempotency_key, state, request_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'submitted', ?, ?, ?)",
       )
       .run(
         intent.intentId,
         intent.operationUuid ?? null,
+        intent.workflowId ?? null,
         intent.kind,
         intent.idempotencyKey ?? null,
         JSON.stringify(intent.request),
@@ -1090,27 +1143,39 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT intent_id, operation_uuid, kind, idempotency_key, state, request_json, response_json, error, created_at, updated_at FROM mutation_intents ORDER BY created_at DESC LIMIT ?",
+          "SELECT intent_id, operation_uuid, workflow_id, kind, idempotency_key, state, request_json, response_json, error, created_at, updated_at FROM mutation_intents ORDER BY created_at DESC LIMIT ?",
         )
         .all(limit) as Record<string, unknown>[]
-    ).map((row) => ({
-      intentId: String(row.intent_id),
-      ...(row.operation_uuid === null
-        ? {}
-        : { operationUuid: String(row.operation_uuid) }),
-      kind: String(row.kind),
-      ...(row.idempotency_key === null
-        ? {}
-        : { idempotencyKey: String(row.idempotency_key) }),
-      state: String(row.state) as MutationIntent["state"],
-      request: JSON.parse(String(row.request_json)),
-      ...(row.response_json === null
-        ? {}
-        : { response: JSON.parse(String(row.response_json)) }),
-      ...(row.error === null ? {} : { error: String(row.error) }),
-      createdAt: Number(row.created_at),
-      updatedAt: Number(row.updated_at),
-    }));
+    ).map(mutationIntentFromRow);
+  }
+
+  unresolvedMutationIntents(): MutationIntent[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT intent_id, operation_uuid, workflow_id, kind, idempotency_key, state,
+                  request_json, response_json, error, created_at, updated_at
+           FROM mutation_intents
+           WHERE state IN ('submitted', 'uncertain')
+           ORDER BY created_at ASC`,
+        )
+        .all() as Record<string, unknown>[]
+    ).map(mutationIntentFromRow);
+  }
+
+  recoverableMutationIntents(): MutationIntent[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT intent_id, operation_uuid, workflow_id, kind, idempotency_key,
+                  state, request_json, response_json, error, created_at, updated_at
+           FROM mutation_intents
+           WHERE state IN ('submitted', 'uncertain')
+              OR (state = 'confirmed' AND kind IN ('apply', 'paid', 'received', 'cancel'))
+           ORDER BY created_at ASC`,
+        )
+        .all() as Record<string, unknown>[]
+    ).map(mutationIntentFromRow);
   }
 
   hasUnresolvedMutation(): boolean {
@@ -1321,8 +1386,8 @@ export class Store {
         .prepare(
           `UPDATE mutation_intents
            SET state = 'reconciled', updated_at = ?
-           WHERE state IN ('submitted', 'uncertain')
-             AND json_extract(request_json, '$.workflowId') = ?`,
+           WHERE state IN ('submitted', 'uncertain', 'confirmed')
+             AND workflow_id = ?`,
         )
         .run(Date.now(), workflowId).changes,
     );

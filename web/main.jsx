@@ -39,15 +39,8 @@ import {
 } from "./components/ui/sheet.tsx";
 import { money } from "./lib/format.js";
 import { useDashboard } from "./hooks/use-dashboard.js";
-import { Capital } from "./features/capital.jsx";
 import { Cockpit } from "./features/cockpit.jsx";
-import { Market } from "./features/market.jsx";
-import { Settings } from "./features/settings.jsx";
 import { Login } from "./features/login.jsx";
-import { Operations } from "./features/operations.jsx";
-import { Hunting } from "./features/hunting.jsx";
-import { Audit } from "./features/audit.jsx";
-import { CooperativeNetwork } from "./features/cooperative-network.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
 import "./globals.css";
 import "./ui-polish.css";
@@ -65,6 +58,41 @@ const Charts = lazy(() =>
 const Logs = lazy(() =>
   import("./features/logs.jsx").then((module) => ({
     default: module.Logs,
+  })),
+);
+const Capital = lazy(() =>
+  import("./features/capital-workspace.jsx").then((module) => ({
+    default: module.CapitalWorkspace,
+  })),
+);
+const Market = lazy(() =>
+  import("./features/market.jsx").then((module) => ({
+    default: module.Market,
+  })),
+);
+const Settings = lazy(() =>
+  import("./features/settings.jsx").then((module) => ({
+    default: module.Settings,
+  })),
+);
+const Operations = lazy(() =>
+  import("./features/operations.jsx").then((module) => ({
+    default: module.Operations,
+  })),
+);
+const Hunting = lazy(() =>
+  import("./features/hunting.jsx").then((module) => ({
+    default: module.Hunting,
+  })),
+);
+const Audit = lazy(() =>
+  import("./features/audit.jsx").then((module) => ({
+    default: module.Audit,
+  })),
+);
+const CooperativeNetwork = lazy(() =>
+  import("./features/cooperative-network.jsx").then((module) => ({
+    default: module.CooperativeNetwork,
   })),
 );
 const navigationGroups = [
@@ -462,79 +490,77 @@ function App() {
               </IconButton>
             </aside>
           ) : null}
-          {view === "resumen" ? (
-            <Cockpit
-              data={data}
-              label={label}
-              unit={unit}
-              onChanged={refresh}
-              resources={resources}
-            />
-          ) : null}
-          {view === "mercado" ? (
-            <Market
-              data={data}
-              market={market}
-              setMarket={setMarket}
-              selected={selected}
-              label={label}
-              unit={unit}
-              resource={resources[`market:${market}`]}
-            />
-          ) : null}
-          {view === "ofertas" ? (
-            <Capital
-              data={data}
-              label={label}
-              unit={unit}
-              onChanged={refresh}
-              resources={resources}
-            />
-          ) : null}
-          {view === "operaciones" ? (
-            <Operations
-              data={data}
-              label={label}
-              unit={unit}
-              onChanged={refresh}
-            />
-          ) : null}
-          {view === "caceria" ? (
-            <Hunting
-              data={data}
-              label={label}
-              unit={unit}
-              onChanged={refresh}
-            />
-          ) : null}
-          {view === "red" ? (
-            <CooperativeNetwork
-              data={data}
-              label={label}
-              unit={unit}
-              onChanged={refresh}
-            />
-          ) : null}
-          {view === "graficas" ? (
-            <Suspense fallback={<Empty>Cargando gráficas…</Empty>}>
+          <Suspense fallback={<Empty>Cargando vista…</Empty>}>
+            {view === "resumen" ? (
+              <Cockpit
+                data={data}
+                label={label}
+                unit={unit}
+                onChanged={refresh}
+                resources={resources}
+              />
+            ) : null}
+            {view === "mercado" ? (
+              <Market
+                data={data}
+                market={market}
+                setMarket={setMarket}
+                selected={selected}
+                label={label}
+                unit={unit}
+                resource={resources[`market:${market}`]}
+              />
+            ) : null}
+            {view === "ofertas" ? (
+              <Capital
+                data={data}
+                label={label}
+                unit={unit}
+                onChanged={refresh}
+                resources={resources}
+              />
+            ) : null}
+            {view === "operaciones" ? (
+              <Operations
+                data={data}
+                label={label}
+                unit={unit}
+                onChanged={refresh}
+              />
+            ) : null}
+            {view === "caceria" ? (
+              <Hunting
+                data={data}
+                label={label}
+                unit={unit}
+                onChanged={refresh}
+              />
+            ) : null}
+            {view === "red" ? (
+              <CooperativeNetwork
+                data={data}
+                label={label}
+                unit={unit}
+                onChanged={refresh}
+              />
+            ) : null}
+            {view === "graficas" ? (
               <Charts markets={data.markets} />
-            </Suspense>
-          ) : null}
-          {view === "configuracion" ? (
-            <Settings
-              initialConfig={initialBootstrap?.config}
-              initialRevisions={initialBootstrap?.configRevisions}
-              onChanged={refresh}
-            />
-          ) : null}
-          {view === "auditoria" ? (
-            <Audit data={data} onChanged={refresh} />
-          ) : null}
-          {view === "logs" ? (
-            <Suspense fallback={<Empty>Cargando logs operativos…</Empty>}>
+            ) : null}
+            {view === "configuracion" ? (
+              <Settings
+                initialConfig={initialBootstrap?.config}
+                initialRevisions={initialBootstrap?.configRevisions}
+                onChanged={refresh}
+              />
+            ) : null}
+            {view === "auditoria" ? (
+              <Audit data={data} onChanged={refresh} />
+            ) : null}
+            {view === "logs" ? (
               <Logs />
-            </Suspense>
-          ) : null}
+            ) : null}
+          </Suspense>
         </div>
       </main>
     </div>

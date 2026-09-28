@@ -222,3 +222,26 @@ test("interrumpe una edición remota colgada y exige conciliación", async () =>
     (error: unknown) => error instanceof QvaMutationUncertainError,
   );
 });
+
+test("trata un 2xx malformado de creación o edición como resultado incierto", async () => {
+  const client = new QvaPayClient(() => "token", {
+    now: () => 1_000,
+    sleep: async () => undefined,
+    fetch: async () => new Response(JSON.stringify({ message: "ok" }), { status: 200 }),
+  });
+
+  await assert.rejects(
+    () => client.createOffer({
+      type: "buy",
+      coin: "BANK_CUP",
+      amount: 1,
+      receive: 900,
+      details: [{ name: "cuenta", value: "123" }],
+    }),
+    (error: unknown) => error instanceof QvaMutationUncertainError,
+  );
+  await assert.rejects(
+    () => client.editOffer("offer-with-invalid-response", { amount: 1 }),
+    (error: unknown) => error instanceof QvaMutationUncertainError,
+  );
+});

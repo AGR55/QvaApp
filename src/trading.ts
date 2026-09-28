@@ -18,6 +18,10 @@ import type { FiatMarket, OperationState, P2pAverage, P2pListPage, P2pOffer } fr
 import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import type { MarketPageUpdate } from "./market-source.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
+import {
+  isMutationUncertain,
+  MonetaryIntents,
+} from "./application/monetary-intents.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
 import {
   MIN_OFFER_QUSD,
@@ -103,6 +107,7 @@ export class TradingEngine {
       typeof marketConfigOrNotify === "function"
         ? marketConfigOrNotify
         : notify!;
+    this.monetaryIntents = new MonetaryIntents(this.store);
     this.opportunityOrchestrator = new OpportunityOrchestrator(
       this.store as Store,
       this.qva,
@@ -125,6 +130,7 @@ export class TradingEngine {
 
   private readonly marketConfig: MarketConfigService;
   private readonly notify: Notify;
+  private readonly monetaryIntents: MonetaryIntents;
   private readonly opportunityOrchestrator: OpportunityOrchestrator;
 
   markets(): MarketConfig[] {
@@ -341,18 +347,14 @@ export class TradingEngine {
   async reconcilePendingStandaloneMutations(): Promise<number> {
     let reconciled = 0;
     const pending = this.store
-      .recentMutationIntents(500)
-      .filter(
-        (intent) =>
-          ["submitted", "uncertain"].includes(intent.state) &&
-          (!intent.operationUuid ||
-            !this.store.findWorkflowByTarget(intent.operationUuid)),
-      );
+      .recoverableMutationIntents()
+      .filter((intent) => !intent.workflowId);
     const ownOfferKinds = new Set([
       "create_offer",
       "edit_offer",
       "cancel_offer",
     ]);
+    const operationKinds = new Set(["paid", "received", "cancel"]);
     const pendingOwnOffers = pending.filter((intent) =>
       ownOfferKinds.has(intent.kind)
     );
@@ -368,6 +370,38 @@ export class TradingEngine {
       }
     }
     for (const intent of pending) {
+      if (operationKinds.has(intent.kind) && intent.operationUuid) {
+        const operation = this.store.getOperation(intent.operationUuid);
+        if (!operation) continue;
+        try {
+          const remote = await this.qva.getOffer(intent.operationUuid);
+          const next = reconciledOperationMutationState(
+            intent.kind,
+            operation.state,
+            remote.status,
+          );
+          if (!next) continue;
+          if (next !== operation.state)
+            this.store.updateOperation(intent.operationUuid, next);
+          this.store.updateMutationIntent(intent.intentId, "reconciled", {
+            remoteStatus: remote.status,
+            operationState: next,
+          });
+          this.store.audit(
+            "operation_mutation_reconciled",
+            `QvaPay confirmó ${intent.kind} mediante el estado ${remote.status}; la Operación quedó ${next}.`,
+            intent.operationUuid,
+          );
+          reconciled += 1;
+        } catch (error) {
+          this.store.audit(
+            "operation_mutation_reconciliation_pending",
+            qvaPayFailureDetail(`conciliar ${intent.kind}`, error),
+            intent.operationUuid,
+          );
+        }
+        continue;
+      }
       if (ownOfferKinds.has(intent.kind)) {
         if (!ownOffers) continue;
         const remote = reconcileOwnOfferMutation(intent, ownOffers);
@@ -385,13 +419,48 @@ export class TradingEngine {
       const uuid = intent.operationUuid!;
       try {
         const remote = await this.qva.getOffer(uuid);
+        const remoteStatus = remote.status.toLowerCase();
         if (
-          remote.status === "open" ||
-          remote.status === "cancelled" ||
-          remote.status === "completed"
+          [
+            "open",
+            "processing",
+            "paid",
+            "revision",
+            "cancelled",
+            "canceled",
+            "completed",
+          ].includes(remoteStatus)
         ) {
+          const next = operationStateFromRemote("applied", remoteStatus);
+          const existing = this.store.getOperation(uuid);
+          if (!existing && operationStatusShowsApplication(remoteStatus)) {
+            if (!isRecoverableOperationOffer(remote)) continue;
+            const request = isRecord(intent.request) ? intent.request : {};
+            this.store.createOperation({
+              uuid,
+              offerType: remote.type,
+              coin: remote.coin,
+              amount: remote.amount,
+              receive: remote.receive,
+              rate: rate(remote),
+              state: next,
+              autoApplied: request.automatic === true,
+              cancelAt: null,
+              createdAt: intent.createdAt,
+              ...(remote.User?.uuid
+                ? { counterpartyId: remote.User.uuid }
+                : remote.Peer?.uuid
+                  ? { counterpartyId: remote.Peer.uuid }
+                  : {}),
+            });
+          } else if (existing && next !== existing.state) {
+            this.store.updateOperation(uuid, next);
+          }
           this.store.updateMutationIntent(intent.intentId, "reconciled", {
             remoteStatus: remote.status,
+            operationState: existing || operationStatusShowsApplication(remoteStatus)
+              ? next
+              : undefined,
           });
           this.store.audit(
             "standalone_apply_reconciled",
@@ -1011,9 +1080,12 @@ export class TradingEngine {
       throw new Error(
         `Saldo QUSD insuficiente. Disponible para operar: ${(balance - strategy.reserve).toFixed(2)} QUSD.`,
       );
-    await this.executeMutation("apply", uuid, { uuid }, () =>
-      this.qva.apply(uuid),
-    );
+    await this.monetaryIntents.execute({
+      kind: "apply",
+      operationUuid: uuid,
+      request: { uuid },
+      action: () => this.qva.apply(uuid),
+    });
     this.store.createOperation({
       uuid,
       offerType: "buy",
@@ -1186,12 +1258,12 @@ export class TradingEngine {
     if (!reference.trim())
       throw new Error("La referencia de transferencia es obligatoria.");
     await this.qva.getOffer(uuid); // comprueba sesión y estado remoto antes de la acción irreversible
-    await this.executeMutation(
-      "paid",
-      uuid,
-      { uuid, reference: reference.trim() },
-      () => this.qva.markPaid(uuid, reference.trim()),
-    );
+    await this.monetaryIntents.execute({
+      kind: "paid",
+      operationUuid: uuid,
+      request: { uuid, reference: reference.trim() },
+      action: () => this.qva.markPaid(uuid, reference.trim()),
+    });
     this.store.updateOperation(uuid, "paid");
     this.store.audit("marked_paid", "Pago fiat marcado por el usuario", uuid);
   }
@@ -1204,9 +1276,12 @@ export class TradingEngine {
         "En una compra de QUSD debes marcar pago, no confirmar recepción.",
       );
     await this.qva.getOffer(uuid);
-    await this.executeMutation("received", uuid, { uuid }, () =>
-      this.qva.confirmReceived(uuid),
-    );
+    await this.monetaryIntents.execute({
+      kind: "received",
+      operationUuid: uuid,
+      request: { uuid },
+      action: () => this.qva.confirmReceived(uuid),
+    });
     this.store.updateOperation(uuid, "completed");
     this.store.audit("received", "Usuario confirmó recepción de fiat", uuid);
   }
@@ -1224,9 +1299,12 @@ export class TradingEngine {
         "Cancelación automática no permitida para esta operación.",
       );
     await this.qva.getOffer(uuid);
-    await this.executeMutation("cancel", uuid, { uuid, automatic }, () =>
-      this.qva.cancel(uuid),
-    );
+    await this.monetaryIntents.execute({
+      kind: "cancel",
+      operationUuid: uuid,
+      request: { uuid, automatic },
+      action: () => this.qva.cancel(uuid),
+    });
     this.store.updateOperation(uuid, "cancelled");
     this.store.audit(
       automatic ? "auto_cancel" : "cancel",
@@ -1249,12 +1327,12 @@ export class TradingEngine {
           );
           continue;
         }
-        await this.executeMutation(
-          "cancel",
-          operation.uuid,
-          { uuid: operation.uuid, automatic: true },
-          () => this.qva.cancel(operation.uuid),
-        );
+        await this.monetaryIntents.execute({
+          kind: "cancel",
+          operationUuid: operation.uuid,
+          request: { uuid: operation.uuid, automatic: true },
+          action: () => this.qva.cancel(operation.uuid),
+        });
         this.store.updateOperation(operation.uuid, "cancelled");
         this.store.audit(
           "auto_cancel",
@@ -1275,7 +1353,7 @@ export class TradingEngine {
           );
           continue;
         }
-        if (this.isMutationUncertain(error)) {
+        if (isMutationUncertain(error)) {
           this.store.updateOperation(operation.uuid, "applied", null);
           this.store.audit(
             "auto_cancel_reconciliation_required",
@@ -1474,15 +1552,15 @@ export class TradingEngine {
       (candidate) => candidate.uuid === uuid,
     );
     if (!offer) throw new Error("No es una oferta propia abierta.");
-    const refreshed = await this.executeMutation(
-      "edit_offer",
-      uuid,
-      { uuid, refresh: true },
-      () =>
+    const refreshed = await this.monetaryIntents.execute({
+      kind: "edit_offer",
+      operationUuid: uuid,
+      request: { uuid, refresh: true },
+      action: () =>
         this.qva.editOffer(uuid, {
           message: (offer.message ?? this.automationConfig().welcomeMessage).slice(0, 79),
         }),
-    );
+    });
     this.recordRefresh(uuid, refreshed?.updated_at);
     this.store.audit(
       "refresh_offer",
@@ -1558,13 +1636,12 @@ export class TradingEngine {
       ...(message ? { message } : {}),
       idempotencyKey,
     };
-    const offer = await this.executeMutation(
-      "create_offer",
-      undefined,
+    const offer = await this.monetaryIntents.execute({
+      kind: "create_offer",
       request,
-      () => this.qva.createOffer(request),
+      action: () => this.qva.createOffer(request),
       idempotencyKey,
-    );
+    });
     this.store.audit(
       "create_offer",
       `Oferta propia ${type} en ${coin}: ${amount} QUSD a tasa solicitada ${fiatPerQusd}; total fiat ${receive} (tasa efectiva ${receive / amount})`,
@@ -1654,12 +1731,12 @@ export class TradingEngine {
       );
       return;
     }
-    await this.executeMutation(
-      "edit_offer",
-      uuid,
-      { uuid, amount, receive },
-      () => this.qva.editOffer(uuid, { amount, receive }),
-    );
+    await this.monetaryIntents.execute({
+      kind: "edit_offer",
+      operationUuid: uuid,
+      request: { uuid, amount, receive },
+      action: () => this.qva.editOffer(uuid, { amount, receive }),
+    });
     this.store.audit(
       "edit_offer",
       `Oferta propia ${offer.coin} actualizada: ${amount} QUSD a tasa solicitada ${fiatPerQusd}; total fiat ${receive} (tasa efectiva ${receive / amount})`,
@@ -1689,12 +1766,12 @@ export class TradingEngine {
     )
       throw new Error(`Importe de reajuste inválido para ${market.label}.`);
     const receive = ownOfferFiatTotal(amount, offer.rate, "buy", market.currency);
-    await this.executeMutation(
-      "edit_offer",
-      offer.uuid,
-      { uuid: offer.uuid, amount, receive },
-      () => this.qva.editOffer(offer.uuid, { amount, receive }),
-    );
+    await this.monetaryIntents.execute({
+      kind: "edit_offer",
+      operationUuid: offer.uuid,
+      request: { uuid: offer.uuid, amount, receive },
+      action: () => this.qva.editOffer(offer.uuid, { amount, receive }),
+    });
     this.store.audit(
       "edit_offer",
       `Oferta propia ${offer.coin} reajustada a ${amount} QUSD; total fiat ${receive}`,
@@ -1704,9 +1781,12 @@ export class TradingEngine {
 
   async cancelOwnOfferFromSnapshot(uuid: string): Promise<void> {
     this.requireRealMode();
-    await this.executeMutation("cancel_offer", uuid, { uuid }, () =>
-      this.qva.cancel(uuid),
-    );
+    await this.monetaryIntents.execute({
+      kind: "cancel_offer",
+      operationUuid: uuid,
+      request: { uuid },
+      action: () => this.qva.cancel(uuid),
+    });
     this.store.audit("cancel_own_offer", "Oferta propia cancelada por reajuste", uuid);
   }
 
@@ -1716,9 +1796,12 @@ export class TradingEngine {
       (candidate) => candidate.uuid === uuid,
     );
     if (!offer) throw new Error("No es una oferta propia abierta.");
-    await this.executeMutation("cancel_offer", uuid, { uuid }, () =>
-      this.qva.cancel(uuid),
-    );
+    await this.monetaryIntents.execute({
+      kind: "cancel_offer",
+      operationUuid: uuid,
+      request: { uuid },
+      action: () => this.qva.cancel(uuid),
+    });
     this.store.audit(
       "cancel_own_offer",
       "Oferta propia abierta cancelada",
@@ -2320,12 +2403,12 @@ export class TradingEngine {
       rate(offer),
       market.outgoingTransferFee,
     );
-    await this.executeMutation(
-      "apply",
-      offer.uuid,
-      { uuid: offer.uuid, automatic },
-      () => this.qva.apply(offer.uuid),
-    );
+    await this.monetaryIntents.execute({
+      kind: "apply",
+      operationUuid: offer.uuid,
+      request: { uuid: offer.uuid, automatic },
+      action: () => this.qva.apply(offer.uuid),
+    });
     this.store.createOperation({
       uuid: offer.uuid,
       offerType: "sell",
@@ -2376,42 +2459,6 @@ export class TradingEngine {
     if (!operation)
       throw new Error("No existe una operación local con ese UUID.");
     return operation;
-  }
-  private async executeMutation<T>(
-    kind: string,
-    operationUuid: string | undefined,
-    request: unknown,
-    action: () => Promise<T>,
-    idempotencyKey?: string,
-  ): Promise<T> {
-    const intentId = randomUUID();
-    this.store.createMutationIntent({
-      intentId,
-      ...(operationUuid ? { operationUuid } : {}),
-      kind,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-      request,
-    });
-    try {
-      const result = await action();
-      this.store.updateMutationIntent(intentId, "confirmed", result);
-      return result;
-    } catch (error) {
-      const uncertain = this.isMutationUncertain(error);
-      const message = error instanceof Error ? error.message : String(error);
-      this.store.updateMutationIntent(
-        intentId,
-        uncertain ? "uncertain" : "rejected",
-        undefined,
-        message,
-      );
-      this.store.audit(
-        uncertain ? "mutation_uncertain" : "mutation_rejected",
-        `${kind}: ${message}`,
-        operationUuid,
-      );
-      throw error;
-    }
   }
   private async sendChatBestEffort(uuid: string): Promise<void> {
     try {
@@ -2516,13 +2563,6 @@ export class TradingEngine {
     this.store.updateOperation(uuid, "cancelled");
     this.store.set(`retry:auto_cancel:${uuid}`, "0");
     this.store.audit("remote_operation_closed", detail, uuid);
-  }
-
-  private isMutationUncertain(error: unknown): boolean {
-    return (
-      error instanceof QvaMutationUncertainError ||
-      (error instanceof QvaApiError && error.status >= 500)
-    );
   }
 
   private scheduleAutoCancelRetry(uuid: string, error: unknown): void {
@@ -2749,6 +2789,39 @@ function operationStateFromRemote(
     default:
       return current;
   }
+}
+
+function reconciledOperationMutationState(
+  kind: string,
+  current: OperationState,
+  remoteStatus: string,
+): OperationState | undefined {
+  const status = remoteStatus.toLowerCase();
+  if (kind === "paid" && ["paid", "completed"].includes(status))
+    return operationStateFromRemote(current, status);
+  if (kind === "received" && status === "completed") return "completed";
+  if (
+    kind === "cancel" &&
+    ["open", "cancelled", "canceled", "completed"].includes(status)
+  )
+    return operationStateFromRemote(current, status);
+  return undefined;
+}
+
+function operationStatusShowsApplication(status: string): boolean {
+  return ["processing", "paid", "revision", "completed"].includes(status);
+}
+
+function isRecoverableOperationOffer(offer: P2pOffer): boolean {
+  return (
+    (offer.type === "buy" || offer.type === "sell") &&
+    typeof offer.coin === "string" &&
+    offer.coin.length > 0 &&
+    Number.isFinite(offer.amount) &&
+    offer.amount > 0 &&
+    Number.isFinite(offer.receive) &&
+    offer.receive > 0
+  );
 }
 
 function optionalPositive<K extends string>(key: K, value: unknown): Partial<Record<K, number>> {

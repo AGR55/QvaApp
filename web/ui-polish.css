@@ -1,7 +1,7 @@
 /* QvaApply — sistema visual coherente v2 (capa final, única fuente de verdad).
    Lenguaje: consola operativa sobria, ledger editorial.
    Reglas: una hero por vista, el resto libro contable con reglas finas;
-   un solo acento azul; Manrope + DM Mono; números tabulares;
+   un solo acento azul; tipografía local del sistema; números tabulares;
    cards solo para superficies accionables; desktop primero. */
 
 :root {
@@ -51,9 +51,9 @@
   --shadow: none;
   --shadow-float: 0 18px 50px rgba(14, 22, 30, 0.18);
   --font-sans:
-    "Manrope", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono:
-    "DM Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --ui-control-height: 42px;
   --ui-focus: 0 0 0 3px rgba(29, 78, 134, 0.28);
   --z-toast: 80;

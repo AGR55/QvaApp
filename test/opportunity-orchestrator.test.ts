@@ -111,6 +111,12 @@ test("hidrata los datos de pago antes de cancelar y los conserva al reponer", as
   assert.equal(store.getOperation("external")?.state, "applied");
   assert.equal(store.activeReservedQusd(), 0);
   assert.equal(store.workflowOwnOffers(result.workflow!.id)[0]?.state, "restored");
+  assert.ok(
+    store
+      .recentMutationIntents(10)
+      .filter((intent) => intent.kind !== "restore_own_offer")
+      .every((intent) => intent.workflowId === result.workflow!.id),
+  );
   store.close();
 });
 

@@ -11,10 +11,14 @@ import {
 } from "../core/risk-policy.js";
 import type { QvaPayGateway } from "../core/ports.js";
 import type { MarketConfigService } from "../market-config.js";
-import { QvaApiError, QvaMutationUncertainError } from "../qvapay.js";
+import { QvaApiError } from "../qvapay.js";
 import type { Store, TradeWorkflow } from "../store.js";
 import type { P2pOffer } from "../types.js";
 import { ownOfferFiatTotal } from "../market-math.js";
+import {
+  isMutationUncertain,
+  MonetaryIntents,
+} from "./monetary-intents.js";
 
 export interface OpportunityInput {
   target: P2pOffer;
@@ -54,6 +58,7 @@ export interface OrchestratorRuntime {
 export class OpportunityOrchestrator {
   private readonly now: () => number;
   private readonly notify: NonNullable<OrchestratorRuntime["notify"]>;
+  private readonly monetaryIntents: MonetaryIntents;
   private inFlight: Promise<OpportunityResult> | undefined;
 
   constructor(
@@ -64,6 +69,7 @@ export class OpportunityOrchestrator {
   ) {
     this.now = runtime.now ?? Date.now;
     this.notify = runtime.notify ?? (async () => undefined);
+    this.monetaryIntents = new MonetaryIntents(this.store);
   }
 
   execute(input: OpportunityInput): Promise<OpportunityResult> {
@@ -339,9 +345,13 @@ export class OpportunityOrchestrator {
       this.store.updateWorkflowState(workflowId, "applying_external");
       if (input.canApply && !input.canApply())
         throw new Error("La cacería de venta fue detenida antes de aplicar.");
-      await this.mutation("apply", input.target.uuid, { workflowId }, () =>
-        this.qva.apply(input.target.uuid),
-      );
+      await this.monetaryIntents.execute({
+        kind: "apply",
+        operationUuid: input.target.uuid,
+        workflowId,
+        request: { workflowId },
+        action: () => this.qva.apply(input.target.uuid),
+      });
       this.store.createOperation({
         uuid: input.target.uuid,
         offerType: "buy",
@@ -386,7 +396,7 @@ export class OpportunityOrchestrator {
       );
     } catch (error) {
       const message = errorMessage(error);
-      if (isUncertain(error)) {
+      if (isMutationUncertain(error)) {
         outcomeDecision = this.blockDecision(
           decision,
           `QvaPay no confirmó la aplicación: ${message}`,
@@ -426,15 +436,16 @@ export class OpportunityOrchestrator {
     for (const own of this.store.workflowOwnOffers(workflowId)) {
       this.store.updateWorkflowOwnOffer(workflowId, own.originalUuid, "cancel_requested");
       try {
-        await this.mutation(
-          "cancel_own_for_liquidity",
-          own.originalUuid,
-          { workflowId },
-          () => this.qva.cancel(own.originalUuid),
-        );
+        await this.monetaryIntents.execute({
+          kind: "cancel_own_for_liquidity",
+          operationUuid: own.originalUuid,
+          workflowId,
+          request: { workflowId },
+          action: () => this.qva.cancel(own.originalUuid),
+        });
         this.store.updateWorkflowOwnOffer(workflowId, own.originalUuid, "cancelled");
       } catch (error) {
-        if (isUncertain(error))
+        if (isMutationUncertain(error))
           this.store.updateWorkflowOwnOffer(workflowId, own.originalUuid, "uncertain", {
             error: errorMessage(error),
           });
@@ -503,7 +514,7 @@ export class OpportunityOrchestrator {
         this.store.updateWorkflowOwnOffer(
           workflowId,
           own.originalUuid,
-          isUncertain(error) ? "uncertain" : "restore_requested",
+          isMutationUncertain(error) ? "uncertain" : "restore_requested",
           { error: errorMessage(error) },
         );
         throw error;
@@ -523,13 +534,14 @@ export class OpportunityOrchestrator {
       this.config.find(own.snapshot.coin)?.currency ?? "",
     );
     try {
-      return await this.mutation(
-        "restore_own_offer",
-        own.originalUuid,
-        { workflowId, snapshot: own.snapshot, amount },
-        () => this.qva.createOffer(request),
-        own.restoreIdempotencyKey,
-      );
+      return await this.monetaryIntents.execute({
+        kind: "restore_own_offer",
+        operationUuid: own.originalUuid,
+        workflowId,
+        request: { workflowId, snapshot: own.snapshot, amount },
+        action: () => this.qva.createOffer(request),
+        idempotencyKey: own.restoreIdempotencyKey,
+      });
     } catch (error) {
       if (!(error instanceof QvaApiError) || error.status !== 409) throw error;
       const open = await this.qva.listOffers({
@@ -589,36 +601,6 @@ export class OpportunityOrchestrator {
     return { workflowId: workflow.id, outcome: "unresolved", detail };
   }
 
-  private async mutation<T>(
-    kind: string,
-    operationUuid: string,
-    request: unknown,
-    action: () => Promise<T>,
-    idempotencyKey?: string,
-  ): Promise<T> {
-    const intentId = randomUUID();
-    this.store.createMutationIntent({
-      intentId,
-      operationUuid,
-      kind,
-      ...(idempotencyKey ? { idempotencyKey } : {}),
-      request,
-    });
-    try {
-      const response = await action();
-      this.store.updateMutationIntent(intentId, "confirmed", response);
-      return response;
-    } catch (error) {
-      this.store.updateMutationIntent(
-        intentId,
-        isUncertain(error) ? "uncertain" : "rejected",
-        undefined,
-        errorMessage(error),
-      );
-      throw error;
-    }
-  }
-
   private nonExecutableDecision(
     input: OpportunityInput,
     kind: Exclude<RiskDecisionKind, "apply">,
@@ -674,13 +656,6 @@ function plannedRestoreQusd(
 
 function roundQusd(value: number): number {
   return Math.round(value * 100_000_000) / 100_000_000;
-}
-
-function isUncertain(error: unknown): boolean {
-  return (
-    error instanceof QvaMutationUncertainError ||
-    (error instanceof QvaApiError && error.status >= 500)
-  );
 }
 
 function errorMessage(error: unknown): string {

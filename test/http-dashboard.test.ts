@@ -215,6 +215,7 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const page = await app.inject({ method: "GET", url: "/" });
   assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
+  assert.doesNotMatch(page.body, /fonts\.(?:googleapis|gstatic)\.com/);
   const icon = await app.inject({ method: "GET", url: "/icons/qusd.png" });
   assert.equal(icon.statusCode, 200);
   assert.match(String(icon.headers["content-type"]), /image\/png/);
@@ -561,6 +562,36 @@ test("Fastify devuelve un rechazo de dominio como error de cliente seguro", asyn
 
   assert.equal(response.statusCode, 400);
   assert.equal(response.json<{ error: string }>().error, "QvaPay no tiene una sesión válida.");
+  await app.close();
+});
+
+test("Fastify no expone fallos internos como errores de cliente", async () => {
+  const readModel = {
+    setPaused: async () => {
+      throw new TypeError("No se pudo leer /srv/qvaapply/secreto interno");
+    },
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const response = await app.inject({
+    method: "PUT",
+    url: "/api/control",
+    headers: { origin, cookie, "content-type": "application/json", "x-csrf-token": csrf },
+    payload: { paused: false },
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(response.json(), {
+    error: "No se pudo completar la solicitud.",
+  });
+  assert.doesNotMatch(response.body, /srv|secreto|TypeError/);
   await app.close();
 });
 

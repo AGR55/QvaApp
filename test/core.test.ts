@@ -746,6 +746,134 @@ test("concilia creación y cancelación propias solo con evidencia remota", asyn
   store.close();
 });
 
+test("concilia tras reinicio paid, received y cancel con evidencia remota", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-operation-mutations-reconcile-")),
+  );
+  const cases = [
+    { uuid: "pending-paid", kind: "paid", offerType: "sell", remote: "paid", expected: "paid" },
+    { uuid: "pending-received", kind: "received", offerType: "buy", remote: "completed", expected: "completed" },
+    { uuid: "pending-cancel", kind: "cancel", offerType: "sell", remote: "open", expected: "cancelled" },
+  ] as const;
+  for (const scenario of cases) {
+    store.createOperation({
+      uuid: scenario.uuid,
+      offerType: scenario.offerType,
+      coin: "BANK_CUP",
+      amount: 5,
+      receive: 4_900,
+      rate: 980,
+      state: "applied",
+      autoApplied: false,
+      cancelAt: null,
+      createdAt: Date.now(),
+    });
+    store.createMutationIntent({
+      intentId: `intent-${scenario.uuid}`,
+      operationUuid: scenario.uuid,
+      kind: scenario.kind,
+      request: { uuid: scenario.uuid },
+    });
+    store.updateMutationIntent(`intent-${scenario.uuid}`, "uncertain");
+  }
+  const remoteStates = new Map<string, string>(
+    cases.map((item) => [item.uuid, item.remote]),
+  );
+  const trading = new TradingService(
+    store,
+    {
+      getOffer: async (uuid: string) => ({ uuid, status: remoteStates.get(uuid) }),
+    } as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.reconcilePendingStandaloneMutations(), 3);
+  assert.equal(store.hasUnresolvedMutation(), false);
+  for (const scenario of cases)
+    assert.equal(store.getOperation(scenario.uuid)?.state, scenario.expected);
+  store.close();
+});
+
+test("mantiene pendiente una mutación de Operación sin evidencia concluyente", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-operation-mutation-inconclusive-")),
+  );
+  store.createOperation({
+    uuid: "received-still-processing",
+    offerType: "buy",
+    coin: "BANK_CUP",
+    amount: 5,
+    receive: 4_900,
+    rate: 980,
+    state: "applied",
+    autoApplied: false,
+    cancelAt: null,
+    createdAt: Date.now(),
+  });
+  store.createMutationIntent({
+    intentId: "intent-received-still-processing",
+    operationUuid: "received-still-processing",
+    kind: "received",
+    request: { uuid: "received-still-processing" },
+  });
+  store.updateMutationIntent("intent-received-still-processing", "uncertain");
+  const trading = new TradingService(
+    store,
+    {
+      getOffer: async () => ({
+        uuid: "received-still-processing",
+        status: "processing",
+      }),
+    } as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.reconcilePendingStandaloneMutations(), 0);
+  assert.equal(store.hasUnresolvedMutation(), true);
+  assert.equal(store.getOperation("received-still-processing")?.state, "applied");
+  store.close();
+});
+
+test("recupera una aplicación confirmada antes de proyectar la Operación local", async () => {
+  const store = new Store(
+    mkdtempSync(join(tmpdir(), "qvaapply-confirmed-apply-projection-")),
+  );
+  store.createMutationIntent({
+    intentId: "confirmed-apply-without-operation",
+    operationUuid: "applied-before-crash",
+    kind: "apply",
+    request: { uuid: "applied-before-crash", automatic: true },
+  });
+  store.updateMutationIntent("confirmed-apply-without-operation", "confirmed");
+  const trading = new TradingService(
+    store,
+    {
+      getOffer: async () => ({
+        uuid: "applied-before-crash",
+        type: "sell",
+        coin: "BANK_CUP",
+        amount: 5,
+        receive: 4_900,
+        status: "processing",
+        User: { uuid: "counterparty" },
+      }),
+    } as never,
+    {} as never,
+    async () => undefined,
+  );
+
+  assert.equal(await trading.reconcilePendingStandaloneMutations(), 1);
+  assert.equal(store.getOperation("applied-before-crash")?.state, "applied");
+  assert.equal(store.getOperation("applied-before-crash")?.autoApplied, true);
+  assert.equal(
+    store.recentMutationIntents(1)[0]?.state,
+    "reconciled",
+  );
+  store.close();
+});
+
 test("omite una edición si QvaPay ya refleja el mismo importe y total", async () => {
   const store = new Store(
     mkdtempSync(join(tmpdir(), "qvaapply-duplicate-edit-")),

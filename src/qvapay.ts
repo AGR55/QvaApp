@@ -360,22 +360,30 @@ export class QvaPayClient {
       body: payload,
       policy: "create",
     })) as { p2p?: P2pOffer };
-    if (!data.p2p) throw new Error("QvaPay no devolvió la oferta creada");
-    return parseOffer(data.p2p, "oferta creada");
+    try {
+      if (!data.p2p) throw new Error("QvaPay no devolvió la oferta creada");
+      return parseOffer(data.p2p, "oferta creada");
+    } catch (error) {
+      throw new QvaMutationUncertainError("create", error);
+    }
   }
 
   async editOffer(
     uuid: string,
     body: Record<string, unknown>,
-  ): Promise<P2pOffer | undefined> {
+  ): Promise<P2pOffer> {
     const data = await this.request(`/p2p/${uuid}/edit`, {
       method: "POST",
       body,
       policy: "edit",
     });
-    return data.p2p === undefined
-      ? undefined
-      : parseOffer(data.p2p, "oferta editada");
+    try {
+      if (data.p2p === undefined)
+        throw new Error("QvaPay no devolvió la oferta editada");
+      return parseOffer(data.p2p, "oferta editada");
+    } catch (error) {
+      throw new QvaMutationUncertainError("edit", error);
+    }
   }
 
   private async request(

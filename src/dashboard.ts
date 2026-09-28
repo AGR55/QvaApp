@@ -491,7 +491,10 @@ export class DashboardReadModel {
   }
 
   localSnapshot() {
+    const generatedAt = Date.now();
     const state = this.trading.operationalState();
+    const configuredMarkets = this.trading.markets();
+    const currentConfig = this.marketConfig.current();
     const balanceResource = this.store.loadRemoteResource<number>("balance");
     const ownOffersResource =
       this.store.loadRemoteResource<OfferView[]>("own-offers");
@@ -503,19 +506,21 @@ export class DashboardReadModel {
     const balance = balanceResource?.data ?? 0;
     const ownOfferViews = ownOffersResource?.data ?? [];
     const averages = averagesResource?.data ?? {};
-    const market = Object.fromEntries(
-      this.trading.markets().map((configured) => [
+    const marketResources = new Map(
+      configuredMarkets.map((configured) => [
         configured.code,
-        this.store.loadRemoteResource<MarketView>(
-          `market:${configured.code}`,
-        )?.data ?? { offers: [], total: 0 },
+        this.store.loadRemoteResource<MarketView>(`market:${configured.code}`),
+      ]),
+    );
+    const market = Object.fromEntries(
+      configuredMarkets.map((configured) => [
+        configured.code,
+        marketResources.get(configured.code)?.data ?? { offers: [], total: 0 },
       ]),
     ) as Record<FiatMarket, MarketView>;
     const strategy = this.trading.strategy();
     const budget = Object.fromEntries(
-      this.trading
-        .markets()
-        .map((configured) => [
+      configuredMarkets.map((configured) => [
           configured.code,
           proportionalBudgetPlan(
             ownOfferViews,
@@ -527,17 +532,21 @@ export class DashboardReadModel {
           ),
         ]),
     );
+    const marketHistory = this.store.marketHistory(
+      generatedAt - 24 * 3_600_000,
+    );
+    const activeOperations = this.store.activeOperations();
+    const workflows = this.store.tradeWorkflows();
     return {
-      generatedAt: Date.now(),
+      generatedAt,
       freshness: {
         balance: balanceResource?.updatedAt ?? null,
         ownOffers: ownOffersResource?.updatedAt ?? null,
         transactions: transactionResource?.updatedAt ?? null,
         markets: Object.fromEntries(
-          this.trading.markets().map((configured) => [
+          configuredMarkets.map((configured) => [
             configured.code,
-            this.store.loadRemoteResource(`market:${configured.code}`)
-              ?.updatedAt ?? null,
+            marketResources.get(configured.code)?.updatedAt ?? null,
           ]),
         ),
       },
@@ -546,8 +555,8 @@ export class DashboardReadModel {
       ownOffers: ownOfferViews,
       market,
       averages,
-      hunting: this.marketConfig.current().hunting,
-      automation: this.marketConfig.current().automation,
+      hunting: currentConfig.hunting,
+      automation: currentConfig.automation,
       transactions: transactionResource?.data ?? [],
       strategy,
       markets: this.marketConfig.publicMarkets(),
@@ -561,7 +570,7 @@ export class DashboardReadModel {
             .reduce((sum, offer) => sum + offer.amount, 0),
         },
         fiat: Object.fromEntries(
-          this.trading.markets().map((configured) => {
+          configuredMarkets.map((configured) => {
             const plan = budget[configured.code] as {
               available: number;
               committed: number;
@@ -581,35 +590,32 @@ export class DashboardReadModel {
         .filter((coin) => !this.marketConfig.find(coin))
         .map((code) => ({ code, label: code, currency: "" })),
       budget,
-      history: this.store.dashboardHistory(Date.now() - 90 * 86_400_000),
-      marketHistory: this.store.marketHistory(Date.now() - 24 * 3_600_000),
-      rankings: rankings(
-        this.trading.markets(),
-        market,
-        this.store.marketHistory(Date.now() - 24 * 3_600_000),
-      ),
+      history: this.store.dashboardHistory(generatedAt - 90 * 86_400_000),
+      marketHistory,
+      rankings: rankings(configuredMarkets, market, marketHistory),
       activity: this.store.recentAudit(50),
       alerts: this.store.recentTradingAlerts(),
       risk: {
-        limits: this.marketConfig.current().risk,
+        limits: currentConfig.risk,
         usage: {
           exposureQusd:
-            this.store.activeOperations().reduce(
+            activeOperations.reduce(
               (sum, operation) => sum + operation.amount,
               0,
             ) + this.store.activeReservedQusd(),
           dailyAppliedQusd: this.store.dailyAppliedQusd(startOfDay()),
-          activeOperations: this.store.activeOperations().length,
+          activeOperations: activeOperations.length,
           unresolvedMutation: this.store.hasUnresolvedMutation(),
           emergencyStop: this.store.get("emergency_stop") === "true",
         },
       },
       recoverableWorkflows: this.store.recoverableWorkflows(),
-      workflows: this.store.tradeWorkflows(),
+      workflows,
       workflowOffers: Object.fromEntries(
-        this.store
-          .tradeWorkflows()
-          .map((workflow) => [workflow.id, this.store.workflowOwnOffers(workflow.id)]),
+        workflows.map((workflow) => [
+          workflow.id,
+          this.store.workflowOwnOffers(workflow.id),
+        ]),
       ),
       capitalReservations: this.store.capitalReservations(),
       cooperativeNetwork: this.cooperativeNetwork(),

@@ -28,8 +28,87 @@ const legacyRuntime = {
 test("versiona el esquema y cierra explícitamente SQLite", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-schema-version-"));
   const store = new Store(dataDir);
-  assert.ok(store.schemaVersion() >= 2);
+  assert.equal(store.schemaVersion(), 18);
   store.close();
+});
+
+test("indexa las ventanas temporales del panel", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-history-indexes-"));
+  const store = new Store(dataDir);
+  store.close();
+
+  const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"), {
+    readOnly: true,
+  });
+  const dashboardPlan = db
+    .prepare(
+      "EXPLAIN QUERY PLAN SELECT created_at FROM dashboard_snapshots WHERE created_at >= ? ORDER BY created_at ASC",
+    )
+    .all(0) as { detail: string }[];
+  const marketPlan = db
+    .prepare(
+      "EXPLAIN QUERY PLAN SELECT created_at FROM market_observations WHERE created_at >= ? AND coin = ? ORDER BY created_at ASC",
+    )
+    .all(0, "BANK_CUP") as { detail: string }[];
+  assert.match(
+    dashboardPlan.map((row) => row.detail).join(" "),
+    /idx_dashboard_snapshots_created/,
+  );
+  assert.match(
+    marketPlan.map((row) => row.detail).join(" "),
+    /idx_market_observations_coin_created/,
+  );
+  db.close();
+});
+
+test("consulta todas las intenciones sin resolver sin un límite de antigüedad", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-pending-intents-"));
+  const store = new Store(dataDir);
+  store.createMutationIntent({
+    intentId: "old-unresolved",
+    operationUuid: "offer-old",
+    kind: "apply",
+    request: { uuid: "offer-old" },
+  });
+  for (let index = 0; index < 501; index += 1) {
+    const intentId = `confirmed-${index}`;
+    store.createMutationIntent({
+      intentId,
+      kind: "create_offer",
+      request: { index },
+    });
+    store.updateMutationIntent(intentId, "confirmed", { ok: true });
+  }
+
+  assert.deepEqual(
+    store.unresolvedMutationIntents().map((intent) => intent.intentId),
+    ["old-unresolved"],
+  );
+  store.close();
+});
+
+test("migra la asociación de workflow fuera del JSON legado", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-intent-workflow-"));
+  const initial = new Store(dataDir);
+  initial.createMutationIntent({
+    intentId: "legacy-workflow-intent",
+    operationUuid: "target-offer",
+    kind: "apply",
+    request: { workflowId: "workflow-legacy" },
+  });
+  initial.close();
+
+  const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"));
+  db.prepare("UPDATE mutation_intents SET workflow_id = NULL").run();
+  db.prepare("DELETE FROM schema_migrations WHERE version = 18").run();
+  db.close();
+
+  const migrated = new Store(dataDir);
+  assert.equal(
+    migrated.recentMutationIntents(1)[0]?.workflowId,
+    "workflow-legacy",
+  );
+  migrated.close();
 });
 
 test("pagina logs operativos, clasifica niveles y redacta secretos", () => {
@@ -306,7 +385,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v16-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v18-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });
@@ -321,7 +400,7 @@ test("repara una base v12 registrada sin la tabla de reajustes", () => {
   db.close();
 
   const migrated = new Store(dataDir);
-  assert.equal(migrated.schemaVersion(), 16);
+  assert.equal(migrated.schemaVersion(), 18);
   const job = migrated.createRebalanceJob("repair-check", [], 1);
   assert.equal(job.id, "repair-check");
   migrated.close();

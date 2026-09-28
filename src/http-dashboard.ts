@@ -847,8 +847,20 @@ async function clientAction<T>(action: () => T | Promise<T>): Promise<T> {
       error instanceof DashboardAuthError ||
       error instanceof QvaApiError
     ) throw error;
+    if (isInternalFailure(error)) throw error;
     throw new ClientInputError(message(error));
   }
+}
+
+function isInternalFailure(error: unknown): boolean {
+  if (
+    error instanceof TypeError ||
+    error instanceof RangeError ||
+    error instanceof ReferenceError ||
+    error instanceof SyntaxError
+  ) return true;
+  if (!isRecord(error) || typeof error.code !== "string") return false;
+  return /^(?:ERR_|SQLITE_|E[A-Z_]+$)/.test(error.code);
 }
 
 async function resilientResource<T>(
@@ -967,7 +979,7 @@ function reactPage(bootstrap: unknown): string {
     .replaceAll(">", "\\u003e")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="apple-touch-icon" href="/logo/isotipo.webp"><title>QvaApply · Mesa de trading</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="apple-touch-icon" href="/logo/isotipo.webp"><title>QvaApply · Mesa de trading</title><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
 }
 
 function openApiDocument() {
