@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { PollingMarketSource } from "./market-source.js";
 import type { MarketDataSource, MarketPageUpdate, MarketSourceStatus } from "./market-source.js";
 import type { Store } from "./store.js";
-import type { P2pOffer } from "./types.js";
+import type { P2pFeedEvent, P2pOffer } from "./types.js";
 import type { Vault } from "./vault.js";
 import {
   QvaPayFeedStream,
@@ -25,6 +25,8 @@ export class MarketFeedRequestError extends Error {
 
 export class MarketSourceCoordinator implements MarketDataSource {
   private processing = false;
+  private recoveryRequested = false;
+  private lastRecoveryPollAt = 0;
   private readonly stream: QvaPayFeedStream;
   private streamState: QvaPayStreamState = { phase: "idle" };
 
@@ -33,10 +35,20 @@ export class MarketSourceCoordinator implements MarketDataSource {
     private readonly vault: Vault,
     private readonly polling: PollingMarketSource,
     private readonly webhookUrl: string,
-    private readonly ingest: (offer: P2pOffer, receivedAt: number) => Promise<unknown>,
+    private readonly ingest: (
+      offer: P2pOffer,
+      receivedAt: number,
+      event: "p2p.created" | "p2p.reopened",
+      sentAt: string,
+    ) => Promise<unknown>,
     private readonly canProcess: () => boolean = () => true,
     private readonly now: () => number = Date.now,
     streamRuntime: QvaPayStreamRuntime = {},
+    private readonly ingestState: (
+      event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened">,
+      offer: P2pOffer,
+      receivedAt: number,
+    ) => Promise<unknown> = async () => undefined,
   ) {
     this.stream = new QvaPayFeedStream(
       (payload) => this.acceptStreamPayload(payload),
@@ -113,8 +125,15 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   async pollNext(): Promise<MarketPageUpdate | undefined> {
-    if (this.mode() !== "polling") return undefined;
-    return this.polling.pollNext();
+    if (this.mode() === "polling") return this.polling.pollNext();
+    const disconnected = this.streamState.phase !== "connected";
+    if (!disconnected && !this.recoveryRequested) return undefined;
+    const now = this.now();
+    if (now - this.lastRecoveryPollAt < 3_000) return undefined;
+    this.lastRecoveryPollAt = now;
+    const update = await this.polling.pollNext();
+    if (update && !disconnected) this.recoveryRequested = false;
+    return update;
   }
 
   status(): MarketSourceStatus {
@@ -139,6 +158,11 @@ export class MarketSourceCoordinator implements MarketDataSource {
       ...(this.store.get("market_feed_last_error")
         ? { lastWebhookError: this.store.get("market_feed_last_error")! }
         : {}),
+      lastEventLatencyMs: optionalStoredNonNegativeNumber(this.store, "market_feed_last_latency_ms"),
+      lastDeliveryLagMs: optionalStoredNonNegativeNumber(this.store, "market_feed_last_delivery_lag_ms"),
+      ...(this.store.get("market_feed_last_outcome")
+        ? { lastEventOutcome: this.store.get("market_feed_last_outcome")! }
+        : {}),
     };
   }
 
@@ -162,31 +186,52 @@ export class MarketSourceCoordinator implements MarketDataSource {
 
   async processNext(): Promise<boolean> {
     if (this.processing || this.mode() !== "hybrid" || !this.canProcess()) return false;
-    const event = this.store.nextMarketFeedEvent(this.now());
-    if (!event) return false;
     this.processing = true;
+    let processed = false;
     try {
-      const payload = normalizeStoredPayload(event.payload);
-      if (!isOpportunityEvent(payload.event) || payload.data.status !== "open") {
-        this.store.completeMarketFeedEvent(event.key, "ignored");
-        return true;
+      while (this.mode() === "hybrid" && this.canProcess()) {
+        const event = this.store.nextMarketFeedEvent(this.now());
+        if (!event) break;
+        processed = true;
+        try {
+          const payload = normalizeStoredPayload(event.payload);
+          if (!isMarketFeedEvent(payload.event)) {
+            this.store.completeMarketFeedEvent(event.key, "ignored");
+            continue;
+          }
+          let outcome: string = payload.event;
+          if (isOpportunityEvent(payload.event) && payload.data.status === "open") {
+            if (this.store.hasPendingMarketFeedInvalidation(payload.data.uuid)) {
+              outcome = "invalidada antes de evaluar";
+            } else {
+              const result = await this.ingest(
+                payload.data,
+                event.receivedAt,
+                payload.event,
+                payload.sent_at,
+              );
+              if (isRecord(result) && typeof result.action === "string") outcome = result.action;
+            }
+          } else if (!isOpportunityEvent(payload.event))
+            await this.ingestState(payload.event, payload.data, event.receivedAt);
+          this.store.completeMarketFeedEvent(event.key, "processed");
+          this.store.set("market_feed_last_processed_at", String(this.now()));
+          this.store.set("market_feed_last_latency_ms", String(Math.max(0, this.now() - event.receivedAt)));
+          this.store.set("market_feed_last_outcome", outcome.slice(0, 200));
+          this.store.set("market_feed_last_error", "");
+          this.store.audit(
+            "market_feed_processed",
+            `Oferta ${payload.data.uuid} procesada desde el feed.`,
+            payload.data.uuid,
+          );
+        } catch (error) {
+          const message = safeError(error);
+          this.store.failMarketFeedEvent(event.key, message, this.now());
+          this.store.set("market_feed_last_error", message);
+          this.store.audit("market_feed_processing_error", message);
+        }
       }
-      await this.ingest(payload.data, event.receivedAt);
-      this.store.completeMarketFeedEvent(event.key, "processed");
-      this.store.set("market_feed_last_processed_at", String(this.now()));
-      this.store.set("market_feed_last_error", "");
-      this.store.audit(
-        "market_feed_processed",
-        `Oferta ${payload.data.uuid} procesada desde el webhook.`,
-        payload.data.uuid,
-      );
-      return true;
-    } catch (error) {
-      const message = safeError(error);
-      this.store.failMarketFeedEvent(event.key, message, this.now());
-      this.store.set("market_feed_last_error", message);
-      this.store.audit("market_feed_processing_error", message);
-      return false;
+      return processed;
     } finally {
       this.processing = false;
     }
@@ -208,8 +253,11 @@ export class MarketSourceCoordinator implements MarketDataSource {
     duplicate: boolean;
     queued: boolean;
   } {
-    const key = `${payload.event}:${payload.data.uuid}`;
-    const queued = this.mode() === "hybrid" && isOpportunityEvent(payload.event);
+    const version = typeof payload.data.updated_at === "string" && payload.data.updated_at
+      ? payload.data.updated_at
+      : payload.sent_at;
+    const key = `${payload.event}:${payload.data.uuid}:${version}`;
+    const queued = this.mode() === "hybrid" && isMarketFeedEvent(payload.event);
     const inserted = this.store.enqueueMarketFeedEvent({
       key,
       event: payload.event,
@@ -217,6 +265,12 @@ export class MarketSourceCoordinator implements MarketDataSource {
       state: queued ? "pending" : "ignored",
       receivedAt: this.now(),
     });
+    const sentAt = Date.parse(payload.sent_at);
+    if (inserted && Number.isFinite(sentAt))
+      this.store.set(
+        "market_feed_last_delivery_lag_ms",
+        String(Math.max(0, this.now() - sentAt)),
+      );
     if (inserted)
       this.store.audit(
         queued ? "market_feed_received" : "market_feed_ignored",
@@ -250,7 +304,10 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   private updateStreamState(state: QvaPayStreamState): void {
+    const previous = this.streamState.phase;
     this.streamState = state;
+    if (state.phase === "connected" && previous !== "connected")
+      this.recoveryRequested = true;
     if (state.error) this.store.set("market_stream_last_error", safeError(state.error));
     else if (state.phase === "connected") this.store.set("market_stream_last_error", "");
   }
@@ -267,8 +324,16 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 }
 
-function isOpportunityEvent(event: string): boolean {
+function isOpportunityEvent(event: string): event is "p2p.created" | "p2p.reopened" {
   return event === "p2p.created" || event === "p2p.reopened";
+}
+
+function isMarketFeedEvent(event: string): event is P2pFeedEvent {
+  return isOpportunityEvent(event) ||
+    event === "p2p.applied" ||
+    event === "p2p.paid" ||
+    event === "p2p.completed" ||
+    event === "p2p.cancelled";
 }
 
 interface FeedPayload {
@@ -348,6 +413,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function optionalStoredNumber(store: Store, key: string): number | null {
   const value = Number(store.get(key));
   return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function optionalStoredNonNegativeNumber(store: Store, key: string): number | null {
+  const raw = store.get(key);
+  if (raw === undefined || raw === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function safeError(error: unknown): string {

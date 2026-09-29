@@ -864,7 +864,7 @@ function MarketSourceSettings() {
       <div className="market-webhook-setup">
         <div className="market-webhook-url">
           <span>
-            <small>URL para QvaPay · p2p.created + p2p.reopened</small>
+            <small>URL para QvaPay · selecciona los 6 eventos P2P</small>
             <code>{source?.webhookUrl || "Cargando…"}</code>
           </span>
           <Button type="button" variant="ghost" size="icon" aria-label="Copiar URL del webhook" onClick={() => void copyWebhookUrl()}>
@@ -922,6 +922,13 @@ function MarketSourceSettings() {
           </span>
         </div>
       </div>
+      {source?.mode === "hybrid" && source?.lastEventOutcome ? (
+        <p className="reader-health-detail" role="status">
+          Último resultado: {source.lastEventOutcome}
+          {Number.isFinite(source?.lastDeliveryLagMs) ? ` · entrega ${source.lastDeliveryLagMs} ms` : ""}
+          {Number.isFinite(source?.lastEventLatencyMs) ? ` · proceso ${source.lastEventLatencyMs} ms` : ""}
+        </p>
+      ) : null}
       {source?.lastWebhookError ? <p className="reader-error" role="status">Webhook: {source.lastWebhookError}</p> : null}
       {source?.lastStreamError ? <p className="reader-error" role="status">Stream: {source.lastStreamError}</p> : null}
       <div className="market-reader-list">

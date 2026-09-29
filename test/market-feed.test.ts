@@ -107,6 +107,9 @@ test("acepta, deduplica y procesa inmediatamente una oferta firmada", async () =
   assert.equal(state.ingested[0]?.offer.receive, 25_000);
   assert.equal(state.coordinator.status().pendingWebhookEvents, 0);
   assert.equal(state.coordinator.status().lastWebhookProcessedAt, Date.parse("2026-09-24T12:00:10Z"));
+  assert.equal(state.coordinator.status().lastDeliveryLagMs, 10_000);
+  assert.equal(state.coordinator.status().lastEventLatencyMs, 0);
+  assert.match(state.coordinator.status().lastEventOutcome ?? "", /procesada|aplicada|p2p/i);
 
   const duplicate = state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   assert.deepEqual(duplicate, { duplicate: true, queued: false });
@@ -135,6 +138,138 @@ test("procesa reaperturas y deduplica el mismo evento entre stream y webhook", a
   state.store.close();
 });
 
+test("procesa dos reaperturas legítimas del mismo UUID en ciclos distintos", async () => {
+  const state = setup();
+  enableRealtime(state.coordinator);
+  const first = payload("cc9e6679-7425-40de-944b-e07fc1f90ae7", "p2p.reopened");
+  const second = {
+    ...first,
+    sent_at: "2026-09-24T12:00:05Z",
+    data: { ...first.data, updated_at: "2026-09-24T12:00:05Z" },
+  };
+  for (const event of [first, second]) {
+    const raw = Buffer.from(JSON.stringify(event));
+    assert.equal(
+      state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z"))).queued,
+      true,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(state.ingested.length, 2);
+  state.coordinator.stop();
+  state.store.close();
+});
+
+test("drena una ráfaga del feed sin esperar un tick del scheduler por oferta", async () => {
+  let releaseFirst: (() => void) | undefined;
+  const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  let calls = 0;
+  const state = setup();
+  const coordinator = new MarketSourceCoordinator(
+    state.store,
+    new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl,
+    async () => {
+      calls += 1;
+      if (calls === 1) await firstBlocked;
+    },
+    () => true,
+    () => Date.parse("2026-09-24T12:00:10Z"),
+    { fetch: async () => new Response("retry: 60000\n\n", { status: 200 }) },
+  );
+  enableRealtime(coordinator);
+  for (const uuid of [
+    "dc9e6679-7425-40de-944b-e07fc1f90ae7",
+    "ec9e6679-7425-40de-944b-e07fc1f90ae7",
+    "fc9e6679-7425-40de-944b-e07fc1f90ae7",
+  ]) {
+    const raw = Buffer.from(JSON.stringify(payload(uuid)));
+    coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 1);
+  releaseFirst?.();
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls, 3);
+  coordinator.stop();
+  state.store.close();
+});
+
+test("integra los seis eventos del feed por stream o webhook", async () => {
+  const state = setup();
+  const opportunities: string[] = [];
+  const lifecycle: string[] = [];
+  const coordinator = new MarketSourceCoordinator(
+    state.store,
+    new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl,
+    async (offer) => void opportunities.push(offer.uuid),
+    () => true,
+    () => Date.parse("2026-09-24T12:00:10Z"),
+    { fetch: async () => new Response("retry: 60000\n\n", { status: 200 }) },
+    async (event, offer) => void lifecycle.push(`${event}:${offer.uuid}`),
+  );
+  enableRealtime(coordinator);
+  const events = [
+    "p2p.created",
+    "p2p.reopened",
+    "p2p.applied",
+    "p2p.paid",
+    "p2p.completed",
+    "p2p.cancelled",
+  ];
+  for (const [index, event] of events.entries()) {
+    const value = payload(`${index + 1}c9e6679-7425-40de-944b-e07fc1f90ae7`, event);
+    const raw = Buffer.from(JSON.stringify(value));
+    assert.equal(
+      coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z"))).queued,
+      true,
+    );
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(opportunities.length, 2);
+  assert.deepEqual(
+    lifecycle.map((item) => item.split(":", 1)[0]),
+    ["p2p.applied", "p2p.paid", "p2p.completed", "p2p.cancelled"],
+  );
+  coordinator.stop();
+  state.store.close();
+});
+
+test("un evento aplicado en cola invalida la oportunidad antes de consumir apply", async () => {
+  const state = setup();
+  const opportunities: string[] = [];
+  const lifecycle: string[] = [];
+  const coordinator = new MarketSourceCoordinator(
+    state.store,
+    new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl,
+    async (offer) => void opportunities.push(offer.uuid),
+    () => true,
+    () => Date.parse("2026-09-24T12:00:10Z"),
+    { fetch: async () => new Response("retry: 60000\n\n", { status: 200 }) },
+    async (event) => void lifecycle.push(event),
+  );
+  enableRealtime(coordinator);
+  const uuid = "4c9e6679-7425-40de-944b-e07fc1f90ae7";
+  for (const event of ["p2p.created", "p2p.applied"]) {
+    const value = payload(uuid, event);
+    const raw = Buffer.from(JSON.stringify(value));
+    coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(opportunities, []);
+  assert.deepEqual(lifecycle, ["p2p.applied"]);
+  coordinator.stop();
+  state.store.close();
+});
+
 test("rechaza firma inválida y timestamp fuera de la ventana", async () => {
   const state = setup();
   enableRealtime(state.coordinator);
@@ -155,7 +290,7 @@ test("rechaza firma inválida y timestamp fuera de la ventana", async () => {
   state.store.close();
 });
 
-test("conmuta de forma exclusiva entre polling y tiempo real", async () => {
+test("conmuta entre polling y tiempo real con una lectura de recuperación acotada", async () => {
   const state = setup();
   await state.coordinator.pollNext();
   assert.equal(state.polls(), 1);
@@ -165,13 +300,15 @@ test("conmuta de forma exclusiva entre polling y tiempo real", async () => {
   state.coordinator.saveStreamCredentials("app-id-tests", "app-secret-for-tests-2026");
   state.coordinator.setMode("hybrid");
   await state.coordinator.pollNext();
-  assert.equal(state.polls(), 1);
+  assert.equal(state.polls(), 2);
   state.coordinator.setMode("polling");
   const raw = Buffer.from(JSON.stringify(payload("8c9e6679-7425-40de-944b-e07fc1f90ae7")));
   const accepted = state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   assert.deepEqual(accepted, { duplicate: false, queued: false });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(state.ingested.length, 0);
+  await state.coordinator.pollNext();
+  assert.equal(state.polls(), 3);
   state.store.close();
 });
 

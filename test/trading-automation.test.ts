@@ -494,6 +494,13 @@ test("evalúa una página secundaria pero aplica únicamente con el gateway prin
 
 test("procesa una oferta del webhook sin esperar listado ni promedios remotos", async () => {
   const { store, cfg, markets } = setup();
+  const fastConfig = markets.current();
+  fastConfig.risk.reviewedAt = null;
+  fastConfig.risk.maxQusdPerOperation = 1;
+  fastConfig.risk.maxDailyAppliedQusd = 1;
+  fastConfig.markets.find((market) => market.code === "BANK_CUP")!.purchaseMaxQusd = 1;
+  markets.save(fastConfig);
+  store.set("consecutive_errors", "99");
   const target: P2pOffer = {
     uuid: "webhook-discovery",
     type: "sell",
@@ -506,7 +513,7 @@ test("procesa una oferta del webhook sin esperar listado ni promedios remotos", 
   const qva = {
     listOffersPage: async () => { throw new Error("no debe listar"); },
     p2pAverages: async () => { throw new Error("no debe consultar promedios"); },
-    qusdBalance: async () => 100,
+    qusdBalance: async () => { throw new Error("una compra con fiat no debe consultar QUSD"); },
     apply: async (uuid: string) => void applications.push(uuid),
     sendChat: async () => undefined,
   };
@@ -520,6 +527,125 @@ test("procesa una oferta del webhook sin esperar listado ni promedios remotos", 
   assert.equal(store.getOperation(target.uuid)?.autoApplied, true);
   const market = store.loadRemoteResource<{ offers: P2pOffer[] }>("market:BANK_CUP");
   assert.equal(market?.data.offers[0]?.uuid, target.uuid);
+  store.close();
+});
+
+test("vende QUSD desde el feed por precio y saldo sin listar el mercado", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "webhook-fast-sell",
+    type: "buy",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 10_200,
+    status: "open",
+    offer_kind: "fixed",
+  };
+  const applications: string[] = [];
+  let balanceReads = 0;
+  const qva = {
+    listOffers: async () => { throw new Error("no debe listar ofertas propias"); },
+    listOffersPage: async () => { throw new Error("no debe listar el mercado"); },
+    p2pAverages: async () => { throw new Error("no debe consultar promedios"); },
+    qusdBalance: async () => { balanceReads += 1; return 25; },
+    apply: async (uuid: string) => void applications.push(uuid),
+    sendChat: async () => undefined,
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const result = await trading.ingestMarketOffer(target, Date.now());
+
+  assert.equal(result.action, `venta aplicada ${target.uuid}`);
+  assert.deepEqual(applications, [target.uuid]);
+  assert.equal(balanceReads, 1);
+  assert.equal(store.getOperation(target.uuid)?.offerType, "buy");
+  store.close();
+});
+
+test("revalida una entrega tardía antes de gastar el cupo de apply", async () => {
+  const { store, cfg, markets } = setup();
+  const target: P2pOffer = {
+    uuid: "delayed-feed-offer",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+  };
+  let applications = 0;
+  let detailReads = 0;
+  const qva = {
+    getOffer: async () => { detailReads += 1; return { ...target, status: "processing" }; },
+    apply: async () => void (applications += 1),
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const result = await trading.ingestMarketOffer(
+    target,
+    Date.now(),
+    "p2p.created",
+    new Date(Date.now() - 30_000).toISOString(),
+  );
+
+  assert.equal(result.action, "ya no disponible (processing)");
+  assert.equal(detailReads, 1);
+  assert.equal(applications, 0);
+  store.close();
+});
+
+test("los eventos paid y completed sustituyen la espera de sincronización periódica", async () => {
+  const { store, cfg, markets } = setup();
+  const trading = new TradingEngine(store, {} as never, cfg as never, markets, async () => undefined);
+  const buying: P2pOffer = {
+    uuid: "feed-paid-operation",
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "paid",
+  };
+  store.createOperation({
+    uuid: buying.uuid,
+    offerType: "sell",
+    coin: buying.coin,
+    amount: buying.amount,
+    receive: buying.receive,
+    rate: buying.receive / buying.amount,
+    state: "applied",
+    autoApplied: true,
+    cancelAt: null,
+    createdAt: Date.now(),
+  });
+
+  await trading.ingestMarketStateEvent("p2p.paid", buying, Date.now());
+  await trading.ingestMarketStateEvent("p2p.completed", { ...buying, status: "completed" }, Date.now());
+
+  assert.equal(store.getOperation(buying.uuid)?.state, "completed");
+  assert.equal(store.recentFiat("BANK_CUP").filter((entry) => entry.uuid === buying.uuid).length, 1);
+
+  const selling: P2pOffer = {
+    uuid: "feed-completed-operation",
+    type: "buy",
+    coin: "BANK_CUP",
+    amount: 5,
+    receive: 5_100,
+    status: "completed",
+  };
+  store.createOperation({
+    uuid: selling.uuid,
+    offerType: "buy",
+    coin: selling.coin,
+    amount: selling.amount,
+    receive: selling.receive,
+    rate: selling.receive / selling.amount,
+    state: "applied",
+    autoApplied: true,
+    cancelAt: null,
+    createdAt: Date.now(),
+  });
+  await trading.ingestMarketStateEvent("p2p.completed", selling, Date.now());
+  assert.equal(store.getOperation(selling.uuid)?.state, "completed");
+  assert.equal(store.recentFiat("BANK_CUP").filter((entry) => entry.uuid === selling.uuid).length, 1);
   store.close();
 });
 

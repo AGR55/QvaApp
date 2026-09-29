@@ -1511,6 +1511,16 @@ export class Store {
     return row ? marketFeedEventFromRow(row) : undefined;
   }
 
+  hasPendingMarketFeedInvalidation(uuid: string): boolean {
+    return Boolean(this.db.prepare(
+      `SELECT 1 FROM market_feed_events
+       WHERE state = 'pending'
+         AND event IN ('p2p.applied', 'p2p.cancelled')
+         AND json_extract(payload_json, '$.data.uuid') = ?
+       LIMIT 1`,
+    ).get(uuid));
+  }
+
   completeMarketFeedEvent(key: string, state: "processed" | "ignored"): void {
     this.db.prepare(
       `UPDATE market_feed_events

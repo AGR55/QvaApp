@@ -60,6 +60,8 @@ test("la fuente de mercado permite alternar polling y tiempo real sin exponer se
   assert.match(settingsSource, /id="market-feed-secret"[^>]*type="password"/);
   assert.match(settingsSource, /id="market-stream-app-secret"[^>]*type="password"/);
   assert.match(settingsSource, /source\?\.webhookUrl/);
+  assert.match(settingsSource, /lastEventLatencyMs/);
+  assert.match(settingsSource, /Último resultado/);
   assert.match(styles, /\.market-source-mode-buttons/);
   assert.match(styles, /\.market-webhook-setup/);
 });

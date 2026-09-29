@@ -50,6 +50,9 @@ export interface MarketSourceStatus {
   pendingWebhookEvents?: number;
   failedWebhookEvents?: number;
   lastWebhookError?: string;
+  lastEventLatencyMs?: number | null;
+  lastDeliveryLagMs?: number | null;
+  lastEventOutcome?: string;
 }
 
 export interface MarketDataSource {

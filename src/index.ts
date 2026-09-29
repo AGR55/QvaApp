@@ -125,8 +125,11 @@ const marketSource = new MarketSourceCoordinator(
   vault,
   pollingMarketSource,
   new URL("/webhooks/qvapay/p2p-feed", config.dashboardTrustedOrigin).toString(),
-  (offer, receivedAt) => trading.ingestMarketOffer(offer, receivedAt),
+  (offer, receivedAt, event, sentAt) => trading.ingestMarketOffer(offer, receivedAt, event, sentAt),
   () => !trading.isPaused(),
+  Date.now,
+  {},
+  (event, offer, receivedAt) => trading.ingestMarketStateEvent(event, offer, receivedAt),
 );
 marketSource.start();
 const dashboardReadModel = new DashboardReadModel(
@@ -418,9 +421,9 @@ const scheduler = new Scheduler((name, error) => {
 });
 scheduler.register("scan", 250, async () => {
   if (trading.isPaused()) return;
+  if (marketSource.mode() === "hybrid" && await marketSource.processNext()) return;
   const update = await marketSource.pollNext();
   if (update) await trading.ingestMarketUpdate(update);
-  else if (marketSource.mode() === "hybrid") await marketSource.processNext();
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
 scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());

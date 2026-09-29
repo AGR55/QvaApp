@@ -45,8 +45,9 @@ mercado P2P** es:
 https://qvapply.honux.tech/webhooks/qvapay/p2p-feed
 ```
 
-Contrata el feed para la misma app cuyas credenciales usarás y selecciona
-`p2p.created` y `p2p.reopened`. Copia el secreto propio del feed, el `app-id` y
+Contrata el feed para la misma app cuyas credenciales usarás y selecciona los
+seis eventos `p2p.created`, `p2p.reopened`, `p2p.applied`, `p2p.paid`,
+`p2p.completed` y `p2p.cancelled`. Copia el secreto propio del feed, el `app-id` y
 el `app-secret`; abre **Estrategia → Fuente de mercado**, guárdalos y activa
 **Tiempo real**. No coloques la
 URL del panel (`https://qvapply.honux.tech/`) ni rutas de API de
@@ -57,7 +58,8 @@ La ruta valida `x-qvapay-signature` sobre el cuerpo crudo y
 responde `202` después de quedar persistida. El panel muestra última recepción,
 estado de conexión, cola y fallos. El stream SSE es la vía de menor latencia; el
 webhook aporta cola y reintentos durante sus desconexiones. Ambos deduplican por
-`event + uuid`. Si necesitas volver al listado periódico, pulsa **Polling**;
+`event + uuid + versión temporal`, lo que permite procesar reaperturas repetidas
+sin duplicar la misma entrega entre canales. Si necesitas volver al listado periódico, pulsa **Polling**;
 las credenciales cifradas se conservan.
 
 La suscripción se compra manualmente en <https://www.qvapay.com/dev>. No envíes
