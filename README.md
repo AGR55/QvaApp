@@ -75,7 +75,7 @@ Precios, límites, mercados, saldos declarados, intervalos, autocancelación, re
 
 El panel abre primero con SQLite y actualiza únicamente los recursos de la vista activa. Si QvaPay tarda o no responde, conserva los datos anteriores, muestra su fecha y permite navegar, auditar o cambiar configuración local sin quedar atrapado en una pantalla de carga.
 
-Los avisos del navegador se activan desde el icono de campana. En la máquina local funcionan mediante `localhost`/`127.0.0.1`; en producción se sirven mediante HTTPS en `honux.tech`. Las gráficas leen una ventana móvil de 24 horas alimentada por el escáner y usan un SVG local liviano.
+Los avisos del navegador se activan desde el icono de campana. En la máquina local funcionan mediante `localhost`/`127.0.0.1`; en producción se sirven mediante HTTPS en `qvapply.honux.tech`. Las gráficas leen una ventana móvil de 24 horas alimentada por el escáner y usan un SVG local liviano.
 
 ## Red cooperativa de cacerías
 

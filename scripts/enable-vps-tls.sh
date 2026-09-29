@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-domain=${1:-honux.tech}
+domain=${1:-qvapply.honux.tech}
 email=${2:?Uso: scripts/enable-vps-tls.sh DOMINIO EMAIL}
 app_root="/opt/qvaapply"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -38,30 +38,40 @@ if [[ ! $host_port =~ ^[0-9]+$ ]] || (( host_port < 1024 || host_port > 65535 ))
   exit 2
 fi
 
-# En la primera activación instalamos la plantilla actual antes de que Certbot
-# añada el bloque TLS. En renovaciones conservamos el bloque ya administrado.
-if ! grep -Eq 'listen[^;]*443' /etc/nginx/sites-available/qvaapply.conf; then
-  sed -e "s/server_name honux\.tech www\.honux\.tech;/server_name $domain www.$domain;/" \
-      -e "s/127\.0\.0\.1:8782/127.0.0.1:$host_port/" \
-      "$release_root/deploy/nginx-qvaapply.conf" \
-      > /etc/nginx/sites-available/qvaapply.conf
-  nginx -t
-  systemctl reload nginx
-fi
+# Restauramos la plantilla HTTP antes de que Certbot genere el bloque TLS. Esto
+# elimina asociaciones anteriores con otros dominios y conserva un host por defecto neutro.
+sed -e "s/server_name qvapply\.honux\.tech;/server_name $domain;/" \
+    -e "s/127\.0\.0\.1:8782/127.0.0.1:$host_port/" \
+    "$release_root/deploy/nginx-qvaapply.conf" \
+    > /etc/nginx/sites-available/qvaapply.conf
+rm -f /etc/nginx/sites-enabled/qvaapply-reject.conf
+nginx -t
+systemctl reload nginx
 
 public_ip=$(curl -4fsS https://api.ipify.org)
-certbot_domains=()
-for candidate in "$domain" "www.$domain"; do
-  resolved=$(getent ahostsv4 "$candidate" | awk 'NR == 1 { print $1 }')
-  if [[ -z $resolved || $resolved != "$public_ip" ]]; then
-    echo "$candidate resuelve a ${resolved:-ninguna IP}, pero esta VPS publica $public_ip." >&2
-    exit 1
-  fi
-  certbot_domains+=(-d "$candidate")
-done
+resolved=$(getent ahostsv4 "$domain" | awk 'NR == 1 { print $1 }')
+if [[ -z $resolved || $resolved != "$public_ip" ]]; then
+  echo "$domain resuelve a ${resolved:-ninguna IP}, pero esta VPS publica $public_ip." >&2
+  exit 1
+fi
 
 certbot --nginx --non-interactive --agree-tos --redirect --keep-until-expiring \
-  --email "$email" "${certbot_domains[@]}"
+  --email "$email" --cert-name "$domain" -d "$domain"
+
+# El servidor TLS por defecto nunca entrega QvaApply a otro hostname. Usa el
+# certificado del subdominio únicamente para completar el handshake y responder 404.
+{
+  printf 'server {\n'
+  printf '    listen 443 ssl default_server;\n'
+  printf '    listen [::]:443 ssl default_server;\n'
+  printf '    server_name _;\n'
+  printf '    ssl_certificate /etc/letsencrypt/live/%s/fullchain.pem;\n' "$domain"
+  printf '    ssl_certificate_key /etc/letsencrypt/live/%s/privkey.pem;\n' "$domain"
+  printf '    return 404;\n'
+  printf '}\n'
+} > /etc/nginx/sites-available/qvaapply-reject.conf
+ln -sfn /etc/nginx/sites-available/qvaapply-reject.conf \
+  /etc/nginx/sites-enabled/qvaapply-reject.conf
 nginx -t
 systemctl reload nginx
 
@@ -89,5 +99,5 @@ for _ in {1..30}; do
   sleep 2
 done
 curl --fail --silent --show-error "http://127.0.0.1:${QVAAPPLY_HOST_PORT}/api/session" >/dev/null
-certbot renew --dry-run
+certbot renew --cert-name "$domain" --dry-run
 echo "TLS, cookies seguras y renovación verificados para https://$domain"

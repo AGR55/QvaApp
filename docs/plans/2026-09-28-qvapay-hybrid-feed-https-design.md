@@ -2,14 +2,14 @@
 
 ## Objetivo
 
-Publicar QvaApply en `https://honux.tech` y reducir al mínimo la latencia entre
+Publicar QvaApply en `https://qvapply.honux.tech` y reducir al mínimo la latencia entre
 la aparición de una oferta P2P y su evaluación. El stream SSE será el camino
 rápido y el webhook firmado actuará como respaldo durable ante desconexiones.
 El sondeo existente seguirá disponible como modo de contingencia.
 
 ## Publicación HTTPS
 
-Nginx terminará TLS para `honux.tech`, redirigirá HTTP a HTTPS y mantendrá la
+Nginx terminará TLS para `qvapply.honux.tech`, redirigirá HTTP a HTTPS y mantendrá la
 aplicación enlazada exclusivamente a `127.0.0.1:8782`. Certbot emitirá el
 certificado con `gonzalezreyesadriano@gmail.com` y dejará activa la renovación
 automática. La configuración conservará `Host`, dirección del cliente y
@@ -74,4 +74,3 @@ deduplicación entre stream y webhook. Se conservarán las pruebas de firma,
 timestamp, persistencia y conmutación existentes. Antes de desplegar se
 ejecutarán `pnpm check` y los smoke tests aplicables; después se validarán HTTPS,
 certificado, redirección, salud y rechazo de webhooks sin firma.
-

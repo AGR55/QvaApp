@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-domain=${1:-honux.tech}
+domain=${1:-qvapply.honux.tech}
 host_port=${2:-8782}
 app_root="/opt/qvaapply"
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -58,7 +58,7 @@ install -d -o 1000 -g 1000 -m 0700 "$app_root/data" "$app_root/data/backups"
 printf '%s\n' "$host_port" > "$app_root/config/host-port"
 chmod 600 "$app_root/config/host-port"
 
-sed -e "s/server_name honux\.tech www\.honux\.tech;/server_name $domain www.$domain;/" \
+sed -e "s/server_name qvapply\.honux\.tech;/server_name $domain;/" \
     -e "s/127\.0\.0\.1:8782/127.0.0.1:$host_port/" \
     "$release_root/deploy/nginx-qvaapply.conf" \
     > /etc/nginx/sites-available/qvaapply.conf

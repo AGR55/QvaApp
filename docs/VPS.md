@@ -44,7 +44,7 @@ tar -xzf /tmp/qvaapply-provision.tar.gz -C /tmp/qvaapply-release
 /tmp/qvaapply-release/scripts/provision-vps.sh honux.tech 8782
 ```
 
-Después, `scripts/bootstrap-vps.sh 8782 https://honux.tech` solicita la
+Después, `scripts/bootstrap-vps.sh 8782 https://qvapply.honux.tech` solicita la
 contraseña del panel y las credenciales de Telegram sin incluirlas en el
 historial. Genera automáticamente la clave local de cifrado.
 `CONFIRM_REAL_TRADING` queda en `false`; la aplicación no arranca hasta que el
@@ -73,7 +73,7 @@ existente:
 ```nginx
 server {
     listen 80;
-server_name honux.tech www.honux.tech;
+server_name qvapply.honux.tech;
 
     location / {
         proxy_pass http://127.0.0.1:8782;
@@ -86,13 +86,13 @@ server_name honux.tech www.honux.tech;
 }
 ```
 
-Cuando `honux.tech` y `www.honux.tech` apunten a `2.25.247.171`, ejecuta
+Cuando `qvapply.honux.tech` apunte a `2.25.247.171`, ejecuta
 manualmente el workflow **Enable production TLS**. Este emite el certificado,
 activa la redirección, fuerza cookies seguras, reinicia el contenedor y verifica
 la renovación. La alternativa desde la VPS es:
 
 ```bash
-/opt/qvaapply/current/scripts/enable-vps-tls.sh honux.tech correo@example.com
+/opt/qvaapply/current/scripts/enable-vps-tls.sh qvapply.honux.tech correo@example.com
 ```
 
 El puerto 8782 nunca se abre en el firewall de Hostinger ni en UFW.

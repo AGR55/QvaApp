@@ -45,15 +45,18 @@ jobs:
           quoted_email=$(printf '%q' "$LETSENCRYPT_EMAIL")
           ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
             -p "$ssh_port" "$remote" \
-            "bash /opt/qvaapply/current/scripts/enable-vps-tls.sh honux.tech $quoted_email"
+            "bash /opt/qvaapply/current/scripts/enable-vps-tls.sh qvapply.honux.tech $quoted_email"
 
       - name: Verify public HTTPS service
         run: |
           redirect=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' \
-            --max-time 20 http://honux.tech/)
-          [[ "$redirect" == "301 https://honux.tech/" || "$redirect" == "308 https://honux.tech/" ]]
-          curl --fail --silent --show-error --max-time 20 https://honux.tech/api/session >/dev/null
+            --max-time 20 http://qvapply.honux.tech/)
+          [[ "$redirect" == "301 https://qvapply.honux.tech/" || "$redirect" == "308 https://qvapply.honux.tech/" ]]
+          curl --fail --silent --show-error --max-time 20 https://qvapply.honux.tech/api/session >/dev/null
           webhook_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
             --max-time 20 -X POST -H 'content-type: application/json' \
-            --data '{}' https://honux.tech/webhooks/qvapay/p2p-feed)
+            --data '{}' https://qvapply.honux.tech/webhooks/qvapay/p2p-feed)
           [[ "$webhook_status" == "401" || "$webhook_status" == "503" ]]
+          root_status=$(curl --insecure --silent --output /dev/null --write-out '%{http_code}' \
+            --max-time 20 https://honux.tech/api/session)
+          [[ "$root_status" != "200" ]]

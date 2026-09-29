@@ -24,7 +24,7 @@ no dispararán operaciones.
 
 El endpoint será:
 
-`POST https://honux.tech/webhooks/qvapay/p2p-feed`
+`POST https://qvapply.honux.tech/webhooks/qvapay/p2p-feed`
 
 La ruta no usará la sesión del panel. Su autenticación será exclusivamente la
 firma `x-qvapay-signature`: HMAC-SHA256 calculado sobre el cuerpo JSON crudo con

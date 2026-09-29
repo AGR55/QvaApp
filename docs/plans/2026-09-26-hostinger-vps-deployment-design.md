@@ -3,7 +3,7 @@
 ## Objetivo
 
 Preparar desde cero la VPS `2.25.247.171` para ejecutar una única instancia de
-QvaApply, publicar el panel en `https://honux.tech` y conservar despliegues
+QvaApply, publicar el panel en `https://qvapply.honux.tech` y conservar despliegues
 automáticos desde `main` con comprobación de salud y rollback.
 
 No se migrarán datos ni secretos de la VPS anterior. La aplicación comenzará
@@ -58,5 +58,5 @@ las referencias operativas a la VPS anterior.
 Se comprobarán la suite del repositorio, la sintaxis de los scripts y del
 workflow, la configuración de Docker Compose y Nginx, los permisos, el estado
 del firewall, el reinicio automático y la accesibilidad del servicio a través
-del proxy. TLS se verificará después de que el DNS de `honux.tech` apunte a
+del proxy. TLS se verificará después de que el DNS de `qvapply.honux.tech` apunte a
 `2.25.247.171`.
