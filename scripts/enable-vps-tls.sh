@@ -99,5 +99,5 @@ for _ in {1..30}; do
   sleep 2
 done
 curl --fail --silent --show-error "http://127.0.0.1:${QVAAPPLY_HOST_PORT}/api/session" >/dev/null
-certbot renew --cert-name "$domain" --dry-run
+certbot renew --no-random-sleep-on-renew --cert-name "$domain" --dry-run
 echo "TLS, cookies seguras y renovación verificados para https://$domain"

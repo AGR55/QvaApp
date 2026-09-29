@@ -117,14 +117,13 @@
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
   color: var(--danger-ink);
 }
-.network-aggregate-grid,
-.network-contribution-grid {
+.network-aggregate-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--s-3);
 }
 .network-aggregate,
-.network-contribution {
+.network-contribution-table-wrap {
   min-width: 0;
 }
 .network-aggregate [data-slot="card-title"] {
@@ -149,10 +148,74 @@
 .network-aggregate-content {
   padding-bottom: calc(var(--card-spacing) + 2px);
 }
-.network-field-group {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--s-2);
+.network-contribution-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-control);
+  background: var(--surface);
+}
+.network-contribution-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.network-contribution-table th {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--faint);
+  background: var(--surface-wash);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.network-contribution-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+}
+.network-contribution-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.network-contribution-row {
+  transition: background 180ms ease;
+}
+.network-contribution-row:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.network-contribution-row.is-confirmed {
+  background: color-mix(in srgb, var(--success) 5%, transparent);
+}
+.network-market-cell strong,
+.network-market-cell small {
+  display: block;
+}
+.network-market-cell strong {
+  color: var(--ink-strong);
+  font-size: 13px;
+  font-weight: 650;
+}
+.network-market-cell small {
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: 11px;
+}
+.network-contribution-table .ui-input {
+  width: 100%;
+  min-width: 96px;
+}
+.network-contribution-table .ui-badge {
+  white-space: nowrap;
+}
+.network-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 150px;
+  white-space: nowrap;
 }
 .network-notice {
   margin: 0 0 var(--s-3);
@@ -160,16 +223,64 @@
   font-size: 12.5px;
 }
 @media (max-width: 1120px) {
-  .network-aggregate-grid,
-  .network-contribution-grid {
+  .network-aggregate-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
-@media (max-width: 640px) {
-  .network-aggregate-grid,
-  .network-contribution-grid,
-  .network-field-group {
+@media (max-width: 700px) {
+  .network-aggregate-grid {
     grid-template-columns: 1fr;
+  }
+  .network-contribution-table-wrap {
+    overflow: visible;
+    border: 0;
+    background: transparent;
+  }
+  .network-contribution-table,
+  .network-contribution-table tbody,
+  .network-contribution-table tr,
+  .network-contribution-table td {
+    display: block;
+    min-width: 0;
+  }
+  .network-contribution-table thead {
+    display: none;
+  }
+  .network-contribution-table tbody {
+    display: grid;
+    gap: var(--s-3);
+  }
+  .network-contribution-table tr {
+    border: 1px solid var(--line);
+    border-radius: var(--r-control);
+    background: var(--surface);
+    overflow: hidden;
+  }
+  .network-contribution-table td {
+    display: grid;
+    grid-template-columns: minmax(7rem, 0.78fr) minmax(0, 1.22fr);
+    align-items: center;
+    gap: var(--s-2);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .network-contribution-table td::before {
+    content: attr(data-label);
+    color: var(--faint);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .network-contribution-table td:last-child {
+    border-bottom: 0;
+  }
+  .network-actions {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+  .network-market-cell small {
+    justify-self: end;
   }
 }
 

@@ -1,16 +1,14 @@
 import React, { useState } from "react";
 import { RadioTower, RefreshCw, ShieldAlert, UsersRound, Wifi, WifiOff } from "lucide-react";
 import { Panel, ViewHead } from "../components/common.jsx";
-import { Badge, Button, Field, Input } from "../components/ui.jsx";
+import { Badge, Button, Input } from "../components/ui.jsx";
 import {
   Card,
   CardAction,
   CardContent,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "../components/ui/card.tsx";
-import { FieldGroup } from "../components/ui/field.tsx";
 import { requestJson } from "../lib/http.js";
 import { money } from "../lib/format.js";
 
@@ -167,63 +165,64 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
       </Panel>
 
       <Panel
-        title="Aportación"
+        title="Aportaciones"
         wide
       >
         {notice ? <p className="network-notice" role="status">{notice}</p> : null}
-        <div className="network-contribution-grid">
-          {data.markets.map((market) => {
-            const draft = draftFor(market);
-            const current = network.contributions?.[market.code];
-            return (
-              <form
-                className="network-contribution"
-                key={market.code}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void publish(market);
-                }}
-              >
-                <Card size="sm">
-                  <CardHeader>
-                    <CardTitle>{market.label}</CardTitle>
-                    <CardAction>
-                      <Badge variant="neutral">
-                        {current
-                          ? current.state === "confirmed"
-                            ? "Confirmada"
-                            : "Pendiente"
-                          : "Sin publicar"}
-                      </Badge>
-                    </CardAction>
-                  </CardHeader>
-                  <CardContent>
-                    <FieldGroup className="network-field-group">
-                      <Field label={`Fiat (${market.currency})`} htmlFor={`${market.code}-fiat`}>
-                        <Input id={`${market.code}-fiat`} name="fiat" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required value={draft.fiat} onChange={(event) => updateDraft(market.code, "fiat", event.target.value)} />
-                      </Field>
-                      <Field label="Mínimo" htmlFor={`${market.code}-minimal`}>
-                        <Input id={`${market.code}-minimal`} name="minimal" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required value={draft.minimal} onChange={(event) => updateDraft(market.code, "minimal", event.target.value)} />
-                      </Field>
-                      <Field label="Precio" htmlFor={`${market.code}-price`}>
-                        <Input id={`${market.code}-price`} name="price" type="number" min="0.0001" step="any" inputMode="decimal" autoComplete="off" required value={draft.price} onChange={(event) => updateDraft(market.code, "price", event.target.value)} />
-                      </Field>
-                    </FieldGroup>
-                  </CardContent>
-                  <CardFooter className="network-actions">
-                    <Button type="submit" variant="primary" disabled={!network.enabled || busy === market.code}>
-                      {current ? "Actualizar" : "Publicar"}
-                    </Button>
-                    {current ? (
-                      <Button type="button" variant="outline" disabled={busy === market.code} onClick={() => void withdraw(market)}>
-                        Retirar
+        <div className="network-contribution-table-wrap">
+          <table className="network-contribution-table">
+            <caption className="sr-only">Aportaciones por mercado a la red cooperativa</caption>
+            <thead>
+              <tr>
+                <th scope="col">Mercado</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Fiat disponible</th>
+                <th scope="col">Mínimo</th>
+                <th scope="col">Precio objetivo</th>
+                <th scope="col">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.markets.map((market) => {
+                const draft = draftFor(market);
+                const current = network.contributions?.[market.code];
+                const formId = `network-contribution-${market.code}`;
+                const state = current?.state === "confirmed" ? "confirmed" : current ? "pending" : "draft";
+                const status = state === "confirmed" ? "Confirmada" : state === "pending" ? "Pendiente" : "Sin publicar";
+                return (
+                  <tr className={`network-contribution-row is-${state}`} key={market.code}>
+                    <td data-label="Mercado" className="network-market-cell">
+                      <form id={formId} onSubmit={(event) => { event.preventDefault(); void publish(market); }} />
+                      <strong>{market.label}</strong>
+                      <small>{market.currency}</small>
+                    </td>
+                    <td data-label="Estado">
+                      <Badge variant="neutral">{status}</Badge>
+                    </td>
+                    <td data-label={`Fiat (${market.currency})`}>
+                      <Input form={formId} id={`${market.code}-fiat`} name="fiat" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required aria-label={`Fiat disponible en ${market.currency} para ${market.label}`} value={draft.fiat} onChange={(event) => updateDraft(market.code, "fiat", event.target.value)} />
+                    </td>
+                    <td data-label="Mínimo">
+                      <Input form={formId} id={`${market.code}-minimal`} name="minimal" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required aria-label={`Mínimo para ${market.label}`} value={draft.minimal} onChange={(event) => updateDraft(market.code, "minimal", event.target.value)} />
+                    </td>
+                    <td data-label="Precio objetivo">
+                      <Input form={formId} id={`${market.code}-price`} name="price" type="number" min="0.0001" step="any" inputMode="decimal" autoComplete="off" required aria-label={`Precio objetivo para ${market.label}`} value={draft.price} onChange={(event) => updateDraft(market.code, "price", event.target.value)} />
+                    </td>
+                    <td data-label="Acciones" className="network-actions">
+                      <Button form={formId} type="submit" variant="primary" disabled={!network.enabled || busy === market.code}>
+                        {current ? "Actualizar" : "Publicar"}
                       </Button>
-                    ) : null}
-                  </CardFooter>
-                </Card>
-              </form>
-            );
-          })}
+                      {current ? (
+                        <Button type="button" variant="outline" disabled={busy === market.code} onClick={() => void withdraw(market)}>
+                          Retirar
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </Panel>
     </div>

@@ -14,6 +14,10 @@ const logsSource = readFileSync(
   new URL("../web/features/logs.jsx", import.meta.url),
   "utf8",
 );
+const cooperativeNetworkSource = readFileSync(
+  new URL("../web/features/cooperative-network.jsx", import.meta.url),
+  "utf8",
+);
 
 test("las tarjetas de mercados contienen sus campos sin invadir la columna vecina", () => {
   assert.match(
@@ -58,4 +62,13 @@ test("la fuente de mercado permite alternar polling y tiempo real sin exponer se
   assert.match(settingsSource, /source\?\.webhookUrl/);
   assert.match(styles, /\.market-source-mode-buttons/);
   assert.match(styles, /\.market-webhook-setup/);
+});
+
+test("la red cooperativa usa una tabla compacta y mantiene acciones por mercado", () => {
+  assert.match(cooperativeNetworkSource, /<table className="network-contribution-table">/);
+  assert.match(cooperativeNetworkSource, /<th scope="col">Fiat disponible<\/th>/);
+  assert.match(cooperativeNetworkSource, /form=\{formId\}/);
+  assert.match(cooperativeNetworkSource, /data-label="Acciones"/);
+  assert.match(styles, /\.network-contribution-table\s*\{/);
+  assert.match(styles, /@media \(max-width: 700px\)[\s\S]*\.network-contribution-table thead\s*\{[^}]*display:\s*none/s);
 });
