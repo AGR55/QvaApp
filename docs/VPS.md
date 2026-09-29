@@ -60,6 +60,7 @@ Crea un entorno `production` y añade:
 | `VPS_USER` | `root` |
 | `VPS_SSH_PRIVATE_KEY` | clave Ed25519 privada exclusiva del despliegue |
 | `VPS_KNOWN_HOSTS` | claves verificadas del host SSH |
+| `LETSENCRYPT_EMAIL` | correo de avisos y renovación de Let's Encrypt |
 
 La variable `VPS_SSH_PORT` puede omitirse porque el servidor utiliza el puerto 22.
 La clave privada no se guarda en el repositorio ni dentro de la VPS.
@@ -72,7 +73,7 @@ existente:
 ```nginx
 server {
     listen 80;
-    server_name honux.tech;
+server_name honux.tech www.honux.tech;
 
     location / {
         proxy_pass http://127.0.0.1:8782;
@@ -85,8 +86,10 @@ server {
 }
 ```
 
-Cuando el registro A de `honux.tech` apunte a `2.25.247.171`, emite el
-certificado y verifica la renovación:
+Cuando `honux.tech` y `www.honux.tech` apunten a `2.25.247.171`, ejecuta
+manualmente el workflow **Enable production TLS**. Este emite el certificado,
+activa la redirección, fuerza cookies seguras, reinicia el contenedor y verifica
+la renovación. La alternativa desde la VPS es:
 
 ```bash
 /opt/qvaapply/current/scripts/enable-vps-tls.sh honux.tech correo@example.com

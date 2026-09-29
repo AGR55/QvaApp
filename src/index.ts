@@ -128,6 +128,7 @@ const marketSource = new MarketSourceCoordinator(
   (offer, receivedAt) => trading.ingestMarketOffer(offer, receivedAt),
   () => !trading.isPaused(),
 );
+marketSource.start();
 const dashboardReadModel = new DashboardReadModel(
   trading,
   qva,
@@ -419,7 +420,7 @@ scheduler.register("scan", 250, async () => {
   if (trading.isPaused()) return;
   const update = await marketSource.pollNext();
   if (update) await trading.ingestMarketUpdate(update);
-  else if (marketSource.mode() === "webhook") await marketSource.processNext();
+  else if (marketSource.mode() === "hybrid") await marketSource.processNext();
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
 scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());
@@ -1346,6 +1347,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   stopping = true;
   console.log(`Cerrando QvaApply (${signal})...`);
   scheduler.stop();
+  marketSource.stop();
   if (pollingRetry) clearTimeout(pollingRetry);
   try {
     await bot.stop();

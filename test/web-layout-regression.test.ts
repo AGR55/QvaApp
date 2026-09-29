@@ -48,11 +48,13 @@ test("la consola de logs sigue por cursor y conserva controles accesibles", () =
   assert.match(styles, /@media \(max-width: 640px\)[\s\S]*\.log-filters\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
 });
 
-test("la fuente de mercado permite alternar polling y webhook sin exponer el secreto", () => {
+test("la fuente de mercado permite alternar polling y tiempo real sin exponer secretos", () => {
   assert.match(settingsSource, /changeMode\("polling"\)/);
-  assert.match(settingsSource, /changeMode\("webhook"\)/);
+  assert.match(settingsSource, /changeMode\("hybrid"\)/);
   assert.match(settingsSource, /\/api\/market-source\/webhook-secret/);
+  assert.match(settingsSource, /\/api\/market-source\/stream-credentials/);
   assert.match(settingsSource, /id="market-feed-secret"[^>]*type="password"/);
+  assert.match(settingsSource, /id="market-stream-app-secret"[^>]*type="password"/);
   assert.match(settingsSource, /source\?\.webhookUrl/);
   assert.match(styles, /\.market-source-mode-buttons/);
   assert.match(styles, /\.market-webhook-setup/);

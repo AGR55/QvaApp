@@ -4,8 +4,13 @@ import type { MarketDataSource, MarketPageUpdate, MarketSourceStatus } from "./m
 import type { Store } from "./store.js";
 import type { P2pOffer } from "./types.js";
 import type { Vault } from "./vault.js";
+import {
+  QvaPayFeedStream,
+  type QvaPayStreamRuntime,
+  type QvaPayStreamState,
+} from "./qvapay-feed-stream.js";
 
-export type MarketSourceMode = "polling" | "webhook";
+export type MarketSourceMode = "polling" | "hybrid";
 
 export interface MarketFeedHeaders {
   signature?: string;
@@ -20,6 +25,8 @@ export class MarketFeedRequestError extends Error {
 
 export class MarketSourceCoordinator implements MarketDataSource {
   private processing = false;
+  private readonly stream: QvaPayFeedStream;
+  private streamState: QvaPayStreamState = { phase: "idle" };
 
   constructor(
     private readonly store: Store,
@@ -29,26 +36,43 @@ export class MarketSourceCoordinator implements MarketDataSource {
     private readonly ingest: (offer: P2pOffer, receivedAt: number) => Promise<unknown>,
     private readonly canProcess: () => boolean = () => true,
     private readonly now: () => number = Date.now,
-  ) {}
+    streamRuntime: QvaPayStreamRuntime = {},
+  ) {
+    this.stream = new QvaPayFeedStream(
+      (payload) => this.acceptStreamPayload(payload),
+      (state) => this.updateStreamState(state),
+      streamRuntime,
+    );
+  }
 
   mode(): MarketSourceMode {
-    return this.store.get("market_source_mode") === "webhook"
-      ? "webhook"
+    const stored = this.store.get("market_source_mode");
+    return stored === "hybrid" || stored === "webhook"
+      ? "hybrid"
       : "polling";
   }
 
   setMode(mode: MarketSourceMode): void {
-    if (mode !== "polling" && mode !== "webhook")
+    if (mode !== "polling" && mode !== "hybrid")
       throw new Error("Modo de fuente de mercado inválido.");
-    if (mode === "webhook" && !this.hasSecret())
+    if (mode === "hybrid" && !this.hasWebhookSecret())
       throw new Error("Guarda primero el secreto del webhook de QvaPay.");
+    const streamCredentials = mode === "hybrid"
+      ? this.streamCredentials()
+      : undefined;
     this.store.set("market_source_mode", mode);
-    if (mode === "polling") this.store.ignorePendingMarketFeedEvents();
+    if (mode === "polling") {
+      this.store.ignorePendingMarketFeedEvents();
+      this.stream.stop();
+    }
     this.store.audit(
       "market_source_changed",
       `Fuente de mercado cambiada a ${mode}.`,
     );
-    if (mode === "webhook") queueMicrotask(() => void this.processNext());
+    if (mode === "hybrid") {
+      this.stream.start(streamCredentials!);
+      queueMicrotask(() => void this.processNext());
+    }
   }
 
   saveWebhookSecret(secret: string): void {
@@ -59,8 +83,33 @@ export class MarketSourceCoordinator implements MarketDataSource {
     this.store.audit("market_feed_secret_rotated", "Se guardó un nuevo secreto cifrado para el feed P2P.");
   }
 
-  hasSecret(): boolean {
+  saveStreamCredentials(appId: string, appSecret: string): void {
+    const normalizedId = appId.trim();
+    const normalizedSecret = appSecret.trim();
+    if (normalizedId.length < 4 || normalizedId.length > 256)
+      throw new Error("El app-id debe tener entre 4 y 256 caracteres.");
+    if (normalizedSecret.length < 16 || normalizedSecret.length > 512)
+      throw new Error("El app-secret debe tener entre 16 y 512 caracteres.");
+    this.store.set("market_feed_app_id", this.vault.encrypt(normalizedId));
+    this.store.set("market_feed_app_secret", this.vault.encrypt(normalizedSecret));
+    this.store.audit("market_stream_credentials_rotated", "Se guardaron credenciales cifradas para el stream P2P.");
+    if (this.mode() === "hybrid") this.startStream();
+  }
+
+  start(): void {
+    if (this.mode() === "hybrid" && this.hasStreamCredentials()) this.startStream();
+  }
+
+  stop(): void {
+    this.stream.stop();
+  }
+
+  hasWebhookSecret(): boolean {
     return Boolean(this.store.get("market_feed_secret"));
+  }
+
+  hasStreamCredentials(): boolean {
+    return Boolean(this.store.get("market_feed_app_id") && this.store.get("market_feed_app_secret"));
   }
 
   async pollNext(): Promise<MarketPageUpdate | undefined> {
@@ -75,7 +124,14 @@ export class MarketSourceCoordinator implements MarketDataSource {
       ...polling,
       mode: this.mode(),
       webhookUrl: this.webhookUrl,
-      webhookSecretConfigured: this.hasSecret(),
+      webhookSecretConfigured: this.hasWebhookSecret(),
+      streamCredentialsConfigured: this.hasStreamCredentials(),
+      streamPhase: this.streamState.phase,
+      ...(this.streamState.expiresAt ? { streamExpiresAt: this.streamState.expiresAt } : {}),
+      lastStreamReceivedAt: optionalStoredNumber(this.store, "market_stream_last_received_at"),
+      ...((this.streamState.error ?? this.store.get("market_stream_last_error"))
+        ? { lastStreamError: this.streamState.error ?? this.store.get("market_stream_last_error")! }
+        : {}),
       lastWebhookReceivedAt: optionalStoredNumber(this.store, "market_feed_last_received_at"),
       lastWebhookProcessedAt: optionalStoredNumber(this.store, "market_feed_last_processed_at"),
       pendingWebhookEvents: counts.pending,
@@ -98,37 +154,20 @@ export class MarketSourceCoordinator implements MarketDataSource {
       throw new MarketFeedRequestError(401, "Timestamp del feed vencido.");
     verifySignature(rawBody, headers.signature, secret);
     const payload = parseFeedPayload(rawBody);
-    const key = `${payload.event}:${payload.data.uuid}`;
-    const queued = this.mode() === "webhook" && payload.event === "p2p.created";
-    const inserted = this.store.enqueueMarketFeedEvent({
-      key,
-      event: payload.event,
-      payload,
-      state: queued ? "pending" : "ignored",
-      receivedAt: this.now(),
-    });
+    const result = this.acceptPayload(payload, "webhook");
     this.store.set("market_feed_last_received_at", String(this.now()));
     this.store.set("market_feed_last_error", "");
-    if (inserted)
-      this.store.audit(
-        queued ? "market_feed_received" : "market_feed_ignored",
-        queued
-          ? `Oferta ${payload.data.uuid} recibida por webhook.`
-          : `Evento ${payload.event} recibido con la fuente ${this.mode()}.`,
-        payload.data.uuid,
-      );
-    if (queued && inserted) queueMicrotask(() => void this.processNext());
-    return { duplicate: !inserted, queued: queued && inserted };
+    return result;
   }
 
   async processNext(): Promise<boolean> {
-    if (this.processing || this.mode() !== "webhook" || !this.canProcess()) return false;
+    if (this.processing || this.mode() !== "hybrid" || !this.canProcess()) return false;
     const event = this.store.nextMarketFeedEvent(this.now());
     if (!event) return false;
     this.processing = true;
     try {
       const payload = normalizeStoredPayload(event.payload);
-      if (payload.event !== "p2p.created" || payload.data.status !== "open") {
+      if (!isOpportunityEvent(payload.event) || payload.data.status !== "open") {
         this.store.completeMarketFeedEvent(event.key, "ignored");
         return true;
       }
@@ -153,6 +192,69 @@ export class MarketSourceCoordinator implements MarketDataSource {
     }
   }
 
+  private acceptStreamPayload(value: unknown): void {
+    try {
+      const payload = normalizeStoredPayload(value);
+      this.store.set("market_stream_last_received_at", String(this.now()));
+      this.acceptPayload(payload, "stream");
+    } catch (error) {
+      const message = safeError(error);
+      this.updateStreamState({ phase: "backoff", error: message });
+      this.store.audit("market_stream_payload_error", message);
+    }
+  }
+
+  private acceptPayload(payload: FeedPayload, source: "webhook" | "stream"): {
+    duplicate: boolean;
+    queued: boolean;
+  } {
+    const key = `${payload.event}:${payload.data.uuid}`;
+    const queued = this.mode() === "hybrid" && isOpportunityEvent(payload.event);
+    const inserted = this.store.enqueueMarketFeedEvent({
+      key,
+      event: payload.event,
+      payload,
+      state: queued ? "pending" : "ignored",
+      receivedAt: this.now(),
+    });
+    if (inserted)
+      this.store.audit(
+        queued ? "market_feed_received" : "market_feed_ignored",
+        queued
+          ? `Oferta ${payload.data.uuid} recibida por ${source}.`
+          : `Evento ${payload.event} recibido por ${source} con la fuente ${this.mode()}.`,
+        payload.data.uuid,
+      );
+    if (queued && inserted) queueMicrotask(() => void this.processNext());
+    return { duplicate: !inserted, queued: queued && inserted };
+  }
+
+  private startStream(): void {
+    const credentials = this.streamCredentials();
+    this.stream.start(credentials);
+  }
+
+  private streamCredentials(): { appId: string; appSecret: string } {
+    const encryptedId = this.store.get("market_feed_app_id");
+    const encryptedSecret = this.store.get("market_feed_app_secret");
+    if (!encryptedId || !encryptedSecret)
+      throw new Error("Faltan las credenciales de app para el stream de QvaPay.");
+    try {
+      return {
+        appId: this.vault.decrypt(encryptedId),
+        appSecret: this.vault.decrypt(encryptedSecret),
+      };
+    } catch {
+      throw new Error("No se pudieron abrir las credenciales del stream.");
+    }
+  }
+
+  private updateStreamState(state: QvaPayStreamState): void {
+    this.streamState = state;
+    if (state.error) this.store.set("market_stream_last_error", safeError(state.error));
+    else if (state.phase === "connected") this.store.set("market_stream_last_error", "");
+  }
+
   private secret(): string {
     const encrypted = this.store.get("market_feed_secret");
     if (!encrypted)
@@ -163,6 +265,10 @@ export class MarketSourceCoordinator implements MarketDataSource {
       throw new MarketFeedRequestError(503, "No se pudo abrir el secreto del webhook.");
     }
   }
+}
+
+function isOpportunityEvent(event: string): boolean {
+  return event === "p2p.created" || event === "p2p.reopened";
 }
 
 interface FeedPayload {

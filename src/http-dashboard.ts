@@ -13,7 +13,7 @@ import type { FiatMarket } from "./types.js";
 import type { StoredPushSubscription, WebPushService } from "./web-push.js";
 import type { MarketAccountService } from "./market-accounts.js";
 import type { MarketDataSource } from "./market-source.js";
-import { MarketFeedRequestError, type MarketSourceCoordinator } from "./market-feed.js";
+import { MarketFeedRequestError, type MarketSourceCoordinator, type MarketSourceMode } from "./market-feed.js";
 
 type AuthOptions = {
   password: string;
@@ -29,7 +29,7 @@ export async function startDashboard(
   pushService?: PushService,
   host: "127.0.0.1" | "0.0.0.0" = "127.0.0.1",
   marketAccounts?: MarketAccountService,
-  marketSource?: Pick<MarketSourceCoordinator, "status" | "setMode" | "saveWebhookSecret" | "acceptWebhook">,
+  marketSource?: Pick<MarketSourceCoordinator, "status" | "setMode" | "saveWebhookSecret" | "saveStreamCredentials" | "acceptWebhook">,
 ): Promise<FastifyInstance> {
   const app = buildDashboard(
     readModel,
@@ -48,7 +48,7 @@ export function buildDashboard(
   authOptions: AuthOptions,
   pushService?: PushService,
   marketAccounts?: MarketAccountService,
-  marketSource?: Pick<MarketSourceCoordinator, "status" | "setMode" | "saveWebhookSecret" | "acceptWebhook"> | Pick<MarketDataSource, "status">,
+  marketSource?: Pick<MarketSourceCoordinator, "status" | "setMode" | "saveWebhookSecret" | "saveStreamCredentials" | "acceptWebhook"> | Pick<MarketDataSource, "status">,
 ): FastifyInstance {
   const app = Fastify({
     logger: false,
@@ -319,13 +319,13 @@ export function buildDashboard(
       readers: marketAccounts?.list() ?? [],
     },
   }));
-  app.put<{ Body: { mode: "polling" | "webhook" } }>("/api/market-source", {
+  app.put<{ Body: { mode: MarketSourceMode } }>("/api/market-source", {
     schema: {
       body: {
         type: "object",
         additionalProperties: false,
         required: ["mode"],
-        properties: { mode: { type: "string", enum: ["polling", "webhook"] } },
+        properties: { mode: { type: "string", enum: ["polling", "hybrid"] } },
       },
     },
   }, async (request) => {
@@ -347,6 +347,24 @@ export function buildDashboard(
     if (!marketSource || !("saveWebhookSecret" in marketSource))
       throw new ClientInputError("La configuración del webhook no está disponible.");
     await clientAction(() => marketSource.saveWebhookSecret(request.body.secret));
+    return { data: marketSource.status() };
+  });
+  app.put<{ Body: { appId: string; appSecret: string } }>("/api/market-source/stream-credentials", {
+    schema: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["appId", "appSecret"],
+        properties: {
+          appId: { type: "string", minLength: 4, maxLength: 256 },
+          appSecret: { type: "string", minLength: 16, maxLength: 512 },
+        },
+      },
+    },
+  }, async (request) => {
+    if (!marketSource || !("saveStreamCredentials" in marketSource))
+      throw new ClientInputError("La configuración del stream no está disponible.");
+    await clientAction(() => marketSource.saveStreamCredentials(request.body.appId, request.body.appSecret));
     return { data: marketSource.status() };
   });
   app.post<{
@@ -1002,7 +1020,15 @@ function openApiDocument() {
       "/api/offers/rebalance/apply": { post: { summary: "Iniciar un reajuste persistente de ofertas propias" } },
       "/api/offers/rebalance/{id}": { get: { summary: "Consultar el progreso de un reajuste" } },
       "/api/market-icons": { post: { summary: "Cargar un icono administrado para un mercado" } },
-      "/api/market-source": { get: { summary: "Consultar la fuente de mercado y su cadencia" } },
+      "/api/market-source": {
+        get: { summary: "Consultar la fuente de mercado y su cadencia" },
+        put: { summary: "Alternar entre sondeo y feed híbrido" },
+      },
+      "/api/market-source/webhook-secret": { put: { summary: "Guardar el secreto cifrado del webhook" } },
+      "/api/market-source/stream-credentials": { put: { summary: "Guardar las credenciales cifradas del stream" } },
+      "/webhooks/qvapay/p2p-feed": {
+        post: { summary: "Recibir un evento P2P firmado", security: [] },
+      },
       "/api/market-readers": { post: { summary: "Añadir y validar una cuenta de solo lectura" } },
       "/api/market-readers/{id}": { put: { summary: "Actualizar una cuenta lectora" }, delete: { summary: "Eliminar una cuenta lectora" } },
       "/api/market-readers/{id}/token": { put: { summary: "Rotar el token cifrado de una cuenta lectora" } },

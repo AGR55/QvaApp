@@ -33,13 +33,18 @@ interface MarketSourceAccountStatus {
 }
 
 export interface MarketSourceStatus {
-  mode: "polling" | "webhook";
+  mode: "polling" | "hybrid";
   accounts: MarketSourceAccountStatus[];
   healthyAccounts: number;
   effectiveCadenceSeconds: number | null;
   estimatedRequestsPerMinute: number;
   webhookUrl?: string;
   webhookSecretConfigured?: boolean;
+  streamCredentialsConfigured?: boolean;
+  streamPhase?: "idle" | "connecting" | "connected" | "backoff" | "unauthorized" | "subscription_required" | "expired";
+  streamExpiresAt?: string;
+  lastStreamReceivedAt?: number | null;
+  lastStreamError?: string;
   lastWebhookReceivedAt?: number | null;
   lastWebhookProcessedAt?: number | null;
   pendingWebhookEvents?: number;

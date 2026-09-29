@@ -1,0 +1,59 @@
+name: Enable production TLS
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qvaapply-production
+  cancel-in-progress: false
+
+jobs:
+  tls:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Configure production SSH
+        env:
+          VPS_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          test -n "$VPS_PRIVATE_KEY"
+          test -n "$VPS_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          chmod 600 "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Issue certificate and enable HTTPS
+        env:
+          LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT }}
+        run: |
+          test -n "$LETSENCRYPT_EMAIL"
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          [[ "$LETSENCRYPT_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]
+          ssh_port="${VPS_SSH_PORT:-22}"
+          remote="${VPS_USER}@${VPS_HOST}"
+          quoted_email=$(printf '%q' "$LETSENCRYPT_EMAIL")
+          ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
+            -p "$ssh_port" "$remote" \
+            "bash /opt/qvaapply/current/scripts/enable-vps-tls.sh honux.tech $quoted_email"
+
+      - name: Verify public HTTPS service
+        run: |
+          redirect=$(curl --silent --output /dev/null --write-out '%{http_code} %{redirect_url}' \
+            --max-time 20 http://honux.tech/)
+          [[ "$redirect" == "301 https://honux.tech/" || "$redirect" == "308 https://honux.tech/" ]]
+          curl --fail --silent --show-error --max-time 20 https://honux.tech/api/session >/dev/null
+          webhook_status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --max-time 20 -X POST -H 'content-type: application/json' \
+            --data '{}' https://honux.tech/webhooks/qvapay/p2p-feed)
+          [[ "$webhook_status" == "401" || "$webhook_status" == "503" ]]

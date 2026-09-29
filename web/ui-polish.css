@@ -2225,6 +2225,13 @@ tbody td small {
 .market-webhook-secret .ui-input {
   min-width: 0;
 }
+.market-stream-credentials {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(180px, 0.75fr) minmax(280px, 1.25fr);
+  align-items: end;
+  gap: 12px;
+}
 .market-source-summary > div {
   display: flex;
   align-items: center;
@@ -2386,6 +2393,9 @@ tbody td small {
   }
   .market-webhook-secret {
     flex-direction: column;
+  }
+  .market-stream-credentials {
+    grid-template-columns: 1fr;
   }
   .market-source-summary {
     grid-template-columns: 1fr;

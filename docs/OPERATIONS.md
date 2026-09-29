@@ -36,7 +36,7 @@ desplegada. En Telegram usa `/coop` para administrar el aporte técnico y
 
 Ejecuta `pnpm login`, introduce el correo, la contraseña oculta y después el código vigente de seis dígitos de la aplicación autenticadora. El comando usa `remember: true`, verifica el token mediante `GET /user` y solo entonces lo cifra en SQLite. Un timeout de transporte se reintenta hasta tres veces; un TOTP rechazado, bloqueo o rate limit requiere intervención humana y nunca se reintenta automáticamente.
 
-## Feed P2P por webhook
+## Feed P2P en tiempo real
 
 El endpoint de producción que debes registrar en **qvapay.com/dev → Feed del
 mercado P2P** es:
@@ -45,18 +45,24 @@ mercado P2P** es:
 https://honux.tech/webhooks/qvapay/p2p-feed
 ```
 
-Selecciona el evento `p2p.created`. Copia el secreto propio del feed, abre
-**Estrategia → Fuente de mercado**, guárdalo y activa **Webhook**. No coloques la
+Contrata el feed para la misma app cuyas credenciales usarás y selecciona
+`p2p.created` y `p2p.reopened`. Copia el secreto propio del feed, el `app-id` y
+el `app-secret`; abre **Estrategia → Fuente de mercado**, guárdalos y activa
+**Tiempo real**. No coloques la
 URL del panel (`https://honux.tech/`) ni rutas de API de
 QvaPay en el campo webhook: la única URL receptora es la anterior.
 
 La ruta valida `x-qvapay-signature` sobre el cuerpo crudo y
 `x-qvapay-timestamp`; no utiliza la contraseña del panel. Una entrega aceptada
 responde `202` después de quedar persistida. El panel muestra última recepción,
-último procesamiento, cola y fallos. Si necesitas volver al listado periódico,
-pulsa **Polling**; el secreto cifrado se conserva.
+estado de conexión, cola y fallos. El stream SSE es la vía de menor latencia; el
+webhook aporta cola y reintentos durante sus desconexiones. Ambos deduplican por
+`event + uuid`. Si necesitas volver al listado periódico, pulsa **Polling**;
+las credenciales cifradas se conservan.
 
-La suscripción y el formato están documentados por QvaPay en
+La suscripción se compra manualmente en <https://www.qvapay.com/dev>. No envíes
+credenciales por chat, logs o tickets. QvaPay documenta ambos canales en
+<https://www.qvapay.com/docs/p2p/stream> y
 <https://www.qvapay.com/docs/p2p/webhooks>.
 
 ## Flujo humano de pago

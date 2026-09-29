@@ -17,9 +17,12 @@ import { Vault } from "../src/vault.js";
 const secret = "feed-secret-for-tests-2026";
 const webhookUrl = "https://qvaapply.example/webhooks/qvapay/p2p-feed";
 
-function payload(uuid = "7c9e6679-7425-40de-944b-e07fc1f90ae7") {
+function payload(
+  uuid = "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  event = "p2p.created",
+) {
   return {
-    event: "p2p.created",
+    event,
     sent_at: "2026-09-24T12:00:00Z",
     data: {
       uuid,
@@ -33,7 +36,7 @@ function payload(uuid = "7c9e6679-7425-40de-944b-e07fc1f90ae7") {
   };
 }
 
-function setup(canProcess: () => boolean = () => true) {
+function setup(canProcess: () => boolean = () => true, streamPayload?: unknown) {
   let now = Date.parse("2026-09-24T12:00:10Z");
   let polls = 0;
   const ingested: Array<{ offer: P2pOffer; receivedAt: number }> = [];
@@ -59,6 +62,15 @@ function setup(canProcess: () => boolean = () => true) {
     async (offer, receivedAt) => void ingested.push({ offer, receivedAt }),
     canProcess,
     () => now,
+    {
+      fetch: async () => new Response(streamPayload
+        ? `retry: 60000\nevent: p2p.reopened\ndata: ${JSON.stringify(streamPayload)}\n\n`
+        : "retry: 60000\n\n", {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      }),
+      wait: async () => new Promise<void>(() => undefined),
+    },
   );
   return {
     store,
@@ -67,6 +79,12 @@ function setup(canProcess: () => boolean = () => true) {
     polls: () => polls,
     setNow(value: number) { now = value; },
   };
+}
+
+function enableRealtime(coordinator: MarketSourceCoordinator): void {
+  coordinator.saveWebhookSecret(secret);
+  coordinator.saveStreamCredentials("app-id-tests", "app-secret-for-tests-2026");
+  coordinator.setMode("hybrid");
 }
 
 function signed(raw: Buffer, timestamp: number) {
@@ -78,8 +96,7 @@ function signed(raw: Buffer, timestamp: number) {
 
 test("acepta, deduplica y procesa inmediatamente una oferta firmada", async () => {
   const state = setup();
-  state.coordinator.saveWebhookSecret(secret);
-  state.coordinator.setMode("webhook");
+  enableRealtime(state.coordinator);
   const raw = Buffer.from(JSON.stringify(payload()));
   const result = state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   assert.deepEqual(result, { duplicate: false, queued: true });
@@ -98,10 +115,29 @@ test("acepta, deduplica y procesa inmediatamente una oferta firmada", async () =
   state.store.close();
 });
 
+test("procesa reaperturas y deduplica el mismo evento entre stream y webhook", async () => {
+  const reopened = payload("bc9e6679-7425-40de-944b-e07fc1f90ae7", "p2p.reopened");
+  const state = setup(() => true, reopened);
+  enableRealtime(state.coordinator);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(state.ingested.length, 1);
+  assert.equal(state.ingested[0]?.offer.uuid, reopened.data.uuid);
+
+  const raw = Buffer.from(JSON.stringify(reopened));
+  const duplicate = state.coordinator.acceptWebhook(
+    raw,
+    signed(raw, Date.parse("2026-09-24T12:00:10Z")),
+  );
+  assert.deepEqual(duplicate, { duplicate: true, queued: false });
+  assert.equal(state.ingested.length, 1);
+  state.coordinator.stop();
+  state.store.close();
+});
+
 test("rechaza firma inválida y timestamp fuera de la ventana", async () => {
   const state = setup();
-  state.coordinator.saveWebhookSecret(secret);
-  state.coordinator.setMode("webhook");
+  enableRealtime(state.coordinator);
   const raw = Buffer.from(JSON.stringify(payload()));
   assert.throws(
     () => state.coordinator.acceptWebhook(raw, {
@@ -119,13 +155,15 @@ test("rechaza firma inválida y timestamp fuera de la ventana", async () => {
   state.store.close();
 });
 
-test("conmuta de forma exclusiva entre polling y webhook", async () => {
+test("conmuta de forma exclusiva entre polling y tiempo real", async () => {
   const state = setup();
   await state.coordinator.pollNext();
   assert.equal(state.polls(), 1);
-  assert.throws(() => state.coordinator.setMode("webhook"), /secreto/i);
+  assert.throws(() => state.coordinator.setMode("hybrid"), /secreto/i);
   state.coordinator.saveWebhookSecret(secret);
-  state.coordinator.setMode("webhook");
+  assert.throws(() => state.coordinator.setMode("hybrid"), /credenciales/i);
+  state.coordinator.saveStreamCredentials("app-id-tests", "app-secret-for-tests-2026");
+  state.coordinator.setMode("hybrid");
   await state.coordinator.pollNext();
   assert.equal(state.polls(), 1);
   state.coordinator.setMode("polling");
@@ -140,8 +178,7 @@ test("conmuta de forma exclusiva entre polling y webhook", async () => {
 test("conserva pendiente una entrega mientras la automatización está pausada", async () => {
   let active = false;
   const state = setup(() => active);
-  state.coordinator.saveWebhookSecret(secret);
-  state.coordinator.setMode("webhook");
+  enableRealtime(state.coordinator);
   const raw = Buffer.from(JSON.stringify(payload("ac9e6679-7425-40de-944b-e07fc1f90ae7")));
   state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   await new Promise((resolve) => setImmediate(resolve));
@@ -157,8 +194,7 @@ test("conserva pendiente una entrega mientras la automatización está pausada",
 
 test("el endpoint público verifica el cuerpo crudo sin sesión", async () => {
   const state = setup();
-  state.coordinator.saveWebhookSecret(secret);
-  state.coordinator.setMode("webhook");
+  enableRealtime(state.coordinator);
   const app = buildDashboard(
     {} as never,
     { password: "contraseña-local-segura-2026", trustedOrigin: "http://127.0.0.1:3000" },
@@ -192,6 +228,48 @@ test("el endpoint público verifica el cuerpo crudo sin sesión", async () => {
     payload: body,
   });
   assert.equal(rejected.statusCode, 401);
+  await app.close();
+  state.store.close();
+});
+
+test("la API autenticada guarda credenciales cifradas sin devolverlas", async () => {
+  const state = setup();
+  const password = "contraseña-local-segura-2026";
+  const origin = "https://qvaapply.example";
+  const app = buildDashboard(
+    {} as never,
+    { password, trustedOrigin: origin, secureCookies: true },
+    undefined,
+    undefined,
+    state.coordinator,
+  );
+  const login = await app.inject({
+    method: "POST",
+    url: "/api/session",
+    headers: { origin, "content-type": "application/json" },
+    payload: { password },
+  });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const response = await app.inject({
+    method: "PUT",
+    url: "/api/market-source/stream-credentials",
+    headers: {
+      origin,
+      cookie,
+      "content-type": "application/json",
+      "x-csrf-token": csrf,
+    },
+    payload: {
+      appId: "app-id-private",
+      appSecret: "app-secret-private-2026",
+    },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json<{ data: { streamCredentialsConfigured: boolean } }>().data.streamCredentialsConfigured, true);
+  assert.doesNotMatch(response.body, /app-id-private|app-secret-private/);
+  assert.doesNotMatch(state.store.get("market_feed_app_id") ?? "", /app-id-private/);
+  assert.doesNotMatch(state.store.get("market_feed_app_secret") ?? "", /app-secret-private/);
   await app.close();
   state.store.close();
 });

@@ -687,6 +687,18 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
   );
 }
 
+function streamPhaseLabel(phase) {
+  return ({
+    idle: "Detenido",
+    connecting: "Conectando…",
+    connected: "Conectado",
+    backoff: "Reconectando…",
+    unauthorized: "Credenciales rechazadas",
+    subscription_required: "Suscripción requerida",
+    expired: "Suscripción vencida",
+  })[phase] || "Sin iniciar";
+}
+
 function MarketSourceSettings() {
   const [source, setSource] = useState();
   const [message, setMessage] = useState("");
@@ -694,6 +706,7 @@ function MarketSourceSettings() {
   const [removing, setRemoving] = useState();
   const [form, setForm] = useState({ label: "", token: "", intervalSeconds: 3 });
   const [feedSecret, setFeedSecret] = useState("");
+  const [streamCredentials, setStreamCredentials] = useState({ appId: "", appSecret: "" });
   const load = useCallback(async () => {
     try {
       const payload = await requestJson("/api/market-source");
@@ -773,7 +786,7 @@ function MarketSourceSettings() {
     }
   };
   const changeMode = async (mode) => {
-    setMessage(`Activando ${mode === "webhook" ? "webhook" : "polling"}…`);
+    setMessage(`Activando ${mode === "hybrid" ? "tiempo real" : "polling"}…`);
     try {
       const payload = await requestJson("/api/market-source", {
         method: "PUT",
@@ -781,7 +794,7 @@ function MarketSourceSettings() {
         body: JSON.stringify({ mode }),
       });
       setSource((current) => ({ ...current, ...payload.data }));
-      setMessage(mode === "webhook" ? "Webhook activo: el polling quedó detenido." : "Polling activo.");
+      setMessage(mode === "hybrid" ? "Tiempo real activo: stream rápido con webhook de respaldo." : "Polling activo.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo cambiar la fuente.");
     }
@@ -796,9 +809,24 @@ function MarketSourceSettings() {
       });
       setFeedSecret("");
       setSource((current) => ({ ...current, ...payload.data }));
-      setMessage("Secreto del webhook guardado. Ya puedes activar el modo webhook.");
+      setMessage("Secreto del webhook guardado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo guardar el secreto.");
+    }
+  };
+  const saveStreamCredentials = async () => {
+    setMessage("Guardando credenciales cifradas del stream…");
+    try {
+      const payload = await requestJson("/api/market-source/stream-credentials", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(streamCredentials),
+      });
+      setStreamCredentials({ appId: "", appSecret: "" });
+      setSource((current) => ({ ...current, ...payload.data }));
+      setMessage("Credenciales del stream guardadas. No se mostrarán de nuevo.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudieron guardar las credenciales.");
     }
   };
   const copyWebhookUrl = async () => {
@@ -822,21 +850,21 @@ function MarketSourceSettings() {
       <div className="market-source-mode" aria-label="Modo de fuente de mercado">
         <div>
           <strong>Modo activo</strong>
-          <p>Webhook reacciona al publicar; polling consulta el listado por intervalos.</p>
+          <p>Tiempo real usa stream SSE y conserva el webhook como red de seguridad.</p>
         </div>
         <div className="market-source-mode-buttons">
           <Button type="button" variant={source?.mode === "polling" ? "primary" : "outline"} onClick={() => void changeMode("polling")}>
             <RefreshCw aria-hidden="true" data-icon="inline-start" /> Polling
           </Button>
-          <Button type="button" variant={source?.mode === "webhook" ? "primary" : "outline"} disabled={!source?.webhookSecretConfigured} onClick={() => void changeMode("webhook")}>
-            <Webhook aria-hidden="true" data-icon="inline-start" /> Webhook
+          <Button type="button" variant={source?.mode === "hybrid" ? "primary" : "outline"} disabled={!source?.webhookSecretConfigured || !source?.streamCredentialsConfigured} onClick={() => void changeMode("hybrid")}>
+            <Webhook aria-hidden="true" data-icon="inline-start" /> Tiempo real
           </Button>
         </div>
       </div>
       <div className="market-webhook-setup">
         <div className="market-webhook-url">
           <span>
-            <small>URL para QvaPay · evento p2p.created</small>
+            <small>URL para QvaPay · p2p.created + p2p.reopened</small>
             <code>{source?.webhookUrl || "Cargando…"}</code>
           </span>
           <Button type="button" variant="ghost" size="icon" aria-label="Copiar URL del webhook" onClick={() => void copyWebhookUrl()}>
@@ -851,15 +879,28 @@ function MarketSourceSettings() {
             </Button>
           </span>
         </Field>
+        <div className="market-stream-credentials">
+          <Field label={source?.streamCredentialsConfigured ? "Rotar app-id" : "App ID de QvaPay"} htmlFor="market-stream-app-id">
+            <Input id="market-stream-app-id" type="password" autoComplete="off" minLength="4" maxLength="256" placeholder={source?.streamCredentialsConfigured ? "Configurado · pega otro para rotarlo" : "App ID de qvapay.com/dev"} value={streamCredentials.appId} onChange={(event) => setStreamCredentials((current) => ({ ...current, appId: event.target.value }))} />
+          </Field>
+          <Field label={source?.streamCredentialsConfigured ? "Rotar app-secret" : "App Secret de QvaPay"} htmlFor="market-stream-app-secret">
+            <span className="market-webhook-secret">
+              <Input id="market-stream-app-secret" type="password" autoComplete="off" minLength="16" maxLength="512" placeholder={source?.streamCredentialsConfigured ? "Configurado · pega otro para rotarlo" : "App Secret de qvapay.com/dev"} value={streamCredentials.appSecret} onChange={(event) => setStreamCredentials((current) => ({ ...current, appSecret: event.target.value }))} />
+              <Button type="button" variant="secondary" disabled={streamCredentials.appId.trim().length < 4 || streamCredentials.appSecret.trim().length < 16} onClick={() => void saveStreamCredentials()}>
+                <KeyRound aria-hidden="true" data-icon="inline-start" /> Guardar
+              </Button>
+            </span>
+          </Field>
+        </div>
       </div>
       <div className="market-source-summary">
         <div>
-          {source?.mode === "webhook" ? <Webhook aria-hidden="true" /> : <Activity aria-hidden="true" />}
+          {source?.mode === "hybrid" ? <Webhook aria-hidden="true" /> : <Activity aria-hidden="true" />}
           <span>
-            <small>{source?.mode === "webhook" ? "Última entrega" : "Cadencia estimada"}</small>
+            <small>{source?.mode === "hybrid" ? "Stream" : "Cadencia estimada"}</small>
             <strong>
-              {source?.mode === "webhook"
-                ? formatReaderTime(source?.lastWebhookReceivedAt)
+              {source?.mode === "hybrid"
+                ? streamPhaseLabel(source?.streamPhase)
                 : source?.effectiveCadenceSeconds
                 ? `1 consulta cada ${source.effectiveCadenceSeconds.toFixed(2)} s`
                 : "Sin cuentas disponibles"}
@@ -869,19 +910,20 @@ function MarketSourceSettings() {
         <div>
           <Wifi aria-hidden="true" />
           <span>
-            <small>{source?.mode === "webhook" ? "Último procesamiento" : "Cuentas saludables"}</small>
-            <strong>{source?.mode === "webhook" ? formatReaderTime(source?.lastWebhookProcessedAt) : source?.healthyAccounts ?? "—"}</strong>
+            <small>{source?.mode === "hybrid" ? "Último evento" : "Cuentas saludables"}</small>
+            <strong>{source?.mode === "hybrid" ? formatReaderTime(Math.max(source?.lastStreamReceivedAt || 0, source?.lastWebhookReceivedAt || 0)) : source?.healthyAccounts ?? "—"}</strong>
           </span>
         </div>
         <div>
           <ShieldCheck aria-hidden="true" />
           <span>
-            <small>{source?.mode === "webhook" ? "Cola del feed" : "Consumo previsto"}</small>
-            <strong>{source?.mode === "webhook" ? `${source?.pendingWebhookEvents || 0} pendientes · ${source?.failedWebhookEvents || 0} fallidos` : source ? `${Math.round(source.estimatedRequestsPerMinute)} consultas/min` : "—"}</strong>
+            <small>{source?.mode === "hybrid" ? "Cola del feed" : "Consumo previsto"}</small>
+            <strong>{source?.mode === "hybrid" ? `${source?.pendingWebhookEvents || 0} pendientes · ${source?.failedWebhookEvents || 0} fallidos` : source ? `${Math.round(source.estimatedRequestsPerMinute)} consultas/min` : "—"}</strong>
           </span>
         </div>
       </div>
       {source?.lastWebhookError ? <p className="reader-error" role="status">Webhook: {source.lastWebhookError}</p> : null}
+      {source?.lastStreamError ? <p className="reader-error" role="status">Stream: {source.lastStreamError}</p> : null}
       <div className="market-reader-list">
         <MarketReaderCard account={{
           id: "primary",
