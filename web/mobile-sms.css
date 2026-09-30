@@ -1,0 +1,92 @@
+.mobile-sms-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.mobile-sms-layout > div {
+  min-width: 0;
+}
+
+.mobile-sms-layout h3 {
+  margin: 0 0 0.8rem;
+  font-size: 0.95rem;
+}
+
+.mobile-sms-pair {
+  display: flex;
+  align-items: end;
+  gap: 0.6rem;
+  margin-bottom: 1rem;
+}
+
+.mobile-sms-pair .ui-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-sms-token {
+  padding: 0.9rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface-wash);
+}
+
+.mobile-sms-token p {
+  margin: 0.35rem 0 0.7rem;
+}
+
+.mobile-sms-token .ui-input {
+  margin-bottom: 0.6rem;
+  font-family: monospace;
+}
+
+.mobile-sms-token .ui-button + .ui-button {
+  margin-left: 0.4rem;
+}
+
+.mobile-sms-devices,
+.mobile-sms-receipts {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.mobile-sms-devices li,
+.mobile-sms-receipts li {
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+}
+
+.mobile-sms-devices li,
+.mobile-sms-receipts li > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.mobile-sms-devices small,
+.mobile-sms-receipts small {
+  display: block;
+  overflow-wrap: anywhere;
+  opacity: 0.75;
+}
+
+.mobile-sms-receipts p {
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .mobile-sms-layout { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 520px) {
+  .mobile-sms-pair { align-items: stretch; flex-direction: column; }
+}

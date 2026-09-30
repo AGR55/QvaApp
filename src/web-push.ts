@@ -66,14 +66,16 @@ export class WebPushService {
     await this.notify({ id: version, type: "blocked-offer", alert, version, url: `/?view=auditoria&offer=${encodeURIComponent(alert.uuid)}` });
   }
 
-  async notifyOperation(input: { uuid: string; coin: string; amount: number; kind: "operation-applied" | "reconciliation-required" }): Promise<void> {
-    const version = `${input.kind}:${input.uuid}`;
+  async notifyOperation(input: { uuid: string; coin: string; amount: number; kind: "operation-applied" | "own-offer-applied" | "reconciliation-required"; eventVersion?: string }): Promise<void> {
+    const version = input.kind === "own-offer-applied" && input.eventVersion
+      ? `${input.kind}:${input.uuid}:${input.eventVersion}`
+      : `${input.kind}:${input.uuid}`;
     await this.notify({
       id: version,
       type: input.kind,
       version,
       alert: { uuid: input.uuid, coin: input.coin, amount: input.amount },
-      url: `/?view=${input.kind === "operation-applied" ? "operaciones" : "auditoria"}&operation=${encodeURIComponent(input.uuid)}`,
+      url: `/?view=${input.kind === "operation-applied" || input.kind === "own-offer-applied" ? "operaciones" : "auditoria"}&operation=${encodeURIComponent(input.uuid)}`,
     });
   }
 

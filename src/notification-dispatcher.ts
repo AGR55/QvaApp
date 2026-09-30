@@ -8,6 +8,7 @@ import type {
 interface NotificationEventPayload {
   kind: NotificationKind;
   uuid?: string;
+  eventVersion?: string;
   coin?: string;
   amount?: number;
   alert?: { uuid: string; rate?: number; reason?: string };
@@ -114,6 +115,8 @@ export class NotificationDispatcher {
 }
 
 function notificationId(event: NotificationEventPayload): string {
+  if (event.kind === "own-offer-applied" && event.uuid && event.eventVersion)
+    return `${event.kind}:${event.uuid}:${event.eventVersion}`;
   if (event.kind !== "blocked-offer" && event.uuid)
     return `${event.kind}:${event.uuid}`;
   const value = JSON.stringify(event);

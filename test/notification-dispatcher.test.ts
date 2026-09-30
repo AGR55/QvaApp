@@ -71,3 +71,31 @@ test("mantiene el aviso web hasta que el usuario lo confirma", async () => {
   assert.equal(store.pendingUserNotifications().length, 0);
   store.close();
 });
+
+test("deduplica el mismo ciclo y conserva la segunda aplicación después de reabrir", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-own-offer-notice-")));
+  let pushCalls = 0;
+  const dispatcher = new NotificationDispatcher(store, {
+    telegram: async () => { throw new Error("Telegram fuera de servicio"); },
+    webPush: async () => { pushCalls += 1; },
+  });
+  const notification = {
+    message: "Tomaron tu oferta",
+    operationUuid: "offer-owned-1",
+    event: { kind: "own-offer-applied" as const, uuid: "offer-owned-1", coin: "BANK_CUP", amount: 8, eventVersion: "cycle-0:updated-2026-09-30T10:00:00Z" },
+  };
+
+  await dispatcher.publish(notification);
+  await dispatcher.publish(notification);
+  assert.equal(pushCalls, 1);
+  assert.equal(store.pendingUserNotifications()[0]?.id, "own-offer-applied:offer-owned-1:cycle-0:updated-2026-09-30T10:00:00Z");
+  assert.equal(store.pendingUserNotifications().length, 1);
+
+  await dispatcher.publish({
+    ...notification,
+    event: { ...notification.event, eventVersion: "cycle-1:updated-2026-09-30T10:05:00Z" },
+  });
+  assert.equal(pushCalls, 2);
+  assert.equal(store.pendingUserNotifications().length, 2);
+  store.close();
+});

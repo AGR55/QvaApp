@@ -16,7 +16,17 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 18;
+const LATEST_SCHEMA_VERSION = 20;
+
+export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
+export interface PaymentReceipt {
+  id: string; deviceId: string; bank: string; sender: string; currency: string;
+  amount: number; beneficiaryMasked: string; transactionId: string;
+  receivedAt: number; state: PaymentReceiptState; operationUuid: string | null;
+  reason: string | null; createdAt: number; processedAt: number | null;
+  retryAttempts: number; nextAttemptAt: number;
+}
+export interface SmsDevice { id: string; label: string; createdAt: number; revokedAt: number | null; }
 
 export type MarketReaderHealth =
   | "healthy"
@@ -176,6 +186,7 @@ export interface DecisionEventPage {
 export type NotificationKind =
   | "blocked-offer"
   | "operation-applied"
+  | "own-offer-applied"
   | "reconciliation-required"
   | "rebalance-completed"
   | "rebalance-attention";
@@ -263,6 +274,19 @@ function mutationIntentFromRow(row: Record<string, unknown>): MutationIntent {
     ...(row.error === null ? {} : { error: String(row.error) }),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
+  };
+}
+
+function paymentReceiptFromRow(row: Record<string, unknown>): PaymentReceipt {
+  return {
+    id: String(row.id), deviceId: String(row.device_id), bank: String(row.bank),
+    sender: String(row.sender), currency: String(row.currency), amount: Number(row.amount),
+    beneficiaryMasked: String(row.beneficiary_masked), transactionId: String(row.transaction_id),
+    receivedAt: Number(row.received_at), state: String(row.state) as PaymentReceiptState,
+    operationUuid: row.operation_uuid == null ? null : String(row.operation_uuid),
+    reason: row.reason == null ? null : String(row.reason), createdAt: Number(row.created_at),
+    processedAt: row.processed_at == null ? null : Number(row.processed_at),
+    retryAttempts: Number(row.retry_attempts ?? 0), nextAttemptAt: Number(row.next_attempt_at ?? 0),
   };
 }
 
@@ -766,6 +790,35 @@ export class Store {
           "INSERT INTO schema_migrations(version, applied_at) VALUES (18, ?)",
         ).run(Date.now());
       }
+      if (this.currentSchemaVersion() < 19) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS sms_devices (
+            id TEXT PRIMARY KEY, label TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+            created_at INTEGER NOT NULL, revoked_at INTEGER, last_seen_at INTEGER,
+            rate_window_at INTEGER NOT NULL DEFAULT 0, rate_count INTEGER NOT NULL DEFAULT 0
+          );
+          CREATE TABLE IF NOT EXISTS payment_receipts (
+            id TEXT PRIMARY KEY, device_id TEXT NOT NULL REFERENCES sms_devices(id),
+            bank TEXT NOT NULL, sender TEXT NOT NULL, currency TEXT NOT NULL,
+            amount REAL NOT NULL, beneficiary_masked TEXT NOT NULL,
+            transaction_id TEXT NOT NULL, received_at INTEGER NOT NULL,
+            state TEXT NOT NULL, operation_uuid TEXT, reason TEXT,
+            created_at INTEGER NOT NULL, processed_at INTEGER,
+            mutation_started INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(bank, sender, transaction_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_payment_receipts_state_created
+            ON payment_receipts(state, created_at DESC);
+        `);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (19, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 20) {
+        this.ensureColumn("payment_receipts", "retry_attempts", "INTEGER NOT NULL DEFAULT 0");
+        this.ensureColumn("payment_receipts", "next_attempt_at", "INTEGER NOT NULL DEFAULT 0");
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_receipts_retry
+          ON payment_receipts(state,next_attempt_at,created_at);`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (20, ?)").run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -784,7 +837,7 @@ export class Store {
   }
 
   private ensureColumn(
-    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts" | "mutation_intents",
+    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts" | "mutation_intents" | "payment_receipts",
     column: string,
     definition: string,
   ): void {
@@ -1883,6 +1936,93 @@ export class Store {
       .run(Date.now(), action, uuid ?? null, detail);
   }
 
+  createSmsDevice(input: { id: string; label: string; tokenHash: string }): SmsDevice {
+    const now = Date.now();
+    this.db.prepare("INSERT INTO sms_devices(id,label,token_hash,created_at) VALUES(?,?,?,?)")
+      .run(input.id, input.label, input.tokenHash, now);
+    this.audit("sms_device_created", `Dispositivo SMS vinculado: ${input.label}.`);
+    return { id: input.id, label: input.label, createdAt: now, revokedAt: null };
+  }
+
+  smsDevices(): SmsDevice[] {
+    return (this.db.prepare("SELECT id,label,created_at,revoked_at FROM sms_devices ORDER BY created_at DESC")
+      .all() as Record<string, unknown>[]).map((row) => ({ id: String(row.id), label: String(row.label), createdAt: Number(row.created_at), revokedAt: row.revoked_at == null ? null : Number(row.revoked_at) }));
+  }
+
+  revokeSmsDevice(id: string): boolean {
+    const changed = this.db.prepare("UPDATE sms_devices SET revoked_at=? WHERE id=? AND revoked_at IS NULL")
+      .run(Date.now(), id).changes > 0;
+    if (changed) this.audit("sms_device_revoked", `Dispositivo SMS revocado: ${id}.`);
+    return changed;
+  }
+
+  authenticateSmsDevice(tokenHash: string, now: number, rateLimit = 30): string | "rate_limited" | undefined {
+    const row = this.db.prepare("SELECT id,revoked_at,rate_window_at,rate_count FROM sms_devices WHERE token_hash=?")
+      .get(tokenHash) as Record<string, unknown> | undefined;
+    if (!row || row.revoked_at != null) return undefined;
+    const windowAt = Number(row.rate_window_at), count = Number(row.rate_count);
+    if (now - windowAt < 60_000 && count >= rateLimit) return "rate_limited";
+    this.db.prepare("UPDATE sms_devices SET last_seen_at=?,rate_window_at=?,rate_count=? WHERE id=?")
+      .run(now, now - windowAt >= 60_000 ? now : windowAt, now - windowAt >= 60_000 ? 1 : count + 1, String(row.id));
+    return String(row.id);
+  }
+
+  insertPaymentReceipt(input: Omit<PaymentReceipt, "state" | "operationUuid" | "reason" | "createdAt" | "processedAt" | "retryAttempts" | "nextAttemptAt">): { receipt: PaymentReceipt; duplicate: boolean } {
+    const now = Date.now();
+    const inserted = this.db.prepare(`INSERT OR IGNORE INTO payment_receipts
+      (id,device_id,bank,sender,currency,amount,beneficiary_masked,transaction_id,received_at,state,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,'pending',?)`).run(input.id,input.deviceId,input.bank,input.sender,input.currency,input.amount,input.beneficiaryMasked,input.transactionId,input.receivedAt,now).changes > 0;
+    const row = this.db.prepare("SELECT * FROM payment_receipts WHERE bank=? AND sender=? AND transaction_id=?")
+      .get(input.bank,input.sender,input.transactionId) as Record<string, unknown>;
+    const receipt = paymentReceiptFromRow(row);
+    if (!inserted) return { receipt: { ...receipt, state: "duplicate" }, duplicate: true };
+    return { receipt, duplicate: false };
+  }
+
+  updatePaymentReceipt(id: string, state: PaymentReceiptState, reason: string | null, operationUuid: string | null): void {
+    this.db.prepare("UPDATE payment_receipts SET state=?,reason=?,operation_uuid=?,processed_at=? WHERE id=?")
+      .run(state, reason, operationUuid, Date.now(), id);
+  }
+
+  claimPaymentOperation(receiptId: string, operationUuid: string): boolean {
+    return this.transaction(() => {
+      const existing = this.db.prepare(`SELECT id FROM payment_receipts
+        WHERE operation_uuid=? AND mutation_started=1 LIMIT 1`).get(operationUuid);
+      if (existing) return false;
+      return this.db.prepare(`UPDATE payment_receipts SET state='processing',operation_uuid=?,
+        mutation_started=1,processed_at=? WHERE id=? AND state='pending'`)
+        .run(operationUuid, Date.now(), receiptId).changes === 1;
+    });
+  }
+
+  paymentReceipts(limit = 100): PaymentReceipt[] {
+    return (this.db.prepare("SELECT * FROM payment_receipts ORDER BY created_at DESC LIMIT ?").all(limit) as Record<string, unknown>[]).map(paymentReceiptFromRow);
+  }
+
+  pendingPaymentReceipts(now = Date.now(), limit = 100): PaymentReceipt[] {
+    return (this.db.prepare("SELECT * FROM payment_receipts WHERE state='pending' AND next_attempt_at<=? ORDER BY created_at ASC LIMIT ?").all(now, limit) as Record<string, unknown>[]).map(paymentReceiptFromRow);
+  }
+
+  deferPaymentReceipt(id: string, reason: string, now = Date.now(), retryAfterMs = 0, maxDelayMs = 15 * 60_000): { attempts: number; nextAttemptAt: number } | undefined {
+    return this.transaction(() => {
+      const row = this.db.prepare("SELECT retry_attempts FROM payment_receipts WHERE id=? AND state='pending' AND mutation_started=0")
+        .get(id) as { retry_attempts?: number } | undefined;
+      if (!row) return undefined;
+      const attempts = Number(row.retry_attempts ?? 0) + 1;
+      const backoff = Math.min(maxDelayMs, 15_000 * 2 ** Math.min(attempts - 1, 6));
+      const nextAttemptAt = now + Math.min(maxDelayMs, Math.max(backoff, retryAfterMs));
+      this.db.prepare(`UPDATE payment_receipts SET retry_attempts=?,next_attempt_at=?,reason=?,processed_at=?
+        WHERE id=? AND state='pending' AND mutation_started=0`)
+        .run(attempts,nextAttemptAt,reason.slice(0, 300),now,id);
+      return { attempts, nextAttemptAt };
+    });
+  }
+
+  paymentReceipt(id: string): PaymentReceipt | undefined {
+    const row = this.db.prepare("SELECT * FROM payment_receipts WHERE id=?").get(id) as Record<string, unknown> | undefined;
+    return row ? paymentReceiptFromRow(row) : undefined;
+  }
+
   recentAudit(
     limit = 10,
   ): {
@@ -2230,7 +2370,7 @@ export class Store {
       this.db.prepare(
         `SELECT * FROM notification_events
          WHERE acknowledged_at IS NULL
-           AND kind IN ('operation-applied', 'reconciliation-required', 'rebalance-completed', 'rebalance-attention')
+           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'rebalance-completed', 'rebalance-attention')
          ORDER BY created_at DESC LIMIT ?`,
       ).all(limit) as Record<string, unknown>[]
     ).map(notificationFromRow);

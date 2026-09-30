@@ -14,6 +14,7 @@ import type { StoredPushSubscription, WebPushService } from "./web-push.js";
 import type { MarketAccountService } from "./market-accounts.js";
 import type { MarketDataSource } from "./market-source.js";
 import { MarketFeedRequestError, type MarketSourceCoordinator, type MarketSourceMode } from "./market-feed.js";
+import { PaymentSmsError, validPaymentReceipt } from "./payment-sms.js";
 
 type AuthOptions = {
   password: string;
@@ -94,6 +95,7 @@ export function buildDashboard(
 
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?", 1)[0]!;
+    if (path === "/api/mobile/payment-receipts" && request.method === "POST") return;
     const publicSession = path === "/api/session" && request.method !== "DELETE";
     if (!path.startsWith("/api/") || publicSession) return;
     if (!auth.session(request.headers.cookie))
@@ -107,7 +109,7 @@ export function buildDashboard(
 
   app.setErrorHandler((error, _request, reply) => {
     const normalized = error instanceof Error ? error : new Error(String(error));
-    const status = httpStatus(normalized, 500);
+    const status = normalized instanceof PaymentSmsError ? normalized.status : httpStatus(normalized, 500);
     if (status >= 500) console.error("Error HTTP local:", normalized);
     void reply.status(status).send({
       error: status >= 500 ? "No se pudo completar la solicitud." : normalized.message,
@@ -236,6 +238,27 @@ export function buildDashboard(
   });
   app.delete("/api/session", async (request, reply) => {
     reply.header("set-cookie", auth.logout(request.headers.cookie)).status(204);
+  });
+
+  app.post<{ Body: { label: string } }>("/api/mobile/devices", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["label"], properties: { label: { type: "string", minLength: 1, maxLength: 80 } } } },
+  }, async (request, reply) => {
+    const result = readModel.pairSmsDevice(request.body.label);
+    return reply.status(201).send({ data: result });
+  });
+  app.get("/api/mobile/devices", async () => ({ data: readModel.smsDevices() }));
+  app.delete<{ Params: { id: string } }>("/api/mobile/devices/:id", async (request, reply) => {
+    if (!readModel.revokeSmsDevice(request.params.id)) return reply.status(404).send({ error: "Dispositivo no encontrado o ya revocado." });
+    return reply.status(204).send();
+  });
+  app.get("/api/mobile/payment-receipts", async () => ({ data: readModel.paymentReceipts() }));
+  app.post<{ Body: unknown }>("/api/mobile/payment-receipts", async (request, reply) => {
+    const authorization = headerValue(request, "authorization") ?? "";
+    const match = /^Bearer ([A-Za-z0-9_-]{40,100})$/.exec(authorization);
+    if (!match) return reply.status(401).send({ error: "Credencial de dispositivo requerida." });
+    if (!validPaymentReceipt(request.body)) return reply.status(400).send({ error: "Comprobante estructurado inválido." });
+    const result = await readModel.receivePaymentReceipt(match[1]!, request.body);
+    return reply.status(result.duplicate ? 200 : 202).send({ ok: true, duplicate: result.duplicate, receiptId: result.receipt.id, status: result.receipt.state });
   });
 
   // Esta ruta es deliberadamente local: debe responder aunque QvaPay esté caído.

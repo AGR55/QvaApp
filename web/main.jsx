@@ -45,6 +45,7 @@ import { requestJson, setCsrfToken } from "./lib/http.js";
 import "./globals.css";
 import "./ui-polish.css";
 import "./identity.css";
+import "./mobile-sms.css";
 
 const initialBootstrap = readDashboardBootstrap();
 if (initialBootstrap?.session?.authenticated)
@@ -129,6 +130,7 @@ function App() {
   const [view, setView] = useState(() => initialView());
   const [market, setMarket] = useState("");
   const [notice, setNotice] = useState(null);
+  const [priorityNotifications, setPriorityNotifications] = useState([]);
   const noticeRef = useRef(null);
   const noticeQueueRef = useRef([]);
   const seenNoticeIdsRef = useRef(new Set());
@@ -163,7 +165,7 @@ function App() {
     noticeRef.current = null;
     setNotice(null);
     const id = current?.id || current?.version;
-    if (id)
+    if (id && !["own-offer-applied", "operation-applied"].includes(current?.type))
       void requestJson(`/api/notifications/${encodeURIComponent(id)}/ack`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -184,6 +186,9 @@ function App() {
         const payload = await requestJson("/api/notifications", {
           timeoutMs: 5_000,
         });
+        if (active) setPriorityNotifications((payload.data || []).filter((item) =>
+          item.type === "own-offer-applied" || item.type === "operation-applied",
+        ));
         if (active && payload.data?.[0]) showNotification(payload.data[0]);
       } catch {
         /* Web Push y Telegram continúan disponibles si el panel está desconectado. */
@@ -450,6 +455,8 @@ function App() {
                 <strong>
                   {notice.type === "blocked-offer"
                     ? "Oferta requiere revisión"
+                    : notice.type === "own-offer-applied"
+                      ? "Tomaron tu oferta"
                     : notice.type === "operation-applied"
                       ? "Aplicación confirmada"
                       : notice.type === "rebalance-completed"
@@ -526,6 +533,14 @@ function App() {
                 label={label}
                 unit={unit}
                 onChanged={refresh}
+                notifications={priorityNotifications}
+                onAcknowledgeNotification={(id) => {
+                  void requestJson(`/api/notifications/${encodeURIComponent(id)}/ack`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: "{}",
+                  }).then(() => setPriorityNotifications((items) => items.filter((item) => item.id !== id))).catch(() => undefined);
+                }}
               />
             ) : null}
             {view === "caceria" ? (

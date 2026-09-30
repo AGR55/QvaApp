@@ -80,8 +80,12 @@ test("notifica aplicaciones y conciliaciones con rutas contextuales", async () =
 
   await service.notifyOperation({ uuid: "operation-1", coin: "BANK_CUP", amount: 8, kind: "operation-applied" });
   await service.notifyOperation({ uuid: "operation-2", coin: "BANK_CUP", amount: 9, kind: "reconciliation-required" });
+  await service.notifyOperation({ uuid: "owned-offer", coin: "BANK_CUP", amount: 9, kind: "own-offer-applied" });
+  await service.notifyOperation({ uuid: "owned-offer", coin: "BANK_CUP", amount: 9, kind: "own-offer-applied", eventVersion: "cycle-1:updated-2026-09-30T10:05:00Z" });
 
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 4);
   assert.match(String(sent[0]?.payload.url), /view=operaciones/);
   assert.match(String(sent[1]?.payload.url), /view=auditoria/);
+  assert.match(String(sent[2]?.payload.url), /view=operaciones/);
+  assert.notEqual(sent[2]?.payload.version, sent[3]?.payload.version);
 });

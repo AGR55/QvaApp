@@ -438,6 +438,7 @@ scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),
 );
 scheduler.register("notifications", 15_000, () => notifications.deliverDue());
+scheduler.register("sms_receipts", 15_000, () => dashboardReadModel.processPendingPaymentReceipts());
 scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudgetRebalances());
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache(),
@@ -487,6 +488,7 @@ async function bootstrap(): Promise<void> {
     );
   scheduler.start();
   void scheduler.run("notifications");
+  void scheduler.run("sms_receipts");
   void scheduler.run("capital_rebalance");
   void scheduler.run("fiat_sync");
   void scheduler.run("operation_sync");
