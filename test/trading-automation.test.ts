@@ -649,6 +649,62 @@ test("los eventos paid y completed sustituyen la espera de sincronización peri�
   store.close();
 });
 
+test("registra ofertas propias recientes y conserva la detección del feed tras reiniciar", async () => {
+  const { store, dataDir, cfg, markets } = setup();
+  const notices: Array<{ kind: string; uuid?: string; coin?: string; amount?: number; eventVersion?: string }> = [];
+  const ownOffer: P2pOffer = {
+    uuid: "new-own-offer", type: "sell", coin: "BANK_CUP", amount: 12,
+    receive: 11_400, status: "open", updated_at: "2026-09-30T10:00:00Z",
+  };
+  const config = markets.current();
+  config.markets.find((market) => market.code === "BANK_CUP")!.paymentDetails = [{ name: "Cuenta", value: "123456" }];
+  markets.save(config);
+  const trading = new TradingEngine(store, {
+    listOffers: async () => [],
+    createOffer: async () => ownOffer,
+  } as never, cfg as never, markets, async (_message, _uuid, event) => {
+    if (event?.kind === "own-offer-applied") notices.push(event);
+  });
+  await trading.createOwnOffer("BANK_CUP", "sell", 12, 950);
+  assert.match(store.get("trading:owned_offer_uuids") ?? "", /new-own-offer/);
+  store.close();
+
+  const restartedStore = new Store(dataDir);
+  const restartedMarkets = new MarketConfigService(dataDir, cfg as never, restartedStore);
+  const restartedTrading = new TradingEngine(restartedStore, {} as never, cfg as never, restartedMarkets, async (_message, _uuid, event) => {
+    if (event?.kind === "own-offer-applied") notices.push(event);
+  });
+  await restartedTrading.ingestMarketStateEvent("p2p.applied", { ...ownOffer, status: "processing" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notices[0]?.kind, "own-offer-applied");
+  assert.equal(notices[0]?.uuid, "new-own-offer");
+  assert.equal(notices[0]?.coin, "BANK_CUP");
+  assert.equal(notices[0]?.amount, 12);
+
+  await restartedTrading.ingestMarketStateEvent("p2p.applied", { ...ownOffer, uuid: "someone-elses-offer" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notices.length, 1);
+
+  restartedStore.set("paused", "true");
+  await restartedTrading.ingestMarketOffer({ ...ownOffer, status: "open" }, Date.now(), "p2p.reopened");
+  await restartedTrading.ingestMarketStateEvent("p2p.applied", { ...ownOffer, status: "processing" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notices.length, 2);
+  assert.notEqual(notices[0]?.eventVersion, notices[1]?.eventVersion);
+
+  const externallyCreated: P2pOffer = { ...ownOffer, uuid: "ui-created-offer" };
+  const refreshingTrading = new TradingEngine(restartedStore, {
+    listOffers: async () => [externallyCreated],
+  } as never, cfg as never, restartedMarkets, async (_message, _uuid, event) => {
+    if (event?.kind === "own-offer-applied") notices.push(event);
+  });
+  await refreshingTrading.listOwnOffers();
+  await restartedTrading.ingestMarketStateEvent("p2p.applied", { ...externallyCreated, status: "processing" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(notices[2]?.uuid, "ui-created-offer");
+  restartedStore.close();
+});
+
 test("no evalúa una instantánea multicuentas que ya está obsoleta", async () => {
   const { store, cfg, markets } = setup();
   const next = markets.current();

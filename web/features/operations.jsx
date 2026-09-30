@@ -4,6 +4,7 @@ import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { operationActionBody } from "../lib/operation-actions.js";
+import { MobileSmsPanel } from "./mobile-sms.jsx";
 import { Badge, Button, Field, Input } from "../components/ui.jsx";
 import { FieldGroup } from "../components/ui/field.tsx";
 import {
@@ -26,7 +27,7 @@ import {
 
 const terminalWorkflow = new Set(["applied", "restored", "blocked"]);
 
-export function Operations({ data, label, unit, onChanged }) {
+export function Operations({ data, label, unit, onChanged, notifications = [], onAcknowledgeNotification }) {
   const [pending, setPending] = useState();
   const [reference, setReference] = useState("");
   const [status, setStatus] = useState("");
@@ -52,6 +53,18 @@ export function Operations({ data, label, unit, onChanged }) {
       <ViewHead
         title="Operaciones"
       />
+      <Panel title="Avisos de operación" wide>
+        {notifications.length ? (
+          <ol className="operation-notifications">
+            {notifications.map((item) => (
+              <li key={item.id}>
+                <div><strong>{item.type === "own-offer-applied" ? "Tomaron tu oferta" : "Aplicación del bot"}</strong><p>{item.message}</p><small>{item.alert?.uuid} · {item.alert?.coin} · {money(item.alert?.amount || 0)} QUSD · {new Date(item.createdAt).toLocaleString("es-CU")}</small></div>
+                <div className="operation-notification-actions"><a href={item.url || `/?view=operaciones&operation=${encodeURIComponent(item.alert?.uuid || "")}`}>Abrir operación</a><Button type="button" variant="outline" size="sm" onClick={() => onAcknowledgeNotification?.(item.id)}>Reconocer</Button></div>
+              </li>
+            ))}
+          </ol>
+        ) : <Empty>No hay avisos de operación pendientes.</Empty>}
+      </Panel>
       {data.risk.usage.unresolvedMutation ? (
         <div className="alert" role="alert">
           <AlertTriangle aria-hidden="true" />
@@ -99,6 +112,7 @@ export function Operations({ data, label, unit, onChanged }) {
           ) : <Empty>No se han ejecutado flujos automáticos.</Empty>}
         </Panel>
       </div>
+      <MobileSmsPanel />
       {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
       <Dialog open={Boolean(pending)} onOpenChange={(open) => !open && closePending()}>
         {pending ? (

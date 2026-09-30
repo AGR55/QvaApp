@@ -13,6 +13,7 @@ import type {
 import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
 import { MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 import type { HuntingSyncCoordinator } from "./hunting-sync.js";
+import { PaymentSmsService, type PaymentReceiptInput } from "./payment-sms.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -95,6 +96,7 @@ function rebalanceIntentMatches(
 
 export class DashboardReadModel {
   private rebalanceExecution: Promise<void> | undefined;
+  private readonly paymentSms: PaymentSmsService;
 
   constructor(
     private readonly trading: TradingService,
@@ -107,7 +109,23 @@ export class DashboardReadModel {
       event: "completed" | "attention",
     ) => void | Promise<void>,
     private readonly huntingSync?: HuntingSyncCoordinator,
-  ) {}
+  ) {
+    this.paymentSms = new PaymentSmsService(
+      store,
+      qva,
+      { markPaid: (uuid, reference) => trading.markPaid(uuid, reference) },
+      (market) => marketConfig.current().markets.find((item) => item.code === market)?.currency,
+    );
+  }
+
+  pairSmsDevice(label: string) { return this.paymentSms.pairDevice(label); }
+  revokeSmsDevice(id: string) { return this.paymentSms.revokeDevice(id); }
+  smsDevices() { return this.paymentSms.devices(); }
+  paymentReceipts() { return this.paymentSms.receipts(); }
+  processPendingPaymentReceipts() { return this.paymentSms.processPending(); }
+  receivePaymentReceipt(token: string, input: PaymentReceiptInput) {
+    return this.paymentSms.receive(token, input);
+  }
 
   updateStrategy(
     values: Parameters<TradingService["updateStrategy"]>[0],
@@ -472,7 +490,7 @@ export class DashboardReadModel {
           };
       const view = item.kind.startsWith("rebalance-")
         ? "ofertas"
-        : item.kind === "operation-applied"
+        : item.kind === "operation-applied" || item.kind === "own-offer-applied"
           ? "operaciones"
           : "auditoria";
       return {

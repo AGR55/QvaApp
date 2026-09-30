@@ -47,10 +47,11 @@ interface BlockedOfferNotification {
   };
 }
 interface OperationNotification {
-  kind: "operation-applied" | "reconciliation-required";
+  kind: "operation-applied" | "own-offer-applied" | "reconciliation-required";
   uuid: string;
   coin: FiatMarket;
   amount: number;
+  eventVersion?: string;
 }
 type Notify = (
   message: string,
@@ -586,6 +587,11 @@ export class TradingEngine {
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     if (this.scanInFlight) await this.scanInFlight;
+    if (event === "p2p.reopened" && offer.status === "open" && this.ownsOfferUuid(offer.uuid)) {
+      const cycleKey = `trading:own_offer_cycle:${offer.uuid}`;
+      const current = Number(this.store.get(cycleKey) ?? 0);
+      this.store.set(cycleKey, String(Number.isSafeInteger(current) && current >= 0 ? current + 1 : 1));
+    }
     const run = this.ingestPreparedMarketOffer(offer, receivedAt, event, sentAt);
     this.scanInFlight = run;
     try {
@@ -839,6 +845,7 @@ export class TradingEngine {
       total?: number;
       offers?: Array<P2pOffer & { rate?: number; decision?: string; reason?: string }>;
     }>(`market:${offer.coin}`);
+    const ownOffer = event === "p2p.applied" && this.ownsOfferUuid(offer.uuid);
     if (cached) {
       const offers = (cached.data.offers ?? []).filter((candidate) => candidate.uuid !== offer.uuid);
       this.store.saveRemoteResource(
@@ -880,6 +887,21 @@ export class TradingEngine {
       `${event} proyectado en ${Math.max(0, Date.now() - receivedAt)} ms${operation ? " y Operación sincronizada" : ""}.`,
       offer.uuid,
     );
+    if (ownOffer) {
+      const cycle = this.store.get(`trading:own_offer_cycle:${offer.uuid}`) ?? "0";
+      const updatedAt = typeof offer.updated_at === "string" && offer.updated_at
+        ? offer.updated_at
+        : "unknown";
+      queueMicrotask(() => void this.notify(
+        `🔔 Tomaron tu oferta ${offer.uuid} en ${this.marketLabel(offer.coin)}: ${offer.amount} QUSD.`,
+        offer.uuid,
+        { kind: "own-offer-applied", uuid: offer.uuid, coin: offer.coin, amount: offer.amount, eventVersion: `cycle-${cycle}:updated-${updatedAt}` },
+      ).catch((error) => this.store.audit(
+        "notification_warning",
+        error instanceof Error ? error.message : String(error),
+        offer.uuid,
+      )));
+    }
   }
 
   private async ingestMarketUpdateOnce(update: MarketPageUpdate): Promise<{
@@ -1685,7 +1707,36 @@ export class TradingEngine {
   }
 
   async listOwnOffers(): Promise<P2pOffer[]> {
-    return this.qva.listOffers({ my: true, take: 20, page: 1, status: "open" });
+    const offers = await this.qva.listOffers({ my: true, take: 20, page: 1, status: "open" });
+    this.rememberOwnOfferUuids(offers.map((offer) => offer.uuid));
+    return offers;
+  }
+
+  private rememberOwnOfferUuids(uuids: string[]): void {
+    const key = "trading:owned_offer_uuids";
+    let previous: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(this.store.get(key) ?? "[]");
+      if (Array.isArray(parsed)) previous = parsed.filter((value): value is string => typeof value === "string");
+    } catch { /* Fresh QvaPay evidence replaces a corrupt local cache. */ }
+    const fresh = [...new Set(uuids.filter((uuid) => uuid.length > 0))];
+    const combined = [...previous.filter((uuid) => !fresh.includes(uuid)), ...fresh];
+    this.store.set(key, JSON.stringify(combined.slice(-5_000)));
+  }
+
+  private ownsOfferUuid(uuid: string): boolean {
+    let known: string[] = [];
+    try {
+      const parsed: unknown = JSON.parse(this.store.get("trading:owned_offer_uuids") ?? "[]");
+      if (Array.isArray(parsed)) known = parsed.filter((value): value is string => typeof value === "string");
+    } catch { /* Ignore corrupt local evidence. */ }
+    if (known.includes(uuid)) return true;
+
+    // Migrate an exact UUID from the previous dashboard cache without a remote request.
+    const cached = this.store.loadRemoteResource<Array<{ uuid?: string }>>("own-offers")?.data;
+    if (!cached?.some((candidate) => candidate.uuid === uuid)) return false;
+    this.rememberOwnOfferUuids([uuid]);
+    return true;
   }
 
   async syncFiatFromQva(): Promise<number> {
@@ -1901,6 +1952,7 @@ export class TradingEngine {
       `Oferta propia ${type} en ${coin}: ${amount} QUSD a tasa solicitada ${fiatPerQusd}; total fiat ${receive} (tasa efectiva ${receive / amount})`,
       offer.uuid,
     );
+    this.rememberOwnOfferUuids([offer.uuid]);
     return offer;
   }
 

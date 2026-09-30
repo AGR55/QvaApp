@@ -70,6 +70,38 @@ test("Fastify protege datos, origen y mutaciones con sesión y CSRF", async () =
   await app.close();
 });
 
+test("la entrega móvil exige Bearer y acepta únicamente campos estructurados", async () => {
+  const stored: unknown[] = [];
+  const app = buildDashboard({
+    pairSmsDevice: (label: string) => ({ device: { id: "device-1", label }, token: "a".repeat(43) }),
+    receivePaymentReceipt: async (token: string, input: unknown) => {
+      assert.equal(token, "a".repeat(43));
+      stored.push(input);
+      return { duplicate: false, receipt: { id: "receipt-1", state: "review" } };
+    },
+  } as never, { password, trustedOrigin: origin });
+
+  const noToken = await app.inject({ method: "POST", url: "/api/mobile/payment-receipts", headers: { "content-type": "application/json" }, payload: {} });
+  assert.equal(noToken.statusCode, 401);
+  const invalid = await app.inject({
+    method: "POST", url: "/api/mobile/payment-receipts",
+    headers: { authorization: `Bearer ${"a".repeat(43)}`, "content-type": "application/json" },
+    payload: { sms: "texto íntegro del SMS" },
+  });
+  assert.equal(invalid.statusCode, 400);
+  const accepted = await app.inject({
+    method: "POST", url: "/api/mobile/payment-receipts",
+    headers: { authorization: `Bearer ${"a".repeat(43)}`, "content-type": "application/json" },
+    payload: { bank: "BPA", sender: "BPA", currency: "CUP", amount: 100, beneficiaryMasked: "1234****5678", transactionId: "TX-1", receivedAt: Date.now() },
+  });
+  assert.equal(accepted.statusCode, 202);
+  assert.equal(accepted.json<{ status: string }>().status, "review");
+  assert.equal(stored.length, 1);
+  const hidden = await app.inject({ method: "GET", url: "/api/mobile/payment-receipts" });
+  assert.equal(hidden.statusCode, 401);
+  await app.close();
+});
+
 test("expone logs operativos autenticados con filtros acotados", async () => {
   const calls: unknown[] = [];
   const readModel = {

@@ -757,6 +757,30 @@ td,
 .push-control.enabled .push-dot {
   display: block;
 }
+.operation-notifications {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.operation-notifications li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-card);
+}
+.operation-notifications p { margin: 3px 0; color: var(--text); }
+.operation-notifications small { color: var(--muted); }
+.operation-notification-actions { display: flex; align-items: center; gap: 12px; white-space: nowrap; }
+@media (max-width: 680px) {
+  .operation-notifications li { align-items: flex-start; flex-direction: column; }
+  .operation-notification-actions { flex-wrap: wrap; }
+}
 .spinning {
   animation: qa-spin 1s linear infinite;
 }

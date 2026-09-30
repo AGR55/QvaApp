@@ -28,7 +28,7 @@ const legacyRuntime = {
 test("versiona el esquema y cierra explícitamente SQLite", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-schema-version-"));
   const store = new Store(dataDir);
-  assert.equal(store.schemaVersion(), 18);
+  assert.equal(store.schemaVersion(), 20);
   store.close();
 });
 
@@ -100,7 +100,7 @@ test("migra la asociación de workflow fuera del JSON legado", () => {
 
   const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"));
   db.prepare("UPDATE mutation_intents SET workflow_id = NULL").run();
-  db.prepare("DELETE FROM schema_migrations WHERE version = 18").run();
+  db.prepare("DELETE FROM schema_migrations WHERE version >= 18").run();
   db.close();
 
   const migrated = new Store(dataDir);
@@ -385,7 +385,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v18-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v20-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });
@@ -400,7 +400,7 @@ test("repara una base v12 registrada sin la tabla de reajustes", () => {
   db.close();
 
   const migrated = new Store(dataDir);
-  assert.equal(migrated.schemaVersion(), 18);
+  assert.equal(migrated.schemaVersion(), 20);
   const job = migrated.createRebalanceJob("repair-check", [], 1);
   assert.equal(job.id, "repair-check");
   migrated.close();
