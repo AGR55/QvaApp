@@ -42,6 +42,7 @@ class ReceiptUploadWorker(context: Context, params: WorkerParameters) : Coroutin
                 if (accepted) store.markSent(queued.id)
                 else {
                     store.markError(queued.id, "HTTP $code")
+                    if (code == 408 || code == 429) return Result.retry()
                     if (code == 401 || code == 403 || code in 400..499) return Result.failure()
                     return Result.retry()
                 }

@@ -24,6 +24,24 @@ class ReceiptParserTest {
         assertEquals("774529", parsed.transactionId)
     }
 
+    @Test fun identifiesBanksFromHeadersWithSharedSender() {
+        val sharedSender = mapOf("PAGOxMOVIL" to "FINCIMEX")
+        val samples = listOf(
+            "Banco Popular de Ahorro. La Transferencia fue completada. Beneficiario: 9205XXXXXXXX0959 Monto: 52500.00 CUP Nro. Transaccion: BR601ABVZE997" to "BPA",
+            "Banco Metropolitano. La Transferencia fue completada. Beneficiario: 9205XXXXXXXX0959 Monto: 4700.00 CUP Nro. Transaccion: MM6056AJ77987" to "BANCO_METROPOLITANO",
+            "FINCIMEX / Clásica. La Transferencia fue completada. Beneficiario: 9760XXXXXXXX3476 Monto: 20.00 USD Nro. Transaccion: 774529" to "FINCIMEX",
+        )
+        for ((body, expectedBank) in samples) {
+            assertEquals(expectedBank, ReceiptParser.parse("PAGOxMOVIL", body, 1_760_000_000_003, sharedSender)?.bank)
+        }
+        assertNull(ReceiptParser.parse(
+            "PAGOxMOVIL",
+            "La Transferencia fue completada. Beneficiario: 9205XXXXXXXX0959 Monto: 10.00 CUP Nro. Transaccion: BR601ABVZE997",
+            1_760_000_000_003,
+            mapOf("PAGOxMOVIL" to ""),
+        ))
+    }
+
     @Test fun ignoresUnknownSenderAndUncompletedMessage() {
         val body = "La Transferencia fue completada. Beneficiario: 9205XXXXXXXX0959 Monto: 10.00 CUP Nro. Transaccion: BR601ABVZE997"
         assertNull(ReceiptParser.parse("unknown", body, 1, senders))
