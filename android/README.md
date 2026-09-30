@@ -3,6 +3,10 @@
 Aplicación Kotlin privada para recibir comprobantes bancarios por SMS. Requiere
 Android 8.0 o posterior. No incorpora emisores bancarios reales: el propietario
 debe introducir manualmente el emisor exacto de cada banco en la pantalla.
+Si varios bancos comparten un emisor (por ejemplo, `PAGOxMOVIL`), la app
+identifica el banco por el nombre explícito en el encabezado del SMS. Un emisor
+compartido sin encabezado reconocido se descarta para evitar atribuirlo al banco
+equivocado; emisores únicos pueden usar la etiqueta que se configuró.
 
 ## Compilar
 
@@ -11,8 +15,16 @@ ejecutar `gradle :app:testDebugUnitTest :app:assembleDebug` con Gradle 8.11.1.
 No se incluye Gradle Wrapper. Los APK se generan en
 `app/build/outputs/apk/debug/`. El flujo GitHub Actions «Android SMS APK»
 ejecuta estas tareas y conserva el APK de depuración como artefacto 14 días.
-Es una compilación de prueba, firmada con la clave debug; antes de distribuirla
-de forma estable se debe firmar una versión release con clave privada propia.
+Los pushes a `main` y las ejecuciones manuales también generan el artefacto
+`qvaapply-sms-private-release`, firmado con una clave privada estable guardada
+en los secretos del repositorio. Esa es la versión para instalar y actualizar.
+Las solicitudes de cambio solo construyen la versión de depuración.
+
+El respaldo local de la clave y su contraseña está en `android/.private-signing/`,
+excluido de Git. Debe conservarse en una copia privada segura: cambiar la clave
+obliga a reinstalar la app y perdería la cola local. Para compilar una release
+local, definir `QVAAPPLY_ANDROID_KEYSTORE_PATH` y
+`QVAAPPLY_ANDROID_KEYSTORE_PASSWORD` y ejecutar `gradle :app:assembleRelease`.
 
 ## Vincular
 

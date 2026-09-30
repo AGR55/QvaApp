@@ -43,15 +43,25 @@ export class PaymentSmsService {
   devices() { return this.store.smsDevices(); }
   receipts() { return this.store.paymentReceipts(); }
 
+  checkDevice(token: string): { ok: true } {
+    this.authenticateDevice(token);
+    return { ok: true };
+  }
+
   async receive(token: string, input: PaymentReceiptInput): Promise<{ receipt: PaymentReceipt; duplicate: boolean }> {
     validateReceipt(input);
-    const deviceId = this.store.authenticateSmsDevice(hashToken(token), Date.now());
-    if (deviceId === "rate_limited") throw new PaymentSmsError(429, "Dispositivo limitado temporalmente; inténtalo más tarde.");
-    if (!deviceId) throw new PaymentSmsError(401, "Credencial inválida, revocada o temporalmente limitada.");
+    const deviceId = this.authenticateDevice(token);
     const inserted = this.store.insertPaymentReceipt({ ...input, id: randomUUID(), deviceId });
     if (inserted.duplicate) return inserted;
     void this.processPending();
     return inserted;
+  }
+
+  private authenticateDevice(token: string): string {
+    const deviceId = this.store.authenticateSmsDevice(hashToken(token), Date.now());
+    if (deviceId === "rate_limited") throw new PaymentSmsError(429, "Dispositivo limitado temporalmente; inténtalo más tarde.");
+    if (!deviceId) throw new PaymentSmsError(401, "Credencial inválida o revocada.");
+    return deviceId;
   }
 
   processPending(now = Date.now()): Promise<void> {

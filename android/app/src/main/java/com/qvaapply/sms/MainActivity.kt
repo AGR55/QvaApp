@@ -16,6 +16,9 @@ import androidx.core.content.ContextCompat
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
     private lateinit var settings: SecureSettings
@@ -25,6 +28,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var metropolitan: EditText
     private lateinit var fincimex: EditText
     private lateinit var status: TextView
+    private var connectionCheckMessage = ""
     private val smsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { updateStatus() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,6 +81,10 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         })
+        root.addView(Button(this).apply {
+            text = "Comprobar conexión"
+            setOnClickListener { checkConnection(this) }
+        })
         status = TextView(this).apply { textSize = 16f; setPadding(0, 16, 0, 0) }
         root.addView(status)
         setContentView(ScrollView(this).apply {
@@ -100,6 +108,61 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatus() {
         val (pending, sent) = ReceiptStore(this).counts()
         val permission = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
-        status.text = "Recepción SMS: ${if (permission) "permitida" else "sin permiso"}\nPendientes de envío: $pending\nAceptados por el servidor: $sent\nEl SMS original y el saldo no se guardan ni se transmiten."
+        status.text = "Recepción SMS: ${if (permission) "permitida" else "sin permiso"}\nPendientes de envío: $pending\nAceptados por el servidor: $sent\n$connectionCheckMessage\nEl SMS original y el saldo no se guardan ni se transmiten."
+    }
+
+    private fun checkConnection(button: Button) {
+        // Use the saved credentials, matching the configuration the receiver/worker will use.
+        val baseUrl = settings.serverUrl
+        val deviceToken = settings.deviceToken
+        val serverUri = Uri.parse(baseUrl)
+        if (!serverUri.scheme.equals("https", ignoreCase = true) || serverUri.host.isNullOrBlank()) {
+            connectionCheckMessage = "Conexión: guarda una URL HTTPS válida primero."
+            updateStatus()
+            return
+        }
+        if (!Regex("^[A-Za-z0-9_-]{40,100}$").matches(deviceToken)) {
+            connectionCheckMessage = "Conexión: guarda un token de dispositivo válido primero."
+            updateStatus()
+            return
+        }
+
+        button.isEnabled = false
+        connectionCheckMessage = "Conexión: comprobando…"
+        updateStatus()
+        Thread {
+            var connection: HttpURLConnection? = null
+            val result = try {
+                val activeConnection = (URL("$baseUrl/api/mobile/device-check").openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    connectTimeout = 10_000
+                    readTimeout = 10_000
+                    instanceFollowRedirects = false
+                    setRequestProperty("Authorization", "Bearer $deviceToken")
+                    setRequestProperty("Accept", "application/json")
+                }
+                connection = activeConnection
+                val code = activeConnection.responseCode
+                val body = (if (code in 200..299) activeConnection.inputStream else activeConnection.errorStream)
+                    ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                when {
+                    code == 200 && runCatching { JSONObject(body).optBoolean("ok") }.getOrDefault(false) ->
+                        "Conexión: correcta; el servidor aceptó la credencial."
+                    code == 401 -> "Conexión: credencial inválida, revocada o limitada."
+                    code == 429 -> "Conexión: demasiados intentos; espera un momento y vuelve a probar."
+                    code in 300..399 -> "Conexión: el servidor redirigió la solicitud; usa la URL HTTPS final."
+                    else -> "Conexión: el servidor respondió HTTP $code."
+                }
+            } catch (_: Exception) {
+                "Conexión: no se pudo contactar el servidor."
+            } finally {
+                connection?.disconnect()
+            }
+            runOnUiThread {
+                connectionCheckMessage = result
+                button.isEnabled = true
+                updateStatus()
+            }
+        }.apply { name = "qvaapply-device-check" }.start()
     }
 }

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { buildDashboard } from "../src/http-dashboard.js";
 import { MarketAccountService } from "../src/market-accounts.js";
+import { PaymentSmsService } from "../src/payment-sms.js";
 import { Store } from "../src/store.js";
 import { Vault } from "../src/vault.js";
 
@@ -100,6 +101,42 @@ test("la entrega móvil exige Bearer y acepta únicamente campos estructurados",
   const hidden = await app.inject({ method: "GET", url: "/api/mobile/payment-receipts" });
   assert.equal(hidden.statusCode, 401);
   await app.close();
+});
+
+test("device-check valida Bearer/revocación sin abrir las rutas administrativas", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-http-device-check-")));
+  const service = new PaymentSmsService(store, {} as never, { markPaid: async () => undefined }, () => "CUP");
+  const paired = service.pairDevice("Android de prueba");
+  const app = buildDashboard({ checkSmsDevice: (token: string) => service.checkDevice(token) } as never, {
+    password,
+    trustedOrigin: origin,
+  });
+
+  const valid = await app.inject({
+    method: "GET", url: "/api/mobile/device-check",
+    headers: { authorization: `Bearer ${paired.token}` },
+  });
+  assert.equal(valid.statusCode, 200);
+  assert.deepEqual(valid.json(), { ok: true });
+
+  const invalid = await app.inject({
+    method: "GET", url: "/api/mobile/device-check",
+    headers: { authorization: `Bearer ${"b".repeat(43)}` },
+  });
+  assert.equal(invalid.statusCode, 401);
+  service.revokeDevice(paired.device.id);
+  const revoked = await app.inject({
+    method: "GET", url: "/api/mobile/device-check",
+    headers: { authorization: `Bearer ${paired.token}` },
+  });
+  assert.equal(revoked.statusCode, 401);
+
+  const admin = await app.inject({ method: "GET", url: "/api/mobile/devices" });
+  assert.equal(admin.statusCode, 401);
+  const nearMatch = await app.inject({ method: "GET", url: "/api/mobile/device-check/extra" });
+  assert.equal(nearMatch.statusCode, 401);
+  await app.close();
+  store.close();
 });
 
 test("expone logs operativos autenticados con filtros acotados", async () => {

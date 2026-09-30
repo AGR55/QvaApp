@@ -123,6 +123,7 @@ export class DashboardReadModel {
   smsDevices() { return this.paymentSms.devices(); }
   paymentReceipts() { return this.paymentSms.receipts(); }
   processPendingPaymentReceipts() { return this.paymentSms.processPending(); }
+  checkSmsDevice(token: string) { return this.paymentSms.checkDevice(token); }
   receivePaymentReceipt(token: string, input: PaymentReceiptInput) {
     return this.paymentSms.receive(token, input);
   }

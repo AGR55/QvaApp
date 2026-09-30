@@ -2,6 +2,7 @@ name: Android SMS APK
 
 on:
   push:
+    branches: [main]
     paths:
       - 'android/**'
       - '.github/workflows/android-build.yml'
@@ -44,3 +45,31 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+
+      - name: Prepare private release signing
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        env:
+          QVAAPPLY_ANDROID_KEYSTORE_BASE64: ${{ secrets.QVAAPPLY_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$QVAAPPLY_ANDROID_KEYSTORE_BASE64"
+          umask 077
+          printf '%s' "$QVAAPPLY_ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/qvaapply-release.jks"
+
+      - name: Build signed private release
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        working-directory: android
+        env:
+          QVAAPPLY_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/qvaapply-release.jks
+          QVAAPPLY_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.QVAAPPLY_ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          test -n "$QVAAPPLY_ANDROID_KEYSTORE_PASSWORD"
+          gradle --no-daemon :app:assembleRelease
+
+      - name: Upload signed private release
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qvaapply-sms-private-release
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30

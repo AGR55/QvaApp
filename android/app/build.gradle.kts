@@ -3,6 +3,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val releaseKeyStore = System.getenv("QVAAPPLY_ANDROID_KEYSTORE_PATH")
+
 android {
     namespace = "com.qvaapply.sms"
     compileSdk = 35
@@ -16,9 +18,21 @@ android {
         applicationId = "com.qvaapply.sms"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    if (!releaseKeyStore.isNullOrBlank()) {
+        signingConfigs {
+            create("privateRelease") {
+                storeFile = file(releaseKeyStore)
+                storePassword = System.getenv("QVAAPPLY_ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = "qvaapply"
+                keyPassword = System.getenv("QVAAPPLY_ANDROID_KEYSTORE_PASSWORD")
+            }
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("privateRelease")
     }
 }
 
