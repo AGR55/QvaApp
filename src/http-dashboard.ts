@@ -95,6 +95,7 @@ export function buildDashboard(
 
   app.addHook("preHandler", async (request) => {
     const path = request.url.split("?", 1)[0]!;
+    if (path === "/api/mobile/device-check" && request.method === "GET") return;
     if (path === "/api/mobile/payment-receipts" && request.method === "POST") return;
     const publicSession = path === "/api/session" && request.method !== "DELETE";
     if (!path.startsWith("/api/") || publicSession) return;
@@ -245,6 +246,12 @@ export function buildDashboard(
   }, async (request, reply) => {
     const result = readModel.pairSmsDevice(request.body.label);
     return reply.status(201).send({ data: result });
+  });
+  app.get("/api/mobile/device-check", async (request, reply) => {
+    const authorization = headerValue(request, "authorization") ?? "";
+    const match = /^Bearer ([A-Za-z0-9_-]{40,100})$/.exec(authorization);
+    if (!match) return reply.status(401).send({ error: "Credencial de dispositivo requerida." });
+    return readModel.checkSmsDevice(match[1]!);
   });
   app.get("/api/mobile/devices", async () => ({ data: readModel.smsDevices() }));
   app.delete<{ Params: { id: string } }>("/api/mobile/devices/:id", async (request, reply) => {
