@@ -73,14 +73,15 @@ test("Fastify protege datos, origen y mutaciones con sesión y CSRF", async () =
 
 test("la entrega móvil exige Bearer y acepta únicamente campos estructurados", async () => {
   const stored: unknown[] = [];
-  const app = buildDashboard({
+  const readModel = {
     pairSmsDevice: (label: string) => ({ device: { id: "device-1", label }, token: "a".repeat(43) }),
     receivePaymentReceipt: async (token: string, input: unknown) => {
       assert.equal(token, "a".repeat(43));
       stored.push(input);
       return { duplicate: false, receipt: { id: "receipt-1", state: "review" } };
     },
-  } as never, { password, trustedOrigin: origin });
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
 
   const noToken = await app.inject({ method: "POST", url: "/api/mobile/payment-receipts", headers: { "content-type": "application/json" }, payload: {} });
   assert.equal(noToken.statusCode, 401);
@@ -840,6 +841,43 @@ test("permite cancelar una operación con cuerpo vacío y reserva reference para
   assert.equal(cancelled.statusCode, 204);
   assert.equal(invalidPaid.statusCode, 400);
   assert.deepEqual(calls, ["cancel:operation-1"]);
+  await app.close();
+});
+
+test("API móvil de operador separa credenciales SMS, limita alcance y permite acciones auditables", async () => {
+  const actions: string[] = [];
+  const readModel = {
+    pairMobileOperator: (label: string) => ({ operator: { id: "op-1", label, scopes: ["read", "actions"], createdAt: 1 }, token: "b".repeat(48) }),
+    checkMobileOperator: (token: string) => token === "b".repeat(48) ? { ok: true, operatorId: "op-1", scopes: ["read", "actions"] } : { ok: false },
+    mobileOperations: () => [{ uuid: "u1", side: "buy", market: "BAND", marketLabel: "Bandec", currency: "CUP", amount: 2, receive: 100, rate: 50, status: "applied", createdAt: 1, actions: ["paid", "cancel"] }],
+    mobileAlerts: () => [{ id: "alert-1", type: "operation-applied", message: "Nueva operación", createdAt: 1 }],
+    mobileMarkets: () => [{ code: "BAND", label: "Bandec", currency: "CUP" }],
+    mobileReceiptOutcomes: () => [{ id: "receipt-1", status: "matched", receivedAt: 1, operationUuid: "u1" }],
+    markPaid: async (uuid: string, reference: string) => void actions.push(`paid:${uuid}:${reference}`),
+    confirmReceived: async (uuid: string) => void actions.push(`received:${uuid}`),
+    cancelOperation: async (uuid: string) => void actions.push(`cancel:${uuid}`),
+    mobileOperationAction: async (_operatorId: string, uuid: string, action: string, reference?: string) => {
+      if (action === "paid") await (readModel.markPaid as (uuid: string, reference: string) => Promise<void>)(uuid, reference!);
+      else if (action === "received") await (readModel.confirmReceived as (uuid: string) => Promise<void>)(uuid);
+      else await (readModel.cancelOperation as (uuid: string) => Promise<void>)(uuid);
+    },
+  };
+  const app = buildDashboard(readModel as never, { password, trustedOrigin: origin });
+  const login = await app.inject({ method: "POST", url: "/api/session", headers: { origin, "content-type": "application/json" }, payload: { password } });
+  const cookie = String(login.headers["set-cookie"]).split(";", 1)[0]!;
+  const csrf = login.json<{ data: { csrfToken: string } }>().data.csrfToken;
+  const paired = await app.inject({ method: "POST", url: "/api/mobile/operators", headers: { origin, cookie, "x-csrf-token": csrf, "content-type": "application/json" }, payload: { label: "Android" } });
+  assert.equal(paired.statusCode, 201);
+  const bearer = { authorization: `Bearer ${"b".repeat(48)}`, "content-type": "application/json" };
+  assert.equal((await app.inject({ method: "GET", url: "/api/mobile/operations", headers: bearer })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: "/api/mobile/alerts", headers: bearer })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: "/api/mobile/markets", headers: bearer })).statusCode, 200);
+  assert.equal((await app.inject({ method: "GET", url: "/api/mobile/receipt-outcomes", headers: bearer })).statusCode, 200);
+  assert.equal((await app.inject({ method: "POST", url: "/api/mobile/operations/u1/cancel", headers: { ...bearer, cookie, origin }, payload: {} })).statusCode, 403);
+  assert.equal((await app.inject({ method: "POST", url: "/api/mobile/operations/u1/paid", headers: bearer, payload: { reference: "REF-1" } })).statusCode, 204);
+  assert.equal((await app.inject({ method: "POST", url: "/api/mobile/operations/u1/cancel", headers: bearer, payload: {} })).statusCode, 204);
+  assert.deepEqual(actions, ["paid:u1:REF-1", "cancel:u1"]);
+  assert.equal((await app.inject({ method: "GET", url: "/api/mobile/operations" })).statusCode, 401);
   await app.close();
 });
 

@@ -16,12 +16,13 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 20;
+const LATEST_SCHEMA_VERSION = 21;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
   id: string; deviceId: string; bank: string; sender: string; currency: string;
   amount: number; beneficiaryMasked: string; transactionId: string;
+  market: string | null; recipientPhone: string | null; receiptKind: "outgoing" | "incoming" | "unknown";
   receivedAt: number; state: PaymentReceiptState; operationUuid: string | null;
   reason: string | null; createdAt: number; processedAt: number | null;
   retryAttempts: number; nextAttemptAt: number;
@@ -282,6 +283,9 @@ function paymentReceiptFromRow(row: Record<string, unknown>): PaymentReceipt {
     id: String(row.id), deviceId: String(row.device_id), bank: String(row.bank),
     sender: String(row.sender), currency: String(row.currency), amount: Number(row.amount),
     beneficiaryMasked: String(row.beneficiary_masked), transactionId: String(row.transaction_id),
+    market: row.market == null ? null : String(row.market),
+    recipientPhone: row.recipient_phone == null ? null : String(row.recipient_phone),
+    receiptKind: row.receipt_kind === "incoming" ? "incoming" : row.receipt_kind === "unknown" ? "unknown" : "outgoing",
     receivedAt: Number(row.received_at), state: String(row.state) as PaymentReceiptState,
     operationUuid: row.operation_uuid == null ? null : String(row.operation_uuid),
     reason: row.reason == null ? null : String(row.reason), createdAt: Number(row.created_at),
@@ -818,6 +822,12 @@ export class Store {
         this.db.exec(`CREATE INDEX IF NOT EXISTS idx_payment_receipts_retry
           ON payment_receipts(state,next_attempt_at,created_at);`);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (20, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 21) {
+        this.ensureColumn("payment_receipts", "market", "TEXT");
+        this.ensureColumn("payment_receipts", "recipient_phone", "TEXT");
+        this.ensureColumn("payment_receipts", "receipt_kind", "TEXT NOT NULL DEFAULT 'outgoing'");
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (21, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -1564,6 +1574,25 @@ export class Store {
     return row ? marketFeedEventFromRow(row) : undefined;
   }
 
+  marketFeedAppliedAt(uuid: string, atOrBefore: number): number | undefined {
+    const rows = this.db.prepare(
+      `SELECT payload_json FROM market_feed_events
+       WHERE event = 'p2p.applied'
+         AND json_extract(payload_json, '$.data.uuid') = ?
+       ORDER BY received_at DESC LIMIT 20`,
+    ).all(uuid) as Array<{ payload_json: string }>;
+    let latest: number | undefined;
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload_json) as { sent_at?: unknown };
+        const sentAt = typeof payload.sent_at === "string" ? Date.parse(payload.sent_at) : Number.NaN;
+        if (Number.isSafeInteger(sentAt) && sentAt <= atOrBefore && (latest === undefined || sentAt > latest))
+          latest = sentAt;
+      } catch { /* Malformed historical feed payloads are not timing evidence. */ }
+    }
+    return latest;
+  }
+
   hasPendingMarketFeedInvalidation(uuid: string): boolean {
     return Boolean(this.db.prepare(
       `SELECT 1 FROM market_feed_events
@@ -1967,11 +1996,11 @@ export class Store {
     return String(row.id);
   }
 
-  insertPaymentReceipt(input: Omit<PaymentReceipt, "state" | "operationUuid" | "reason" | "createdAt" | "processedAt" | "retryAttempts" | "nextAttemptAt">): { receipt: PaymentReceipt; duplicate: boolean } {
+  insertPaymentReceipt(input: Omit<PaymentReceipt, "state" | "operationUuid" | "reason" | "createdAt" | "processedAt" | "retryAttempts" | "nextAttemptAt" | "market" | "recipientPhone" | "receiptKind"> & Partial<Pick<PaymentReceipt, "market" | "recipientPhone" | "receiptKind">>): { receipt: PaymentReceipt; duplicate: boolean } {
     const now = Date.now();
     const inserted = this.db.prepare(`INSERT OR IGNORE INTO payment_receipts
-      (id,device_id,bank,sender,currency,amount,beneficiary_masked,transaction_id,received_at,state,created_at)
-      VALUES(?,?,?,?,?,?,?,?,?,'pending',?)`).run(input.id,input.deviceId,input.bank,input.sender,input.currency,input.amount,input.beneficiaryMasked,input.transactionId,input.receivedAt,now).changes > 0;
+      (id,device_id,bank,sender,currency,amount,beneficiary_masked,transaction_id,received_at,state,created_at,market,recipient_phone,receipt_kind)
+      VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)`).run(input.id,input.deviceId,input.bank,input.sender,input.currency,input.amount,input.beneficiaryMasked,input.transactionId,input.receivedAt,now,input.market ?? null,input.recipientPhone ?? null,input.receiptKind ?? "outgoing").changes > 0;
     const row = this.db.prepare("SELECT * FROM payment_receipts WHERE bank=? AND sender=? AND transaction_id=?")
       .get(input.bank,input.sender,input.transactionId) as Record<string, unknown>;
     const receipt = paymentReceiptFromRow(row);
