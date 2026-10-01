@@ -97,6 +97,16 @@ export function buildDashboard(
     const path = request.url.split("?", 1)[0]!;
     if (path === "/api/mobile/device-check" && request.method === "GET") return;
     if (path === "/api/mobile/payment-receipts" && request.method === "POST") return;
+    if (isMobileOperatorApi(path, request.method)) {
+      // Native Bearer clients have no browser cookie. If a web session is also
+      // present, preserve the dashboard's Origin/CSRF checks for mutations.
+      if (auth.session(request.headers.cookie) && !["GET", "HEAD"].includes(request.method)) {
+        auth.assertOrigin(request.headers.origin);
+        requireJson(request);
+        auth.assertCsrf(request.headers.cookie, headerValue(request, "x-csrf-token"));
+      }
+      return;
+    }
     const publicSession = path === "/api/session" && request.method !== "DELETE";
     if (!path.startsWith("/api/") || publicSession) return;
     if (!auth.session(request.headers.cookie))
@@ -256,6 +266,61 @@ export function buildDashboard(
   app.get("/api/mobile/devices", async () => ({ data: readModel.smsDevices() }));
   app.delete<{ Params: { id: string } }>("/api/mobile/devices/:id", async (request, reply) => {
     if (!readModel.revokeSmsDevice(request.params.id)) return reply.status(404).send({ error: "Dispositivo no encontrado o ya revocado." });
+    return reply.status(204).send();
+  });
+  app.post<{ Body: { label: string } }>("/api/mobile/operators", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["label"], properties: { label: { type: "string", minLength: 1, maxLength: 80 } } } },
+  }, async (request, reply) => {
+    if (typeof readModel.pairMobileOperator !== "function") return reply.status(503).send({ error: "Operadores móviles no disponibles." });
+    return reply.status(201).send({ data: readModel.pairMobileOperator(request.body.label) });
+  });
+  app.get("/api/mobile/operators", async () => ({ data: typeof readModel.mobileOperators === "function" ? readModel.mobileOperators() : [] }));
+  app.delete<{ Params: { id: string } }>("/api/mobile/operators/:id", async (request, reply) => {
+    if (typeof readModel.revokeMobileOperator !== "function" || !readModel.revokeMobileOperator(request.params.id))
+      return reply.status(404).send({ error: "Operador no encontrado o ya revocado." });
+    return reply.status(204).send();
+  });
+  app.get("/api/mobile/operator-check", async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
+    return { ok: true, scopes: operator.scopes };
+  });
+  app.get<{ Querystring: { limit?: string } }>("/api/mobile/operations", async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
+    const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 100) || 100));
+    return { data: typeof readModel.mobileOperations === "function" ? readModel.mobileOperations(limit) : [] };
+  });
+  app.get("/api/mobile/alerts", async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
+    return { data: typeof readModel.mobileAlerts === "function" ? readModel.mobileAlerts() : [] };
+  });
+  app.get("/api/mobile/markets", async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
+    return { data: typeof readModel.mobileMarkets === "function" ? readModel.mobileMarkets() : [] };
+  });
+  app.get("/api/mobile/receipt-outcomes", async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
+    return { data: typeof readModel.mobileReceiptOutcomes === "function" ? readModel.mobileReceiptOutcomes() : [] };
+  });
+  app.post<{ Params: { uuid: string; action: string }; Body: { reference?: string } }>("/api/mobile/operations/:uuid/:action", {
+    schema: {
+      params: { type: "object", required: ["uuid", "action"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 }, action: { type: "string", enum: ["paid", "received", "cancel"] } } },
+      body: { type: "object", additionalProperties: false, properties: { reference: { type: "string", minLength: 1, maxLength: 200 } } },
+    },
+  }, async (request, reply) => {
+    requireJson(request);
+    const operator = mobileAuth(readModel, request, true);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
+    const { uuid, action } = request.params;
+    const reference = request.body.reference?.trim();
+    if (action === "paid" && !reference) throw new ClientInputError("La referencia del pago es obligatoria.");
+    if (action !== "paid" && reference !== undefined) throw new ClientInputError("La referencia solo se admite al marcar pagado.");
+    if (typeof readModel.mobileOperationAction !== "function") return reply.status(503).send({ error: "Acciones móviles no disponibles." });
+    await readModel.mobileOperationAction(operator.operatorId!, uuid, action as "paid" | "received" | "cancel", reference);
     return reply.status(204).send();
   });
   app.get("/api/mobile/payment-receipts", async () => ({ data: readModel.paymentReceipts() }));
@@ -999,6 +1064,18 @@ function serviceWorkerScript(): string {
 function requireJson(request: FastifyRequest): void {
   if (!request.headers["content-type"]?.toLowerCase().startsWith("application/json"))
     throw new DashboardAuthError(403, "Se requiere contenido JSON.");
+}
+
+function isMobileOperatorApi(path: string, method: string): boolean {
+  return (method === "GET" && ["/api/mobile/operator-check", "/api/mobile/operations", "/api/mobile/alerts", "/api/mobile/markets", "/api/mobile/receipt-outcomes"].includes(path)) ||
+    (method === "POST" && /^\/api\/mobile\/operations\/[^/]+\/(?:paid|received|cancel)$/.test(path));
+}
+
+function mobileAuth(readModel: DashboardReadModel, request: FastifyRequest, write: boolean) {
+  const authorization = headerValue(request, "authorization") ?? "";
+  const match = /^Bearer ([A-Za-z0-9_-]{40,100})$/.exec(authorization);
+  if (!match || typeof readModel.checkMobileOperator !== "function") return { ok: false as const };
+  return readModel.checkMobileOperator(match[1]!, write);
 }
 
 function headerValue(request: FastifyRequest, name: string): string | undefined {

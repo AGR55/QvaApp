@@ -22,9 +22,7 @@ class ReceiptUploadWorker(context: Context, params: WorkerParameters) : Coroutin
             try {
                 val r = queued.receipt
                 val payload = JSONObject().apply {
-                    put("bank", r.bank); put("sender", r.sender); put("currency", r.currency)
-                    put("amount", r.amount); put("beneficiaryMasked", r.beneficiaryMasked)
-                    put("transactionId", r.transactionId); put("receivedAt", r.receivedAt)
+                    ReceiptPayload.toMap(r).forEach { (key, value) -> put(key, value) }
                 }.toString()
                 val activeConnection = (URL("$baseUrl/api/mobile/payment-receipts").openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"; connectTimeout = 15_000; readTimeout = 15_000

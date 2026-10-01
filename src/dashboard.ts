@@ -14,6 +14,7 @@ import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
 import { MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 import type { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { PaymentSmsService, type PaymentReceiptInput } from "./payment-sms.js";
+import { MobileOperatorService } from "./mobile-operator.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -97,6 +98,7 @@ function rebalanceIntentMatches(
 export class DashboardReadModel {
   private rebalanceExecution: Promise<void> | undefined;
   private readonly paymentSms: PaymentSmsService;
+  private readonly mobileOperator: MobileOperatorService;
 
   constructor(
     private readonly trading: TradingService,
@@ -116,6 +118,31 @@ export class DashboardReadModel {
       { markPaid: (uuid, reference) => trading.markPaid(uuid, reference) },
       (market) => marketConfig.current().markets.find((item) => item.code === market)?.currency,
     );
+    this.mobileOperator = new MobileOperatorService(store, {
+      operations: () => store.visibleOperations(),
+      alerts: () => this.notifications(),
+      markets: () => this.marketConfig.publicMarkets(),
+      markPaid: (uuid, reference) => trading.markPaid(uuid, reference),
+      confirmReceived: (uuid) => trading.confirmReceived(uuid),
+      cancel: (uuid) => trading.cancel(uuid),
+    });
+  }
+
+  pairMobileOperator(label: string) { return this.mobileOperator.pair(label); }
+  checkMobileOperator(token: string, write = false) { return this.mobileOperator.check(token, write); }
+  mobileOperators() { return this.mobileOperator.list(); }
+  revokeMobileOperator(id: string) { return this.mobileOperator.revoke(id); }
+  mobileOperations(limit: number) { return this.mobileOperator.operations(limit); }
+  mobileAlerts() { return this.mobileOperator.alerts(); }
+  mobileMarkets() { return this.mobileOperator.markets(); }
+  mobileReceiptOutcomes() {
+    return this.paymentSms.receipts().slice(0, 100).map((receipt) => ({
+      id: receipt.id, status: receipt.state, receivedAt: receipt.receivedAt,
+      operationUuid: receipt.operationUuid, reason: receipt.reason,
+    }));
+  }
+  mobileOperationAction(operatorId: string, uuid: string, action: "paid" | "received" | "cancel", reference?: string) {
+    return this.mobileOperator.act(operatorId, uuid, action, reference);
   }
 
   pairSmsDevice(label: string) { return this.paymentSms.pairDevice(label); }
