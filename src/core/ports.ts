@@ -36,6 +36,7 @@ export type TradingRepository = Pick<
   | "hasUnresolvedMutation"
   | "isSeen"
   | "loadRemoteResource"
+  | "latestMarketFeedState"
   | "markSeen"
   | "pendingCancellations"
   | "recentAudit"

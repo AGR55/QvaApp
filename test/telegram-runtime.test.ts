@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   answerCallbackSafely,
+  isMessageNotModified,
   splitCallbackData,
+  TelegramRenderGuard,
 } from "../src/telegram-runtime.js";
 
 test("un callback expirado no derriba el proceso", async () => {
@@ -29,4 +31,17 @@ test("conserva valores de callback que contienen dos puntos", () => {
     "panel",
     "market:BANDECPREPAGO",
   ]);
+});
+
+test("una interacción posterior invalida las ediciones progresivas anteriores", () => {
+  const guard = new TelegramRenderGuard();
+  const first = guard.begin("admin-chat");
+  assert.equal(guard.isCurrent("admin-chat", first), true);
+  guard.begin("admin-chat");
+  assert.equal(guard.isCurrent("admin-chat", first), false);
+});
+
+test("reconoce la respuesta Telegram de texto sin cambios para no duplicar el mensaje", () => {
+  assert.equal(isMessageNotModified(new Error("Bad Request: message is not modified")), true);
+  assert.equal(isMessageNotModified(new Error("network error")), false);
 });

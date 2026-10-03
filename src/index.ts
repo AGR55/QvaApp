@@ -3,10 +3,10 @@ import { config } from "./config.js";
 import { QvaPayClient } from "./qvapay.js";
 import { Session } from "./session.js";
 import { Store } from "./store.js";
-import { TradingEngine, type MarketItem } from "./trading.js";
+import { TradingEngine } from "./trading.js";
 import { MarketConfigService } from "./market-config.js";
 import type { FiatMarket } from "./types.js";
-import { answerCallbackSafely, splitCallbackData } from "./telegram-runtime.js";
+import { answerCallbackSafely, isMessageNotModified, splitCallbackData, TelegramRenderGuard } from "./telegram-runtime.js";
 import { Vault } from "./vault.js";
 import { DashboardReadModel } from "./dashboard.js";
 import { startDashboard } from "./http-dashboard.js";
@@ -53,6 +53,7 @@ const qva = new QvaPayClient(() => session.token(), {
 const bot = new Bot(config.telegramToken);
 const huntingRates = new HuntingRateSessions();
 const cooperativeContributions = new CooperativeContributionSessions();
+const telegramRenderGuard = new TelegramRenderGuard();
 const webPush = new WebPushService(store);
 const notifications = new NotificationDispatcher(store, {
   telegram: async (notification) => {
@@ -176,6 +177,7 @@ bot.use(async (ctx, next) => {
       );
     return;
   }
+  telegramRenderGuard.begin(String(ctx.chat.id));
   await next();
 });
 bot.use(async (ctx, next) => {
@@ -533,6 +535,12 @@ async function showPanelAction(ctx: Context, view: string): Promise<void> {
 
 async function showHunting(ctx: Context, notice?: string): Promise<void> {
   const current = marketConfig.current();
+  const observations = Object.fromEntries(
+    trading.markets().map((market) => [
+      market.code,
+      dashboardReadModel.marketSideObservations(market.code),
+    ]),
+  );
   const text = [
     "<b>🎯 Cacería automática</b>",
     "━━━━━━━━━━━━━━━━━━━━",
@@ -541,7 +549,16 @@ async function showHunting(ctx: Context, notice?: string): Promise<void> {
     "",
     ...current.markets.map(
       (market) =>
-        `${market.active ? "🟢" : "⚪"} <b>${escapeHtml(market.label)}</b> · compra ${market.huntBuyEnabled ? "ON" : "OFF"} · venta ${market.huntSellEnabled ? "ON" : "OFF"}`,
+        (() => {
+          const sides = observations[market.code];
+          const observed = (side: "buy" | "sell") => {
+            const value = sides?.[side];
+            return value
+              ? `${value.data.median === undefined ? "sin mediana" : `${money(value.data.median)} (${value.data.samples} ofertas de ${side === "buy" ? "compra" : "venta"})`} · ${relativeTime(value.updatedAt)}`
+              : "sin observación";
+          };
+          return `${market.active ? "🟢" : "⚪"} <b>${escapeHtml(market.label)}</b> · compra ${market.huntBuyEnabled ? "ON" : "OFF"} · venta ${market.huntSellEnabled ? "ON" : "OFF"}\n   Mediana compra: <b>${observed("buy")}</b>\n   Mediana venta: <b>${observed("sell")}</b>`;
+        })(),
     ),
     notice ? `\n${escapeHtml(notice)}` : "",
   ]
@@ -835,16 +852,55 @@ async function showAutomation(ctx: Context, notice?: string): Promise<void> {
 }
 
 async function showDashboard(ctx: Context, notice?: string): Promise<void> {
-  const state = trading.operationalState();
-  let balance = "No disponible";
-  try {
-    balance = `${money(await trading.qusdBalance())} QUSD`;
-  } catch (error) {
-    balance = `Error: ${escapeHtml(errorMessage(error))}`;
-  }
+  const snapshot = dashboardReadModel.localSnapshot();
+  const target = await renderWithTarget(
+    ctx,
+    dashboardText(snapshot, notice),
+    mainKeyboard(snapshot.state.paused),
+  );
+  if (!target || isFresh(snapshot.freshness.balance, 30_000)) return;
+  void dashboardReadModel.refreshBalance().then(
+    () => updateProgressive(
+      target,
+      dashboardText(dashboardReadModel.localSnapshot(), notice),
+      mainKeyboard(trading.isPaused()),
+    ),
+    (error) => updateProgressive(
+      target,
+      dashboardText(dashboardReadModel.localSnapshot(), notice, errorMessage(error)),
+      mainKeyboard(trading.isPaused()),
+    ),
+  );
+}
+
+function dashboardText(
+  snapshot: ReturnType<DashboardReadModel["localSnapshot"]>,
+  notice?: string,
+  balanceError?: string,
+): string {
+  const state = snapshot.state;
+  const balance = snapshot.freshness.balance === null
+    ? "Sin dato local"
+    : `${money(snapshot.balance)} QUSD · ${relativeTime(snapshot.freshness.balance)}`;
   const last = state.lastScan
     ? `${relativeTime(state.lastScan.at)} · ${state.lastScan.inspected} revisadas · ${state.lastScan.candidates} candidatas`
     : "Aún no se ha ejecutado ningún escaneo";
+  const unresolved = snapshot.unresolvedMutations.slice(0, 3);
+  const mutationWarning = snapshot.risk.usage.unresolvedMutation
+    ? [
+        "⚠️ <b>BLOQUEO DE MUTACIÓN</b>",
+        ...unresolved.map((intent) =>
+          `${escapeHtml(intent.kind)} · ${escapeHtml(intent.state)} desde ${relativeTime(intent.createdAt)}${intent.error ? " · " + escapeHtml(intent.error) : " · requiere conciliación"}`,
+        ),
+      ].join("\n")
+    : "";
+  const feed = marketSource.status();
+  const feedAt = Math.max(
+    feed.lastStreamReceivedAt ?? 0,
+    feed.lastWebhookReceivedAt ?? 0,
+    feed.lastWebhookProcessedAt ?? 0,
+  );
+  const feedStatus = `📡 Feed P2P (${feed.mode}): ${feedAt ? "evento " + relativeTime(feedAt) : "sin eventos recibidos"}${feed.lastEventOutcome ? " · " + escapeHtml(feed.lastEventOutcome) : ""}${feed.lastWebhookError || feed.lastStreamError ? " · ⚠️ " + escapeHtml(feed.lastWebhookError ?? feed.lastStreamError ?? "") : ""}`;
   const fiat = trading
     .markets()
     .map(
@@ -860,17 +916,19 @@ async function showDashboard(ctx: Context, notice?: string): Promise<void> {
     "<b>QvaApply · Centro de operaciones</b>",
     "━━━━━━━━━━━━━━━━━━━━",
     `${state.paused ? "⏸ <b>INACTIVO</b>" : "▶️ <b>ACTIVO</b>"}`,
-    `💰 QvaPay: <b>${balance}</b>`,
+    `💰 QvaPay: <b>${balance}</b>${balanceError ? `\n   ⚠️ No se pudo actualizar: ${escapeHtml(balanceError)}` : ""}`,
     `💳 ${fiat}`,
     movements,
     `📦 Operaciones activas: <b>${state.active}</b> · Refresco: <b>${state.refresh ? "ON" : "OFF"}</b>`,
     "",
     `<b>Último escaneo</b>\n${last}`,
+    feedStatus,
+    mutationWarning,
     notice ? `\n${notice}` : "",
   ]
     .filter(Boolean)
     .join("\n");
-  return render(ctx, text, mainKeyboard(state.paused));
+  return text;
 }
 
 async function showCooperativeNetwork(ctx: Context, notice?: string): Promise<void> {
@@ -1024,17 +1082,47 @@ function networkContributionLabel(coin: string): string {
 }
 
 async function showOwnOffers(ctx: Context, notice?: string): Promise<void> {
-  const offers = await trading.listOwnOffers();
-  const text = [
+  const snapshot = dashboardReadModel.localSnapshot();
+  const offers = snapshot.ownOffers;
+  const target = await renderWithTarget(ctx, ownOffersText(offers, notice), ownOffersKeyboard(offers));
+  if (!target || isFresh(snapshot.freshness.ownOffers, 30_000)) return;
+  void dashboardReadModel.refreshOwnOffers().then(
+    () => {
+      const latest = dashboardReadModel.localSnapshot().ownOffers;
+      return updateProgressive(target, ownOffersText(latest, notice), ownOffersKeyboard(latest));
+    },
+    (error) => updateProgressive(
+      target,
+      ownOffersText(dashboardReadModel.localSnapshot().ownOffers, notice, errorMessage(error)),
+      ownOffersKeyboard(dashboardReadModel.localSnapshot().ownOffers),
+    ),
+  );
+}
+
+function ownOffersText(
+  offers: ReturnType<DashboardReadModel["localSnapshot"]>["ownOffers"],
+  notice?: string,
+  refreshError?: string,
+): string {
+  return [
     "<b>💼 Mis ofertas abiertas</b>",
     "━━━━━━━━━━━━━━━━━━━━",
     offers.length
-      ? offers.slice(0, 8).map(ownOfferCard).join("\n\n")
-      : "No hay ofertas abiertas detectadas.",
+      ? offers.slice(0, 8).map((offer) => ownOfferCard({
+          ...offer,
+          ...(offer.updatedAt === undefined ? {} : { updated_at: offer.updatedAt }),
+        })).join("\n\n")
+      : "Sin ofertas locales guardadas.",
+    refreshError ? "⚠️ No se pudo actualizar: " + escapeHtml(refreshError) : "",
     notice ?? "",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function ownOffersKeyboard(
+  offers: ReturnType<DashboardReadModel["localSnapshot"]>["ownOffers"],
+): InlineKeyboard {
   const keyboard = new InlineKeyboard();
   for (const offer of offers.slice(0, 6))
     keyboard
@@ -1042,33 +1130,92 @@ async function showOwnOffers(ctx: Context, notice?: string): Promise<void> {
       .text("✖", `cancelown:${offer.uuid}`)
       .row();
   keyboard.text("‹ Volver", "panel:home");
-  return render(ctx, text, keyboard);
+  return keyboard;
 }
 
 async function showMarket(ctx: Context, coin: FiatMarket): Promise<void> {
-  const market = await trading.inspectMarket(coin);
-  const shown = market.items.slice(0, 8);
-  const text = [
-    `<b>🔎 Mercado P2P · ${trading.marketLabel(coin)}</b>`,
+  const initial = dashboardReadModel.localSnapshot();
+  const cached = initial.market[coin] ?? { offers: [], total: 0 };
+  const target = await renderWithTarget(
+    ctx,
+    marketText(coin, cached, dashboardReadModel.marketSideObservations(coin)),
+    marketKeyboard(cached.offers),
+  );
+  if (!target) return;
+  const observations = dashboardReadModel.marketSideObservations(coin);
+  const staleSides = (["sell", "buy"] as const).filter((side) =>
+    !isFresh(observations[side]?.updatedAt ?? null, 30_000),
+  );
+  if (!staleSides.length) return;
+  void (async () => {
+    const errors: Partial<Record<"buy" | "sell", string>> = {};
+    for (const side of staleSides) {
+      if (!telegramRenderGuard.isCurrent(target.key, target.revision)) return;
+      try {
+        await dashboardReadModel.refreshMarketSide(coin, side);
+        delete errors[side];
+      } catch (error) {
+        errors[side] = errorMessage(error);
+      }
+      const latest = dashboardReadModel.localSnapshot();
+      await updateProgressive(
+        target,
+        marketText(coin, latest.market[coin] ?? { offers: [], total: 0 }, dashboardReadModel.marketSideObservations(coin), errors),
+        marketKeyboard((latest.market[coin] ?? { offers: [], total: 0 }).offers),
+      );
+    }
+  })();
+}
+
+function marketText(
+  coin: FiatMarket,
+  market: ReturnType<DashboardReadModel["localSnapshot"]>["market"][FiatMarket],
+  observations: ReturnType<DashboardReadModel["marketSideObservations"]>,
+  errors: Partial<Record<"buy" | "sell", string>> = {},
+): string {
+  const sideText = (side: "buy" | "sell") => {
+    const label = side === "buy" ? "Compra" : "Venta";
+    const observation = observations[side];
+    if (errors[side]) return label + ": error al actualizar (" + escapeHtml(errors[side]!) + ")";
+    if (!observation) return label + ": sin observación local · actualizando";
+    const median = observation.data.median === undefined
+      ? "sin mediana"
+      : money(observation.data.median) + " (" + observation.data.samples + " ofertas de " + (side === "buy" ? "compra" : "venta") + ")";
+    return label + ": " + median + " · " + relativeTime(observation.updatedAt);
+  };
+  const shown = market.offers.slice(0, 8);
+  return [
+    "<b>🔎 Mercado P2P · " + trading.marketLabel(coin) + "</b>",
     "━━━━━━━━━━━━━━━━━━━━",
-    `Mostrando ${shown.length} de ${market.total} ofertas abiertas.`,
+    "Medianas observadas · " + sideText("buy") + "\n" + sideText("sell"),
+    "Mostrando " + shown.length + " de " + market.total + " ofertas abiertas.",
     "",
-    shown.length
-      ? shown.map(marketCard).join("\n\n")
-      : "No hay ofertas abiertas en la respuesta de QvaPay.",
+    shown.length ? shown.map((item) => marketViewCard(item, coin)).join("\n\n") : "Sin ofertas locales guardadas.",
   ].join("\n");
+}
+
+function marketViewCard(
+  item: ReturnType<DashboardReadModel["localSnapshot"]>["market"][FiatMarket]["offers"][number],
+  coin: FiatMarket,
+): string {
+  const title = item.type === "sell" ? "🟢 COMPRAR QUSD" : "🔵 VENDER QUSD";
+  const tag = item.decision === "auto_buy"
+    ? "✅ Autoelegible"
+    : item.decision === "manual_sell"
+      ? "👆 Acción manual"
+      : "— Descartada";
+  return title + " · <b>" + money(item.amount) + " QUSD</b>\nTasa: <b>" + money(item.rate) + " " + trading.marketCurrency(coin) + "/QUSD</b> · Total: " + money(item.receive) + " " + trading.marketCurrency(coin) + "\n" + tag + ": " + escapeHtml(item.reason) + "\n<code>" + item.uuid + "</code>";
+}
+
+function marketKeyboard(
+  offers: ReturnType<DashboardReadModel["localSnapshot"]>["market"][FiatMarket]["offers"],
+): InlineKeyboard {
   const keyboard = new InlineKeyboard();
-  for (const item of shown
-    .filter((item) => item.decision === "manual_sell")
-    .slice(0, 4))
-    keyboard.text("Aplicar venta manual", `apply:${item.offer.uuid}`).row();
+  for (const item of offers.filter((offer) => offer.decision === "manual_sell").slice(0, 4))
+    keyboard.text("Aplicar venta manual", "apply:" + item.uuid).row();
   for (const configured of trading.markets())
-    keyboard.text(configured.label, `panel:market:${configured.code}`);
-  keyboard
-    .row()
-    .text("🔄 Escanear", "panel:scan")
-    .text("‹ Volver", "panel:home");
-  return render(ctx, text, keyboard);
+    keyboard.text(configured.label, "panel:market:" + configured.code);
+  return keyboard.row().text("🔄 Escanear", "panel:scan").text("‹ Volver", "panel:home");
 }
 
 async function showStrategy(ctx: Context): Promise<void> {
@@ -1114,16 +1261,54 @@ async function render(
   text: string,
   keyboard: InlineKeyboard,
 ): Promise<void> {
+  await renderWithTarget(ctx, text, keyboard);
+}
+
+async function renderWithTarget(
+  ctx: Context,
+  text: string,
+  keyboard: InlineKeyboard,
+): Promise<{ key: string; revision: number; chatId: number; messageId: number } | undefined> {
   const options = { parse_mode: "HTML" as const, reply_markup: keyboard };
+  const key = chatKey(ctx);
+  const revision = telegramRenderGuard.begin(key);
+  const callbackMessage = ctx.callbackQuery?.message;
+  const callbackTarget = callbackMessage && "chat" in callbackMessage
+    ? { chatId: callbackMessage.chat.id, messageId: callbackMessage.message_id }
+    : undefined;
   if (ctx.callbackQuery) {
     try {
       await ctx.editMessageText(text, options);
-      return;
-    } catch {
+      return callbackTarget ? { key, revision, ...callbackTarget } : undefined;
+    } catch (error) {
+      if (isMessageNotModified(error))
+        return callbackTarget ? { key, revision, ...callbackTarget } : undefined;
       /* Telegram puede rechazar texto sin cambios */
     }
   }
-  await ctx.reply(text, options);
+  const sent = await ctx.reply(text, options);
+  return { key, revision, chatId: sent.chat.id, messageId: sent.message_id };
+}
+
+async function updateProgressive(
+  target: { key: string; revision: number; chatId: number; messageId: number },
+  text: string,
+  keyboard: InlineKeyboard,
+): Promise<void> {
+  if (!telegramRenderGuard.isCurrent(target.key, target.revision)) return;
+  try {
+    await bot.api.editMessageText(target.chatId, target.messageId, text, {
+      parse_mode: "HTML",
+      reply_markup: keyboard,
+    });
+  } catch (error) {
+    if (!isMessageNotModified(error))
+      console.warn("No se pudo actualizar el panel progresivo de Telegram:", errorMessage(error));
+  }
+}
+
+function isFresh(updatedAt: number | null, maxAgeMs: number): boolean {
+  return updatedAt !== null && Date.now() - updatedAt < maxAgeMs;
 }
 function mainKeyboard(paused: boolean): InlineKeyboard {
   const keyboard = new InlineKeyboard()
@@ -1166,19 +1351,6 @@ function ownOfferCard(offer: {
   const currency = trading.marketCurrency(coin);
   const refreshed = trading.lastRefresh(offer.uuid);
   return `${label} · <b>${money(offer.amount)} QUSD</b> · ${trading.marketLabel(coin)}\nTasa: <b>${money(offer.receive / offer.amount)} ${currency}/QUSD</b> · Total: ${money(offer.receive)} ${currency}\nEstado: ${escapeHtml(offer.status)} · ${relativeTime(offer.updated_at)}\nRefresco local: ${refreshed ? relativeTime(refreshed) : "pendiente"}`;
-}
-function marketCard(item: MarketItem): string {
-  const title =
-    item.offer.type === "sell" ? "🟢 COMPRAR QUSD" : "🔵 VENDER QUSD";
-  const tag =
-    item.decision === "auto_buy"
-      ? "✅ Autoelegible"
-      : item.decision === "manual_sell"
-        ? "👆 Acción manual"
-        : "— Descartada";
-  const coin = trading.isMarket(item.offer.coin) ? item.offer.coin : defaultMarket();
-  const currency = trading.marketCurrency(coin);
-  return `${title} · <b>${money(item.offer.amount)} QUSD</b>\nTasa: <b>${money(item.rate)} ${currency}/QUSD</b> · Total: ${money(item.offer.receive)} ${currency}\n${tag}: ${escapeHtml(item.reason)}\n<code>${item.offer.uuid}</code>`;
 }
 function logsText(): string {
   const logs = trading.logs();

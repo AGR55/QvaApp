@@ -349,6 +349,8 @@ export class Store {
     if (existed && this.currentSchemaVersion() < LATEST_SCHEMA_VERSION)
       this.backupBeforeMigration(dataDir);
     this.migrate();
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_market_feed_offer_uuid
+      ON market_feed_events(json_extract(payload_json, '$.data.uuid'));`);
   }
 
   private migrate(): void {
@@ -1591,6 +1593,58 @@ export class Store {
       } catch { /* Malformed historical feed payloads are not timing evidence. */ }
     }
     return latest;
+  }
+
+  latestMarketFeedState(uuid: string): {
+    event: string;
+    status: string;
+    sentAt: number;
+    receivedAt: number;
+  } | undefined {
+    const rows = this.db.prepare(
+      `SELECT event, payload_json, received_at FROM market_feed_events
+       WHERE json_extract(payload_json, '$.data.uuid') = ?`,
+    ).all(uuid) as Array<{
+      event: string;
+      payload_json: string;
+      received_at: number;
+    }>;
+    const candidates: Array<{
+      event: string;
+      status: string;
+      sentAt: number;
+      receivedAt: number;
+    }> = [];
+    for (const row of rows) {
+      try {
+        const payload = JSON.parse(row.payload_json) as {
+          sent_at?: unknown;
+          data?: { status?: unknown };
+        };
+        const sentAt = typeof payload.sent_at === "string"
+          ? Date.parse(payload.sent_at)
+          : Number.NaN;
+        if (!Number.isSafeInteger(sentAt)) continue;
+        const event = String(row.event);
+        const rawStatus = payload.data?.status;
+        const status = typeof rawStatus === "string" && rawStatus.trim()
+          ? rawStatus.trim().toLowerCase()
+          : "unknown";
+        candidates.push({
+          event,
+          status,
+          sentAt,
+          receivedAt: Number(row.received_at),
+        });
+      } catch {
+        // Malformed historical feed payloads cannot establish lifecycle order.
+      }
+    }
+    if (!candidates.length) return undefined;
+    const latestSentAt = Math.max(...candidates.map((candidate) => candidate.sentAt));
+    const latest = candidates.filter((candidate) => candidate.sentAt === latestSentAt);
+    if (latest.length !== 1) return undefined;
+    return latest[0];
   }
 
   hasPendingMarketFeedInvalidation(uuid: string): boolean {
