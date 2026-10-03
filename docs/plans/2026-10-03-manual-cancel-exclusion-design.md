@@ -25,6 +25,10 @@ la vía rápida y una cancelación manual entre ellas en la auditoría de produc
   usando la mediana local de venta del mismo mercado y el porcentaje de protección
   configurado. La referencia caduca tras 5 minutos, no se renueva por lecturas de
   otros mercados y sin referencia vigente se requiere revisión manual.
+  Preferir la mediana de QvaPay. Una estimación desde el listado necesita al
+  menos tres UUID distintos con tasas válidas; una oferta no constituye su propia
+  referencia. No incluir valores ya identificados como sospechosos frente a la
+  referencia anterior en esa estimación.
 - Registrar el motivo «Excluida por cancelación manual» en la auditoría.
 
 ## Plan y verificación

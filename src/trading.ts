@@ -629,7 +629,17 @@ export class TradingEngine {
     const matchingOffers = page.offers.filter(
       (offer) => offer.type === type && offer.coin === coin,
     );
-    const marketMedian = median(matchingOffers.map(rate));
+    const previousMedian = type === "sell" ? this.store.recentSellMedian(coin) : undefined;
+    const guard = this.market(coin)?.priceGuardPercent ?? this.automationConfig().priceGuardPercent;
+    const samples = [...new Map(matchingOffers
+      .filter(offer => Number.isFinite(rate(offer)) && rate(offer) > 0)
+      .filter(offer => !previousMedian || rate(offer) >= previousMedian * (1 - guard / 100))
+      .map(offer => [offer.uuid, rate(offer)])).values()];
+    const officialMedian = numeric(averages?.[coin]?.[type === "buy" ? "median_buy" : "median_sell"]);
+    // One offer (or repeated UUIDs) cannot become its own safety reference.
+    const marketMedian = type === "buy"
+      ? median(matchingOffers.map(rate))
+      : officialMedian ?? (samples.length >= 3 ? median(samples) : undefined);
     const reference: P2pAverage = {
       ...averages?.[coin],
       ...(marketMedian === undefined

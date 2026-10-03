@@ -101,6 +101,52 @@ test("precio sospechosamente bajo se bloquea usando la mediana local, sin consul
   assert.equal(store.decisionEvents({ decision: "blocked", status: "pending" }).pending, 1);
 });
 
+test("una oferta barata no es su propia mediana ni contamina la referencia al escanear", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  const offer: P2pOffer = { uuid: "single-cheap-sample", type: "sell", coin: "BANK_CUP", amount: 5, receive: 5, status: "open" };
+  const trading = new TradingEngine(store, {
+    listOffersPage: async () => ({ offers: [offer], total: 100, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({ BANK_CUP: {} }),
+  } as never, cfg as never, markets, async () => undefined);
+  const snapshot = await trading.inspectMarketSide("BANK_CUP", "sell");
+  assert.equal(snapshot.average?.median_sell, undefined, "el total reportado no sustituye las muestras realmente observadas");
+  assert.equal(snapshot.items[0]?.decision, "blocked");
+  assert.equal(store.recentSellMedian("BANK_CUP"), 930);
+});
+
+test("la mediana oficial tiene prioridad sobre una muestra individual barata", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  const offer: P2pOffer = { uuid: "official-median-cheap", type: "sell", coin: "BANK_CUP", amount: 5, receive: 5, status: "open" };
+  const trading = new TradingEngine(store, {
+    listOffersPage: async () => ({ offers: [offer], total: 1, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
+  } as never, cfg as never, markets, async () => undefined);
+  const snapshot = await trading.inspectMarketSide("BANK_CUP", "sell");
+  assert.equal(snapshot.average?.median_sell, 930);
+  assert.equal(snapshot.items[0]?.decision, "blocked");
+});
+
+for (const distinct of [false, true]) {
+  test(`estimación de mediana exige tres UUID distintos: ${distinct}`, async t => {
+    const { dataDir, store, cfg, markets } = setup();
+    t.after(() => store.close());
+    const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"));
+    db.prepare("DELETE FROM market_observations").run();
+    db.close();
+    const offers: P2pOffer[] = [0, 1, 2].map(i => ({ uuid: distinct ? `sample-${i}` : "repeated-sample",
+      type: "sell", coin: "BANK_CUP", amount: 10, receive: 9300, status: "open" }));
+    const trading = new TradingEngine(store, {
+      listOffersPage: async () => ({ offers, total: 3, currentPage: 1, perPage: 100 }),
+      p2pAverages: async () => ({}),
+    } as never, cfg as never, markets, async () => undefined);
+    const snapshot = await trading.inspectMarketSide("BANK_CUP", "sell");
+    assert.equal(snapshot.average?.median_sell, distinct ? 930 : undefined);
+    assert.equal(snapshot.items[0]?.decision, distinct ? "auto_buy" : "blocked");
+  });
+}
+
 test("venta rápida vuelve a comprobar el mínimo vigente después de esperar el saldo", async t => {
   const { store, cfg, markets } = setup();
   t.after(() => store.close());

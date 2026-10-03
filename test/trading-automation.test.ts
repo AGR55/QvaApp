@@ -101,7 +101,7 @@ test("el escaneo real libera QUSD retenido aunque la venta propia publique mejor
   const calls: string[] = [];
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 20 }),
-    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930, median_sell: 930 } }),
     qusdBalance: async () => 10,
     listOffers: async () => [own],
     getOffer: async () => own,
@@ -150,7 +150,7 @@ test("Clásica bloquea una compra cuya comisión supera la tasa máxima efectiva
       currentPage: 1,
       perPage: 100,
     }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async () => void (applications += 1),
     sendChat: async () => undefined,
@@ -202,7 +202,7 @@ test("permite ajustar el cortafuegos de mediana por mercado sin relajar los dem�
       currentPage: 1,
       perPage: 100,
     }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
   };
   const trading = new TradingEngine(
     store,
@@ -243,7 +243,7 @@ test("ignora ofertas exclusivas VIP sin intentar aplicar ni sumar errores", asyn
   const notifications: string[] = [];
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     apply: async () => void (applications += 1),
   };
   const trading = new TradingEngine(
@@ -391,7 +391,7 @@ test("clasifica no disponible y límite de ofertas con la evidencia textual de Q
     };
     const qva = {
       listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
-      p2pAverages: async () => ({}),
+      p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
       qusdBalance: async () => 100,
       apply: async () => { throw new QvaApiError(scenario.status, scenario.message); },
     };
@@ -445,7 +445,7 @@ test("un rechazo definitivo al aplicar queda explicado y no se reintenta", async
   let applications = 0;
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async () => {
       applications += 1;
@@ -519,7 +519,7 @@ test("detiene compra y venta por separado sin consultar el lado deshabilitado", 
       queries.push(params.type);
       return { offers: [], total: 0, currentPage: 1, perPage: 100 };
     },
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
   };
   const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
 
@@ -573,7 +573,7 @@ test("revalida la cacería de compra después de evaluar el riesgo", async () =>
   let trading: TradingEngine;
   const qva = {
     listOffersPage: async (params: { type?: string }) => ({ offers: params.type === "sell" ? [target] : [], total: 1, currentPage: 1, perPage: 100 }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => {
       trading.updateHunting({ buyRunning: false });
       return 100;
@@ -598,7 +598,7 @@ test("consulta hasta cien ofertas por lado y ordena por mejor tasa", async () =>
       queries.push(params);
       return { offers: [], total: 0, currentPage: 1, perPage: 100 };
     },
-    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930, median_sell: 930 } }),
   };
   const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
 
@@ -631,7 +631,7 @@ test("evalúa una página secundaria pero aplica únicamente con el gateway prin
       primaryListings += 1;
       return { offers: [], total: 0, currentPage: 1, perPage: 100 };
     },
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async (uuid: string) => void applications.push(uuid),
     sendChat: async () => undefined,
@@ -888,7 +888,7 @@ test("no evalúa una instantánea multicuentas que ya está obsoleta", async () 
   };
   let applications = 0;
   const qva = {
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async () => void (applications += 1),
   };
@@ -916,7 +916,7 @@ test("no evalúa una instantánea multicuentas que ya está obsoleta", async () 
 
 test("no inunda auditoría con resultados de escaneo idénticos", async () => {
   const { store, cfg, markets } = setup();
-  const qva = { p2pAverages: async () => ({}) };
+  const qva = { p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }) };
   const trading = new TradingEngine(
     store,
     qva as never,
@@ -967,7 +967,7 @@ test("el cooldown queda visible como advertencia y no pierde la mejor compra", a
   const applied: string[] = [];
   const qva = {
     listOffersPage: async (params: { type?: string }) => ({ offers: params.type === "sell" ? offers : [], total: offers.length, currentPage: 1, perPage: 100 }),
-    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930, median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async (uuid: string) => void applied.push(uuid),
     sendChat: async () => undefined,
@@ -1003,7 +1003,7 @@ test("el escaneo no muta si un límite global bloquea la compra automática", as
   let mutations = 0;
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 20 }),
-    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930, median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async () => void (mutations += 1),
   };
@@ -1036,7 +1036,7 @@ test("notifica una sola vez mientras una oferta conserve el mismo bloqueo de liq
       currentPage: 1,
       perPage: 100,
     }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => 0,
     listOffers: async () => [],
   };
@@ -1087,7 +1087,7 @@ test("reintenta una oferta bloqueada cuando mejora el saldo QUSD", async () => {
       currentPage: 1,
       perPage: 100,
     }),
-    p2pAverages: async () => ({}),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
     qusdBalance: async () => balance,
     listOffers: async () => [],
     apply: async (uuid: string) => void applications.push(uuid),
@@ -1159,7 +1159,7 @@ test("el cooldown persistido no bloquea una segunda operación protegida por los
   let mutations = 0;
   const qva = {
     listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 20 }),
-    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930 } }),
+    p2pAverages: async () => ({ BANK_CUP: { average_buy: 1_015, average_sell: 930, median_sell: 930 } }),
     qusdBalance: async () => 100,
     apply: async () => void (mutations += 1),
   };
