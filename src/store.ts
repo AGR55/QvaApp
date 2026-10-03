@@ -16,7 +16,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 21;
+const LATEST_SCHEMA_VERSION = 22;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -831,6 +831,19 @@ export class Store {
         this.ensureColumn("payment_receipts", "recipient_phone", "TEXT");
         this.ensureColumn("payment_receipts", "receipt_kind", "TEXT NOT NULL DEFAULT 'outgoing'");
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (21, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 22) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS manual_cancel_exclusions (
+            offer_uuid TEXT PRIMARY KEY, created_at INTEGER NOT NULL, source TEXT NOT NULL
+          );
+          INSERT OR IGNORE INTO manual_cancel_exclusions(offer_uuid, created_at, source)
+          SELECT offer_uuid, MIN(created_at), 'historical_audit'
+          FROM audit_log
+          WHERE offer_uuid IS NOT NULL AND action = 'cancel'
+          GROUP BY offer_uuid;
+        `);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (22, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -1964,12 +1977,18 @@ export class Store {
       .run(uuid, Date.now());
   }
 
-  createOperation(operation: Operation): void {
+  createOperation(operation: Operation, allowCancelledManualReapply = false): void {
     this.db
       .prepare(
         `INSERT INTO operations(uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, updated_at, counterparty_id, reference_rate)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(uuid) DO NOTHING`,
+      ON CONFLICT(uuid) DO UPDATE SET offer_type=excluded.offer_type, coin=excluded.coin,
+        amount=excluded.amount, receive=excluded.receive, rate=excluded.rate,
+        state=excluded.state, auto_applied=excluded.auto_applied, cancel_at=excluded.cancel_at,
+        created_at=excluded.created_at, updated_at=excluded.updated_at,
+        counterparty_id=excluded.counterparty_id, reference_rate=excluded.reference_rate
+      WHERE ? = 1 AND operations.state='cancelled' AND excluded.auto_applied=0
+        AND NOT EXISTS (SELECT 1 FROM fiat_ledger WHERE operation_uuid=operations.uuid)`,
       )
       .run(
         operation.uuid,
@@ -1985,6 +2004,7 @@ export class Store {
         operation.createdAt,
         operation.counterpartyId ?? null,
         operation.referenceRate ?? null,
+        Number(allowCancelledManualReapply),
       );
   }
 
@@ -2060,6 +2080,22 @@ export class Store {
         "INSERT INTO audit_log(created_at, action, offer_uuid, detail) VALUES (?, ?, ?, ?)",
       )
       .run(Date.now(), action, uuid ?? null, detail);
+  }
+
+  excludeAutomaticReapplyAfterManualCancel(uuid: string): void {
+    this.transaction(() => {
+      const inserted = this.db.prepare(
+        "INSERT OR IGNORE INTO manual_cancel_exclusions(offer_uuid, created_at, source) VALUES (?, ?, 'manual_cancel')",
+      ).run(uuid, Date.now()).changes > 0;
+      if (inserted)
+        this.audit("manual_cancel_auto_exclusion", "Excluida por cancelación manual; no se permitirá reaplicación automática.", uuid);
+    });
+  }
+
+  isExcludedAfterManualCancel(uuid: string): boolean {
+    return Boolean(this.db.prepare(
+      "SELECT 1 FROM manual_cancel_exclusions WHERE offer_uuid = ?",
+    ).get(uuid));
   }
 
   createSmsDevice(input: { id: string; label: string; tokenHash: string }): SmsDevice {
@@ -2732,6 +2768,13 @@ export class Store {
         "DELETE FROM market_observations WHERE id NOT IN (SELECT id FROM market_observations ORDER BY id DESC LIMIT 20_000)",
       )
       .run();
+  }
+
+  recentSellMedian(coin: FiatMarket, now = Date.now()): number | undefined {
+    const row = this.db.prepare(`SELECT median_sell FROM market_observations
+      WHERE coin = ? AND created_at >= ? AND created_at <= ? AND median_sell > 0
+      ORDER BY created_at DESC, id DESC LIMIT 1`).get(coin, now - 300_000, now) as { median_sell: number } | undefined;
+    return row && Number.isFinite(row.median_sell) ? row.median_sell : undefined;
   }
 
   marketHistory(

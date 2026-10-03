@@ -209,8 +209,8 @@ test("USD Prepago inicia en 110 y usa sus propios umbrales", async () => {
       perPage: 20,
     }),
     p2pAverages: async () => ({
-      BANDECPREPAGO: { average_sell: 1.1 },
-      BANK_CUP: { average_sell: 980 },
+      BANDECPREPAGO: { average_sell: 1.1, median_sell: 1.1 },
+      BANK_CUP: { average_sell: 980, median_sell: 980 },
     }),
   };
   const config = {
@@ -260,7 +260,7 @@ test("Clásica no usa el saldo de Prepago aunque ambas operen en USD", async () 
       currentPage: 1,
       perPage: 20,
     }),
-    p2pAverages: async () => ({ CLASICA: { average_sell: 1 } }),
+    p2pAverages: async () => ({ CLASICA: { average_sell: 1, median_sell: 1 } }),
   };
   const config = {
     initialUsdFiatBalance: 110,

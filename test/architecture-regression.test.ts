@@ -115,7 +115,7 @@ test("el dashboard persiste una sola observación completa por mercado", async (
   const averages = Object.fromEntries(
     markets
       .markets()
-      .map((market) => [market.code, { average_buy: 980, average_sell: 930 }]),
+      .map((market) => [market.code, { average_buy: 980, average_sell: 930, median_sell: 930 }]),
   );
   const qva = {
     listOffers: async () => [],
