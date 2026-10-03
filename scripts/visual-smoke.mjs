@@ -405,6 +405,35 @@ try {
     {},
   );
 
+  await waitFor(() => execute("return document.querySelector('.recovery-item') !== null"));
+  const checkIntent = await find("xpath", "//button[normalize-space(.)='Comprobar ahora']");
+  await command("POST", `/session/${sessionId}/element/${checkIntent}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('No se obtuvo evidencia concluyente')"));
+  const manualReview = await find("xpath", "//button[normalize-space(.)='Registrar comprobación manual']");
+  await command("POST", `/session/${sessionId}/element/${manualReview}/click`, {});
+  await waitFor(() => execute("return document.querySelector('#recovery-reason') !== null"));
+  await assertPageQuality("Recuperación manual");
+  const initiallyDisabled = await execute("return [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Registrar declaración')?.disabled");
+  if (!initiallyDisabled) throw new Error("La recuperación manual no exige confirmación y evidencia");
+  for (const [selector, text] of [["#recovery-reason", "Comprobación ficticia de operación no realizada"], ["#recovery-evidence", "Datos de demostración, sin pagos ni operaciones reales"]]) {
+    const field = await find("css selector", selector);
+    await command("POST", `/session/${sessionId}/element/${field}/value`, { text });
+  }
+  const confirmation = await find("css selector", ".recovery-confirmation button[role='checkbox']");
+  await command("POST", `/session/${sessionId}/element/${confirmation}/click`, {});
+  await screenshot("/tmp/qvaapply-recovery-manual-desktop.png");
+  const registerDeclaration = await find("xpath", "//button[normalize-space(.)='Registrar declaración']");
+  await command("POST", `/session/${sessionId}/element/${registerDeclaration}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('No hay intenciones remotas que requieran atención')"));
+  const bulkDismiss = await find("xpath", "//button[normalize-space(.)='Descartar todas']");
+  await command("POST", `/session/${sessionId}/element/${bulkDismiss}/click`, {});
+  await waitFor(() => execute("return document.querySelector('[role=alertdialog]') !== null"));
+  await assertPageQuality("Confirmación de descarte masivo");
+  await screenshot("/tmp/qvaapply-bulk-dismiss-desktop.png");
+  const bulkConfirm = await find("xpath", "//button[normalize-space(.)='Descartar 1 decisiones']");
+  await command("POST", `/session/${sessionId}/element/${bulkConfirm}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('1 decisión(es) descartada(s).')"));
+
   const logs = await find(
     "xpath",
     "//button[normalize-space(.)='Logs']",

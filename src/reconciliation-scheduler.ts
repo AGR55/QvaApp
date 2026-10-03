@@ -43,6 +43,11 @@ export class ReconciliationScheduler {
     this.state.set(this.key(intentId), "");
   }
 
+  getStatus(intentId: string): RetryRecord | undefined {
+    validateIntentId(intentId);
+    return this.read(intentId);
+  }
+
   private read(intentId: string): RetryRecord | undefined {
     const raw = this.state.get(this.key(intentId));
     if (!raw) return undefined;
