@@ -30,6 +30,7 @@ import {
   ownOfferFiatTotal,
 } from "./market-math.js";
 import { planLiquidity } from "./core/liquidity-plan.js";
+import { ReconciliationScheduler } from "./reconciliation-scheduler.js";
 
 type RuntimeConfig = typeof Config;
 interface BlockedOfferNotification {
@@ -348,9 +349,10 @@ export class TradingEngine {
 
   async reconcilePendingStandaloneMutations(): Promise<number> {
     let reconciled = 0;
+    const retry = new ReconciliationScheduler(this.store);
     const pending = this.store
       .recoverableMutationIntents()
-      .filter((intent) => !intent.workflowId);
+      .filter((intent) => !intent.workflowId && retry.canAttempt(intent.intentId, Date.now()));
     const ownOfferKinds = new Set([
       "create_offer",
       "edit_offer",
@@ -372,124 +374,156 @@ export class TradingEngine {
       }
     }
     for (const intent of pending) {
-      if (operationKinds.has(intent.kind) && intent.operationUuid) {
-        const operation = this.store.getOperation(intent.operationUuid);
-        if (!operation) continue;
-        try {
-          const remote = await this.qva.getOffer(intent.operationUuid);
-          const next = reconciledOperationMutationState(
-            intent.kind,
-            operation.state,
-            remote.status,
-          );
-          if (!next) continue;
-          if (next !== operation.state)
-            this.store.updateOperation(intent.operationUuid, next);
-          this.store.updateMutationIntent(intent.intentId, "reconciled", {
-            remoteStatus: remote.status,
-            operationState: next,
-          });
+      try {
+        if (operationKinds.has(intent.kind) && intent.operationUuid) {
+          const operation = this.store.getOperation(intent.operationUuid);
+          if (!operation) continue;
+          try {
+            const remote = await this.qva.getOffer(intent.operationUuid);
+            const next = reconciledOperationMutationState(
+              intent.kind,
+              operation.state,
+              remote.status,
+            );
+            if (!next) continue;
+            if (next !== operation.state)
+              this.store.updateOperation(intent.operationUuid, next);
+            this.store.updateMutationIntent(intent.intentId, "reconciled", {
+              remoteStatus: remote.status,
+              operationState: next,
+            });
+            this.store.audit(
+              "operation_mutation_reconciled",
+              `QvaPay confirmó ${intent.kind} mediante el estado ${remote.status}; la Operación quedó ${next}.`,
+              intent.operationUuid,
+            );
+            reconciled += 1;
+          } catch (error) {
+            this.store.audit(
+              "operation_mutation_reconciliation_pending",
+              qvaPayFailureDetail(`conciliar ${intent.kind}`, error),
+              intent.operationUuid,
+            );
+          }
+          continue;
+        }
+        if (ownOfferKinds.has(intent.kind)) {
+          if (!ownOffers) continue;
+          const remote = reconcileOwnOfferMutation(intent, ownOffers);
+          if (!remote) continue;
+          this.store.updateMutationIntent(intent.intentId, "reconciled", remote);
           this.store.audit(
-            "operation_mutation_reconciled",
-            `QvaPay confirmó ${intent.kind} mediante el estado ${remote.status}; la Operación quedó ${next}.`,
+            "standalone_offer_mutation_reconciled",
+            `QvaPay confirmó el resultado de ${intent.kind}; la mutación incierta ya no bloquea el motor.`,
             intent.operationUuid,
           );
           reconciled += 1;
-        } catch (error) {
-          this.store.audit(
-            "operation_mutation_reconciliation_pending",
-            qvaPayFailureDetail(`conciliar ${intent.kind}`, error),
-            intent.operationUuid,
-          );
+          continue;
         }
-        continue;
-      }
-      if (ownOfferKinds.has(intent.kind)) {
-        if (!ownOffers) continue;
-        const remote = reconcileOwnOfferMutation(intent, ownOffers);
-        if (!remote) continue;
-        this.store.updateMutationIntent(intent.intentId, "reconciled", remote);
-        this.store.audit(
-          "standalone_offer_mutation_reconciled",
-          `QvaPay confirmó el resultado de ${intent.kind}; la mutación incierta ya no bloquea el motor.`,
-          intent.operationUuid,
-        );
-        reconciled += 1;
-        continue;
-      }
-      if (intent.kind !== "apply" || !intent.operationUuid) continue;
-      const uuid = intent.operationUuid!;
-      try {
-        const remote = await this.qva.getOffer(uuid);
-        const remoteStatus = remote.status.toLowerCase();
-        if (
-          [
-            "open",
-            "processing",
-            "paid",
-            "revision",
-            "cancelled",
-            "canceled",
-            "completed",
-          ].includes(remoteStatus)
-        ) {
-          const next = operationStateFromRemote("applied", remoteStatus);
-          const existing = this.store.getOperation(uuid);
-          if (!existing && operationStatusShowsApplication(remoteStatus)) {
-            if (!isRecoverableOperationOffer(remote)) continue;
-            const request = isRecord(intent.request) ? intent.request : {};
-            this.store.createOperation({
-              uuid,
-              offerType: remote.type,
-              coin: remote.coin,
-              amount: remote.amount,
-              receive: remote.receive,
-              rate: rate(remote),
-              state: next,
-              autoApplied: request.automatic === true,
-              cancelAt: null,
-              createdAt: intent.createdAt,
-              ...(remote.User?.uuid
-                ? { counterpartyId: remote.User.uuid }
-                : remote.Peer?.uuid
-                  ? { counterpartyId: remote.Peer.uuid }
-                  : {}),
+        if (intent.kind !== "apply" || !intent.operationUuid) continue;
+        const uuid = intent.operationUuid!;
+        try {
+          const remote = await this.qva.getOffer(uuid);
+          const remoteStatus = remote.status.toLowerCase();
+          if (
+            [
+              "open",
+              "processing",
+              "paid",
+              "revision",
+              "cancelled",
+              "canceled",
+              "completed",
+            ].includes(remoteStatus)
+          ) {
+            const next = operationStateFromRemote("applied", remoteStatus);
+            const existing = this.store.getOperation(uuid);
+            if (!existing && operationStatusShowsApplication(remoteStatus)) {
+              if (!isRecoverableOperationOffer(remote)) continue;
+              const request = isRecord(intent.request) ? intent.request : {};
+              this.store.createOperation({
+                uuid,
+                offerType: remote.type,
+                coin: remote.coin,
+                amount: remote.amount,
+                receive: remote.receive,
+                rate: rate(remote),
+                state: next,
+                autoApplied: request.automatic === true,
+                cancelAt: null,
+                createdAt: intent.createdAt,
+                ...(remote.User?.uuid
+                  ? { counterpartyId: remote.User.uuid }
+                  : remote.Peer?.uuid
+                    ? { counterpartyId: remote.Peer.uuid }
+                    : {}),
+              });
+            } else if (existing && next !== existing.state) {
+              this.store.updateOperation(uuid, next);
+            }
+            this.store.updateMutationIntent(intent.intentId, "reconciled", {
+              remoteStatus: remote.status,
+              operationState: existing || operationStatusShowsApplication(remoteStatus)
+                ? next
+                : undefined,
             });
-          } else if (existing && next !== existing.state) {
-            this.store.updateOperation(uuid, next);
+            this.store.audit(
+              "standalone_apply_reconciled",
+              `QvaPay confirmó el estado ${remote.status}; la mutación incierta ya no bloquea el motor.`,
+              uuid,
+            );
+            reconciled += 1;
+          }
+        } catch (error) {
+          // An inaccessible detail is not proof of rejection. A later, authenticated
+          // cancellation corroborates that this UUID has no remaining payable deal.
+          const terminal = this.store.latestMarketFeedState(uuid);
+          if (
+            error instanceof QvaApiError && error.status === 404 &&
+            terminal?.event === "p2p.cancelled" && terminal.status === "cancelled" &&
+            terminal.sentAt > intent.createdAt && terminal.sentAt <= Date.now() &&
+            terminal.receivedAt >= intent.createdAt
+          ) {
+            const existing = this.store.getOperation(uuid);
+            // Cancellation does not establish what happened to money already sent.
+            if (existing && ["paid", "revision"].includes(existing.state)) continue;
+            if (existing && !["completed", "cancelled"].includes(existing.state))
+              this.store.updateOperation(uuid, "cancelled");
+            this.store.updateMutationIntent(intent.intentId, "reconciled", {
+              remoteStatus: "cancelled", evidence: "authenticated_feed_and_detail_404",
+              eventSentAt: terminal.sentAt,
+            });
+            this.store.audit(
+              "standalone_apply_reconciled",
+              "El feed autenticado confirmó la cancelación posterior de esta oferta; no quedan obligaciones activas. El 404 aislado no se interpretó como VIP ni rechazo.",
+              uuid,
+            );
+            reconciled += 1;
+            continue;
+          }
+          if (!isDefinitiveAccountRestriction(error)) {
+            this.store.audit(
+              "standalone_apply_reconciliation_pending",
+              qvaPayFailureDetail("conciliar la aplicación", error),
+              uuid,
+            );
+            continue;
           }
           this.store.updateMutationIntent(intent.intentId, "reconciled", {
-            remoteStatus: remote.status,
-            operationState: existing || operationStatusShowsApplication(remoteStatus)
-              ? next
-              : undefined,
+            rejectedByQvaPay: true,
+            reason: error.message,
           });
           this.store.audit(
             "standalone_apply_reconciled",
-            `QvaPay confirmó el estado ${remote.status}; la mutación incierta ya no bloquea el motor.`,
+            `QvaPay confirmó que la cuenta no cumple la restricción de la oferta: ${error.message}`,
             uuid,
           );
           reconciled += 1;
         }
-      } catch (error) {
-        if (!isDefinitiveAccountRestriction(error)) {
-          this.store.audit(
-            "standalone_apply_reconciliation_pending",
-            qvaPayFailureDetail("conciliar la aplicación", error),
-            uuid,
-          );
-          continue;
-        }
-        this.store.updateMutationIntent(intent.intentId, "reconciled", {
-          rejectedByQvaPay: true,
-          reason: error.message,
-        });
-        this.store.audit(
-          "standalone_apply_reconciled",
-          `QvaPay confirmó que la cuenta no cumple la restricción de la oferta: ${error.message}`,
-          uuid,
-        );
-        reconciled += 1;
+      } finally {
+        if (this.store.recoverableMutationIntents().some((item) => item.intentId === intent.intentId))
+          retry.recordFailure(intent.intentId, Date.now());
+        else retry.clear(intent.intentId);
       }
     }
     return reconciled;
@@ -497,6 +531,18 @@ export class TradingEngine {
 
   reconcileWorkflow(workflowId: string) {
     return this.opportunityOrchestrator.reconcile(workflowId);
+  }
+
+  private offerRejectionDetail(action: string, error: unknown, uuid: string): string {
+    const detail = qvaPayFailureDetail(action, error);
+    if (!(error instanceof QvaApiError) || ![403, 404].includes(error.status)) return detail;
+    const latest = this.store.latestMarketFeedState(uuid);
+    if (!latest || latest.sentAt > Date.now()) return detail;
+    if (latest.event === "p2p.applied" && latest.status === "processing")
+      return `${detail}; feed autenticado: oferta ocupada por una aplicación (no identifica quién).`;
+    if (latest.event === "p2p.cancelled" && latest.status === "cancelled")
+      return `${detail}; feed autenticado: oferta cancelada.`;
+    return detail;
   }
 
   async inspectMarket(coin: FiatMarket): Promise<MarketSnapshot> {
@@ -607,6 +653,18 @@ export class TradingEngine {
     event: "p2p.created" | "p2p.reopened",
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
+    if (this.isPaused()) return { inspected: 0, candidates: 0, action: "pausado" };
+    if (offer.status !== "open")
+      return { inspected: 1, candidates: 0, action: `ya no disponible (${offer.status})` };
+    if (!this.isMarket(offer.coin))
+      return { inspected: 1, candidates: 0, action: "mercado no configurado" };
+    if (!this.huntEnabled(offer.coin, offer.type === "sell" ? "buy" : "sell"))
+      return { inspected: 0, candidates: 0, action: "mercado o cacería inactivos" };
+    const vipFlag = explicitFlag(offer.only_vip);
+    if (vipFlag === "true")
+      return { inspected: 1, candidates: 0, action: "Oferta exclusiva para usuarios VIP" };
+    if (vipFlag === "unknown")
+      return { inspected: 1, candidates: 0, action: "restricción VIP no interpretable" };
     let candidate = offer;
     const publishedAt = sentAt ? Date.parse(sentAt) : Number.NaN;
     if (Number.isFinite(publishedAt) && Date.now() - publishedAt > 5_000) {
@@ -614,7 +672,7 @@ export class TradingEngine {
         candidate = await this.qva.getOffer(offer.uuid);
       } catch (error) {
         if (error instanceof QvaApiError && error.status === 404)
-          return { inspected: 1, candidates: 0, action: "ya no disponible" };
+          return { inspected: 1, candidates: 0, action: this.offerRejectionDetail("consultar la oferta", error, offer.uuid) };
         throw error;
       }
       if (candidate.status !== "open")
@@ -639,9 +697,12 @@ export class TradingEngine {
     const transfer = outgoingFiatCost(offer.amount, quotedRate, market.outgoingTransferFee);
     let decision: MarketItem["decision"] = "auto_buy";
     let reason = "Compra inmediata elegible por precio y capital";
-    if (Boolean(offer.only_vip)) {
+    const vipFlag = explicitFlag(offer.only_vip);
+    if (vipFlag === "true" || vipFlag === "unknown") {
       decision = "ignored";
-      reason = "Oferta exclusiva para usuarios VIP";
+      reason = vipFlag === "true"
+        ? "Oferta exclusiva para usuarios VIP"
+        : "Restricción VIP no interpretable";
     } else if (!this.huntEnabled(coin, "buy")) {
       decision = "ignored";
       reason = "Cacería de compra detenida";
@@ -682,7 +743,7 @@ export class TradingEngine {
       await this.applyBuyQusd(offer, true, undefined, true);
     } catch (error) {
       if (!isDefinitiveQvaApplyRejection(error)) throw error;
-      const detail = qvaPayFailureDetail("aplicar a la oferta", error);
+      const detail = this.offerRejectionDetail("aplicar a la oferta", error, offer.uuid);
       this.store.markSeen(offer.uuid);
       this.store.audit("qvapay_apply_rejected", detail, offer.uuid);
       return { inspected: 1, candidates: 1, action: `rechazada ${offer.uuid}` };
@@ -725,9 +786,12 @@ export class TradingEngine {
     const quotedRate = rate(offer);
     let decision: MarketItem["decision"] = "manual_sell";
     let reason = "Venta inmediata elegible por precio y capital";
-    if (Boolean(offer.only_vip)) {
+    const vipFlag = explicitFlag(offer.only_vip);
+    if (vipFlag === "true" || vipFlag === "unknown") {
       decision = "ignored";
-      reason = "Oferta exclusiva para usuarios VIP";
+      reason = vipFlag === "true"
+        ? "Oferta exclusiva para usuarios VIP"
+        : "Restricción VIP no interpretable";
     } else if (offer.offer_kind === "flexible") {
       decision = "ignored";
       reason = "La aplicación parcial de ofertas flexibles todavía no está configurada";
@@ -775,7 +839,7 @@ export class TradingEngine {
       });
     } catch (error) {
       if (!isDefinitiveQvaApplyRejection(error)) throw error;
-      const detail = qvaPayFailureDetail("aplicar a la oferta", error);
+      const detail = this.offerRejectionDetail("aplicar a la oferta", error, offer.uuid);
       this.store.markSeen(offer.uuid);
       this.store.audit("qvapay_apply_rejected", detail, offer.uuid);
       return { inspected: 1, candidates: 1, action: `rechazada ${offer.uuid}` };
@@ -1156,7 +1220,7 @@ export class TradingEngine {
             await this.applyBuyQusd(best, true, reference);
           } catch (error) {
             if (!isDefinitiveQvaApplyRejection(error)) throw error;
-            const reason = qvaPayFailureDetail("aplicar a la oferta", error);
+            const reason = this.offerRejectionDetail("aplicar a la oferta", error, best.uuid);
             this.store.audit("qvapay_apply_rejected", reason, best.uuid);
             this.store.recordDecisionEvent({
               uuid: best.uuid,
@@ -2285,13 +2349,15 @@ export class TradingEngine {
       };
     const coin = this.offerMarket(offer);
     const configured = this.market(coin)!;
-    if (Boolean(offer.only_vip))
+    const vipFlag = explicitFlag(offer.only_vip);
+    if (vipFlag === "true" || vipFlag === "unknown")
       return {
         offer,
         rate: value,
         decision: "ignored",
-        reason:
-          "Oferta exclusiva para usuarios VIP; QvaPay no permite aplicarla con esta cuenta.",
+        reason: vipFlag === "true"
+          ? "Oferta exclusiva para usuarios VIP; QvaPay no permite aplicarla con esta cuenta."
+          : "Restricción VIP no interpretable; se omite la oferta por seguridad.",
       };
     if (
       (offer.type === "sell" && !this.huntEnabled(coin, "buy")) ||
@@ -2988,8 +3054,11 @@ function isDefinitiveAccountRestriction(error: unknown): error is QvaApiError {
 }
 
 function qvaPayFailureDetail(action: string, error: unknown): string {
-  if (error instanceof QvaApiError)
-    return `⚠️ QvaPay rechazó ${action} (HTTP ${error.status}): ${error.message}`;
+  if (error instanceof QvaApiError) {
+    const category = classifyQvaPayRejection(error);
+    const code = error.code ? `, código ${error.code}` : "";
+    return `⚠️ QvaPay rechazó ${action} (${category}, HTTP ${error.status}${code}): ${error.message}`;
+  }
   if (error instanceof QvaConnectionError)
     return `🌐 No se pudo completar ${action} por la conexión con QvaPay: ${error.message}`;
   if (error instanceof QvaMutationUncertainError)
@@ -2997,6 +3066,29 @@ function qvaPayFailureDetail(action: string, error: unknown): string {
   return `⚠️ QvaPay devolvió un dato no utilizable durante ${action}: ${
     error instanceof Error ? error.message : String(error)
   }`;
+}
+
+function classifyQvaPayRejection(error: QvaApiError): string {
+  const evidence = `${error.code ?? ""} ${error.message}`;
+  if (/\bVIP\b/i.test(evidence)) return "restricción VIP explícita";
+  if (/\bKYC\b|verificaci[oó]n de identidad/i.test(evidence))
+    return "restricción KYC explícita";
+  if (/no puedes aplicar a m[aá]s de \d+ ofertas?\s+P2P|l[ií]mite de ofertas? P2P/i.test(evidence))
+    return "límite de operaciones de la cuenta";
+  if (/already applied|already taken|ya aplicaste|ya est[aá]s aplicado|ya aplicada/i.test(evidence))
+    return "aplicación previa indicada por QvaPay";
+  if (/no longer available|not available|expired|no est[aá] disponible|oferta vencida/i.test(evidence))
+    return "oferta no disponible indicada por QvaPay";
+  if ([403, 404].includes(error.status)) return "permiso o acceso denegado (causa no determinada)";
+  return "rechazo no clasificado";
+}
+
+function explicitFlag(value: unknown): "true" | "false" | "unknown" {
+  if (value === undefined || value === null || value === false || value === 0 || value === "0" || value === "false")
+    return "false";
+  if (value === true || value === 1 || value === "1" || value === "true")
+    return "true";
+  return "unknown";
 }
 
 /** @deprecated Use TradingEngine. Kept while Telegram and HTTP adapters migrate. */

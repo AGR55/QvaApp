@@ -97,7 +97,11 @@ function signed(raw: Buffer, timestamp: number) {
 test("acepta, deduplica y procesa inmediatamente una oferta firmada", async () => {
   const state = setup();
   enableRealtime(state.coordinator);
-  const raw = Buffer.from(JSON.stringify(payload()));
+  const source = payload();
+  const raw = Buffer.from(JSON.stringify({
+    ...source,
+    data: { ...source.data, details: { Cuenta: "1234567890123456" } },
+  }));
   const result = state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   assert.deepEqual(result, { duplicate: false, queued: true });
 
@@ -110,6 +114,9 @@ test("acepta, deduplica y procesa inmediatamente una oferta firmada", async () =
   assert.equal(state.coordinator.status().lastDeliveryLagMs, 10_000);
   assert.equal(state.coordinator.status().lastEventLatencyMs, 0);
   assert.match(state.coordinator.status().lastEventOutcome ?? "", /procesada|aplicada|p2p/i);
+  const processedAudit = state.store.recentAudit(20).find((entry) => entry.action === "market_feed_processed");
+  assert.match(processedAudit?.detail ?? "", /p2p\.created.*BANK_CUP/);
+  assert.doesNotMatch(processedAudit?.detail ?? "", /1234567890123456|Cuenta/);
 
   const duplicate = state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   assert.deepEqual(duplicate, { duplicate: true, queued: false });

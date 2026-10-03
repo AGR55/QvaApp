@@ -42,6 +42,25 @@ function setup() {
   return { dataDir, store, cfg, markets };
 }
 
+for (const lifecycle of ["none", "applied", "cancelled"] as const) {
+  test(`detalle 404 ambiguo conserva evidencia del feed: ${lifecycle}`, async () => {
+    const { store, cfg, markets } = setup();
+    const offer: P2pOffer = { uuid: "inaccessible-feed", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open" };
+    const trading = new TradingEngine(store, {
+      getOffer: async () => { throw new QvaApiError(404, "No tienes permisos para ver esta oferta"); },
+    } as never, cfg as never, markets, async () => undefined);
+    if (lifecycle !== "none") store.enqueueMarketFeedEvent({
+      key: lifecycle, event: `p2p.${lifecycle}`, receivedAt: Date.now(),
+      payload: { event: `p2p.${lifecycle}`, sent_at: new Date(Date.now() - 1_000).toISOString(), data: { uuid: offer.uuid, status: lifecycle === "applied" ? "processing" : "cancelled" } },
+    });
+    const result = await trading.ingestMarketOffer(offer, Date.now(), "p2p.created", new Date(Date.now() - 6_000).toISOString());
+    assert.match(result.action!, /causa no determinada/);
+    if (lifecycle === "none") assert.doesNotMatch(result.action!, /ocupada|cancelada|VIP/);
+    else assert.match(result.action!, lifecycle === "applied" ? /ocupada por una aplicación/ : /oferta cancelada/);
+    store.close();
+  });
+}
+
 test("producción arranca activa y respeta una parada de emergencia", () => {
   const first = setup();
   first.store.set("paused", "true");
@@ -244,6 +263,145 @@ test("ignora ofertas exclusivas VIP sin intentar aplicar ni sumar errores", asyn
   store.close();
 });
 
+test("descarta antes del refresco ofertas viejas de mercados inactivos, pausados o VIP explícitos", async () => {
+  const cases: Array<{
+    label: string;
+    configure: (trading: TradingEngine, markets: MarketConfigService) => void;
+    offer?: Partial<P2pOffer>;
+  }> = [
+    {
+      label: "mercado inactivo",
+      configure: (_trading, markets) => {
+        const next = markets.current();
+        next.markets.find((market) => market.code === "BANK_CUP")!.active = false;
+        markets.save(next);
+      },
+      offer: { coin: "BANK_CUP" },
+    },
+    {
+      label: "cacería detenida",
+      configure: (trading) => trading.updateHunting({ buyRunning: false }),
+      offer: { coin: "BANK_CUP" },
+    },
+    {
+      label: "bot pausado",
+      configure: (trading) => trading.setPaused(true),
+      offer: { coin: "BANK_CUP" },
+    },
+    {
+      label: "VIP explícito",
+      configure: () => undefined,
+      offer: { coin: "BANK_CUP", only_vip: 1 },
+    },
+  ];
+  for (const [index, scenario] of cases.entries()) {
+    const { store, cfg, markets } = setup();
+    let refreshes = 0;
+    const qva = {
+      getOffer: async () => {
+        refreshes += 1;
+        throw new Error("No se debe consultar la oferta descartada");
+      },
+      apply: async () => {
+        throw new Error("No se debe aplicar la oferta descartada");
+      },
+    };
+    const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+    scenario.configure(trading, markets);
+    const offer: P2pOffer = {
+      uuid: `stale-gate-${index}`,
+      type: "sell",
+      coin: "BANK_CUP",
+      amount: 10,
+      receive: 9_200,
+      status: "open",
+      ...scenario.offer,
+    };
+    const result = await trading.ingestMarketOffer(
+      offer,
+      Date.now() - 10_000,
+      "p2p.created",
+      new Date(Date.now() - 10_000).toISOString(),
+    );
+    assert.equal(refreshes, 0, scenario.label);
+    assert.equal(result.candidates, 0, scenario.label);
+    store.close();
+  }
+});
+
+test("interpreta only_vip string 0 como falso y string 1 como restricción explícita", async () => {
+  const { store, cfg, markets } = setup();
+  let applications = 0;
+  const qva = {
+    apply: async () => { applications += 1; },
+  };
+  const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  const offer = (uuid: string, only_vip: string): P2pOffer => ({
+    uuid,
+    type: "sell",
+    coin: "BANK_CUP",
+    amount: 10,
+    receive: 9_200,
+    status: "open",
+    only_vip: only_vip as unknown as number,
+  });
+
+  const allowed = await trading.ingestMarketOffer(
+    offer("vip-string-zero", "0"),
+    Date.now(),
+    "p2p.created",
+    new Date().toISOString(),
+  );
+  const rejected = await trading.ingestMarketOffer(
+    offer("vip-string-one", "1"),
+    Date.now(),
+    "p2p.created",
+    new Date().toISOString(),
+  );
+
+  assert.equal(allowed.action, "aplicada vip-string-zero");
+  assert.equal(rejected.action, "Oferta exclusiva para usuarios VIP");
+  assert.equal(applications, 1);
+  store.close();
+});
+
+test("clasifica no disponible y límite de ofertas con la evidencia textual de QvaPay", async () => {
+  const cases = [
+    {
+      status: 409,
+      message: "La oferta no está disponible para aplicar",
+      expected: /oferta no disponible indicada por QvaPay/i,
+    },
+    {
+      status: 400,
+      message: "No puedes aplicar a más de 10 ofertas P2P",
+      expected: /límite de operaciones de la cuenta/i,
+    },
+  ];
+  for (const [index, scenario] of cases.entries()) {
+    const { store, cfg, markets } = setup();
+    const target: P2pOffer = {
+      uuid: `classification-${index}`,
+      type: "sell",
+      coin: "BANK_CUP",
+      amount: 10,
+      receive: 9_200,
+      status: "open",
+    };
+    const qva = {
+      listOffersPage: async () => ({ offers: [target], total: 1, currentPage: 1, perPage: 100 }),
+      p2pAverages: async () => ({}),
+      qusdBalance: async () => 100,
+      apply: async () => { throw new QvaApiError(scenario.status, scenario.message); },
+    };
+    const trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+    await trading.scan();
+    const reason = store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "";
+    assert.match(reason, scenario.expected);
+    store.close();
+  }
+});
+
 test("un rechazo o caída de QvaPay no activa el cortafuegos de errores internos", async () => {
   const { store, cfg, markets } = setup();
   const notifications: string[] = [];
@@ -309,6 +467,14 @@ test("un rechazo definitivo al aplicar queda explicado y no se reintenta", async
   assert.match(
     store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
     /QvaPay.*HTTP 403.*bloqueó esta cuenta/i,
+  );
+  assert.match(
+    store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
+    /causa no determinada/i,
+  );
+  assert.doesNotMatch(
+    store.decisionEvents({ page: 1, pageSize: 10 }).items[0]?.reason ?? "",
+    /restricción VIP explícita/i,
   );
   assert.match(notifications.at(-1) ?? "", /Compra automática bloqueada.*QvaPay.*HTTP 403/is);
   store.close();

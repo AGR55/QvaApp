@@ -26,3 +26,23 @@ export function splitCallbackData(
     ? [data, ""]
     : [data.slice(0, separator), data.slice(separator + 1)];
 }
+
+/** Invalidates background Telegram edits when a newer interaction arrives. */
+export class TelegramRenderGuard {
+  private readonly revisions = new Map<string, number>();
+
+  begin(key: string): number {
+    const revision = (this.revisions.get(key) ?? 0) + 1;
+    this.revisions.set(key, revision);
+    return revision;
+  }
+
+  isCurrent(key: string, revision: number): boolean {
+    return this.revisions.get(key) === revision;
+  }
+}
+
+export function isMessageNotModified(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /message is not modified/i.test(message);
+}

@@ -46,6 +46,38 @@ test("rechaza un Peer inválido cuando la oferta ya tiene contraparte", async ()
   );
 });
 
+test("normaliza los detalles de pago en formato array y trata null o vacío como ausencia", async () => {
+  for (const [details, expected] of [
+    [null, undefined],
+    [[], undefined],
+    [[{ name: "Cuenta", value: "001234" }, { name: "Banco", value: "BPA" }], { Cuenta: "001234", Banco: "BPA" }],
+  ] as const) {
+    const client = new QvaPayClient(() => "token", {
+      fetch: async () => new Response(JSON.stringify({ p2p: {
+        uuid: "offer-details-1", type: "buy", coin: "BANK_CUP",
+        amount: 10, receive: 9_400, status: "open", details,
+      } }), { status: 200 }),
+    });
+    assert.deepEqual((await client.getOffer("offer-details-1")).details, expected);
+  }
+});
+
+test("falla cerrado para detalles de pago malformados o con claves duplicadas", async () => {
+  for (const details of [
+    [{ name: "Cuenta", value: 123 }],
+    [{ name: "Cuenta", value: "001" }, { name: "Cuenta", value: "002" }],
+    { Cuenta: 123 },
+  ]) {
+    const client = new QvaPayClient(() => "token", {
+      fetch: async () => new Response(JSON.stringify({ p2p: {
+        uuid: "offer-details-invalid", type: "buy", coin: "BANK_CUP",
+        amount: 10, receive: 9_400, status: "open", details,
+      } }), { status: 200 }),
+    });
+    await assert.rejects(() => client.getOffer("offer-details-invalid"), /datos de pago/);
+  }
+});
+
 test("serializa mutaciones distintas bajo un único límite global", async () => {
   let now = 1_000;
   const calls: { url: string; at: number }[] = [];

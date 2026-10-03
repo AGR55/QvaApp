@@ -11,7 +11,7 @@ import type {
   Store,
 } from "./store.js";
 import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
-import { MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
+import { median, MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 import type { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { PaymentSmsService, type PaymentReceiptInput } from "./payment-sms.js";
 import { MobileOperatorService } from "./mobile-operator.js";
@@ -21,6 +21,12 @@ type OfferView = ReturnType<typeof offerView>;
 type MarketView = {
   offers: (OfferView & { decision: string; reason: string })[];
   total: number;
+};
+export type MarketSideObservation = {
+  offers: (OfferView & { decision: string; reason: string })[];
+  total: number;
+  median?: number;
+  samples: number;
 };
 type TransactionView = {
   uuid: string;
@@ -97,6 +103,7 @@ function rebalanceIntentMatches(
 
 export class DashboardReadModel {
   private rebalanceExecution: Promise<void> | undefined;
+  private readonly pendingReads = new Map<string, Promise<unknown>>();
   private readonly paymentSms: PaymentSmsService;
   private readonly mobileOperator: MobileOperatorService;
 
@@ -666,6 +673,7 @@ export class DashboardReadModel {
       capitalReservations: this.store.capitalReservations(),
       cooperativeNetwork: this.cooperativeNetwork(),
       mutationIntents: this.store.recentMutationIntents(100),
+      unresolvedMutations: this.store.unresolvedMutationIntents(),
       operations: this.store.visibleOperations(),
       integrity: {
         schemaVersion: this.store.schemaVersion(),
@@ -675,11 +683,13 @@ export class DashboardReadModel {
   }
 
   async refreshBalance() {
-    const data = await this.trading.qusdBalance();
-    const updatedAt = Date.now();
-    this.store.saveRemoteResource("balance", data, updatedAt);
-    this.recordDashboardPoint();
-    return { data, updatedAt };
+    return this.coalesceRead("balance", async () => {
+      const data = await this.trading.qusdBalance();
+      const updatedAt = Date.now();
+      this.store.saveRemoteResource("balance", data, updatedAt);
+      this.recordDashboardPoint();
+      return { data, updatedAt };
+    });
   }
 
   async refreshOwnOffers() {
@@ -739,6 +749,22 @@ export class DashboardReadModel {
     };
     const updatedAt = current.scannedAt;
     this.store.saveRemoteResource(`market:${coin}`, data, updatedAt);
+    for (const side of ["buy", "sell"] as const) {
+      const items = current.items.filter((item) => item.offer.type === side);
+      const sideData: MarketSideObservation = {
+        offers: items.map((item) => ({
+          ...offerView(item.offer),
+          decision: item.decision,
+          reason: item.reason,
+        })),
+        total: items.length,
+        samples: items.filter((item) => Number.isFinite(item.rate) && item.rate > 0).length,
+        ...(current.average?.[side === "buy" ? "median_buy" : "median_sell"] === undefined
+          ? {}
+          : { median: current.average[side === "buy" ? "median_buy" : "median_sell"] }),
+      };
+      this.store.saveRemoteResource(`market-side:${coin}:${side}`, sideData, updatedAt);
+    }
     const previousAverages =
       this.store.loadRemoteResource<Record<string, unknown>>("averages")?.data ??
       {};
@@ -762,6 +788,62 @@ export class DashboardReadModel {
       ).length,
     });
     return { data, updatedAt, average: current.average };
+  }
+
+  marketSideObservations(coin: string): Partial<Record<"buy" | "sell", { data: MarketSideObservation; updatedAt: number }>> {
+    const result: Partial<Record<"buy" | "sell", { data: MarketSideObservation; updatedAt: number }>> = {};
+    for (const side of ["buy", "sell"] as const) {
+      const cached = this.store.loadRemoteResource<MarketSideObservation>(`market-side:${coin}:${side}`);
+      if (cached) result[side] = { data: cached.data, updatedAt: cached.updatedAt };
+    }
+    return result;
+  }
+
+  async refreshMarketSide(coin: string, side: "buy" | "sell") {
+    return this.coalesceRead(`market-side:${coin}:${side}`, () =>
+      this.refreshMarketSideOnce(coin, side),
+    );
+  }
+
+  private async refreshMarketSideOnce(coin: string, side: "buy" | "sell") {
+    if (!this.marketConfig.find(coin)) throw new Error("Mercado inválido.");
+    const current = await this.trading.inspectMarketSide(coin, side);
+    const items = current.items.filter((item) => item.offer.type === side);
+    const medianValue = median(items.map((item) => item.rate));
+    const data: MarketSideObservation = {
+      offers: items.map((item) => ({
+        ...offerView(item.offer),
+        decision: item.decision,
+        reason: item.reason,
+      })),
+      total: current.total,
+      samples: items.filter((item) => Number.isFinite(item.rate) && item.rate > 0).length,
+      ...(medianValue === undefined ? {} : { median: medianValue }),
+    };
+    const updatedAt = current.scannedAt;
+    this.store.saveRemoteResource(`market-side:${coin}:${side}`, data, updatedAt);
+
+    const otherSide = side === "buy" ? "sell" : "buy";
+    const other = this.store.loadRemoteResource<MarketSideObservation>(`market-side:${coin}:${otherSide}`)?.data;
+    const offers = [...(other?.offers ?? []), ...data.offers];
+    const marketData: MarketView = {
+      offers,
+      total: (other?.total ?? 0) + data.total,
+    };
+    this.store.saveRemoteResource(`market:${coin}`, marketData, updatedAt);
+    return { data, updatedAt };
+  }
+
+  private coalesceRead<T>(key: string, read: () => Promise<T>): Promise<T> {
+    const pending = this.pendingReads.get(key);
+    if (pending) return pending as Promise<T>;
+    const request = Promise.resolve().then(read);
+    this.pendingReads.set(key, request);
+    const clear = () => {
+      if (this.pendingReads.get(key) === request) this.pendingReads.delete(key);
+    };
+    void request.then(clear, clear);
+    return request;
   }
 
   async refreshCache(): Promise<void> {

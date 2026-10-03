@@ -608,9 +608,39 @@ function parseOffer(value: unknown, context: string): P2pOffer {
   if (peer !== undefined && peer !== null) validateParty(peer, `${context}, Peer`);
   if (raw.tags !== undefined && (!Array.isArray(raw.tags) || !raw.tags.every((tag) => typeof tag === "string")))
     throw new Error(`Respuesta inválida de QvaPay (${context}): etiquetas inválidas.`);
-  if (raw.details !== undefined && !stringRecord(raw.details))
-    throw new Error(`Respuesta inválida de QvaPay (${context}): datos de pago inválidos.`);
-  return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status, Peer: peer } as P2pOffer;
+  const details = normalizePaymentDetails(raw.details, context);
+  return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status, Peer: peer, details } as P2pOffer;
+}
+
+function normalizePaymentDetails(
+  value: unknown,
+  context: string,
+): Record<string, string> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return undefined;
+    const entries: Array<[string, string]> = [];
+    const names = new Set<string>();
+    for (const item of value) {
+      if (
+        !item ||
+        typeof item !== "object" ||
+        Array.isArray(item) ||
+        typeof (item as Record<string, unknown>).name !== "string" ||
+        !(item as Record<string, unknown>).name ||
+        typeof (item as Record<string, unknown>).value !== "string"
+      )
+        throw new Error(`Respuesta inválida de QvaPay (${context}): datos de pago inválidos.`);
+      const { name, value: detailValue } = item as { name: string; value: string };
+      if (names.has(name))
+        throw new Error(`Respuesta inválida de QvaPay (${context}): datos de pago duplicados.`);
+      names.add(name);
+      entries.push([name, detailValue]);
+    }
+    return Object.fromEntries(entries);
+  }
+  if (stringRecord(value)) return value;
+  throw new Error(`Respuesta inválida de QvaPay (${context}): datos de pago inválidos.`);
 }
 
 function parseAverages(value: Record<string, unknown>): Record<string, P2pAverage> {

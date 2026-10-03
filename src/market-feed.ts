@@ -221,14 +221,19 @@ export class MarketSourceCoordinator implements MarketDataSource {
           this.store.set("market_feed_last_error", "");
           this.store.audit(
             "market_feed_processed",
-            `Oferta ${payload.data.uuid} procesada desde el feed.`,
+            `Evento ${payload.event} de oferta ${payload.data.uuid} (${payload.data.coin}) procesado desde el feed: ${outcome.slice(0, 200)}.`,
             payload.data.uuid,
           );
         } catch (error) {
           const message = safeError(error);
           this.store.failMarketFeedEvent(event.key, message, this.now());
           this.store.set("market_feed_last_error", message);
-          this.store.audit("market_feed_processing_error", message);
+          const metadata = eventMetadata(event.payload);
+          this.store.audit(
+            "market_feed_processing_error",
+            `${metadata.text}. Error: ${message}`,
+            metadata.uuid,
+          );
         }
       }
       return processed;
@@ -275,8 +280,8 @@ export class MarketSourceCoordinator implements MarketDataSource {
       this.store.audit(
         queued ? "market_feed_received" : "market_feed_ignored",
         queued
-          ? `Oferta ${payload.data.uuid} recibida por ${source}.`
-          : `Evento ${payload.event} recibido por ${source} con la fuente ${this.mode()}.`,
+          ? `Evento ${payload.event} de oferta ${payload.data.uuid} (${payload.data.coin}) recibido por ${source}.`
+          : `Evento ${payload.event} de oferta ${payload.data.uuid} (${payload.data.coin}) recibido por ${source} con la fuente ${this.mode()}.`,
         payload.data.uuid,
       );
     if (queued && inserted) queueMicrotask(() => void this.processNext());
@@ -426,4 +431,22 @@ function safeError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error))
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
     .slice(0, 500);
+}
+
+function eventMetadata(value: unknown): { text: string; uuid?: string } {
+  if (!isRecord(value)) return { text: "Evento de feed inválido" };
+  const event = typeof value.event === "string" && isMarketFeedEvent(value.event)
+    ? value.event
+    : "evento desconocido";
+  const data = isRecord(value.data) ? value.data : undefined;
+  const uuid = typeof data?.uuid === "string" && /^[A-Za-z0-9-]{8,100}$/.test(data.uuid)
+    ? data.uuid
+    : undefined;
+  const coin = typeof data?.coin === "string" && /^[A-Z0-9_]{2,40}$/.test(data.coin)
+    ? data.coin
+    : "mercado desconocido";
+  return {
+    text: `Evento ${event}${uuid ? ` de oferta ${uuid}` : ""} (${coin})`,
+    ...(uuid ? { uuid } : {}),
+  };
 }
