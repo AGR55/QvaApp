@@ -693,6 +693,10 @@ export class TradingEngine {
     event: "p2p.created" | "p2p.reopened",
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
+    if (this.isExcludedAfterManualCancel(offer.uuid))
+      return { inspected: 1, candidates: 0, action: "Excluida por cancelación manual" };
+    if (this.store.getOperation(offer.uuid))
+      return { inspected: 1, candidates: 0, action: "Oferta con una operación local previa; requiere acción manual" };
     if (this.isPaused()) return { inspected: 0, candidates: 0, action: "pausado" };
     if (offer.status !== "open")
       return { inspected: 1, candidates: 0, action: `ya no disponible (${offer.status})` };
@@ -729,12 +733,15 @@ export class TradingEngine {
     event: "p2p.created" | "p2p.reopened",
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     if (this.isPaused()) return { inspected: 0, candidates: 0, action: "pausado" };
-    if (offer.status !== "open" || !this.isMarket(offer.coin) || offer.amount <= 0 || offer.receive <= 0)
+    if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0)
       return { inspected: 1, candidates: 0, action: "ignorada" };
+    if (this.isExcludedAfterManualCancel(offer.uuid))
+      return { inspected: 1, candidates: 0, action: "Excluida por cancelación manual" };
     const coin = this.offerMarket(offer);
     const market = this.market(coin)!;
     const quotedRate = rate(offer);
     const transfer = outgoingFiatCost(offer.amount, quotedRate, market.outgoingTransferFee);
+    const suspiciousPriceReason = this.suspiciousBuyPriceReason(offer);
     let decision: MarketItem["decision"] = "auto_buy";
     let reason = "Compra inmediata elegible por precio y capital";
     const vipFlag = explicitFlag(offer.only_vip);
@@ -752,6 +759,9 @@ export class TradingEngine {
     } else if (!this.canFund(offer)) {
       decision = "ignored";
       reason = "Saldo fiat declarado insuficiente";
+    } else if (suspiciousPriceReason) {
+      decision = "blocked";
+      reason = suspiciousPriceReason;
     } else if (this.store.isSeen(offer.uuid) && event !== "p2p.reopened") {
       decision = "ignored";
       reason = "Oferta ya evaluada";
@@ -760,6 +770,10 @@ export class TradingEngine {
       { coin, side: offer.type, items: [], total: 1, scannedAt: receivedAt },
       [{ offer, rate: quotedRate, decision, reason }],
     );
+    if (decision === "blocked") this.store.recordDecisionEvent({
+      uuid: offer.uuid, coin, offerType: offer.type, amount: offer.amount,
+      receive: offer.receive, rate: quotedRate, decision, reason,
+    });
     if (decision !== "auto_buy")
       return { inspected: 1, candidates: 0, action: reason };
     if (this.mode() !== "real") {
@@ -819,8 +833,10 @@ export class TradingEngine {
     event: "p2p.created" | "p2p.reopened",
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     if (this.isPaused()) return { inspected: 0, candidates: 0, action: "pausado" };
-    if (offer.status !== "open" || !this.isMarket(offer.coin) || offer.amount <= 0 || offer.receive <= 0)
+    if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0)
       return { inspected: 1, candidates: 0, action: "ignorada" };
+    if (this.isExcludedAfterManualCancel(offer.uuid))
+      return { inspected: 1, candidates: 0, action: "Excluida por cancelación manual" };
     const coin = this.offerMarket(offer);
     const market = this.market(coin)!;
     const quotedRate = rate(offer);
@@ -868,8 +884,8 @@ export class TradingEngine {
     const availableQusd = await this.fastLaneQusdBalance();
     if (availableQusd < offer.amount)
       return { inspected: 1, candidates: 0, action: "Saldo QUSD libre insuficiente" };
-    if (!this.huntEnabled(coin, "sell"))
-      return { inspected: 1, candidates: 1, action: "cacería cambió antes de aplicar" };
+    if (!this.isAutomaticSellStillEligible(offer))
+      return { inspected: 1, candidates: 1, action: "La tasa, el mínimo de venta o las condiciones de seguridad cambiaron antes de aplicar" };
     try {
       await this.monetaryIntents.execute({
         kind: "apply",
@@ -1352,7 +1368,7 @@ export class TradingEngine {
           priceReason: reference
             ? "La tasa supera el mínimo configurado y tiene referencia de mercado."
             : "No existe una referencia de mercado válida.",
-          canApply: () => this.huntEnabled(coin, "sell"),
+          canApply: () => this.isAutomaticSellStillEligible(bestExternalBuy),
         });
         if (result.applicationConfirmed) {
           this.store.recordDecisionEvent({
@@ -1430,6 +1446,7 @@ export class TradingEngine {
   async applyManually(uuid: string): Promise<string> {
     const strategy = this.strategy();
     this.requireRealMode();
+    this.assertManualApplicationAllowed(uuid);
     const offer = await this.qva.getOffer(uuid);
     if (offer.status !== "open" || !this.isMarket(offer.coin))
       throw new Error(
@@ -1478,7 +1495,7 @@ export class TradingEngine {
       cancelAt: null,
       createdAt: Date.now(),
       ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
-    });
+    }, true);
     await this.sendChatBestEffort(uuid);
     this.store.audit(
       "manual_apply_sell",
@@ -1678,6 +1695,7 @@ export class TradingEngine {
       throw new Error(
         "Cancelación automática no permitida para esta operación.",
       );
+    if (!automatic) this.store.excludeAutomaticReapplyAfterManualCancel(uuid);
     await this.qva.getOffer(uuid);
     await this.monetaryIntents.execute({
       kind: "cancel",
@@ -2375,6 +2393,10 @@ export class TradingEngine {
 
   private classifyOffer(offer: P2pOffer, statistics?: P2pAverage): MarketItem {
     const value = rate(offer);
+    if (this.isExcludedAfterManualCancel(offer.uuid))
+      return { offer, rate: value, decision: "ignored", reason: "Excluida por cancelación manual" };
+    if (this.store.getOperation(offer.uuid))
+      return { offer, rate: value, decision: "ignored", reason: "Oferta con una operación local previa; requiere acción manual" };
     if (
       offer.status !== "open" ||
       !this.isMarket(offer.coin) ||
@@ -2438,6 +2460,11 @@ export class TradingEngine {
           decision: "blocked",
           reason: `La tasa efectiva ${transfer.effectiveRate.toFixed(2)} supera el máximo de compra ${buyMax.toFixed(2)} ${this.marketCurrency(coin)}/QUSD (nominal ${value.toFixed(2)} + comisión ${transfer.fee.toFixed(2)})`,
         };
+      // A full scan already supplies its fresh reference below. Prefer the
+      // prior local median when present so one cheap offer cannot replace it.
+      const suspiciousPriceReason = this.suspiciousBuyPriceReason(offer, false);
+      if (suspiciousPriceReason)
+        return { offer, rate: value, decision: "blocked", reason: suspiciousPriceReason };
       const marketMedian = numeric(statistics?.median_sell);
       if (!marketMedian)
         return {
@@ -2521,6 +2548,53 @@ export class TradingEngine {
       offer.receive +
         (this.market(this.offerMarket(offer))?.outgoingTransferFee ?? 0)
     );
+  }
+
+  private isExcludedAfterManualCancel(uuid: string): boolean {
+    return this.store.isExcludedAfterManualCancel(uuid);
+  }
+
+  private assertManualApplicationAllowed(uuid: string): void {
+    const previous = this.store.getOperation(uuid);
+    if (previous && (previous.state !== "cancelled" || this.store.hasFiatMovement(uuid)))
+      throw new Error("La oferta ya tiene una operación local activa, terminal o con movimientos de dinero; no se puede reaplicar.");
+  }
+
+  private isAutomaticSellStillEligible(offer: P2pOffer): boolean {
+    if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
+    if (this.store.hasUnresolvedMutation()) return false;
+    if (this.store.getOperation(offer.uuid)) return false;
+    if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0) return false;
+    const coin = this.offerMarket(offer);
+    const currentRate = rate(offer);
+    return this.huntEnabled(coin, "sell") && Number.isFinite(currentRate) && currentRate > 0 && currentRate >= this.market(coin)!.sellMinRate;
+  }
+
+  private isAutomaticBuyStillEligible(offer: P2pOffer): boolean {
+    if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
+    if (this.store.hasUnresolvedMutation()) return false;
+    if (this.store.getOperation(offer.uuid)) return false;
+    if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0) return false;
+    const coin = this.offerMarket(offer);
+    const market = this.market(coin)!;
+    const quotedRate = rate(offer);
+    if (!Number.isFinite(quotedRate) || quotedRate <= 0) return false;
+    const transfer = outgoingFiatCost(offer.amount, quotedRate, market.outgoingTransferFee);
+    return this.huntEnabled(coin, "buy") && Number.isFinite(transfer.effectiveRate) && transfer.effectiveRate <= market.buyMaxRate &&
+      !this.suspiciousBuyPriceReason(offer) && this.canFund(offer);
+  }
+
+  private suspiciousBuyPriceReason(offer: P2pOffer, requireFreshMedian = true): string | undefined {
+    const coin = this.offerMarket(offer);
+    const reference = this.store.recentSellMedian(coin);
+    if (!reference) return requireFreshMedian
+      ? "Mediana reciente no disponible (máximo 5 min); compra automática para revisión manual."
+      : undefined;
+    const guard = this.market(coin)?.priceGuardPercent ?? this.automationConfig().priceGuardPercent;
+    const floor = reference * (1 - guard / 100);
+    if (rate(offer) < floor)
+      return `Precio sospechosamente bajo: ${rate(offer).toFixed(2)}, por debajo de ${floor.toFixed(2)} (${guard}% bajo mediana ${reference.toFixed(2)}).`;
+    return undefined;
   }
 
   private async evaluateAutomaticBuy(
@@ -2810,8 +2884,9 @@ export class TradingEngine {
     referenceRate?: number,
     deferPostApply = false,
   ): Promise<void> {
-    if (automatic && !this.huntEnabled(this.offerMarket(offer), "buy"))
-      throw new Error("La cacería de compra fue detenida antes de aplicar.");
+    if (automatic && !this.isAutomaticBuyStillEligible(offer))
+      throw new Error("La oferta dejó de cumplir las condiciones de compra automática antes de aplicar.");
+    if (!automatic) this.assertManualApplicationAllowed(offer.uuid);
     const market = this.market(this.offerMarket(offer))!;
     const transfer = outgoingFiatCost(
       offer.amount,
@@ -2839,7 +2914,7 @@ export class TradingEngine {
       createdAt: Date.now(),
       ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
       ...(referenceRate === undefined ? {} : { referenceRate }),
-    });
+    }, !automatic);
     this.store.audit(
       automatic ? "auto_apply_buy" : "manual_apply_buy",
       `Compra de ${offer.amount} QUSD · tasa nominal ${rate(offer).toFixed(2)} · comisión ${transfer.fee.toFixed(2)} · tasa efectiva ${transfer.effectiveRate.toFixed(2)}`,

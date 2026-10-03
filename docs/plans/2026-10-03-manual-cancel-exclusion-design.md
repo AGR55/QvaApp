@@ -21,6 +21,10 @@ la vía rápida y una cancelación manual entre ellas en la auditoría de produc
   remotas ni cambiar operaciones, saldos o intenciones monetarias.
 - Comprobar importes finitos positivos, rate efectivo/límites vigentes y capital
   local en el último punto antes de aplicar. No añadir GET a cada oferta.
+- Ampliación aprobada explícitamente: bloquear precios sospechosamente bajos
+  usando la mediana local de venta del mismo mercado y el porcentaje de protección
+  configurado. La referencia caduca tras 5 minutos, no se renueva por lecturas de
+  otros mercados y sin referencia vigente se requiere revisión manual.
 - Registrar el motivo «Excluida por cancelación manual» en la auditoría.
 
 ## Plan y verificación

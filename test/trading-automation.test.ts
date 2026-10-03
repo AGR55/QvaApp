@@ -39,6 +39,7 @@ function setup() {
   store.set("fiat_balance:BANK_CUP", "100000");
   store.set("paused", "false");
   store.set("mode", "real");
+  store.recordMarketObservation({ coin: "BANK_CUP", medianSell: 930, openOffers: 20, eligible: 0 });
   return { dataDir, store, cfg, markets };
 }
 
