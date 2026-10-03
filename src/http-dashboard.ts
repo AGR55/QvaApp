@@ -15,6 +15,7 @@ import type { MarketAccountService } from "./market-accounts.js";
 import type { MarketDataSource } from "./market-source.js";
 import { MarketFeedRequestError, type MarketSourceCoordinator, type MarketSourceMode } from "./market-feed.js";
 import { PaymentSmsError, validPaymentReceipt } from "./payment-sms.js";
+import { RecoveryConflictError, RecoveryInputError } from "./self-service-recovery.js";
 
 type AuthOptions = {
   password: string;
@@ -772,6 +773,61 @@ export function buildDashboard(
     await clientAction(() => readModel.cancelOwnOffer(request.params.uuid));
     reply.status(204);
   });
+  app.get("/api/recovery", async (_request, reply) => {
+    if (typeof readModel.recoveryItems !== "function")
+      return reply.status(503).send({ error: "La recuperación local no está disponible." });
+    return { data: readModel.recoveryItems() };
+  });
+  app.post<{ Params: { intentId: string }; Body: Record<string, never> }>("/api/recovery/:intentId/check", {
+    schema: {
+      params: {
+        type: "object", required: ["intentId"],
+        properties: { intentId: { type: "string", minLength: 1, maxLength: 200 } },
+      },
+      body: { type: "object", additionalProperties: false, properties: {} },
+    },
+  }, async (request, reply) => {
+    if (typeof readModel.checkRecoveryIntent !== "function")
+      return reply.status(503).send({ error: "La conciliación local no está disponible." });
+    return { data: await readModel.checkRecoveryIntent(request.params.intentId) };
+  });
+  app.post<{
+    Params: { intentId: string };
+    Body: {
+      expectedUpdatedAt: number;
+      outcome: "not_applied" | "cancelled";
+      reason: string;
+      evidence: string;
+      confirmed: true;
+    };
+  }>("/api/recovery/:intentId/resolve", {
+    schema: {
+      params: {
+        type: "object", required: ["intentId"],
+        properties: { intentId: { type: "string", minLength: 1, maxLength: 200 } },
+      },
+      body: {
+        type: "object", additionalProperties: false,
+        required: ["expectedUpdatedAt", "outcome", "reason", "evidence", "confirmed"],
+        properties: {
+          expectedUpdatedAt: { type: "integer", minimum: 0 },
+          outcome: { type: "string", enum: ["not_applied", "cancelled"] },
+          reason: { type: "string", minLength: 12, maxLength: 500 },
+          evidence: { type: "string", minLength: 12, maxLength: 1_000 },
+          confirmed: { const: true },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (typeof readModel.resolveRecoveryIntent !== "function")
+      return reply.status(503).send({ error: "La resolución local no está disponible." });
+    return {
+      data: readModel.resolveRecoveryIntent({
+        intentId: request.params.intentId,
+        ...request.body,
+      }),
+    };
+  });
   app.post<{ Params: { workflowId: string } }>("/api/workflows/:workflowId/reconcile", async (request) => ({
     data: await clientAction(() => readModel.reconcileWorkflow(request.params.workflowId)),
   }));
@@ -872,6 +928,10 @@ export function buildDashboard(
     readModel.dismissDecisionEvent(id);
     reply.status(204);
   });
+  app.post<{ Body: { throughId: number } }>("/api/decision-events/dismiss-all", {
+    schema: { body: { type: "object", required: ["throughId"], additionalProperties: false,
+      properties: { throughId: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER } } } },
+  }, async (request) => ({ data: await clientAction(() => readModel.dismissAllDecisionEvents(request.body.throughId)) }));
 
   if (pushService) {
     app.get("/api/push/public-key", async () => ({ data: { publicKey: pushService.publicKey() } }));
@@ -1085,6 +1145,8 @@ function headerValue(request: FastifyRequest, name: string): string | undefined 
 
 function httpStatus(error: Error, fallback: number): number {
   if (error instanceof DashboardAuthError) return error.status;
+  if (error instanceof RecoveryConflictError) return error.status;
+  if (error instanceof RecoveryInputError) return error.status;
   if (error instanceof ClientInputError) return 400;
   if (error instanceof QvaApiError)
     return [400, 401, 403, 404, 409, 429].includes(error.status) ? error.status : 502;
@@ -1141,12 +1203,16 @@ function openApiDocument() {
       "/api/market-readers/{id}/token": { put: { summary: "Rotar el token cifrado de una cuenta lectora" } },
       "/api/offers/{uuid}": { put: { summary: "Editar oferta propia" }, delete: { summary: "Cancelar oferta propia" } },
       "/api/workflows/{workflowId}/reconcile": { post: { summary: "Conciliar un resultado remoto ambiguo" } },
+      "/api/recovery": { get: { summary: "Consultar intenciones monetarias pendientes de conciliación" } },
+      "/api/recovery/{intentId}/check": { post: { summary: "Conciliar una sola intención sin repetir la mutación" } },
+      "/api/recovery/{intentId}/resolve": { post: { summary: "Registrar una declaración manual revisada por el propietario" } },
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
       "/api/hunting": { put: { summary: "Controlar cacerías y precios por mercado" } },
       "/api/audit": { get: { summary: "Exportar auditoría" } },
       "/api/logs": { get: { summary: "Consultar logs operativos filtrados por cursor" } },
       "/api/decision-events": { get: { summary: "Consultar decisiones operativas paginadas" } },
       "/api/decision-events/{id}/dismiss": { post: { summary: "Descartar una versión de decisión" } },
+      "/api/decision-events/dismiss-all": { post: { summary: "Descartar las decisiones bloqueadas pendientes hasta una versión" } },
       "/api/push/public-key": { get: { summary: "Obtener la clave pública Web Push" } },
       "/api/push/subscriptions": { post: { summary: "Registrar el navegador para avisos" }, delete: { summary: "Eliminar la suscripción del navegador" } },
       "/api/notifications": { get: { summary: "Consultar avisos persistentes pendientes" } },

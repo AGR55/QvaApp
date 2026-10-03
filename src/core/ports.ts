@@ -33,6 +33,7 @@ export type TradingRepository = Pick<
   | "createOperation"
   | "get"
   | "getOperation"
+  | "getMutationIntent"
   | "hasUnresolvedMutation"
   | "isSeen"
   | "loadRemoteResource"

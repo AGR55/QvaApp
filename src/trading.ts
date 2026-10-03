@@ -75,6 +75,7 @@ export interface MarketSnapshot {
 }
 
 export class TradingEngine {
+  private readonly reconciliationInFlight = new Set<string>();
   private averagesCache?: {
     value: Record<string, P2pAverage>;
     expiresAt: number;
@@ -347,12 +348,24 @@ export class TradingEngine {
     return this.opportunityOrchestrator.reconcilePending();
   }
 
-  async reconcilePendingStandaloneMutations(): Promise<number> {
+  async reconcilePendingStandaloneMutations(options: {
+    intentId?: string;
+    force?: boolean;
+  } = {}): Promise<number> {
     let reconciled = 0;
     const retry = new ReconciliationScheduler(this.store);
+    const recordCheck = (intentId: string, error: string) => this.store.set(
+      `reconciliation_last_check:${intentId}`,
+      JSON.stringify({ checkedAt: Date.now(), error: safeRecoveryCheckError(error) }),
+    );
     const pending = this.store
       .recoverableMutationIntents()
-      .filter((intent) => !intent.workflowId && retry.canAttempt(intent.intentId, Date.now()));
+      .filter((intent) =>
+        !intent.workflowId &&
+        (!options.intentId || intent.intentId === options.intentId) &&
+        !this.reconciliationInFlight.has(intent.intentId) &&
+        (options.force === true || retry.canAttempt(intent.intentId, Date.now())),
+      );
     const ownOfferKinds = new Set([
       "create_offer",
       "edit_offer",
@@ -363,10 +376,12 @@ export class TradingEngine {
       ownOfferKinds.has(intent.kind)
     );
     let ownOffers: P2pOffer[] | undefined;
+    let ownOfferCheckError: string | undefined;
     if (pendingOwnOffers.length) {
       try {
         ownOffers = await this.listOwnOffers();
       } catch (error) {
+        ownOfferCheckError = qvaPayFailureDetail("consultar las ofertas propias", error);
         this.store.audit(
           "standalone_offer_reconciliation_pending",
           qvaPayFailureDetail("consultar las ofertas propias", error),
@@ -374,10 +389,18 @@ export class TradingEngine {
       }
     }
     for (const intent of pending) {
+      const current = this.store.getMutationIntent(intent.intentId);
+      if (!current || current.state !== intent.state || current.updatedAt !== intent.updatedAt ||
+        this.reconciliationInFlight.has(intent.intentId)) continue;
+      this.reconciliationInFlight.add(intent.intentId);
       try {
+        recordCheck(intent.intentId, "La consulta no confirmó todavía el resultado de la mutación.");
         if (operationKinds.has(intent.kind) && intent.operationUuid) {
           const operation = this.store.getOperation(intent.operationUuid);
-          if (!operation) continue;
+          if (!operation) {
+            recordCheck(intent.intentId, "No existe una operación local asociada; se requiere revisión.");
+            continue;
+          }
           try {
             const remote = await this.qva.getOffer(intent.operationUuid);
             const next = reconciledOperationMutationState(
@@ -399,6 +422,7 @@ export class TradingEngine {
             );
             reconciled += 1;
           } catch (error) {
+            recordCheck(intent.intentId, qvaPayFailureDetail(`conciliar ${intent.kind}`, error));
             this.store.audit(
               "operation_mutation_reconciliation_pending",
               qvaPayFailureDetail(`conciliar ${intent.kind}`, error),
@@ -408,7 +432,10 @@ export class TradingEngine {
           continue;
         }
         if (ownOfferKinds.has(intent.kind)) {
-          if (!ownOffers) continue;
+          if (!ownOffers) {
+            if (ownOfferCheckError) recordCheck(intent.intentId, ownOfferCheckError);
+            continue;
+          }
           const remote = reconcileOwnOfferMutation(intent, ownOffers);
           if (!remote) continue;
           this.store.updateMutationIntent(intent.intentId, "reconciled", remote);
@@ -475,6 +502,14 @@ export class TradingEngine {
             reconciled += 1;
           }
         } catch (error) {
+          const checkedAt = Date.now();
+          this.store.set(
+            `reconciliation_last_check:${intent.intentId}`,
+            JSON.stringify({
+              checkedAt,
+              error: safeRecoveryCheckError(qvaPayFailureDetail("conciliar la aplicación", error)),
+            }),
+          );
           // An inaccessible detail is not proof of rejection. A later, authenticated
           // cancellation corroborates that this UUID has no remaining payable deal.
           const terminal = this.store.latestMarketFeedState(uuid);
@@ -521,6 +556,7 @@ export class TradingEngine {
           reconciled += 1;
         }
       } finally {
+        this.reconciliationInFlight.delete(intent.intentId);
         if (this.store.recoverableMutationIntents().some((item) => item.intentId === intent.intentId))
           retry.recordFailure(intent.intentId, Date.now());
         else retry.clear(intent.intentId);
@@ -531,6 +567,10 @@ export class TradingEngine {
 
   reconcileWorkflow(workflowId: string) {
     return this.opportunityOrchestrator.reconcile(workflowId);
+  }
+
+  isReconciliationInFlight(intentId: string): boolean {
+    return this.reconciliationInFlight.has(intentId);
   }
 
   private offerRejectionDetail(action: string, error: unknown, uuid: string): string {
@@ -3066,6 +3106,13 @@ function qvaPayFailureDetail(action: string, error: unknown): string {
   return `⚠️ QvaPay devolvió un dato no utilizable durante ${action}: ${
     error instanceof Error ? error.message : String(error)
   }`;
+}
+
+function safeRecoveryCheckError(value: string): string {
+  return value
+    .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
+    .replace(/\b\d{6,}\b/g, "[redacted]")
+    .slice(0, 400);
 }
 
 function classifyQvaPayRejection(error: QvaApiError): string {

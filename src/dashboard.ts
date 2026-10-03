@@ -15,6 +15,10 @@ import { median, MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 import type { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { PaymentSmsService, type PaymentReceiptInput } from "./payment-sms.js";
 import { MobileOperatorService } from "./mobile-operator.js";
+import {
+  SelfServiceRecovery,
+  type ManualRecoveryOutcome,
+} from "./self-service-recovery.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -106,6 +110,7 @@ export class DashboardReadModel {
   private readonly pendingReads = new Map<string, Promise<unknown>>();
   private readonly paymentSms: PaymentSmsService;
   private readonly mobileOperator: MobileOperatorService;
+  private readonly recovery: SelfServiceRecovery;
 
   constructor(
     private readonly trading: TradingService,
@@ -133,6 +138,26 @@ export class DashboardReadModel {
       confirmReceived: (uuid) => trading.confirmReceived(uuid),
       cancel: (uuid) => trading.cancel(uuid),
     });
+    this.recovery = new SelfServiceRecovery(store, trading);
+  }
+
+  recoveryItems() {
+    return this.recovery.list();
+  }
+
+  checkRecoveryIntent(intentId: string) {
+    return this.recovery.check(intentId);
+  }
+
+  resolveRecoveryIntent(input: {
+    intentId: string;
+    expectedUpdatedAt: number;
+    outcome: ManualRecoveryOutcome;
+    reason: string;
+    evidence: string;
+    confirmed: true;
+  }) {
+    return this.recovery.resolveManual(input);
   }
 
   pairMobileOperator(label: string) { return this.mobileOperator.pair(label); }
@@ -506,6 +531,9 @@ export class DashboardReadModel {
   }
   decisionEvents(options: Parameters<Store["decisionEvents"]>[0]) {
     return this.store.decisionEvents(options);
+  }
+  dismissAllDecisionEvents(throughId: number) {
+    return { dismissed: this.store.dismissAllBlockedDecisions(throughId) };
   }
   dismissDecisionEvent(id: number): void {
     const event = this.store.decisionEvent(id);

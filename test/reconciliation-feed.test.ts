@@ -6,6 +6,7 @@ import test from "node:test";
 import { Store } from "../src/store.js";
 import { TradingEngine } from "../src/trading.js";
 import { QvaApiError } from "../src/qvapay.js";
+import { SelfServiceRecovery } from "../src/self-service-recovery.js";
 
 for (const scenario of ["cancelled", "old", "reopened", "processing", "no-event", "403", "future", "early-receipt", "paid", "revision", "completed-event", "tie"] as const) {
   test(`conciliación segura con feed: ${scenario}`, async (t) => {
@@ -50,3 +51,29 @@ for (const scenario of ["cancelled", "old", "reopened", "processing", "no-event"
     }
   });
 }
+
+test("una conciliación en curso impide cierre manual y consultas duplicadas", async (t) => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qva-reconciliation-race-")));
+  t.after(() => store.close());
+  store.createMutationIntent({ intentId: "race", operationUuid: "offer-race", kind: "apply", request: {} });
+  store.updateMutationIntent("race", "uncertain");
+  const intent = store.getMutationIntent("race")!;
+  let release!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  let calls = 0;
+  const trading = new TradingEngine(store, {
+    getOffer: async () => { calls++; await barrier; throw new QvaApiError(404, "No tienes permisos para ver esta oferta"); },
+  } as never, {} as never, async () => undefined);
+  const recovery = new SelfServiceRecovery(store, trading);
+  const first = recovery.check("race");
+  assert.equal(trading.isReconciliationInFlight("race"), true);
+  assert.equal(recovery.list().items[0]?.manualEligible, false);
+  assert.throws(() => recovery.resolveManual({ intentId: "race", expectedUpdatedAt: intent.updatedAt,
+    outcome: "not_applied", reason: "Verifiqué manualmente esta operación", evidence: "Revisé el estado y el saldo en QvaPay", confirmed: true }), /en curso/);
+  await assert.rejects(() => recovery.check("race"), /Espera unos segundos/);
+  assert.equal(calls, 1);
+  release();
+  await first;
+  assert.equal(trading.isReconciliationInFlight("race"), false);
+  assert.equal(store.hasUnresolvedMutation(), true);
+});

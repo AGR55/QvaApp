@@ -182,6 +182,7 @@ export interface DecisionEventPage {
   pending: number;
   page: number;
   pageSize: number;
+  dismissThroughId: number;
 }
 
 export type NotificationKind =
@@ -1212,6 +1213,48 @@ export class Store {
         )
         .all(limit) as Record<string, unknown>[]
     ).map(mutationIntentFromRow);
+  }
+
+  getMutationIntent(intentId: string): MutationIntent | undefined {
+    const row = this.db.prepare("SELECT * FROM mutation_intents WHERE intent_id = ?").get(intentId) as Record<string, unknown> | undefined;
+    return row ? mutationIntentFromRow(row) : undefined;
+  }
+
+  hasFiatMovement(uuid: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM fiat_ledger WHERE operation_uuid = ? LIMIT 1").get(uuid));
+  }
+
+  hasMarketFeedHistory(uuid: string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM market_feed_events WHERE json_extract(payload_json, '$.data.uuid') = ? LIMIT 1").get(uuid));
+  }
+
+  resolveMutationIntentCAS(intentId: string, expectedUpdatedAt: number, response: Record<string, unknown>): boolean {
+    return this.transaction(() => {
+      const intent = this.getMutationIntent(intentId);
+      if (!intent || intent.updatedAt !== expectedUpdatedAt || intent.state !== "uncertain" ||
+        intent.kind !== "apply" || intent.workflowId || !intent.operationUuid) return false;
+      const operation = this.getOperation(intent.operationUuid);
+      if (this.findWorkflowByTarget(intent.operationUuid)) return false;
+      if ((operation && operation.state !== "cancelled") || this.hasFiatMovement(intent.operationUuid)) return false;
+      const latest = this.latestMarketFeedState(intent.operationUuid);
+      if (!latest && this.hasMarketFeedHistory(intent.operationUuid)) return false;
+      if (latest && (latest.sentAt > Date.now() || latest.receivedAt > Date.now() || latest.event === "p2p.applied" || !["open", "cancelled"].includes(latest.status))) return false;
+      if (latest?.status === "open" && response.outcome === "cancelled") return false;
+      if (response.source !== "operator_attestation" || response.actor !== "admin_web" ||
+        response.operatorConfirmed !== true || !Number.isSafeInteger(response.verifiedAt) ||
+        Number(response.verifiedAt) < intent.createdAt || Number(response.verifiedAt) > Date.now() ||
+        !["not_applied", "cancelled"].includes(String(response.outcome)) ||
+        typeof response.reason !== "string" || response.reason.trim().length < 12 || response.reason.length > 500 ||
+        typeof response.evidence !== "string" || response.evidence.trim().length < 12 || response.evidence.length > 1000) return false;
+      const now = Date.now();
+      const result = this.db.prepare(`UPDATE mutation_intents
+        SET state = 'reconciled', response_json = ?, error = NULL, updated_at = ?
+        WHERE intent_id = ? AND updated_at = ? AND state = 'uncertain'`).run(JSON.stringify(response), now, intentId, expectedUpdatedAt);
+      if (!result.changes) return false;
+      this.audit("mutation_manually_reviewed",
+        `Declaración del propietario (${response.actor}), intención ${intentId}, resultado ${response.outcome}. Motivo: ${response.reason}. Evidencia declarada: ${response.evidence}. No es confirmación remota de QvaPay.`, intent.operationUuid);
+      return true;
+    });
   }
 
   unresolvedMutationIntents(): MutationIntent[] {
@@ -2369,7 +2412,10 @@ export class Store {
       `SELECT * FROM decision_events${where}
        ORDER BY resolved_at IS NULL DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?`,
     ).all(...parameters, pageSize, (page - 1) * pageSize) as Record<string, unknown>[];
-    return { items: rows.map((row) => this.readDecisionEvent(row)), total, pending, page, pageSize };
+    const dismissThroughId = Number((this.db.prepare(
+      "SELECT coalesce(max(id), 0) AS id FROM decision_events WHERE decision = 'blocked' AND resolved_at IS NULL",
+    ).get() as { id: number }).id);
+    return { items: rows.map((row) => this.readDecisionEvent(row)), total, pending, page, pageSize, dismissThroughId };
   }
 
   decisionEvent(id: number): DecisionEvent | undefined {
@@ -2518,6 +2564,28 @@ export class Store {
     return this.db.prepare(
       "UPDATE decision_events SET resolved_at = ?, resolution = ?, updated_at = ? WHERE id = ? AND resolved_at IS NULL",
     ).run(now, resolution, now, id).changes > 0;
+  }
+
+  dismissAllBlockedDecisions(throughId: number): number {
+    if (!Number.isSafeInteger(throughId) || throughId < 1) throw new Error("Cursor de descarte inválido.");
+    return this.transaction(() => {
+      const now = Date.now();
+      // Resolve only matching legacy alerts; a newer decision must remain visible.
+      this.db.prepare(`UPDATE trading_alerts SET resolution = 'dismissed', resolved_at = ?, updated_at = ?
+        WHERE decision = 'blocked' AND resolved_at IS NULL AND EXISTS (
+          SELECT 1 FROM decision_events d WHERE d.offer_uuid = trading_alerts.offer_uuid
+          AND d.id <= ? AND d.decision = 'blocked' AND d.resolved_at IS NULL
+          AND d.rate = trading_alerts.rate AND d.reason = trading_alerts.reason
+        ) AND NOT EXISTS (
+          SELECT 1 FROM decision_events newer WHERE newer.offer_uuid = trading_alerts.offer_uuid
+          AND newer.id > ? AND newer.resolved_at IS NULL
+        )`).run(now, now, throughId, throughId);
+      const count = Number(this.db.prepare(`UPDATE decision_events
+        SET resolution = 'dismissed', resolved_at = ?, updated_at = ?
+        WHERE id <= ? AND decision = 'blocked' AND resolved_at IS NULL`).run(now, now, throughId).changes);
+      this.audit("blocked_offers_bulk_dismissed", `admin_web descartó ${count} decisiones bloqueadas hasta la versión ${throughId}; historial conservado, sin cambios financieros.`);
+      return count;
+    });
   }
 
   resolveDecisionEventsForOffer(

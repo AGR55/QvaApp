@@ -111,7 +111,18 @@ const snapshot = {
   freshness: { balance: now, ownOffers: now, transactions: now, markets: { BANK_CUP: now, BANDECPREPAGO: now } },
 };
 
+let previewDecisionDismissed = false;
+let previewRecovery = [{ intentId: "preview-uncertain-apply", kind: "apply", state: "uncertain",
+  operationUuid: "preview-external-offer", createdAt: now - 600000, updatedAt: now - 590000,
+  error: "HTTP 404: No tienes permisos para ver esta oferta", manualEligible: true,
+  retry: { attempts: 3, nextAttemptAt: now + 60000, eligible: false } }];
 const model = {
+  recoveryItems: () => ({ items: previewRecovery, blocked: previewRecovery.length > 0 }),
+  checkRecoveryIntent: async (intentId) => ({ intentId, outcome: "pending", state: "uncertain", message: "No se obtuvo evidencia concluyente. Verifica el resultado en QvaPay.", updatedAt: now - 590000 }),
+  resolveRecoveryIntent: ({ intentId }) => {
+    previewRecovery = previewRecovery.filter(item => item.intentId !== intentId);
+    return { intentId, state: "reconciled", actor: "admin_web" };
+  },
   snapshot: async () => snapshot,
   localSnapshot: () => snapshot,
   smsDevices: () => [],
@@ -144,13 +155,14 @@ const model = {
     };
   },
   decisionEvents: ({ page = 1, pageSize = 20 } = {}) => ({
-    items: [{ id: 1, version: "preview-blocked-v1", ...snapshot.alerts[0], checks: [
+    items: previewDecisionDismissed ? [] : [{ id: 1, version: "preview-blocked-v1", ...snapshot.alerts[0], checks: [
       { code: "price_policy", label: "Política de precio", status: "fail", actual: "blocked", limit: "eligible", reason: "Supera la protección extrema de mediana." },
       { code: "operation_amount", label: "Importe por operación", status: "pass", actual: 20, limit: 25, reason: "Dentro del límite." },
       { code: "slippage", label: "Deslizamiento", status: "warning", actual: 4.15, limit: 1, reason: "Advertencia informativa; no bloquea por sí sola." },
     ] }],
-    total: 1, pending: 1, page, pageSize,
+    total: previewDecisionDismissed ? 0 : 1, pending: previewDecisionDismissed ? 0 : 1, dismissThroughId: 1, page, pageSize,
   }),
+  dismissAllDecisionEvents: () => { const dismissed = previewDecisionDismissed ? 0 : 1; previewDecisionDismissed = true; return { dismissed }; },
   dismissDecisionEvent: () => undefined,
   setPaused: (value) => { snapshot.state.paused = value; },
   setMode: (value) => { snapshot.state.mode = value; },
