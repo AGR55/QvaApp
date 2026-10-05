@@ -123,14 +123,14 @@ test("historical manual cancel audit entries are backfilled once", () => {
   store.audit("auto_cancel", "Venció el plazo", "legacy-auto-cancelled");
   store.close();
   const db = new DatabaseSync(join(dataDir, "qvaapply.sqlite"));
-  db.prepare("DELETE FROM schema_migrations WHERE version = 22").run();
+  db.prepare("DELETE FROM schema_migrations WHERE version >= 22").run();
   db.prepare("DELETE FROM manual_cancel_exclusions WHERE offer_uuid = ?").run("legacy-cancelled-offer");
   db.close();
 
   const migrated = new Store(dataDir);
   assert.equal(migrated.isExcludedAfterManualCancel("legacy-cancelled-offer"), true);
   assert.equal(migrated.isExcludedAfterManualCancel("legacy-auto-cancelled"), false);
-  assert.equal(migrated.schemaVersion(), 22);
+  assert.equal(migrated.schemaVersion(), 23);
   migrated.close();
 });
 

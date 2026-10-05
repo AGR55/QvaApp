@@ -568,7 +568,7 @@ function App() {
               />
             ) : null}
             {view === "graficas" ? (
-              <Charts markets={data.markets} initialHistory={data.marketHistory} />
+              <Charts markets={data.markets} initialHistory={data.marketHistory} initialBalanceHistory={data.history} />
             ) : null}
             {view === "configuracion" ? (
               <Settings

@@ -9,6 +9,7 @@ import type {
   RestorableOwnOffer,
 } from "./core/liquidity-plan.js";
 import type { TradingConfig } from "./market-config.js";
+import type { AnalyticsTransaction, AnalyticsFiatMovement } from "./trading-analytics.js";
 import type {
   FiatMarket,
   OperationState,
@@ -16,7 +17,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 22;
+const LATEST_SCHEMA_VERSION = 23;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -845,6 +846,14 @@ export class Store {
           GROUP BY offer_uuid;
         `);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (22, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 23) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS analytics_transactions (
+          account_uuid TEXT NOT NULL, uuid TEXT NOT NULL, created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(account_uuid, uuid)
+        );
+        CREATE INDEX IF NOT EXISTS idx_analytics_transactions_account_date ON analytics_transactions(account_uuid, created_at);`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (23, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -1954,6 +1963,27 @@ export class Store {
     });
   }
 
+  saveAnalyticsTransactions(accountUuid: string, transactions: AnalyticsTransaction[]): void {
+    this.transaction(() => {
+      const insert = this.db.prepare(`INSERT INTO analytics_transactions(account_uuid, uuid, created_at, updated_at, payload_json)
+        VALUES (?, ?, ?, ?, ?) ON CONFLICT(account_uuid, uuid) DO UPDATE SET
+        created_at=excluded.created_at, updated_at=excluded.updated_at, payload_json=excluded.payload_json
+        WHERE excluded.updated_at >= analytics_transactions.updated_at`);
+      for (const tx of transactions) insert.run(accountUuid, tx.uuid, tx.createdAt, tx.updatedAt, JSON.stringify(tx));
+    });
+  }
+
+  analyticsTransactions(accountUuid: string, since: number): AnalyticsTransaction[] {
+    return (this.db.prepare(`SELECT payload_json FROM analytics_transactions
+      WHERE account_uuid = ? AND created_at >= ? ORDER BY created_at ASC`).all(accountUuid, since) as { payload_json: string }[])
+      .flatMap((row) => { try { return [JSON.parse(row.payload_json) as AnalyticsTransaction]; } catch { return []; } });
+  }
+
+  analyticsFiatMovements(): AnalyticsFiatMovement[] {
+    return this.db.prepare(`SELECT operation_uuid AS uuid, direction, amount FROM fiat_ledger`).all()
+      .map((row) => ({ uuid: String(row.uuid), direction: String(row.direction), amount: Number(row.amount) }));
+  }
+
   recentFiat(
     coin: FiatMarket,
     limit = 5,
@@ -2710,9 +2740,12 @@ export class Store {
       );
     this.db
       .prepare(
-        "DELETE FROM dashboard_snapshots WHERE id NOT IN (SELECT id FROM dashboard_snapshots ORDER BY id DESC LIMIT 2160)",
+        `DELETE FROM dashboard_snapshots WHERE created_at < ? AND id NOT IN (
+          SELECT MAX(id) FROM dashboard_snapshots WHERE created_at >= ?
+          GROUP BY CAST(created_at / 3600000 AS INTEGER)
+        )`,
       )
-      .run();
+      .run(Date.now() - 48 * 3_600_000, Date.now() - 90 * 86_400_000);
   }
 
   dashboardHistory(

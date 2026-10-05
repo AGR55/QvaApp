@@ -1,4 +1,5 @@
 import { buildDashboard } from "../dist/http-dashboard.js";
+import { buildTradingAnalytics } from "../dist/trading-analytics.js";
 
 const port = Number(process.env.QVAAPPLY_PREVIEW_PORT || 3100);
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
@@ -23,6 +24,22 @@ const markets = [
   { code: "BANDECPREPAGO", label: "USD Prepago", currency: "USD", active: true, huntBuyEnabled: false, huntSellEnabled: false, fiatBalance: 110, buyMaxRate: 1.06, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0.25, outgoingTransferFee: 0, paymentDetails: [] },
   { code: "CLASICA", label: "Tarjeta Clásica", currency: "USD", active: true, huntBuyEnabled: true, huntSellEnabled: true, fiatBalance: 40, buyMaxRate: 1.04, sellMinRate: 1.12, purchaseMaxQusd: 25, sellFeePercent: 0, outgoingTransferFee: 0.08, paymentDetails: [{ name: "Tarjeta", value: "•••• 9876" }] },
 ];
+const analyticsTransactions = Array.from({ length: 90 }, (_, i) => markets.flatMap((market, m) => {
+  const amount = 8 + (i * 7 + m * 3) % 23;
+  const price = market.currency === "CUP" ? 950 : 1.04;
+  const at = now - (89 - i) * 86_400_000 - 7_200_000;
+  return ["buy", "sell"].map((side, offset) => ({
+    uuid: `preview-tx-${i}-${m}-${side}`, amount, createdAt: at + offset * 3_600_000,
+    updatedAt: at + offset * 3_600_000, payerUuid: side === "sell" ? "preview-me" : "preview-other",
+    recipientUuid: side === "buy" ? "preview-me" : "preview-other",
+    p2p: { uuid: `preview-offer-${i}-${m}-${side}`, coin: market.code, amount,
+      receive: amount * (side === "buy" ? price : price * (1.035 + i % 3 * .008)), status: "completed" },
+  }));
+})).flat();
+const analyticsBalances = Array.from({ length: 90 }, (_, i) => ({
+  createdAt: now - (89 - i) * 86_400_000, qusdBalance: 45 + i * .6 + Math.sin(i / 3) * 12,
+  openOffers: 3, activeOperations: 1,
+}));
 const marketHistory = markets.flatMap((market, marketIndex) =>
   Array.from({ length: 12 }, (_, index) => {
     const base = market.currency === "CUP" ? 64_180 : 1.04 + marketIndex * .01;
@@ -84,7 +101,7 @@ const snapshot = {
       coin: "CLASICA", available: 8, committed: 10.48, deficit: 2.48, invalid: [],
       adjustments: [{ uuid: "own-01", coin: "CLASICA", rate: 1.04, currentQusd: 10, proposedQusd: 7.61, currentFiat: 10.48, proposedFiat: 7.9944, releasedFiat: 2.4856, action: "edit" }],
     },
-  }, history: [], marketHistory,
+  }, history: analyticsBalances, marketHistory,
   rankings: { rotation: [{ code: "BANK_CUP", label: "Transferencia CUP", observed: 210, eligible: 12 }], potential: [{ buy: "BANDECPREPAGO", sell: "BANK_CUP", amount: 15, profit: 450, marginPercent: 2.1 }] },
   activity: [{ createdAt: now - 30000, action: "price_guard_block", uuid: "blocked-demo-01", detail: "4.2% por encima de la mediana de compra." }],
   alerts: [{ uuid: "blocked-demo-01", coin: "BANK_CUP", offerType: "buy", amount: 20, receive: 21080, rate: 1054, referenceRate: 1012, decision: "blocked", reason: "4.2% por encima de la mediana de compra", createdAt: now - 60000, updatedAt: now - 30000, resolvedAt: null }],
@@ -117,6 +134,11 @@ let previewRecovery = [{ intentId: "preview-uncertain-apply", kind: "apply", sta
   error: "HTTP 404: No tienes permisos para ver esta oferta", manualEligible: true,
   retry: { attempts: 3, nextAttemptAt: now + 60000, eligible: false } }];
 const model = {
+  tradingAnalytics: (days = 30) => ({
+    ...buildTradingAnalytics({ transactions: analyticsTransactions, accountUuid: "preview-me", fiat: [], markets, days, now }),
+    balanceHistory: analyticsBalances.filter((point) => point.createdAt >= now - days * 86_400_000),
+    sync: { accountKnown: true, complete: true, limited: false, pages: 18, updatedAt: now },
+  }),
   recoveryItems: () => ({ items: previewRecovery, blocked: previewRecovery.length > 0 }),
   checkRecoveryIntent: async (intentId) => ({ intentId, outcome: "pending", state: "uncertain", message: "No se obtuvo evidencia concluyente. Verifica el resultado en QvaPay.", updatedAt: now - 590000 }),
   resolveRecoveryIntent: ({ intentId }) => {
