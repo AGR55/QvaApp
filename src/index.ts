@@ -70,6 +70,8 @@ const notifications = new NotificationDispatcher(store, {
     const event = notification.payload;
     if (notification.kind === "blocked-offer")
       await webPush.notifyBlocked(event.alert as never);
+    else if (notification.kind === "recovery-blocked")
+      await webPush.notifyRecovery(event as { intentId: string; uuid?: string });
     else if (notification.kind === "rebalance-completed" || notification.kind === "rebalance-attention")
       await webPush.notifyRebalance(event as never);
     else await webPush.notifyOperation(event as never);
@@ -440,6 +442,16 @@ scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),
 );
 scheduler.register("notifications", 15_000, () => notifications.deliverDue());
+scheduler.register("recovery_alerts", 10_000, async () => {
+  for (const intent of store.unresolvedMutationIntents()) {
+    if (intent.state !== "uncertain") continue;
+    await notifications.publish({
+      message: `🚨 QvaApply detuvo nuevas operaciones por una intención incierta (${intent.kind}). Oferta: ${intent.operationUuid ?? "sin UUID"}. Revisa Auditoría → Recuperación de intenciones. No repitas el pago ni la aplicación sin comprobar QvaPay. https://qvapply.honux.tech/?view=auditoria`,
+      ...(intent.operationUuid ? { operationUuid: intent.operationUuid } : {}),
+      event: { kind: "recovery-blocked", intentId: intent.intentId, ...(intent.operationUuid ? { uuid: intent.operationUuid } : {}) },
+    });
+  }
+});
 scheduler.register("sms_receipts", 15_000, () => dashboardReadModel.processPendingPaymentReceipts());
 scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudgetRebalances());
 scheduler.register("dashboard_cache", 30_000, () =>
@@ -490,6 +502,7 @@ async function bootstrap(): Promise<void> {
     );
   scheduler.start();
   void scheduler.run("notifications");
+  void scheduler.run("recovery_alerts");
   void scheduler.run("sms_receipts");
   void scheduler.run("capital_rebalance");
   void scheduler.run("fiat_sync");

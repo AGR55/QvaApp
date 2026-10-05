@@ -79,6 +79,16 @@ export class WebPushService {
     });
   }
 
+  async notifyRecovery(input: { intentId: string; uuid?: string }): Promise<void> {
+    await this.notify({
+      id: `recovery-blocked:${input.intentId}`,
+      type: "recovery-blocked",
+      version: `recovery-blocked:${input.intentId}`,
+      alert: { uuid: input.uuid, reason: "El bot detuvo nuevas operaciones hasta revisar una intención incierta." },
+      url: `/?view=auditoria&intent=${encodeURIComponent(input.intentId)}`,
+    });
+  }
+
   async notifyRebalance(input: { uuid: string; kind: "rebalance-completed" | "rebalance-attention"; reason: string }): Promise<void> {
     const version = `${input.kind}:${input.uuid}`;
     await this.notify({

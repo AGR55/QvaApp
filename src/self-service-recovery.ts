@@ -2,7 +2,7 @@ import type { MutationIntent, Operation, Store } from "./store.js";
 import type { TradingService } from "./trading.js";
 import { ReconciliationScheduler } from "./reconciliation-scheduler.js";
 
-export type ManualRecoveryOutcome = "not_applied" | "cancelled";
+export type ManualRecoveryOutcome = "not_applied" | "cancelled" | "terminal_reviewed";
 
 interface RecoveryFeedEvidence {
   event: string;
@@ -183,8 +183,8 @@ export class SelfServiceRecovery {
     const intent = this.requireIntent(input.intentId);
     const reason = input.reason.trim();
     const evidence = input.evidence.trim();
-    if (input.outcome !== "not_applied" && input.outcome !== "cancelled")
-      throw new RecoveryInputError("El resultado manual debe ser not_applied o cancelled.");
+    if (!["not_applied", "cancelled", "terminal_reviewed"].includes(input.outcome))
+      throw new RecoveryInputError("El resultado manual no es válido.");
     if (input.confirmed !== true)
       throw new RecoveryInputError("Debes confirmar la revisión realizada en QvaPay.");
     if (!Number.isSafeInteger(input.expectedUpdatedAt) || input.expectedUpdatedAt !== intent.updatedAt)
@@ -196,7 +196,12 @@ export class SelfServiceRecovery {
     const manualBlockedReason = this.manualBlockedReason(intent);
     if (manualBlockedReason)
       throw new RecoveryConflictError(manualBlockedReason);
-    if (input.outcome === "cancelled" && this.store.latestMarketFeedState(intent.operationUuid!)?.status === "open")
+    const feed = this.store.latestMarketFeedState(intent.operationUuid!);
+    if (feed?.status === "completed" && input.outcome !== "terminal_reviewed")
+      throw new RecoveryConflictError("La oferta terminó: declara únicamente la revisión de una obligación ya cerrada en tu cuenta.");
+    if (feed?.status !== "completed" && input.outcome === "terminal_reviewed")
+      throw new RecoveryConflictError("Solo se puede revisar como terminal una oferta completada con evidencia del feed.");
+    if (input.outcome === "cancelled" && feed?.status === "open")
       throw new RecoveryConflictError("El feed muestra la oferta abierta: no se puede declarar cancelada. Comprueba si la aplicación no se realizó.");
 
     const verifiedAt = this.now();
@@ -246,7 +251,7 @@ export class SelfServiceRecovery {
       ...(feed ? { feed } : {}),
       retry: this.retryView(intent.intentId, this.now()),
       manualEligible: !manualBlockedReason,
-      manualOutcomes: feed?.status === "open" ? ["not_applied"] : ["not_applied", "cancelled"],
+      manualOutcomes: feed?.status === "completed" ? ["terminal_reviewed"] : feed?.status === "open" ? ["not_applied"] : ["not_applied", "cancelled"],
       ...(manualBlockedReason ? { manualBlockedReason } : {}),
     };
   }
@@ -272,7 +277,9 @@ export class SelfServiceRecovery {
     if (feed) {
       if (feed.sentAt > this.now() || feed.receivedAt > this.now())
         return "La evidencia del feed tiene fecha futura y no es confiable.";
-      if (!["open", "cancelled"].includes(feed.status) || feed.event === "p2p.applied")
+      if (feed.status === "completed" && (feed.event !== "p2p.completed" || feed.sentAt < intent.createdAt || feed.receivedAt < intent.createdAt))
+        return "La finalización del feed no es posterior a esta intención; requiere conciliación remota.";
+      if (!["open", "cancelled", "completed"].includes(feed.status) || feed.event === "p2p.applied")
         return `El feed más reciente muestra estado ${feed.status}; existe evidencia remota que impide una declaración manual.`;
     }
     return undefined;

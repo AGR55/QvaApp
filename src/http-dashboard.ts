@@ -803,7 +803,7 @@ export function buildDashboard(
     Params: { intentId: string };
     Body: {
       expectedUpdatedAt: number;
-      outcome: "not_applied" | "cancelled";
+      outcome: "not_applied" | "cancelled" | "terminal_reviewed";
       reason: string;
       evidence: string;
       confirmed: true;
@@ -819,7 +819,7 @@ export function buildDashboard(
         required: ["expectedUpdatedAt", "outcome", "reason", "evidence", "confirmed"],
         properties: {
           expectedUpdatedAt: { type: "integer", minimum: 0 },
-          outcome: { type: "string", enum: ["not_applied", "cancelled"] },
+          outcome: { type: "string", enum: ["not_applied", "cancelled", "terminal_reviewed"] },
           reason: { type: "string", minLength: 12, maxLength: 500 },
           evidence: { type: "string", minLength: 12, maxLength: 1_000 },
           confirmed: { const: true },

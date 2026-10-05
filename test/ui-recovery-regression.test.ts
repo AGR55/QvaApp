@@ -6,6 +6,7 @@ const audit = readFileSync(new URL("../web/features/audit.jsx", import.meta.url)
 const recovery = readFileSync(new URL("../web/features/recovery-panel.jsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../web/ui-polish.css", import.meta.url), "utf8");
 const common = readFileSync(new URL("../web/components/common.jsx", import.meta.url), "utf8");
+const main = readFileSync(new URL("../web/main.jsx", import.meta.url), "utf8");
 
 test("la conciliación y resolución manual usan solo el contrato de recuperación y gates manualEligible", () => {
   assert.match(recovery, /requestJson\("\/api\/recovery"\)/);
@@ -18,6 +19,13 @@ test("la conciliación y resolución manual usan solo el contrato de recuperaci�
   assert.match(recovery, /sin volver a enviar una mutación/);
   assert.match(recovery, /payload\.data\?\.message/);
   assert.match(recovery, /await onChanged\?\.\(\)/);
+});
+
+test("la revisión terminal y el bloqueo global son visibles sin navegar por varias pantallas", () => {
+  assert.match(recovery, /terminal_reviewed/);
+  assert.match(recovery, /no tengo ninguna obligación o dinero pendiente/);
+  assert.match(main, /recovery-block-banner/);
+  assert.match(main, /Resolver bloqueo/);
 });
 
 test("descartar todas usa el cursor global, confirma cantidad y recarga primera página sin optimismo", () => {

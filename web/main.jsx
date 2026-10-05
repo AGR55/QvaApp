@@ -446,6 +446,16 @@ function App() {
           </div>
         </header>
         <div className="content">
+          {data.risk?.usage?.unresolvedMutation ? (
+            <aside className="recovery-block-banner" role="alert">
+              <ShieldCheck aria-hidden="true" />
+              <div>
+                <strong>Operaciones automáticas detenidas</strong>
+                <p>Hay {data.unresolvedMutations?.length || "una o más"} intención(es) pendientes de conciliación. Revísalas en Auditoría para desbloquear el bot de forma segura.</p>
+              </div>
+              <Button variant="primary" size="sm" onClick={() => navigate("auditoria")}>Resolver bloqueo</Button>
+            </aside>
+          ) : null}
           {notice ? (
             <aside className="push-toast" role="alert" aria-live="polite">
               <Bell aria-hidden="true" />
