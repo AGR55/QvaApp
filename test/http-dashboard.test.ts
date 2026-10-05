@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, mkdtempSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -282,32 +283,41 @@ test("gestiona cuentas lectoras sin exponer sus tokens", async () => {
 });
 
 test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", async () => {
+  const assetName = `cachetest${randomUUID().replaceAll("-", "")}.js`;
+  const assetDirectory = join(process.cwd(), "public", "dashboard");
+  const assetPath = join(assetDirectory, assetName);
+  mkdirSync(assetDirectory, { recursive: true });
+  writeFileSync(assetPath, "export const cacheFixture = true;\n");
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
-  const page = await app.inject({ method: "GET", url: "/" });
-  assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
-  assert.match(page.body, /src="\/logo\/logotipo\.webp"/);
-  assert.match(page.body, /src="\/auth\/login\.js"/);
-  assert.doesNotMatch(page.body, /src="\/dashboard\/app\.js"/);
-  assert.doesNotMatch(page.body, /fonts\.(?:googleapis|gstatic)\.com/);
-  const icon = await app.inject({ method: "GET", url: "/icons/qusd.png" });
-  assert.equal(icon.statusCode, 200);
-  assert.match(String(icon.headers["content-type"]), /image\/png/);
-  assert.match(String(icon.headers["cache-control"]), /public, max-age=86400/);
-  const logo = await app.inject({ method: "GET", url: "/logo/logotipo.webp" });
-  assert.equal(logo.statusCode, 200);
-  assert.match(String(logo.headers["content-type"]), /image\/webp/);
-  assert.match(String(logo.headers["cache-control"]), /public, max-age=86400/);
-  const signinImage = await app.inject({ method: "GET", url: "/images/signin-picture.webp" });
-  assert.equal(signinImage.statusCode, 404);
-  const appScript = await app.inject({ method: "GET", url: "/dashboard/app.js" });
-  assert.equal(appScript.headers["cache-control"], "public, no-cache, must-revalidate");
-  const unchanged = await app.inject({ method: "GET", url: "/dashboard/app.js", headers: { "if-none-match": String(appScript.headers.etag) } });
-  assert.equal(unchanged.statusCode, 304);
-  const traversal = await app.inject({ method: "GET", url: "/icons/%2e%2e%2fpackage.json" });
-  assert.equal(traversal.statusCode, 404);
-  const imageTraversal = await app.inject({ method: "GET", url: "/images/%2e%2e%2fpackage.json" });
-  assert.equal(imageTraversal.statusCode, 404);
-  await app.close();
+  try {
+    const page = await app.inject({ method: "GET", url: "/" });
+    assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
+    assert.match(page.body, /src="\/logo\/logotipo\.webp"/);
+    assert.match(page.body, /src="\/auth\/login\.js"/);
+    assert.doesNotMatch(page.body, /src="\/dashboard\/app\.js"/);
+    assert.doesNotMatch(page.body, /fonts\.(?:googleapis|gstatic)\.com/);
+    const icon = await app.inject({ method: "GET", url: "/icons/qusd.png" });
+    assert.equal(icon.statusCode, 200);
+    assert.match(String(icon.headers["content-type"]), /image\/png/);
+    assert.match(String(icon.headers["cache-control"]), /public, max-age=86400/);
+    const logo = await app.inject({ method: "GET", url: "/logo/logotipo.webp" });
+    assert.equal(logo.statusCode, 200);
+    assert.match(String(logo.headers["content-type"]), /image\/webp/);
+    assert.match(String(logo.headers["cache-control"]), /public, max-age=86400/);
+    const signinImage = await app.inject({ method: "GET", url: "/images/signin-picture.webp" });
+    assert.equal(signinImage.statusCode, 404);
+    const appScript = await app.inject({ method: "GET", url: `/dashboard/${assetName}` });
+    assert.equal(appScript.headers["cache-control"], "public, no-cache, must-revalidate");
+    const unchanged = await app.inject({ method: "GET", url: `/dashboard/${assetName}`, headers: { "if-none-match": String(appScript.headers.etag) } });
+    assert.equal(unchanged.statusCode, 304);
+    const traversal = await app.inject({ method: "GET", url: "/icons/%2e%2e%2fpackage.json" });
+    assert.equal(traversal.statusCode, 404);
+    const imageTraversal = await app.inject({ method: "GET", url: "/images/%2e%2e%2fpackage.json" });
+    assert.equal(imageTraversal.statusCode, 404);
+  } finally {
+    await app.close();
+    unlinkSync(assetPath);
+  }
 });
 
 test("el documento autenticado incluye sesión y snapshot local sin una segunda lectura", async () => {
