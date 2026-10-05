@@ -26,7 +26,7 @@ import {
   ScrollText,
   RadioTower,
 } from "lucide-react";
-import { Empty, Skeleton } from "./components/common.jsx";
+import { Skeleton, ViewLoading } from "./components/common.jsx";
 import { Button, IconButton } from "./components/ui.jsx";
 import { readDashboardBootstrap } from "./lib/dashboard-bootstrap.js";
 import {
@@ -495,7 +495,7 @@ function App() {
               </IconButton>
             </aside>
           ) : null}
-          <Suspense fallback={<Empty>Cargando vista…</Empty>}>
+          <Suspense fallback={<ViewLoading />}>
             {view === "resumen" ? (
               <Cockpit
                 data={data}

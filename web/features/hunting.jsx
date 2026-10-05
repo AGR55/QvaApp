@@ -379,7 +379,7 @@ export function Hunting({ data, label, unit, onChanged }) {
             ))}
           </div>
         ) : (
-          <Empty>
+          <Empty title="Todavía sin aplicaciones" icon={Crosshair}>
             Cuando el bot aplique una oferta con precio de caza, aparecerá aquí.
           </Empty>
         )}

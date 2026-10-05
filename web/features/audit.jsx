@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, XCircle } from "lucide-react";
-import { Empty, Panel, ViewHead } from "../components/common.jsx";
+import { Activity, CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, WalletCards, XCircle } from "lucide-react";
+import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { Button } from "../components/ui.jsx";
 import {
   AlertDialog,
@@ -147,6 +147,7 @@ export function Audit({ data, onChanged }) {
   };
 
   return <>
+    <div className="page-stack audit-view">
     <ViewHead
       title="Auditoría"
     />
@@ -159,11 +160,11 @@ export function Audit({ data, onChanged }) {
             <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "Bloqueo activo" : "Ninguna"} />
             <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
           </dl></Panel>
-          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty>Sin reservas registradas.</Empty>}</Panel>
+          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty title="Sin reservas" icon={WalletCards}>No hay capital apartado por operaciones.</Empty>}</Panel>
         </div>
-        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin mutaciones registradas.</Empty>}</Panel>
+        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty title="Sin intenciones remotas" icon={Clock3}>No hay acciones remotas pendientes de reconciliar.</Empty>}</Panel>
         <RecoveryPanel onChanged={onChanged} />
-        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty>Sin eventos.</Empty>}</Panel>
+        <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty title="Sin actividad reciente" icon={Activity}>Las acciones registradas aparecerán aquí.</Empty>}</Panel>
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
         <div className="blocked-rail-head"><div><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
@@ -173,10 +174,11 @@ export function Audit({ data, onChanged }) {
         {dismissAllMessage ? <p className="recovery-message" role="status">{dismissAllMessage}</p> : null}
         {dismissAllError ? <div className="resource-error" role="alert"><p>{dismissAllError}</p></div> : null}
         {eventsError ? <div className="resource-error" role="alert"><p>{eventsError}</p><Button variant="secondary" size="sm" onClick={() => void loadEvents()}>Reintentar</Button></div> : null}
-        {eventsLoading && !events ? <div className="blocked-loading" aria-label="Cargando ofertas bloqueadas"><span /><span /><span /></div> : null}
-        {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.id ?? offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : !eventsLoading ? <Empty>No hay ofertas esperando tu decisión.</Empty> : null}
+        {eventsLoading && !events ? <Skeleton rows={3} label="Cargando ofertas bloqueadas" /> : null}
+        {blocked.length ? blocked.map((offer) => <BlockedCard key={offer.id ?? offer.uuid} offer={offer} onReview={() => void review(offer)} onDismiss={() => setDialog({ kind: "dismiss", offer })} />) : !eventsLoading ? <Empty title="Cola despejada" icon={CheckCircle2}>No hay ofertas esperando tu decisión.</Empty> : null}
         {events && events.total > events.pageSize ? <nav className="pagination" aria-label="Páginas de ofertas bloqueadas"><Button variant="outline" size="sm" disabled={page === 1 || eventsLoading} onClick={() => setPage((value) => Math.max(1, value - 1))}>Anterior</Button><span>{page} / {Math.ceil(events.total / events.pageSize)}</span><Button variant="outline" size="sm" disabled={page * events.pageSize >= events.total || eventsLoading} onClick={() => setPage((value) => value + 1)}>Siguiente</Button></nav> : null}
       </aside>
+    </div>
     </div>
     <AlertDialog open={dialog?.kind === "dismiss"} onOpenChange={(open) => !open && close()}>
       <AlertDialogContent className="decision-dialog">

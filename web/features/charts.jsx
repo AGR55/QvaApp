@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { Activity } from "lucide-react";
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { Button, Tabs } from "../components/ui.jsx";
@@ -90,7 +91,7 @@ export function Charts({ markets, initialHistory = [] }) {
           </>
         ) : data ? (
           <div className="chart-stage chart-empty">
-            <Empty>La próxima lectura del mercado añadirá las medianas necesarias para esta gráfica.</Empty>
+            <Empty title="Esperando histórico" icon={Activity}>La próxima lectura del mercado añadirá las medianas necesarias para esta gráfica.</Empty>
           </div>
         ) : (
           <div className="chart-stage chart-loading">
