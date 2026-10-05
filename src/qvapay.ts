@@ -3,6 +3,7 @@ import type {
   P2pListPage,
   P2pOffer,
   QvaTransaction,
+  QvaTransactionPage,
 } from "./types.js";
 
 const API = "https://api.qvapay.com";
@@ -207,6 +208,7 @@ export class QvaPayClient {
       policy: "read",
       retryRead: true,
     });
+    if (typeof data.uuid === "string") this.throttleState?.set("analytics_account_uuid", data.uuid);
     const candidates = [
       data.balance,
       (data.data as Record<string, unknown> | undefined)?.balance,
@@ -232,6 +234,7 @@ export class QvaPayClient {
     });
     if (typeof data.uuid !== "string")
       throw new Error("QvaPay no devolvió el UUID del usuario.");
+    this.throttleState?.set("analytics_account_uuid", data.uuid);
     return {
       uuid: data.uuid,
       ...(typeof data.balance === "number" ? { balance: data.balance } : {}),
@@ -247,18 +250,26 @@ export class QvaPayClient {
   }
 
   async listTransactions(): Promise<QvaTransaction[]> {
+    return (await this.listTransactionsPage({ take: 20 })).transactions;
+  }
+
+  async listTransactionsPage(params: { page?: number; take?: number; dateFrom?: string; dateTo?: string } = {}): Promise<QvaTransactionPage> {
+    const page = params.page ?? 1;
+    const take = params.take ?? 30;
+    if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(take) || take < 1 || take > 30)
+      throw new RangeError("Paginación de transacciones inválida.");
+    const query = new URLSearchParams({ take: String(take), page: String(page), status: "paid", order: "desc", include_total: "true" });
+    if (params.dateFrom) query.set("date_from", params.dateFrom);
+    if (params.dateTo) query.set("date_to", params.dateTo);
     const data = (await this.request(
-      "/transaction?take=20&page=1&status=paid",
+      `/transaction?${query}`,
       { policy: "read", retryRead: true },
     )) as unknown;
-    if (Array.isArray(data)) return data as QvaTransaction[];
-    if (
-      data &&
-      typeof data === "object" &&
-      Array.isArray((data as { transactions?: unknown }).transactions)
-    )
-      return (data as { transactions: QvaTransaction[] }).transactions;
-    return [];
+    const envelope = data as { transactions?: unknown; total?: unknown } | null;
+    const rows = Array.isArray(data) ? data : envelope?.transactions;
+    if (!Array.isArray(rows)) throw new Error("QvaPay devolvió un listado de transacciones inválido.");
+    const total = envelope?.total == null || envelope.total === "" ? NaN : Number(envelope.total);
+    return { transactions: rows.map(parseTransaction), ...(Number.isSafeInteger(total) && total >= 0 ? { total } : {}) };
   }
 
   async apply(uuid: string): Promise<void> {
@@ -691,6 +702,36 @@ function isEmptyParty(value: unknown): boolean {
   if (value === undefined || value === null || value === "") return true;
   if (Array.isArray(value)) return value.length === 0;
   return typeof value === "object" && Object.keys(value).length === 0;
+}
+
+function parseTransaction(value: unknown): QvaTransaction {
+  if (!isObject(value)) throw new Error("Transacción de QvaPay inválida.");
+  const raw = value;
+  const amount = raw.amount == null || raw.amount === "" ? NaN : Number(raw.amount);
+  if (typeof raw.uuid !== "string" || !raw.uuid || !Number.isFinite(amount) || amount < 0)
+    throw new Error("Importe o identificador de transacción de QvaPay inválido.");
+  const identity = (value: unknown) => isObject(value) && typeof value.uuid === "string" ? { uuid: value.uuid } : null;
+  const p2p = isObject(raw.P2P ?? raw.p2p) ? (raw.P2P ?? raw.p2p) as Record<string, unknown> : undefined;
+  const tick = typeof p2p?.coin === "string" ? p2p.coin : isObject(p2p?.coin) ? p2p.coin.tick : undefined;
+  const wallet = isObject(raw.Wallet ?? raw.wallet) ? (raw.Wallet ?? raw.wallet) as Record<string, unknown> : undefined;
+  const walletCoin = wallet?.Coin ?? wallet?.coin;
+  const positive = (value: unknown) => value != null && value !== "" && Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : undefined;
+  const p2pAmount = positive(p2p?.amount), receive = positive(p2p?.receive);
+  return {
+    uuid: raw.uuid, amount, status: typeof raw.status === "string" ? raw.status : "unknown",
+    ...(typeof raw.description === "string" ? { description: raw.description.slice(0, 500) } : {}),
+    ...(typeof raw.created_at === "string" ? { created_at: raw.created_at } : {}),
+    ...(typeof raw.updated_at === "string" ? { updated_at: raw.updated_at } : {}),
+    User: identity(raw.User ?? raw.user), PaidBy: identity(raw.PaidBy ?? raw.paid_by),
+    ...(p2p ? { P2P: {
+      ...(typeof p2p.uuid === "string" ? { uuid: p2p.uuid } : {}),
+      ...(typeof tick === "string" ? { coin: tick } : {}),
+      ...(p2pAmount === undefined ? {} : { amount: p2pAmount }),
+      ...(receive === undefined ? {} : { receive }),
+      ...(typeof p2p.status === "string" ? { status: p2p.status } : {}),
+    } } : {}),
+    ...(isObject(walletCoin) && typeof walletCoin.tick === "string" ? { Wallet: { Coin: { tick: walletCoin.tick } } } : {}),
+  };
 }
 
 function stringRecord(value: unknown): value is Record<string, string> {

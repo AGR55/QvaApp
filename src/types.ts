@@ -70,6 +70,8 @@ export interface QvaTransaction {
   status: string;
   created_at?: string;
   updated_at?: string;
+  User?: { uuid?: string } | null;
+  PaidBy?: { uuid?: string } | null;
   P2P?: {
     uuid?: string;
     amount?: number;
@@ -78,6 +80,11 @@ export interface QvaTransaction {
     status?: string;
   } | null;
   Wallet?: { Coin?: { tick?: string } | null } | null;
+}
+
+export interface QvaTransactionPage {
+  transactions: QvaTransaction[];
+  total?: number;
 }
 
 export type OperationState =

@@ -136,7 +136,7 @@ test("el dashboard persiste una sola observación completa por mercado", async (
     }),
     p2pAverages: async () => averages,
     qusdBalance: async () => 10,
-    listTransactions: async () => [],
+    listTransactionsPage: async () => ({ transactions: [] }),
   };
   const trading = new TradingService(
     store,

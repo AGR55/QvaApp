@@ -7,8 +7,9 @@ import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { chartDomain } from "../lib/chart-domain.js";
 import { MarketIdentity } from "../components/market-identity.jsx";
+import { TradingAnalytics } from "./trading-analytics.jsx";
 
-export function Charts({ markets, initialHistory = [] }) {
+export function Charts({ markets, initialHistory = [], initialBalanceHistory = [] }) {
   const [coin, setCoin] = useState(markets[0]?.code || ""),
     [remote, setRemote] = useState({}),
     [loading, setLoading] = useState(true),
@@ -75,6 +76,7 @@ export function Charts({ markets, initialHistory = [] }) {
       <ViewHead
         title="Gráficas"
       />
+      <TradingAnalytics markets={markets} initialBalanceHistory={initialBalanceHistory} />
       <Panel title="Fluctuación de precios" wide>
           <Tabs value={coin} onChange={setCoin} items={markets.map((market) => ({ value: market.code, label: <MarketIdentity market={market} size="sm" /> }))} />
         {error ? <div className="resource-error" role="alert"><p>{error}</p><Button variant="secondary" size="sm" onClick={() => setRetry((value) => value + 1)}>Reintentar</Button></div> : null}

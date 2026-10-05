@@ -235,6 +235,23 @@ try {
     "//button[contains(normalize-space(.), 'Gráficas')]",
   );
   await command("POST", `/session/${sessionId}/element/${charts}/click`, {});
+  await waitFor(() => execute("return document.querySelectorAll('.analytics-chart .recharts-surface').length === 7"));
+  await waitFor(() => execute("return document.querySelector('.analytics-activity .recharts-bar path') !== null"));
+  const incomingColor = await execute("return getComputedStyle(document.querySelector('.analytics-activity .recharts-bar path')).fill");
+  if (!incomingColor || incomingColor === 'rgb(0, 0, 0)') throw new Error('Los colores de analítica no se aplican bajo la política CSP.');
+  const previousAnalyticsPeriod = await execute("return document.querySelector('.analytics-period')?.textContent");
+  const analyticsPeriod = await find("xpath", "//section[@aria-label='Análisis de tu actividad']//button[normalize-space(.)='7 días']");
+  await command("POST", `/session/${sessionId}/element/${analyticsPeriod}/click`, {});
+  await waitFor(() => execute(`return document.querySelector('.analytics-period')?.textContent !== ${JSON.stringify(previousAnalyticsPeriod)} && !document.querySelector('.analytics-workspace .skeleton')`));
+  const analyticsMonth = await find("xpath", "//section[@aria-label='Análisis de tu actividad']//button[normalize-space(.)='30 días']");
+  await command("POST", `/session/${sessionId}/element/${analyticsMonth}/click`, {});
+  const densitySelect = await find("css selector", "#analytics-density");
+  await command("POST", `/session/${sessionId}/element/${densitySelect}/click`, {});
+  const tenBars = await find("xpath", "//*[@role='option' and normalize-space(.)='Hasta 10 barras']");
+  await command("POST", `/session/${sessionId}/element/${tenBars}/click`, {});
+  await waitFor(() => execute("return document.querySelectorAll('.analytics-activity .recharts-bar path').length === 20"));
+  const shareCount = await find("xpath", "//*[@aria-label='Distribución por mercado']//button[normalize-space(.)='Operaciones']");
+  await command("POST", `/session/${sessionId}/element/${shareCount}/click`, {});
   await waitFor(() =>
     execute(
       "return document.body.innerText.includes('Fluctuación de precios')",
@@ -310,6 +327,14 @@ try {
     );
   await screenshot("/tmp/qvaapply-charts-desktop.png");
   const chartsDesktop = await assertPageQuality("Gráficas");
+  await execute("window.scrollTo(0, 0); return true");
+  await screenshot("/tmp/qvaapply-analytics-desktop.png");
+  await execute("document.documentElement.dataset.theme = 'dark'; return true");
+  await screenshot("/tmp/qvaapply-analytics-dark.png");
+  await assertPageQuality("Analítica oscura");
+  await execute("document.querySelector('[aria-label=\"Ganancia estimada por mercado\"]').scrollIntoView(); return true");
+  await screenshot("/tmp/qvaapply-analytics-profit-dark.png");
+  await execute("document.documentElement.dataset.theme = 'light'; window.scrollTo(0, 0); return true");
 
   const settings = await find(
     "xpath",

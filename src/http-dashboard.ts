@@ -678,6 +678,9 @@ export function buildDashboard(
       throw new ClientInputError("Mercado inválido.");
     return { data: await readModel.marketAnalytics(coin), source: "sqlite" };
   });
+  app.get<{ Querystring: { days?: number } }>("/api/trading-analytics", {
+    schema: { querystring: { type: "object", additionalProperties: false, properties: { days: { type: "integer", enum: [7, 30, 90], default: 30 } } } },
+  }, async (request) => ({ data: readModel.tradingAnalytics(request.query.days ?? 30), source: "sqlite" }));
   app.post<{ Body: { refresh?: boolean } }>("/api/offers/rebalance/preview", {
     schema: {
       body: {
@@ -1192,6 +1195,7 @@ function openApiDocument() {
       "/api/live/balance": { get: { summary: "Actualizar saldo QUSD" } },
       "/api/live/own-offers": { get: { summary: "Actualizar ofertas propias" } },
       "/api/live/transactions": { get: { summary: "Actualizar transacciones" } },
+      "/api/trading-analytics": { get: { summary: "Consultar actividad, volumen y beneficio estimado del histórico local" } },
       "/api/live/operations": { get: { summary: "Conciliar operaciones activas con QvaPay" } },
       "/api/live/markets/{coin}": { get: { summary: "Actualizar un mercado" } },
       "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },

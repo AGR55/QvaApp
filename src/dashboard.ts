@@ -19,6 +19,7 @@ import {
   SelfServiceRecovery,
   type ManualRecoveryOutcome,
 } from "./self-service-recovery.js";
+import { analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -755,7 +756,29 @@ export class DashboardReadModel {
   }
 
   async refreshTransactions() {
-    const data: TransactionView[] = (await this.qva.listTransactions())
+    return this.coalesceRead("transactions", async () => {
+    const account = this.store.get("analytics_account_uuid");
+    const key = `analytics_history:${account ?? "pending"}`;
+    const saved = this.store.loadRemoteResource<{ page: number; anchor: number; complete: boolean; limited?: boolean }>(key);
+    const now = Date.now();
+    const cached = this.store.loadRemoteResource<TransactionView[]>("transactions");
+    const history = saved && (now - saved.updatedAt < 6 * 3_600_000 || !saved.data.complete)
+      ? saved.data : { page: 1, anchor: now, complete: false };
+    const backfill = Boolean(account && !history.complete && cached && now - cached.updatedAt < 60_000);
+    const page = await this.qva.listTransactionsPage(backfill ? {
+      page: history.page, take: 30,
+      dateFrom: new Date(history.anchor - 365 * 86_400_000).toISOString(), dateTo: new Date(history.anchor).toISOString(),
+    } : { take: 30 });
+    if (account) {
+      this.store.saveAnalyticsTransactions(account, page.transactions.flatMap((tx) => {
+        const normalized = analyticsTransaction(tx); return normalized ? [normalized] : [];
+      }));
+      if (backfill) this.store.saveRemoteResource(key, { ...history, page: history.page + 1,
+        complete: page.transactions.length < 30 || (page.total !== undefined && history.page * 30 >= page.total) || history.page >= 400,
+        limited: history.page >= 400 && page.transactions.length === 30 && (page.total === undefined || history.page * 30 < page.total) }, now);
+    }
+    if (backfill && cached) return { data: cached.data, updatedAt: cached.updatedAt };
+    const data: TransactionView[] = page.transactions
       .slice(0, 12)
       .map((tx) => ({
         uuid: tx.uuid,
@@ -783,6 +806,18 @@ export class DashboardReadModel {
     const updatedAt = Date.now();
     this.store.saveRemoteResource("transactions", data, updatedAt);
     return { data, updatedAt };
+    });
+  }
+
+  tradingAnalytics(days = 30) {
+    if (![7, 30, 90].includes(days)) throw new Error("Periodo de análisis inválido.");
+    const now = Date.now(), account = this.store.get("analytics_account_uuid") ?? "";
+    const report = buildTradingAnalytics({ transactions: account ? this.store.analyticsTransactions(account, now - 365 * 86_400_000) : [],
+      accountUuid: account, fiat: this.store.analyticsFiatMovements(), markets: this.marketConfig.publicMarkets(), days, now });
+    const history = this.store.loadRemoteResource<{ complete: boolean; page: number; limited?: boolean }>(`analytics_history:${account}`);
+    return { ...report, balanceHistory: sampleHistory(this.store.dashboardHistory(now - days * 86_400_000), 120),
+      sync: { accountKnown: Boolean(account), complete: Boolean(history?.data.complete && !history.data.limited), limited: history?.data.limited ?? false,
+        pages: Math.max(0, (history?.data.page ?? 1) - 1), updatedAt: history?.updatedAt ?? this.store.loadRemoteResource("transactions")?.updatedAt ?? null } };
   }
 
   async refreshOperations() {
