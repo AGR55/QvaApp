@@ -1129,13 +1129,14 @@ function MarketIconEditor({ market, onChange }) {
     setUploading(true);
     setError("");
     try {
-      const base64 = await fileBase64(file);
+      const prepared = await optimizeMarketIcon(file);
+      const base64 = await fileBase64(prepared);
       const payload = await requestJson("/api/market-icons", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          name: file.name,
-          mimeType: file.type || imageMimeFromName(file.name),
+          name: prepared === file ? file.name : `${file.name.replace(/\.[^.]+$/, "")}.webp`,
+          mimeType: prepared.type || imageMimeFromName(file.name),
           base64,
         }),
         timeoutMs: 20_000,
@@ -1194,7 +1195,7 @@ function MarketIconEditor({ market, onChange }) {
           onChange={(event) => void choose(event)}
         />
       </div>
-      <small>PNG, WebP, JPEG o SVG seguro · máximo 512 KB</small>
+      <small>PNG, WebP, JPEG o SVG seguro · los raster se reducen a 64×64 y menos de 10 KB</small>
       {error ? (
         <p className="form-error" role="alert">
           {error}
@@ -1215,6 +1216,32 @@ function fileBase64(file) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+async function optimizeMarketIcon(file) {
+  if ((file.type || imageMimeFromName(file.name)) === "image/svg+xml") {
+    if (file.size > 10_000) throw new Error("El SVG debe pesar menos de 10 KB.");
+    return file;
+  }
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = 64;
+    canvas.height = 64;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Este navegador no puede preparar iconos.");
+    const scale = Math.min(64 / bitmap.width, 64 / bitmap.height);
+    const width = bitmap.width * scale;
+    const height = bitmap.height * scale;
+    context.drawImage(bitmap, (64 - width) / 2, (64 - height) / 2, width, height);
+    for (const quality of [0.82, 0.7, 0.55, 0.4]) {
+      const icon = await new Promise((resolve) => canvas.toBlob(resolve, "image/webp", quality));
+      if (icon?.type === "image/webp" && icon.size <= 10_000) return icon;
+    }
+    throw new Error("No se pudo reducir el icono a menos de 10 KB.");
+  } finally {
+    bitmap.close();
+  }
 }
 
 function imageMimeFromName(name) {

@@ -285,16 +285,24 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const page = await app.inject({ method: "GET", url: "/" });
   assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
+  assert.match(page.body, /src="\/logo\/logotipo\.webp"/);
+  assert.match(page.body, /src="\/auth\/login\.js"/);
+  assert.doesNotMatch(page.body, /src="\/dashboard\/app\.js"/);
   assert.doesNotMatch(page.body, /fonts\.(?:googleapis|gstatic)\.com/);
   const icon = await app.inject({ method: "GET", url: "/icons/qusd.png" });
   assert.equal(icon.statusCode, 200);
   assert.match(String(icon.headers["content-type"]), /image\/png/);
+  assert.match(String(icon.headers["cache-control"]), /public, max-age=86400/);
   const logo = await app.inject({ method: "GET", url: "/logo/logotipo.webp" });
   assert.equal(logo.statusCode, 200);
   assert.match(String(logo.headers["content-type"]), /image\/webp/);
+  assert.match(String(logo.headers["cache-control"]), /public, max-age=86400/);
   const signinImage = await app.inject({ method: "GET", url: "/images/signin-picture.webp" });
-  assert.equal(signinImage.statusCode, 200);
-  assert.match(String(signinImage.headers["content-type"]), /image\/webp/);
+  assert.equal(signinImage.statusCode, 404);
+  const appScript = await app.inject({ method: "GET", url: "/dashboard/app.js" });
+  assert.equal(appScript.headers["cache-control"], "public, no-cache, must-revalidate");
+  const unchanged = await app.inject({ method: "GET", url: "/dashboard/app.js", headers: { "if-none-match": String(appScript.headers.etag) } });
+  assert.equal(unchanged.statusCode, 304);
   const traversal = await app.inject({ method: "GET", url: "/icons/%2e%2e%2fpackage.json" });
   assert.equal(traversal.statusCode, 404);
   const imageTraversal = await app.inject({ method: "GET", url: "/images/%2e%2e%2fpackage.json" });
@@ -366,13 +374,11 @@ test("el documento público no incluye información operativa", async () => {
     { password, trustedOrigin: origin },
   );
   const page = await app.inject({ method: "GET", url: "/" });
-  const encoded = page.body.match(
-    /<template id="qvaapply-bootstrap">([^]*?)<\/template>/,
-  )?.[1];
-  assert.ok(encoded);
-  assert.deepEqual(JSON.parse(encoded), {
-    session: { authenticated: false },
-  });
+  assert.doesNotMatch(page.body, /qvaapply-bootstrap|csrfToken|dashboard\/app\.js/);
+  assert.match(page.body, /id="login-form"/);
+  const loginScript = await app.inject({ method: "GET", url: "/auth/login.js" });
+  assert.equal(loginScript.statusCode, 200);
+  assert.ok(loginScript.body.length < 2_000);
   await app.close();
 });
 

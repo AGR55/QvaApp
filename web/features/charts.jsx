@@ -7,35 +7,50 @@ import { requestJson } from "../lib/http.js";
 import { chartDomain } from "../lib/chart-domain.js";
 import { MarketIdentity } from "../components/market-identity.jsx";
 
-export function Charts({ markets }) {
+export function Charts({ markets, initialHistory = [] }) {
   const [coin, setCoin] = useState(markets[0]?.code || ""),
-    [data, setData] = useState(),
+    [remote, setRemote] = useState({}),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [retry, setRetry] = useState(0);
   useEffect(() => {
     let active = true;
-    setLoading(true);
-    setError("");
-    if (coin)
+    let pending = false;
+    const refreshHistory = () => {
+      if (!coin || pending || document.hidden) return;
+      pending = true;
+      setLoading(true);
+      setError("");
       void requestJson(`/api/market-analytics?coin=${encodeURIComponent(coin)}`)
         .then((payload) => {
-          if (active) setData(payload.data);
+          if (active) setRemote((current) => ({ ...current, [coin]: payload.data.history }));
         })
         .catch((reason) => {
           if (active) setError(reason instanceof Error ? reason.message : "No se pudo leer el histórico local.");
         })
         .finally(() => {
+          pending = false;
           if (active) setLoading(false);
         });
+    };
+    refreshHistory();
+    const timer = window.setInterval(refreshHistory, 20_000);
     return () => {
       active = false;
+      window.clearInterval(timer);
     };
   }, [coin, retry]);
   useEffect(() => {
     if (!markets.some((market) => market.code === coin))
       setCoin(markets.find((market) => market.active)?.code || markets[0]?.code || "");
   }, [coin, markets]);
+  const data = useMemo(() => {
+    const saved = initialHistory.filter((item) => item.coin === coin);
+    const fresh = remote[coin];
+    if (!fresh) return { history: saved };
+    const freshTime = fresh.at(-1)?.createdAt ?? 0;
+    return { history: [...fresh, ...saved.filter((point) => point.createdAt > freshTime)] };
+  }, [coin, initialHistory, remote]);
   const rows = useMemo(
     () =>
       data?.history.map((item) => ({

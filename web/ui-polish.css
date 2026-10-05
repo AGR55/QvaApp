@@ -482,11 +482,15 @@ td,
   display: flex;
   align-items: center;
   gap: 12px;
+  width: fit-content;
+  padding: 11px 14px;
+  border-radius: 12px;
+  background: #292521;
 }
 .login-brand-lockup img {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 200px;
+  height: auto;
+  border-radius: 0;
 }
 .login-brand-lockup .brand-word strong {
   font-size: 22px;
@@ -1116,9 +1120,9 @@ td,
   color: var(--muted);
   font-size: 13px;
 }
-.empty [data-slot="empty-icon"] svg {
-  width: 18px;
-  height: 18px;
+.empty [data-slot="empty-icon"] .empty-illustration {
+  width: 72px;
+  height: 52px;
   color: var(--faint);
 }
 .skeleton {
@@ -1126,6 +1130,17 @@ td,
   gap: 8px;
   padding: 8px 0;
 }
+.skeleton-pulse {
+  width: 28px;
+  height: 3px;
+  border-radius: 99px;
+  background: var(--accent);
+  animation: skeleton-beat 1.4s ease-in-out infinite;
+}
+.skeleton [data-slot="skeleton"]:nth-of-type(2n) { width: 86%; }
+.skeleton [data-slot="skeleton"]:nth-of-type(3n) { width: 68%; }
+@keyframes skeleton-beat { 50% { opacity: .35; transform: scaleX(.62); transform-origin: left; } }
+@media (prefers-reduced-motion: reduce) { .skeleton-pulse { animation: none; } }
 .skeleton [data-slot="skeleton"] {
   display: block;
   height: 44px;
@@ -3252,15 +3267,20 @@ tbody td small {
 }
 .login-shell {
   display: grid;
-  grid-template-columns: minmax(420px, 480px) 1fr;
+  place-items: center;
   min-height: 100dvh;
-  background: var(--bg);
+  padding: 24px;
+  background: radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--accent) 8%, var(--bg)), var(--bg) 60%);
 }
 .login-panel {
   display: grid;
   align-content: center;
-  padding: 48px;
+  width: min(100%, 440px);
+  padding: clamp(28px, 5vw, 48px);
   background: var(--surface);
+  border: 1px solid var(--line-soft);
+  border-radius: 22px;
+  box-shadow: 0 20px 64px rgba(0, 0, 0, .08);
 }
 .login-panel-inner {
   display: grid;
@@ -3297,27 +3317,6 @@ tbody td small {
 }
 .password-field .ui-input {
   padding-left: 38px;
-}
-.login-visual {
-  position: relative;
-  overflow: hidden;
-  min-height: 100dvh;
-}
-.login-visual img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.login-visual-overlay {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    180deg,
-    rgba(12, 17, 22, 0.05),
-    rgba(12, 17, 22, 0.45)
-  );
 }
 
 /* ============ Responsive desktop-primero ============ */
@@ -3535,12 +3534,6 @@ tbody td small {
   }
   .risk-meter:first-child {
     border-top: 0;
-  }
-  .login-shell {
-    grid-template-columns: 1fr;
-  }
-  .login-visual {
-    display: none;
   }
   .header-metrics {
     order: 3;

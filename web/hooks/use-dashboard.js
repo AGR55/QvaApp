@@ -4,8 +4,6 @@ import { requestJson } from "../lib/http.js";
 const EMPTY_RESOURCES = Object.freeze({});
 
 export function useDashboard(
-  view,
-  market,
   setMarket,
   initialData,
   enabled = true,
@@ -86,18 +84,14 @@ export function useDashboard(
 
   useEffect(() => {
     if (!enabled) return undefined;
-    void refresh();
+    // El HTML ya contiene un snapshot local: deja pintar la interfaz antes de
+    // pedir la siguiente lectura. Sin snapshot, consulta de inmediato.
+    const timer = window.setTimeout(() => void refresh(), initialData ? 1_500 : 0);
     return () => {
+      window.clearTimeout(timer);
       generation.current += 1;
     };
-  }, [enabled, refresh]);
-
-  useEffect(() => {
-    if (!enabled || !data) return;
-    void refresh();
-    // Cambiar de vista o mercado solo relee el snapshot local de la VPS.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, market, enabled]);
+  }, [enabled, initialData, refresh]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -114,7 +108,7 @@ export function useDashboard(
     document.addEventListener("visibilitychange", onVisibility);
     const timer = window.setInterval(() => {
       if (!document.hidden) void refresh();
-    }, 10_000);
+    }, 20_000);
     return () => {
       window.removeEventListener("online", updateConnection);
       window.removeEventListener("offline", updateConnection);

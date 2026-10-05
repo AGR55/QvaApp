@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import Fastify, {
@@ -75,13 +76,13 @@ export function buildDashboard(
   );
   const auth = new DashboardAuth(authOptions);
   const publicRoot = resolve("public/dashboard");
+  const authRoot = resolve("public/auth");
   const iconsRoot = resolve("public/icons");
   const logoRoot = resolve("public/logo");
-  const imagesRoot = resolve("public/images");
 
   app.addHook("onSend", async (_request, reply, payload) => {
+    if (!reply.hasHeader("cache-control")) reply.header("cache-control", "no-store");
     reply
-      .header("cache-control", "no-store")
       .header(
         "content-security-policy",
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
@@ -145,10 +146,20 @@ export function buildDashboard(
     return reply
       .type("text/html; charset=utf-8")
       .header("vary", "Cookie")
-      .send(reactPage(bootstrap));
+      .send(session ? reactPage(bootstrap) : publicLoginPage());
+  });
+  app.get<{ Params: { name: string } }>("/auth/:name", async (request, reply) => {
+    const name = request.params.name;
+    if (name !== "login.js" && name !== "login.css")
+      return reply.status(404).send("Recurso no encontrado.");
+    return reply.type(name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
+      .header("cache-control", "public, no-cache, must-revalidate")
+      .send(readFileSync(resolve(authRoot, name)));
   });
   app.get("/service-worker.js", async (_request, reply) =>
-    reply.type("text/javascript; charset=utf-8").send(serviceWorkerScript()),
+    reply.type("text/javascript; charset=utf-8")
+      .header("cache-control", "no-cache")
+      .send(serviceWorkerScript()),
   );
   app.get<{ Params: { name: string } }>("/icons/:name", async (request, reply) => {
     const name = request.params.name;
@@ -158,7 +169,7 @@ export function buildDashboard(
     if (!file.startsWith(`${iconsRoot}/`) || !existsSync(file))
       return reply.status(404).type("text/plain").send("Icono no encontrado.");
     return reply.type(name.endsWith(".svg") ? "image/svg+xml" : "image/png")
-      .header("cache-control", "public, max-age=86400")
+      .header("cache-control", "public, max-age=86400, stale-while-revalidate=604800")
       .send(readFileSync(file));
   });
   app.get<{ Params: { name: string } }>("/logo/:name", async (request, reply) => {
@@ -169,18 +180,7 @@ export function buildDashboard(
     if (!file.startsWith(`${logoRoot}/`) || !existsSync(file))
       return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
     return reply.type("image/webp")
-      .header("cache-control", "public, max-age=86400")
-      .send(readFileSync(file));
-  });
-  app.get<{ Params: { name: string } }>("/images/:name", async (request, reply) => {
-    const name = request.params.name;
-    if (!/^[a-zA-Z0-9._-]+\.webp$/.test(name))
-      return reply.status(404).type("text/plain").send("Imagen no encontrada.");
-    const file = resolve(imagesRoot, name);
-    if (!file.startsWith(`${imagesRoot}/`) || !existsSync(file))
-      return reply.status(404).type("text/plain").send("Imagen no encontrada.");
-    return reply.type("image/webp")
-      .header("cache-control", "public, max-age=86400")
+      .header("cache-control", "public, max-age=86400, stale-while-revalidate=604800")
       .send(readFileSync(file));
   });
   app.get<{ Params: { name: string } }>("/market-icons/:name", async (request, reply) => {
@@ -198,9 +198,17 @@ export function buildDashboard(
     const file = resolve(publicRoot, relative);
     if (!file.startsWith(`${publicRoot}/`) || !existsSync(file))
       return reply.status(404).type("text/plain").send("Panel no compilado. Ejecuta pnpm build.");
+    const body = readFileSync(file);
+    const fingerprinted = /-[A-Za-z0-9_-]{8,}\.js$/.test(relative);
+    const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
+    reply.header("etag", etag)
+      .header("cache-control", fingerprinted
+        ? "public, max-age=31536000, immutable"
+        : "public, no-cache, must-revalidate");
+    if (request.headers["if-none-match"] === etag) return reply.status(304).send();
     return reply
       .type(relative.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
-      .send(readFileSync(file));
+      .send(body);
   });
 
   app.get("/api/session", async (request) => {
@@ -1166,7 +1174,11 @@ function reactPage(bootstrap: unknown): string {
     .replaceAll(">", "\\u003e")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="apple-touch-icon" href="/logo/isotipo.webp"><title>QvaApply · Mesa de trading</title><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="apple-touch-icon" href="/logo/isotipo.webp"><link rel="preload" as="image" href="/logo/logotipo.webp"><title>QvaApply · Mesa de trading</title><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"><main class="boot boot-first-paint" role="status" aria-label="Abriendo QvaApply"><img src="/logo/logotipo.webp" alt="QvaApply" width="200" height="47"><span class="skeleton-pulse" aria-hidden="true"></span></main></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
+}
+
+function publicLoginPage(): string {
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="preload" as="image" href="/logo/logotipo.webp"><link rel="stylesheet" href="/auth/login.css"><title>QvaApply · Acceso</title></head><body><main class="login-shell"><section class="login-panel" aria-labelledby="login-title"><img class="login-logo" src="/logo/logotipo.webp" alt="QvaApply" width="200" height="47"><h1 id="login-title">Mesa de operaciones</h1><p>Todo el control de tus mercados, en un solo lugar.</p><form id="login-form"><label for="dashboard-password">Contraseña administrativa</label><input id="dashboard-password" name="password" type="password" autocomplete="current-password" minlength="14" required autofocus placeholder="Introduce tu contraseña"><button type="submit">Entrar de forma segura</button><p id="login-status" role="status" aria-live="polite"></p></form></section></main><script src="/auth/login.js" defer></script></body></html>`;
 }
 
 function openApiDocument() {

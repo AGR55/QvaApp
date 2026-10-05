@@ -1,0 +1,14 @@
+:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}
+*{box-sizing:border-box}body{margin:0;color:#27231e;background:#f6f3ed}
+.login-shell{min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0%,#e6e4e0,#f6f3ed 60%)}
+.login-panel{width:min(100%,440px);padding:clamp(28px,5vw,48px);border:1px solid #e7e1d8;border-radius:22px;background:#fffdfa;box-shadow:0 20px 64px #00000014}
+.login-logo{display:block;width:228px;height:auto;max-width:100%;padding:11px 14px;border-radius:12px;background:#292521}
+h1{margin:26px 0 8px;font-size:clamp(26px,5vw,32px);line-height:1.18;letter-spacing:-.035em}
+.login-panel>p{margin:0 0 28px;color:#6b645c;font-size:14px;line-height:1.5}
+form{display:grid;gap:12px}label{font-size:13px;font-weight:650;color:#625b52}
+input{width:100%;min-height:42px;padding:9px 12px;border:1px solid #bbb3a9;border-radius:10px;background:#fffdfa;color:#27231e;font:inherit;font-size:14px}
+input:focus-visible,button:focus-visible{outline:3px solid #8bafce;outline-offset:2px}
+button{min-height:42px;margin-top:8px;border:0;border-radius:10px;background:#1d4e86;color:white;font:inherit;font-size:14px;font-weight:650;cursor:pointer}
+button:hover{background:#153c69}button:disabled{opacity:.65;cursor:wait}
+#login-status{min-height:1.4em;margin:0;color:#9b302d;font-size:13px;line-height:1.4}
+@media(prefers-color-scheme:dark){body{color:#f5f1ea;background:#211e1b}.login-shell{background:radial-gradient(circle at 50% 0%,#303033,#211e1b 65%)}.login-panel{background:#292521;border-color:#464039}.login-panel>p,label{color:#c4bdb4}input{background:#34302b;color:#f5f1ea;border-color:#655c52}}
