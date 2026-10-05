@@ -24,6 +24,16 @@ function EmptyHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+function EmptyTitle({ className, ...props }: React.ComponentProps<"h3">) {
+  return (
+    <h3
+      data-slot="empty-title"
+      className={cn("text-base font-semibold leading-none tracking-tight", className)}
+      {...props}
+    />
+  )
+}
+
 const emptyMediaVariants = cva(
   "mb-2 flex shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
@@ -56,7 +66,7 @@ function EmptyMedia({
 
 function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
   return (
-    <div
+    <p
       data-slot="empty-description"
       className={cn(
         "text-sm/relaxed text-muted-foreground [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
@@ -67,9 +77,21 @@ function EmptyDescription({ className, ...props }: React.ComponentProps<"p">) {
   )
 }
 
+function EmptyContent({ className, ...props }: React.ComponentProps<"div">) {
+  return (
+    <div
+      data-slot="empty-content"
+      className={cn("flex w-full max-w-sm flex-col items-center gap-2", className)}
+      {...props}
+    />
+  )
+}
+
 export {
   Empty,
   EmptyHeader,
+  EmptyTitle,
   EmptyDescription,
   EmptyMedia,
+  EmptyContent,
 }

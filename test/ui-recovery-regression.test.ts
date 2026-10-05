@@ -5,6 +5,7 @@ import test from "node:test";
 const audit = readFileSync(new URL("../web/features/audit.jsx", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../web/features/recovery-panel.jsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../web/ui-polish.css", import.meta.url), "utf8");
+const common = readFileSync(new URL("../web/components/common.jsx", import.meta.url), "utf8");
 
 test("la conciliación y resolución manual usan solo el contrato de recuperación y gates manualEligible", () => {
   assert.match(recovery, /requestJson\("\/api\/recovery"\)/);
@@ -36,7 +37,11 @@ test("descartar todas usa el cursor global, confirma cantidad y recarga primera 
 
 test("los paneles de recuperación quedan separados y se adaptan a móvil", () => {
   assert.match(audit, /<RecoveryPanel\s+onChanged=\{onChanged\}\s*\/>/);
-  assert.match(recovery, /aria-label|role="status"/);
+  assert.match(recovery, /<Skeleton[^>]*label="Cargando intenciones remotas"/);
+  const skeleton = common.match(/export function Skeleton\([^]*?\n\}/)?.[0];
+  assert.ok(skeleton);
+  assert.match(skeleton, /role="status"/);
+  assert.match(skeleton, /aria-label=\{label\}/);
   assert.match(styles, /\.recovery-panel\s*\{/);
   assert.match(styles, /@media \(max-width: 640px\)[^]*\.recovery-fields/);
 });

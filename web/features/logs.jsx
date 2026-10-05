@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   TerminalSquare,
+  ListFilter,
 } from "lucide-react";
 import { Empty, ViewHead } from "../components/common.jsx";
 import { Badge, Button, Field, Input, Select } from "../components/ui.jsx";
@@ -26,6 +27,7 @@ import {
   CardHeader,
   CardTitle,
 } from "../components/ui/card.tsx";
+import { Skeleton as ShadcnSkeleton } from "../components/ui/skeleton.tsx";
 import { requestJson } from "../lib/http.js";
 
 const LEVELS = [
@@ -216,28 +218,9 @@ export function Logs() {
   };
 
   return (
-    <>
+    <div className="page-stack logs-view">
       <ViewHead
-        kicker="Diagnóstico local"
-        title="Logs operativos"
-        description="Sigue el escáner, QvaPay y las tareas internas sin acceder por SSH. Los secretos se redactan antes de llegar al navegador."
-        meta={
-          <div className="log-view-status" role="status" aria-live="polite">
-            <span className={`live-dot ${following && !error ? "is-live" : ""}`} />
-            <span>
-              {error
-                ? "Conexión interrumpida"
-                : following
-                  ? "Seguimiento activo"
-                  : "Seguimiento pausado"}
-            </span>
-            {lastUpdated ? (
-              <time dateTime={new Date(lastUpdated).toISOString()}>
-                Última lectura {new Date(lastUpdated).toLocaleTimeString("es-CU")}
-              </time>
-            ) : null}
-          </div>
-        }
+        title="Logs"
       />
 
       <section className="log-metrics" aria-label="Resumen de eventos visibles">
@@ -257,6 +240,21 @@ export function Logs() {
             <CardDescription>
               Hasta 500 eventos visibles; el historial completo permanece en SQLite.
             </CardDescription>
+            <div className="log-view-status" role="status" aria-live="polite">
+              <span className={`live-dot ${following && !error ? "is-live" : ""}`} />
+              <span>
+                {error
+                  ? "Conexión interrumpida"
+                  : following
+                    ? "Seguimiento activo"
+                    : "Seguimiento pausado"}
+              </span>
+              {lastUpdated ? (
+                <time dateTime={new Date(lastUpdated).toISOString()}>
+                  Última lectura {new Date(lastUpdated).toLocaleTimeString("es-CU")}
+                </time>
+              ) : null}
+            </div>
           </div>
           <CardAction className="log-console-actions">
             <Button
@@ -345,11 +343,15 @@ export function Logs() {
             aria-busy={loading}
           >
             {loading && !entries.length ? (
-              <div className="log-loading" role="status">
-                <span />
-                <span />
-                <span />
-                Leyendo auditoría…
+              <div className="log-loading" role="status" aria-label="Leyendo auditoría">
+                {Array.from({ length: 7 }, (_, index) => (
+                  <div className="log-loading-row" key={index} aria-hidden="true">
+                    <ShadcnSkeleton className="log-placeholder-time" />
+                    <ShadcnSkeleton className="log-placeholder-level" />
+                    <ShadcnSkeleton className="log-placeholder-message" />
+                  </div>
+                ))}
+                <span className="sr-only">Leyendo auditoría…</span>
               </div>
             ) : entries.length ? (
               <ol className="log-list">
@@ -358,7 +360,7 @@ export function Logs() {
                 ))}
               </ol>
             ) : (
-              <Empty>No hay eventos que coincidan con estos filtros.</Empty>
+              <Empty title="Sin eventos coincidentes" icon={ListFilter}>No hay eventos que coincidan con estos filtros.</Empty>
             )}
           </div>
         </CardContent>
@@ -399,7 +401,7 @@ export function Logs() {
           </span>
         </CardFooter>
       </Card>
-    </>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CircleCheck, RotateCw, ShieldAlert } from "lucide-react";
-import { Empty, Panel } from "../components/common.jsx";
+import { Empty, Panel, Skeleton } from "../components/common.jsx";
 import { Button, Field, Select, Textarea } from "../components/ui.jsx";
 import { Badge } from "../components/ui/badge.tsx";
 import { Checkbox } from "../components/ui/checkbox.tsx";
@@ -122,8 +122,8 @@ export function RecoveryPanel({ onChanged }) {
         </div>
         {loadError ? <div className="resource-error" role="alert"><p><AlertTriangle aria-hidden="true" />{loadError}</p><Button variant="outline" size="sm" onClick={() => void load()}>Reintentar</Button></div> : null}
         {actionMessage ? <p className={actionFailed ? "recovery-message danger" : "recovery-message"} role={actionFailed ? "alert" : "status"}>{actionMessage}</p> : null}
-        {loading && !report ? <div className="recovery-loading" role="status">Cargando intenciones…</div> : null}
-        {!loading && !loadError && items.length === 0 ? <Empty>No hay intenciones remotas que requieran atención.</Empty> : null}
+        {loading && !report ? <Skeleton rows={2} label="Cargando intenciones remotas" /> : null}
+        {!loading && !loadError && items.length === 0 ? <Empty title="Todo al día" icon={CircleCheck}>No hay intenciones remotas que requieran atención.</Empty> : null}
         {items.length ? <ol className="recovery-list">
           {items.map((item) => <RecoveryCard
             key={item.intentId}

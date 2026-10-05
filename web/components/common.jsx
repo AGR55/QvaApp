@@ -1,11 +1,14 @@
 import React from "react";
+import { Activity, Inbox } from "lucide-react";
 import { CardTitle } from "./ui.jsx";
 import { Card, CardContent, CardDescription, CardHeader } from "./ui/card.tsx";
 import {
   Empty as ShadcnEmpty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
+  EmptyTitle,
 } from "./ui/empty.tsx";
 import { Skeleton as ShadcnSkeleton } from "./ui/skeleton.tsx";
 
@@ -38,31 +41,57 @@ export function ViewHead({ kicker, title, description, meta }) {
     </header>
   );
 }
-export function Empty({ children }) {
+export function Empty({
+  children,
+  title = "Sin resultados",
+  icon: Icon = Inbox,
+  action,
+  className = "",
+}) {
   return (
-    <ShadcnEmpty className="empty" data-ui="empty">
+    <ShadcnEmpty className={`empty ${className}`.trim()} data-ui="empty">
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <svg className="empty-illustration" viewBox="0 0 72 52" fill="none" aria-hidden="true">
-            <rect x="5" y="7" width="62" height="38" rx="7" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M15 35h42M15 28l11-8 10 5 9-10 12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            <circle cx="45" cy="15" r="2.5" fill="currentColor" />
-          </svg>
+          <Icon aria-hidden="true" />
         </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
         <EmptyDescription>{children}</EmptyDescription>
       </EmptyHeader>
+      {action ? <EmptyContent>{action}</EmptyContent> : null}
     </ShadcnEmpty>
   );
 }
 export function Skeleton({ rows = 3, label = "Cargando datos" }) {
   return (
     <div className="skeleton" role="status" aria-label={label}>
-      <span className="skeleton-pulse" aria-hidden="true" />
       {Array.from({ length: rows }, (_, index) => (
-        <ShadcnSkeleton key={index} />
+        <ShadcnSkeleton key={index} className="skeleton-row" aria-hidden="true" />
       ))}
       <span className="sr-only">{label}</span>
     </div>
+  );
+}
+export function ViewLoading({ label = "Cargando vista" }) {
+  return (
+    <section className="view-loading" role="status" aria-busy="true" aria-label={label}>
+      <span className="sr-only">{label}</span>
+      <div className="view-loading-heading" aria-hidden="true">
+        <ShadcnSkeleton className="view-loading-title" />
+        <ShadcnSkeleton className="view-loading-subtitle" />
+      </div>
+      <div className="view-loading-panel" aria-hidden="true">
+        <div className="view-loading-summary">
+          <ShadcnSkeleton />
+          <ShadcnSkeleton />
+          <ShadcnSkeleton />
+        </div>
+        <div className="view-loading-lines">
+          <ShadcnSkeleton />
+          <ShadcnSkeleton />
+          <ShadcnSkeleton />
+        </div>
+      </div>
+    </section>
   );
 }
 export function Freshness({ state, cachedAt }) {
@@ -88,6 +117,6 @@ export function List({ rows, render, empty = "Sin señales todavía." }) {
       ))}
     </ol>
   ) : (
-    <Empty>{empty}</Empty>
+    <Empty title="Sin actividad" icon={Activity}>{empty}</Empty>
   );
 }

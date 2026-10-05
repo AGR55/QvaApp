@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { ReceiptText, Smartphone, Workflow } from "lucide-react";
 import { Empty, Panel } from "../components/common.jsx";
 import { Badge, Button, Field, Input } from "../components/ui.jsx";
 import { requestJson } from "../lib/http.js";
@@ -151,7 +152,7 @@ export function MobileSmsPanel() {
                 </li>
               ))}
             </ul>
-          ) : <Empty>Aún no hay móviles vinculados.</Empty>}
+          ) : <Empty title="Sin móviles vinculados" icon={Smartphone}>Vincula la APK para recibir comprobantes de transferencia.</Empty>}
           <h3>Operaciones y avisos</h3>
           <p className="detail">Este acceso es independiente del token SMS y permite ejecutar acciones financieras desde la app. Guárdalo solo en tu móvil.</p>
           <form className="mobile-sms-pair" onSubmit={pairOperator}>
@@ -178,7 +179,7 @@ export function MobileSmsPanel() {
                 </li>
               ))}
             </ul>
-          ) : <Empty>Aún no hay acceso a operaciones vinculado.</Empty>}
+          ) : <Empty title="Sin operador móvil" icon={Workflow}>Vincula la app para consultar y ejecutar operaciones desde el teléfono.</Empty>}
         </div>
         <div>
           <h3>Últimos comprobantes</h3>
@@ -193,7 +194,7 @@ export function MobileSmsPanel() {
                 </li>
               ))}
             </ul>
-          ) : <Empty>No hay comprobantes recibidos.</Empty>}
+          ) : <Empty title="Sin comprobantes" icon={ReceiptText}>Los SMS de transferencia recibidos por la app aparecerán aquí.</Empty>}
           <p className="detail">Si un comprobante requiere revisión, abre la operación correspondiente y usa «Registrar pago» tras comprobar la transferencia.</p>
         </div>
       </div>

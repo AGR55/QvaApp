@@ -680,7 +680,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
             ))}
           </ol>
         ) : (
-          <Empty>Sin revisiones registradas.</Empty>
+          <Empty title="Sin revisiones" icon={History}>Los cambios de configuración registrados aparecerán aquí.</Empty>
         )}
       </Panel>
     </div>

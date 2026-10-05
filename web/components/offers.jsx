@@ -1,5 +1,6 @@
 import React from "react";
 import { Empty } from "./common.jsx";
+import { Inbox } from "lucide-react";
 import { Badge, Button } from "./ui.jsx";
 import {
   Table,
@@ -14,7 +15,7 @@ import { money } from "../lib/format.js";
 import { MarketIdentity } from "./market-identity.jsx";
 
 export function Offers({ offers, markets = [], label, unit, editable = false, onEdit, onCancel }) {
-  if (!offers?.length) return <Empty>Sin ofertas.</Empty>;
+  if (!offers?.length) return <Empty title="Sin ofertas" icon={Inbox}>Este mercado todavía no tiene ofertas disponibles.</Empty>;
   return (
     <div className="table-wrap">
       <Table aria-label="Ofertas del mercado">

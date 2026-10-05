@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from "react";
-import { AlertTriangle, CheckCircle2, RefreshCcw } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Bell, CheckCircle2, RefreshCcw, Workflow } from "lucide-react";
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
@@ -63,7 +63,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
               </li>
             ))}
           </ol>
-        ) : <Empty>No hay avisos de operación pendientes.</Empty>}
+        ) : <Empty title="Sin avisos pendientes" icon={Bell}>Los avisos de tus operaciones aparecerán aquí.</Empty>}
       </Panel>
       {data.risk.usage.unresolvedMutation ? (
         <div className="alert" role="alert">
@@ -96,7 +96,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
                 </TableBody>
               </Table>
             </div>
-          ) : <Empty>No hay operaciones registradas.</Empty>}
+          ) : <Empty title="Sin operaciones registradas" icon={ArrowLeftRight}>Cuando se inicie una operación, podrás gestionarla desde esta tabla.</Empty>}
         </Panel>
         <Panel title="Flujos automáticos" wide>
           {data.workflows?.length ? (
@@ -109,7 +109,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
                 </li>
               ))}
             </ol>
-          ) : <Empty>No se han ejecutado flujos automáticos.</Empty>}
+          ) : <Empty title="Sin flujos ejecutados" icon={Workflow}>Las aplicaciones automáticas aparecerán aquí.</Empty>}
         </Panel>
       </div>
       <MobileSmsPanel />
