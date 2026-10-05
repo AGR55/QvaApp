@@ -18,7 +18,8 @@ const serverSource = readFileSync(
 test("el navegador solo lee el snapshot preparado por la VPS", () => {
   assert.doesNotMatch(hookSource, /\/api\/live\//);
   assert.doesNotMatch(hookSource, /dashboardResources/);
-  assert.match(hookSource, /window\.setInterval\([^]*10_000\)/);
+  assert.match(hookSource, /window\.setInterval\([^]*20_000\)/);
+  assert.doesNotMatch(hookSource, /\[view, market, enabled\]/);
 });
 
 test("la VPS refresca el snapshot al arrancar y periódicamente", () => {

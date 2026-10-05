@@ -1,5 +1,4 @@
 import React from "react";
-import { Activity } from "lucide-react";
 import { CardTitle } from "./ui.jsx";
 import { Card, CardContent, CardDescription, CardHeader } from "./ui/card.tsx";
 import {
@@ -44,7 +43,11 @@ export function Empty({ children }) {
     <ShadcnEmpty className="empty" data-ui="empty">
       <EmptyHeader>
         <EmptyMedia variant="icon">
-          <Activity />
+          <svg className="empty-illustration" viewBox="0 0 72 52" fill="none" aria-hidden="true">
+            <rect x="5" y="7" width="62" height="38" rx="7" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M15 35h42M15 28l11-8 10 5 9-10 12 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="45" cy="15" r="2.5" fill="currentColor" />
+          </svg>
         </EmptyMedia>
         <EmptyDescription>{children}</EmptyDescription>
       </EmptyHeader>
@@ -54,6 +57,7 @@ export function Empty({ children }) {
 export function Skeleton({ rows = 3, label = "Cargando datos" }) {
   return (
     <div className="skeleton" role="status" aria-label={label}>
+      <span className="skeleton-pulse" aria-hidden="true" />
       {Array.from({ length: rows }, (_, index) => (
         <ShadcnSkeleton key={index} />
       ))}

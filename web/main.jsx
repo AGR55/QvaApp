@@ -137,8 +137,6 @@ function App() {
   const [theme, setTheme] = useState(() => getInitialTheme());
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const { data, status, resources, online, refresh } = useDashboard(
-    view,
-    market,
     setMarket,
     initialBootstrap?.dashboard,
     Boolean(session?.authenticated),
@@ -560,7 +558,7 @@ function App() {
               />
             ) : null}
             {view === "graficas" ? (
-              <Charts markets={data.markets} />
+              <Charts markets={data.markets} initialHistory={data.marketHistory} />
             ) : null}
             {view === "configuracion" ? (
               <Settings

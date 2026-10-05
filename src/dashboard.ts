@@ -44,6 +44,30 @@ type TransactionView = {
 
 const REBALANCE_OWN_OFFERS_MAX_AGE_MS = 60_000;
 
+export function compactMarketHistory<T extends { coin: string; createdAt: number }>(
+  history: T[],
+  maxPerMarket: number,
+): T[] {
+  if (!Number.isInteger(maxPerMarket) || maxPerMarket < 2)
+    throw new RangeError("El histórico compacto requiere al menos dos puntos por mercado.");
+  const groups = new Map<string, T[]>();
+  for (const point of history) {
+    const group = groups.get(point.coin);
+    if (group) group.push(point);
+    else groups.set(point.coin, [point]);
+  }
+  const compact: T[] = [];
+  for (const group of groups.values()) {
+    if (group.length <= maxPerMarket) {
+      compact.push(...group);
+      continue;
+    }
+    for (let index = 0; index < maxPerMarket; index += 1)
+      compact.push(group[Math.round(index * (group.length - 1) / (maxPerMarket - 1))]!);
+  }
+  return compact.sort((a, b) => a.createdAt - b.createdAt);
+}
+
 export interface BudgetRebalancePreview {
   plans: BudgetPlan[];
   updatedAt: number | null;
@@ -671,8 +695,8 @@ export class DashboardReadModel {
         .filter((coin) => !this.marketConfig.find(coin))
         .map((code) => ({ code, label: code, currency: "" })),
       budget,
-      history: this.store.dashboardHistory(generatedAt - 90 * 86_400_000),
-      marketHistory,
+      history: sampleHistory(this.store.dashboardHistory(generatedAt - 90 * 86_400_000), 180),
+      marketHistory: compactMarketHistory(marketHistory, 96),
       rankings: rankings(configuredMarkets, market, marketHistory),
       activity: this.store.recentAudit(50),
       alerts: this.store.recentTradingAlerts(),
@@ -916,7 +940,7 @@ export class DashboardReadModel {
   marketAnalytics(coin: string) {
     return {
       coin,
-      history: this.store.marketHistory(Date.now() - 24 * 3_600_000, coin),
+      history: compactMarketHistory(this.store.marketHistory(Date.now() - 24 * 3_600_000, coin), 240),
     };
   }
 
@@ -924,6 +948,13 @@ export class DashboardReadModel {
     return Object.values(this.localSnapshot().budget)
       .filter((plan): plan is BudgetPlan => (plan as BudgetPlan).deficit > 0);
   }
+}
+
+function sampleHistory<T>(history: T[], limit: number): T[] {
+  if (history.length <= limit) return history;
+  return Array.from({ length: limit }, (_, index) =>
+    history[Math.round(index * (history.length - 1) / (limit - 1))]!,
+  );
 }
 
 function precisionQusd(value: number): number {

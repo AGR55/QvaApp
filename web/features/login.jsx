@@ -35,15 +35,11 @@ export function Login({ onAuthenticated }) {
         <div className="login-panel-inner">
           <div className="login-brand-lockup">
             <img
-              src="/logo/isotipo.webp"
+              src="/logo/logotipo.webp"
               alt="QvaApply"
-              width="44"
-              height="44"
+              width="200"
+              height="47"
             />
-            <span className="brand-word">
-              <strong>QvaApply</strong>
-              <small>Mesa P2P</small>
-            </span>
           </div>
           <div className="login-heading">
             <h1 id="login-title">Mesa de operaciones</h1>
@@ -80,16 +76,6 @@ export function Login({ onAuthenticated }) {
           </form>
         </div>
       </section>
-      <aside
-        className="login-visual"
-        aria-label="Panorama de mercados financieros"
-      >
-        <img
-          src="/images/signin-picture.webp"
-          alt="Visualización de mercados financieros globales"
-        />
-        <div className="login-visual-overlay" />
-      </aside>
     </main>
   );
 }
