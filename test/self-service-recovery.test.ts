@@ -209,3 +209,39 @@ test("bloquea la resolución manual cuando el orden del feed tiene un empate amb
   assert.match(item.manualBlockedReason ?? "", /historial del feed es ambiguo/i);
   store.close();
 });
+
+test("p2p.completed posterior permite solo declarar revisión terminal sin inventar resultado remoto", () => {
+  const { store, createIntent } = setup();
+  const intent = createIntent("terminal-intent", "terminal-offer");
+  store.enqueueMarketFeedEvent({ key: "terminal-event", event: "p2p.completed", receivedAt: Date.now(), payload: {
+    event: "p2p.completed", sent_at: new Date(Date.now()).toISOString(), data: { uuid: "terminal-offer", status: "completed" },
+  } });
+  const service = new SelfServiceRecovery(store, {} as never);
+  const item = service.list().items[0]!;
+  assert.equal(item.manualEligible, true);
+  assert.deepEqual(item.manualOutcomes, ["terminal_reviewed"]);
+  const input = { intentId: intent.intentId, expectedUpdatedAt: intent.updatedAt,
+    reason: "Revisé la oferta finalizada y mis operaciones en QvaPay.",
+    evidence: "La oferta terminó, pero mi cuenta no muestra operación ni pago pendiente.", confirmed: true as const };
+  assert.throws(() => service.resolveManual({ ...input, outcome: "not_applied" }), /oferta terminó/);
+  assert.equal(service.resolveManual({ ...input, outcome: "terminal_reviewed" }).state, "reconciled");
+  assert.equal((store.getMutationIntent(intent.intentId)?.response as { outcome: string }).outcome, "terminal_reviewed");
+  assert.equal(store.getOperation("terminal-offer"), undefined);
+  assert.equal(store.hasFiatMovement("terminal-offer"), false);
+  store.close();
+});
+
+test("p2p.completed anterior a la intención no habilita resolución terminal", () => {
+  const { store, createIntent } = setup();
+  store.enqueueMarketFeedEvent({ key: "old-terminal", event: "p2p.completed", receivedAt: Date.now() - 5_000, payload: {
+    event: "p2p.completed", sent_at: new Date(Date.now() - 5_000).toISOString(), data: { uuid: "old-offer", status: "completed" },
+  } });
+  const intent = createIntent("old-terminal-intent", "old-offer");
+  const service = new SelfServiceRecovery(store, {} as never);
+  assert.equal(service.list().items[0]?.manualEligible, false);
+  assert.equal(store.resolveMutationIntentCAS(intent.intentId, intent.updatedAt, {
+    source: "operator_attestation", actor: "admin_web", operatorConfirmed: true,
+    outcome: "terminal_reviewed", reason: "Revisé la oferta en QvaPay", evidence: "No existe operación ni pago pendiente", verifiedAt: Date.now(),
+  }), false);
+  store.close();
+});

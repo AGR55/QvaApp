@@ -585,7 +585,9 @@ export class DashboardReadModel {
         type: item.kind,
         message: item.message,
         alert,
-        url: `/?view=${view}&operation=${encodeURIComponent(item.operationUuid ?? "")}`,
+        url: item.kind === "recovery-blocked"
+          ? `/?view=auditoria&intent=${encodeURIComponent(String(event.intentId ?? ""))}`
+          : `/?view=${view}&operation=${encodeURIComponent(item.operationUuid ?? "")}`,
         createdAt: item.createdAt,
       };
     });

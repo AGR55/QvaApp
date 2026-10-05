@@ -9,6 +9,7 @@ interface NotificationEventPayload {
   kind: NotificationKind;
   uuid?: string;
   eventVersion?: string;
+  intentId?: string;
   coin?: string;
   amount?: number;
   alert?: { uuid: string; rate?: number; reason?: string };
@@ -115,6 +116,8 @@ export class NotificationDispatcher {
 }
 
 function notificationId(event: NotificationEventPayload): string {
+  if (event.kind === "recovery-blocked" && event.intentId)
+    return `recovery-blocked:${event.intentId}`;
   if (event.kind === "own-offer-applied" && event.uuid && event.eventVersion)
     return `${event.kind}:${event.uuid}:${event.eventVersion}`;
   if (event.kind !== "blocked-offer" && event.uuid)

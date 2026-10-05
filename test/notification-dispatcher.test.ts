@@ -99,3 +99,38 @@ test("deduplica el mismo ciclo y conserva la segunda aplicación después de rea
   assert.equal(store.pendingUserNotifications().length, 2);
   store.close();
 });
+
+test("el bloqueo incierto produce aviso persistente único y se retira al resolver", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-recovery-notice-")));
+  let telegramCalls = 0;
+  const dispatcher = new NotificationDispatcher(store, {
+    telegram: async () => { telegramCalls++; },
+    webPush: async () => undefined,
+  });
+  store.createMutationIntent({ intentId: "i-recovery", kind: "apply", operationUuid: "offer", request: {} });
+  store.updateMutationIntent("i-recovery", "uncertain");
+  const input = { message: "QvaApply detuvo nuevas operaciones", operationUuid: "offer",
+    event: { kind: "recovery-blocked" as const, intentId: "i-recovery", uuid: "offer" } };
+  await dispatcher.publish(input);
+  await dispatcher.publish(input);
+  assert.equal(telegramCalls, 1);
+  assert.equal(store.pendingUserNotifications()[0]?.id, "recovery-blocked:i-recovery");
+  store.updateMutationIntent("i-recovery", "reconciled");
+  assert.equal(store.pendingUserNotifications().length, 0);
+  store.close();
+});
+
+test("un bloqueo ya resuelto no vuelve a notificar en los reintentos", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-recovery-stale-")));
+  const dispatcher = new NotificationDispatcher(store, {
+    telegram: async () => { throw new Error("Telegram sin red"); },
+    webPush: async () => undefined,
+  });
+  store.createMutationIntent({ intentId: "i-stale", kind: "apply", operationUuid: "offer-stale", request: {} });
+  store.updateMutationIntent("i-stale", "uncertain");
+  await dispatcher.publish({ message: "Bloqueo", event: { kind: "recovery-blocked", intentId: "i-stale", uuid: "offer-stale" } });
+  assert.equal(store.pendingUserNotifications().length, 1);
+  store.updateMutationIntent("i-stale", "reconciled");
+  assert.equal(store.pendingNotificationDeliveries(Date.now() + 60_000).length, 0);
+  store.close();
+});

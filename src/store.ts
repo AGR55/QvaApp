@@ -190,6 +190,7 @@ export type NotificationKind =
   | "operation-applied"
   | "own-offer-applied"
   | "reconciliation-required"
+  | "recovery-blocked"
   | "rebalance-completed"
   | "rebalance-attention";
 
@@ -1216,6 +1217,8 @@ export class Store {
         Date.now(),
         intentId,
       );
+    if (state !== "submitted" && state !== "uncertain")
+      this.acknowledgeNotification(`recovery-blocked:${intentId}`);
   }
 
   recentMutationIntents(limit = 20): MutationIntent[] {
@@ -1251,12 +1254,14 @@ export class Store {
       if ((operation && operation.state !== "cancelled") || this.hasFiatMovement(intent.operationUuid)) return false;
       const latest = this.latestMarketFeedState(intent.operationUuid);
       if (!latest && this.hasMarketFeedHistory(intent.operationUuid)) return false;
-      if (latest && (latest.sentAt > Date.now() || latest.receivedAt > Date.now() || latest.event === "p2p.applied" || !["open", "cancelled"].includes(latest.status))) return false;
+      if (latest && (latest.sentAt > Date.now() || latest.receivedAt > Date.now() || latest.event === "p2p.applied" || !["open", "cancelled", "completed"].includes(latest.status))) return false;
+      if (latest?.status === "completed" && (latest.event !== "p2p.completed" || latest.sentAt < intent.createdAt || latest.receivedAt < intent.createdAt || response.outcome !== "terminal_reviewed")) return false;
+      if (latest?.status !== "completed" && response.outcome === "terminal_reviewed") return false;
       if (latest?.status === "open" && response.outcome === "cancelled") return false;
       if (response.source !== "operator_attestation" || response.actor !== "admin_web" ||
         response.operatorConfirmed !== true || !Number.isSafeInteger(response.verifiedAt) ||
         Number(response.verifiedAt) < intent.createdAt || Number(response.verifiedAt) > Date.now() ||
-        !["not_applied", "cancelled"].includes(String(response.outcome)) ||
+        !["not_applied", "cancelled", "terminal_reviewed"].includes(String(response.outcome)) ||
         typeof response.reason !== "string" || response.reason.trim().length < 12 || response.reason.length > 500 ||
         typeof response.evidence !== "string" || response.evidence.trim().length < 12 || response.evidence.length > 1000) return false;
       const now = Date.now();
@@ -1264,6 +1269,7 @@ export class Store {
         SET state = 'reconciled', response_json = ?, error = NULL, updated_at = ?
         WHERE intent_id = ? AND updated_at = ? AND state = 'uncertain'`).run(JSON.stringify(response), now, intentId, expectedUpdatedAt);
       if (!result.changes) return false;
+      this.acknowledgeNotification(`recovery-blocked:${intentId}`);
       this.audit("mutation_manually_reviewed",
         `Declaración del propietario (${response.actor}), intención ${intentId}, resultado ${response.outcome}. Motivo: ${response.reason}. Evidencia declarada: ${response.evidence}. No es confirmación remota de QvaPay.`, intent.operationUuid);
       return true;
@@ -2495,8 +2501,9 @@ export class Store {
     return (
       this.db.prepare(
         `SELECT * FROM notification_events
-         WHERE (telegram_delivered_at IS NULL AND telegram_next_attempt_at <= ?)
-            OR (push_delivered_at IS NULL AND push_next_attempt_at <= ?)
+         WHERE (kind <> 'recovery-blocked' OR acknowledged_at IS NULL)
+           AND ((telegram_delivered_at IS NULL AND telegram_next_attempt_at <= ?)
+             OR (push_delivered_at IS NULL AND push_next_attempt_at <= ?))
          ORDER BY created_at ASC LIMIT ?`,
       ).all(now, now, limit) as Record<string, unknown>[]
     ).map(notificationFromRow);
@@ -2535,7 +2542,7 @@ export class Store {
       this.db.prepare(
         `SELECT * FROM notification_events
          WHERE acknowledged_at IS NULL
-           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'rebalance-completed', 'rebalance-attention')
+           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'recovery-blocked', 'rebalance-completed', 'rebalance-attention')
          ORDER BY created_at DESC LIMIT ?`,
       ).all(limit) as Record<string, unknown>[]
     ).map(notificationFromRow);

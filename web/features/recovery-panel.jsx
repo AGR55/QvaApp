@@ -74,7 +74,7 @@ export function RecoveryPanel({ onChanged }) {
 
   const beginResolve = (item) => {
     setSelected(item);
-    setOutcome("not_applied");
+    setOutcome(item.manualOutcomes?.[0] ?? "not_applied");
     setReason("");
     setEvidence("");
     setConfirmed(false);
@@ -153,21 +153,22 @@ export function RecoveryPanel({ onChanged }) {
               options={[
                 { value: "not_applied", label: "La aplicación no se realizó" },
                 { value: "cancelled", label: "La solicitud aparece cancelada" },
+                { value: "terminal_reviewed", label: "Oferta completada; verifiqué que no tengo obligaciones pendientes" },
               ].filter((option) => !selected.manualOutcomes || selected.manualOutcomes.includes(option.value))}
             />
           </Field>
           <Field label="Motivo" htmlFor="recovery-reason" description="Resume qué comprobaste y por qué corresponde este resultado.">
             <Textarea id="recovery-reason" value={reason} onChange={(event) => setReason(event.target.value)} rows={3} maxLength={500} />
           </Field>
-          <Field label="Evidencia revisada en QvaPay" htmlFor="recovery-evidence" description="Anota el dato observable que verificaste, por ejemplo estado e identificador de la oferta. Mínimo 12 caracteres.">
+          <Field label="Evidencia revisada en QvaPay" htmlFor="recovery-evidence" description={outcome === "terminal_reviewed" ? "Indica qué comprobaste en Mis operaciones y pagos de tu cuenta, además del UUID de la oferta. Mínimo 12 caracteres." : "Anota el dato observable que verificaste, por ejemplo estado e identificador de la oferta. Mínimo 12 caracteres."}>
             <Textarea id="recovery-evidence" value={evidence} onChange={(event) => setEvidence(event.target.value)} rows={3} maxLength={1000} />
           </Field>
           <label className="recovery-confirmation">
             <Checkbox checked={confirmed} onCheckedChange={(value) => setConfirmed(value === true)} />
-            <span>Confirmo que revisé QvaPay y que esta declaración describe lo que observé.</span>
+            <span>{outcome === "terminal_reviewed" ? "Confirmo que revisé en QvaPay mis operaciones y pagos de esta oferta, y que no tengo ninguna obligación o dinero pendiente." : "Confirmo que revisé QvaPay y que esta declaración describe lo que observé."}</span>
           </label>
           {resolveError ? <div className="resource-error" role="alert"><p><AlertTriangle aria-hidden="true" />{resolveError}</p></div> : null}
-          <p className="recovery-warning">No uses esta acción para marcar pagos o recepciones. La resolución manual no prueba por sí sola el resultado remoto.</p>
+          <p className="recovery-warning">{outcome === "terminal_reviewed" ? "El evento p2p.completed solo indica que la oferta terminó; no demuestra quién la tomó. Si figura en tus operaciones, tienes un pago sin cerrar o no puedes comprobarlo, no desbloquees aquí." : "No uses esta acción para marcar pagos o recepciones. La resolución manual no prueba por sí sola el resultado remoto."}</p>
         </div> : null}
         <DialogFooter>
           <Button variant="secondary" disabled={Boolean(busyId)} onClick={() => setSelected(null)}>Cancelar</Button>
