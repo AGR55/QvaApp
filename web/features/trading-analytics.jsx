@@ -138,7 +138,7 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
               <CartesianGrid vertical={false} /><XAxis dataKey="date" axisLine={false} tickLine={false} tickFormatter={dateLabel} />
               <YAxis axisLine={false} tickLine={false} width={55} tickFormatter={compact} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={dateLabel} />} />
-              <Area dataKey="totalQusd" type="monotone" fill="var(--color-totalQusd)" fillOpacity={0.12} stroke="var(--color-totalQusd)" strokeWidth={2} animationDuration={350} />
+              <Area dataKey="totalQusd" type="monotone" dot={dailyCapital.length === 1 ? { r: 4 } : false} fill="var(--color-totalQusd)" fillOpacity={0.12} stroke="var(--color-totalQusd)" strokeWidth={2} animationDuration={350} />
             </AreaChart>
           </ChartContainer>
         </ChartOrEmpty>
@@ -151,7 +151,7 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
               <XAxis dataKey="at" axisLine={false} tickLine={false} minTickGap={40} tickFormatter={(time) => new Date(time).toLocaleDateString("es-CU", { day: "numeric", month: "short" })} />
               <YAxis axisLine={false} tickLine={false} width={55} tickFormatter={compact} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, payload) => payload[0] ? new Date(payload[0].payload.at).toLocaleString("es-CU") : ""} />} />
-              <Area dataKey="totalQusd" type="monotone" fill="var(--color-totalQusd)" fillOpacity={0.12} stroke="var(--color-totalQusd)" strokeWidth={2} animationDuration={350} />
+              <Area dataKey="totalQusd" type="monotone" dot={balanceRows.length === 1 ? { r: 4 } : false} fill="var(--color-totalQusd)" fillOpacity={0.12} stroke="var(--color-totalQusd)" strokeWidth={2} animationDuration={350} />
             </AreaChart>
           </ChartContainer>
         </ChartOrEmpty>
