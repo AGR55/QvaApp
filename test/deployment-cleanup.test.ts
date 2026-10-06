@@ -54,7 +54,9 @@ test("limpia releases e imágenes huérfanas conservando actual, anterior y cont
     assert.doesNotMatch(commands, new RegExp(`image rm qvaapply:${protectedImage}`));
   assert.doesNotMatch(commands, /image rm (friend:latest|qvaapply:manual)|system prune|volume prune|image prune.*--all/);
   assert.match(commands, /image prune -f --filter label=qvaapply.release=true/);
-  assert.match(commands, /buildx prune -f --filter inuse=false --filter shared=false --filter description~=qvaapply-runtime/);
+  assert.match(commands, /buildx prune -f --filter description~=qvaapply-runtime/);
+  assert.match(commands, /pnpm\.install\.--prod\.--frozen-lockfile\.--ignore-scripts\$/);
+  assert.doesNotMatch(commands, /buildx prune.*--all|(?:inuse|shared)=(?:true|false)/);
 });
 
 test("no elimina nada si la revisión activa no coincide o tiene un nombre inválido", () => {

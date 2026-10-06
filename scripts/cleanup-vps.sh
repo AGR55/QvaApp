@@ -44,8 +44,9 @@ while IFS= read -r -d '' stale_release; do
 done < <(find "$app_root/releases" -mindepth 1 -maxdepth 1 -type d -print0)
 
 docker image prune -f --filter 'label=qvaapply.release=true'
-# Named stages identify future caches. The legacy COPY stages were verified
-# against this VPS; unrelated builders, sources and shared image layers stay intact.
-docker buildx prune -f --filter 'inuse=false' --filter 'shared=false' \
-  --filter 'description~=qvaapply-runtime|^\[[67]/7\].COPY.(dist|public).'
+# Normal prune (without --all) already excludes in-use and shared image layers.
+# BuildKit exposes boolean attributes as presence, not true/false string values.
+# Select only the QvaApply stages verified on this VPS, including old dependencies.
+docker buildx prune -f \
+  --filter 'description~=qvaapply-runtime|^\[[67]/7\].COPY.(dist|public).|pnpm.install.--prod.--frozen-lockfile.--ignore-scripts$'
 echo "Retención de QvaApply: versión activa y versión anterior."
