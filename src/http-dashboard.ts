@@ -646,6 +646,16 @@ export function buildDashboard(
     await clientAction(() => readModel.reconcileCooperativeNetwork());
     reply.status(204);
   });
+  app.put<{ Body: { enabled: boolean } }>("/api/cooperative-network/hunting", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["enabled"], properties: { enabled: { type: "boolean" } } } },
+  }, async (request, reply) => { readModel.setCooperativeHunting(request.body.enabled); reply.status(204); });
+  app.post("/api/cooperative-network/executions/check", async (_request, reply) => {
+    await clientAction(() => readModel.checkCooperativeHunting()); reply.status(204);
+  });
+  app.post<{ Params: { uuid: string }; Body: { confirmed: boolean } }>("/api/cooperative-network/executions/:uuid/distributed", {
+    schema: { params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
+      body: { type: "object", additionalProperties: false, required: ["confirmed"], properties: { confirmed: { const: true } } } },
+  }, async (request, reply) => { readModel.markCooperativeDistributed(request.params.uuid); reply.status(204); });
   app.put<{ Body: { paused?: boolean; refresh?: boolean; emergencyStop?: boolean; mode?: string } }>("/api/control", {
     schema: {
       body: {

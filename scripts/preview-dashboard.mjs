@@ -132,11 +132,22 @@ const snapshot = {
 };
 
 let previewDecisionDismissed = false;
+snapshot.cooperativeHunting = { enabled: true, qusdOwed: 6, executions: [{
+  offer: { uuid: "cooperative-demo", coin: "BANK_CUP", type: "sell", status: "completed", amount: 10, receive: 9500 },
+  phase: "completed", credited: true, createdAt: now - 180000, updatedAt: now,
+  reservation: { externalId: "cooperative-demo", state: "completed", ownerFiat: 3800, contributions: [{ userId: "preview-friend", fiat: 5700, qusd: 6 }] },
+}] };
 let previewRecovery = [{ intentId: "preview-uncertain-apply", kind: "apply", state: "uncertain",
   operationUuid: "preview-external-offer", createdAt: now - 600000, updatedAt: now - 590000,
   error: "HTTP 404: No tienes permisos para ver esta oferta", manualEligible: true,
   retry: { attempts: 3, nextAttemptAt: now + 60000, eligible: false } }];
 const model = {
+  setCooperativeHunting: enabled => { snapshot.cooperativeHunting.enabled = enabled; },
+  checkCooperativeHunting: async () => undefined,
+  markCooperativeDistributed: uuid => {
+    snapshot.cooperativeHunting.executions = snapshot.cooperativeHunting.executions.filter(job => job.offer.uuid !== uuid);
+    snapshot.cooperativeHunting.qusdOwed = 0;
+  },
   tradingAnalytics: (days = 30) => ({
     ...buildTradingAnalytics({ transactions: analyticsTransactions, accountUuid: "preview-me", fiat: [], markets, days, now }),
     balanceHistory: analyticsBalances.filter((point) => point.createdAt >= now - days * 86_400_000),

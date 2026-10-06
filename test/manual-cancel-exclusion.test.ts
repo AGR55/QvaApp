@@ -130,7 +130,7 @@ test("historical manual cancel audit entries are backfilled once", () => {
   const migrated = new Store(dataDir);
   assert.equal(migrated.isExcludedAfterManualCancel("legacy-cancelled-offer"), true);
   assert.equal(migrated.isExcludedAfterManualCancel("legacy-auto-cancelled"), false);
-  assert.equal(migrated.schemaVersion(), 24);
+  assert.equal(migrated.schemaVersion(), 25);
   migrated.close();
 });
 

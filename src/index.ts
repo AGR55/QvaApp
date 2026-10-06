@@ -14,6 +14,7 @@ import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
 import { HuntingSyncCoordinator } from "./hunting-sync.js";
+import { CooperativeHunter } from "./cooperative-hunter.js";
 import {
   HuntingRateSessions,
   TELEGRAM_COMMANDS,
@@ -116,13 +117,22 @@ const pollingMarketSource = new PollingMarketSource(
   qva,
   () => marketConfig.current().automation.scanIntervalSeconds,
   () => weightedMarketJobs({
-    markets: trading.activeMarkets().map((market) => ({
+    markets: trading.markets().filter(market => market.active || huntingSync.aggregate(market.code)).map((market) => ({
       code: market.code,
-      buyEnabled: trading.huntEnabled(market.code, "buy"),
+      buyEnabled: trading.huntEnabled(market.code, "buy") || Boolean(huntingSync.aggregate(market.code)),
       sellEnabled: trading.huntEnabled(market.code, "sell"),
     })),
   }),
 );
+const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
+  ownBusy: () => trading.ownDecisionBusy(),
+  safetyReason: offer => trading.cooperativeSafetyReason(offer),
+  canReserveOwn: (coin, fiat) => trading.cooperativeOwnCapacity(coin, fiat),
+  ownerCost: (coin, fiat) => trading.cooperativeOwnerCost(coin, fiat),
+  notify: (message, uuid) => notifications.publish({ message, operationUuid: uuid,
+    event: { kind: message.startsWith("⚠️") ? "reconciliation-required" : "operation-applied", uuid } }),
+});
+trading.observeSecondaryOpportunities((offer, receivedAt) => cooperativeHunter.enqueue(offer, receivedAt));
 const marketSource = new MarketSourceCoordinator(
   store,
   vault,
@@ -132,7 +142,10 @@ const marketSource = new MarketSourceCoordinator(
   () => !trading.isPaused(),
   Date.now,
   {},
-  (event, offer, receivedAt) => trading.ingestMarketStateEvent(event, offer, receivedAt),
+  async (event, offer, receivedAt) => {
+    await trading.ingestMarketStateEvent(event, offer, receivedAt);
+    cooperativeHunter.onState(event, offer);
+  },
 );
 marketSource.start();
 const dashboardReadModel = new DashboardReadModel(
@@ -156,6 +169,7 @@ const dashboardReadModel = new DashboardReadModel(
     });
   },
   huntingSync,
+  cooperativeHunter,
 );
 const dashboardServer = await startDashboard(
   dashboardReadModel,
@@ -469,6 +483,7 @@ scheduler.register("cooperative_reconcile", 60_000, () =>
 scheduler.register("cooperative_capacity", 5_000, () =>
   huntingSync.syncCapacity(),
 );
+scheduler.register("cooperative_hunt_reconcile", 30_000, () => cooperativeHunter.reconcile());
 void bootstrap();
 
 async function installTelegramMenu(): Promise<void> {
@@ -1543,6 +1558,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   stopping = true;
   console.log(`Cerrando QvaApply (${signal})...`);
   scheduler.stop();
+  await cooperativeHunter.stop();
   marketSource.stop();
   if (pollingRetry) clearTimeout(pollingRetry);
   try {
