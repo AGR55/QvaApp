@@ -26,18 +26,16 @@ test("codifica todas las acciones cooperativas dentro del límite de Telegram", 
   assert.throws(() => decodeCooperativeAction("coop:e:moneda inválida"));
 });
 
-test("el flujo cooperativo recopila precio, mínimo y fiat antes de confirmar", () => {
+test("el flujo cooperativo solo recopila precio y mínimo antes de confirmar", () => {
   const sessions = new CooperativeContributionSessions(() => "token1");
   assert.equal(sessions.begin("admin", "BANK_CUP").stage, "price");
   assert.equal(sessions.accept("admin", "390,5").stage, "minimal");
-  assert.equal(sessions.accept("admin", "1000").stage, "fiat");
-  assert.equal(sessions.accept("admin", "25000").stage, "confirm");
+  assert.equal(sessions.accept("admin", "1000").stage, "confirm");
   assert.throws(() => sessions.confirm("admin", "otro-token"));
   assert.deepEqual(sessions.confirm("admin", "token1"), {
     coin: "BANK_CUP",
     price: 390.5,
     minimal: 1000,
-    fiat: 25000,
   });
   assert.equal(sessions.current("admin"), undefined);
 });

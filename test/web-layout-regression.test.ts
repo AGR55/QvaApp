@@ -68,7 +68,7 @@ test("la fuente de mercado permite alternar polling y tiempo real sin exponer se
 
 test("la red cooperativa usa una tabla compacta y mantiene acciones por mercado", () => {
   assert.match(cooperativeNetworkSource, /<table className="network-contribution-table">/);
-  assert.match(cooperativeNetworkSource, /<th scope="col">Fiat disponible<\/th>/);
+  assert.match(cooperativeNetworkSource, /<th scope="col">Fiat aportado<\/th>/);
   assert.match(cooperativeNetworkSource, /form=\{formId\}/);
   assert.match(cooperativeNetworkSource, /data-label="Acciones"/);
   assert.match(styles, /\.network-contribution-table\s*\{/);

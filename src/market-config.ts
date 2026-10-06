@@ -100,10 +100,16 @@ export class MarketConfigService {
   }
 
   current(): TradingConfig {
-    return structuredClone(this.value);
+    const config = structuredClone(this.value);
+    for (const market of config.markets) {
+      const stored = this.store.get(`fiat_balance:${market.code}`);
+      if (stored !== undefined && stored !== "" && Number.isFinite(Number(stored)))
+        market.fiatBalance = Number(stored);
+    }
+    return config;
   }
   markets(): MarketConfig[] {
-    return this.value.markets.map((market) => structuredClone(market));
+    return this.current().markets;
   }
   activeMarkets(): MarketConfig[] {
     return this.markets().filter((market) => market.active);
@@ -112,7 +118,7 @@ export class MarketConfigService {
     return this.value.markets.find((market) => market.code === code);
   }
   publicMarkets(): PublicMarketConfig[] {
-    return this.value.markets.map(({ paymentDetails, ...market }) => ({
+    return this.markets().map(({ paymentDetails, ...market }) => ({
       ...market,
       paymentDetailsCount: paymentDetails.length,
     }));

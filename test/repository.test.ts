@@ -32,6 +32,17 @@ test("versiona el esquema y cierra explícitamente SQLite", () => {
   store.close();
 });
 
+test("el mercado público refleja el fiat actualizado por una operación", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-market-fiat-live-"));
+  const store = new Store(dataDir);
+  const markets = new MarketConfigService(dataDir, legacyRuntime as never, store);
+  store.set("fiat_balance:BANK_CUP", "4000");
+  assert.equal(store.recordFiatMovement("paid-operation", "BANK_CUP", "debit", 1000, "test"), true);
+  assert.equal(markets.current().markets.find((market) => market.code === "BANK_CUP")?.fiatBalance, 3000);
+  assert.equal(markets.publicMarkets().find((market) => market.code === "BANK_CUP")?.fiatBalance, 3000);
+  store.close();
+});
+
 test("indexa las ventanas temporales del panel", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-history-indexes-"));
   const store = new Store(dataDir);

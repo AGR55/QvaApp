@@ -58,16 +58,14 @@ export type CooperativeDraft = {
   coin: FiatMarket;
   price: number;
   minimal: number;
-  fiat: number;
 };
 
 type CooperativeSession = {
-  stage: "price" | "minimal" | "fiat" | "confirm";
+  stage: "price" | "minimal" | "confirm";
   token: string;
   coin: FiatMarket;
   price?: number;
   minimal?: number;
-  fiat?: number;
 };
 
 export class CooperativeContributionSessions {
@@ -102,9 +100,6 @@ export class CooperativeContributionSessions {
       next.stage = "minimal";
     } else if (current.stage === "minimal") {
       next.minimal = value;
-      next.stage = "fiat";
-    } else {
-      next.fiat = value;
       next.stage = "confirm";
     }
     this.pending.set(chatId, next);
@@ -118,8 +113,7 @@ export class CooperativeContributionSessions {
       current.stage !== "confirm" ||
       current.token !== confirmationToken ||
       current.price === undefined ||
-      current.minimal === undefined ||
-      current.fiat === undefined
+      current.minimal === undefined
     )
       throw new Error("Esta confirmación cooperativa ya no está vigente.");
     this.pending.delete(chatId);
@@ -127,7 +121,6 @@ export class CooperativeContributionSessions {
       coin: current.coin,
       price: current.price,
       minimal: current.minimal,
-      fiat: current.fiat,
     };
   }
 
