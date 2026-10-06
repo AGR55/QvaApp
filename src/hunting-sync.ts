@@ -222,7 +222,7 @@ export function parseCooperativeSnapshot(raw: unknown): Record<string, Cooperati
       ...(Array.isArray(value.capacities) ? { capacities: value.capacities.map((level: unknown) => {
         if (!record(level)) throw new Error("Nivel cooperativo inválido.");
         return { fiat: finiteNonNegative(level.fiat, "fiat"), price: finitePositive(level.price, "price"),
-          minimal: finitePositive(level.minimal, "minimal") };
+          minimal: finiteNonNegative(level.minimal, "minimal") };
       }) } : {}),
     };
   }
@@ -242,7 +242,7 @@ export function parseCooperativeContributions(raw: unknown): Record<string, Coop
     parsed[coin] = {
       coin,
       fiat: finiteNonNegative(item.fiat, `${coin}.fiat`),
-      minimal: finitePositive(item.minimal, `${coin}.minimal`),
+      minimal: finiteNonNegative(item.minimal, `${coin}.minimal`),
       price: finitePositive(item.price, `${coin}.price`),
       state: "confirmed",
       updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
@@ -646,8 +646,8 @@ function emptyNetworkState(enabled: boolean): CooperativeNetworkState {
 function validateContribution(input: ContributionDraft): void {
   input.coin = normalizeCoin(input.coin);
   for (const [name, value] of Object.entries({ minimal: input.minimal, price: input.price }))
-    if (!Number.isFinite(value) || value <= 0)
-      throw new Error(`${name} debe ser un número positivo.`);
+    if (!Number.isFinite(value) || (name === "minimal" ? value < 0 : value <= 0))
+      throw new Error(`${name} debe ser ${name === "minimal" ? "un número no negativo" : "un número positivo"}.`);
 }
 
 function normalizeCoin(value: string): string {
