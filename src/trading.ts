@@ -184,7 +184,7 @@ export class TradingEngine {
   }
 
   cooperativeSafetyReason(offer: P2pOffer): string | undefined {
-    if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.store.hasUnresolvedMutation()) return "Motor propio detenido o pendiente de conciliación";
+    if (this.mode() !== "real" || this.isPaused() || this.store.get("emergency_stop") === "true" || this.store.hasUnresolvedMutation()) return "Motor propio detenido o pendiente de conciliación";
     if (!this.isMarket(offer.coin) || offer.type !== "sell" || offer.status !== "open" || offer.offer_kind === "flexible") return "Oferta no compatible";
     if (explicitFlag(offer.only_vip) !== "false") return "Restricción VIP";
     const account = this.store.get("analytics_account_uuid");

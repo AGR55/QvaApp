@@ -52,3 +52,7 @@ test("manual own sale creation and expansion cannot spend participants' QUSD",as
  s.engine.listOwnOffers=async()=>[{uuid:"own-sale",coin:"BANK_CUP",type:"sell",amount:5,receive:550,status:"open"}];
  await assert.rejects(s.engine.editOwnOffer("own-sale",8,110),/pendiente de repartir/);
 });
+test("cooperative hunting cannot bypass simulation mode",t=>{
+ const s=setup();t.after(()=>s.store.close());s.store.set("mode","simulation");
+ assert.match(s.engine.cooperativeSafetyReason({uuid:"group",coin:"BANK_CUP",type:"sell",amount:10,receive:1000,status:"open"})??"",/detenido/);
+});
