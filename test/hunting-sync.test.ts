@@ -55,7 +55,7 @@ test("acepta el mínimo cero autorizado por Sync Core en capacidades y aportes",
  const contributions=parseCooperativeContributions({data:[{coin:"BANK_CUP",fiat:100,price:100,minimal:0}]});
  assert.equal(contributions.BANK_CUP?.minimal,0);
  assert.throws(()=>parseCooperativeSnapshot({data:{BANK_CUP:{coin:"BANK_CUP",fiat:100,price:100,minimal:0,offers_count:1,
-   capacities:[{fiat:100,price:100,minimal:-1}]}}}),/no negativo/);
+   capacities:[{fiat:100,price:100,minimal:-1}]}}}),/no es válido/);
 });
 
 test("normaliza únicamente los aportes activos de la cuenta autenticada", () => {
