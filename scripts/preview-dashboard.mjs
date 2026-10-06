@@ -40,6 +40,9 @@ const analyticsBalances = Array.from({ length: 90 }, (_, i) => ({
   createdAt: now - (89 - i) * 86_400_000, qusdBalance: 45 + i * .6 + Math.sin(i / 3) * 12,
   openOffers: 3, activeOperations: 1,
 }));
+const portfolioHistory = analyticsBalances.map((point, index) => ({ createdAt: point.createdAt,
+  qusdFree: point.qusdBalance, qusdCommitted: 23 + index % 4,
+  fiatQusd: 95 + index * .8, totalQusd: point.qusdBalance + 23 + index % 4 + 95 + index * .8 }));
 const marketHistory = markets.flatMap((market, marketIndex) =>
   Array.from({ length: 12 }, (_, index) => {
     const base = market.currency === "CUP" ? 64_180 : 1.04 + marketIndex * .01;
@@ -137,6 +140,8 @@ const model = {
   tradingAnalytics: (days = 30) => ({
     ...buildTradingAnalytics({ transactions: analyticsTransactions, accountUuid: "preview-me", fiat: [], markets, days, now }),
     balanceHistory: analyticsBalances.filter((point) => point.createdAt >= now - days * 86_400_000),
+    portfolioHistory: portfolioHistory.filter((point) => point.createdAt >= now - days * 86_400_000),
+    portfolioStatus: { reason: null, updatedAt: now },
     sync: { accountKnown: true, complete: true, limited: false, pages: 18, updatedAt: now },
   }),
   recoveryItems: () => ({ items: previewRecovery, blocked: previewRecovery.length > 0 }),

@@ -172,6 +172,7 @@ export class QvaPayClient {
 
   async listOffersPage(
     params: Record<string, string | number | boolean | undefined>,
+    options: { analyticsOnly?: boolean } = {},
   ): Promise<P2pListPage> {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params))
@@ -187,7 +188,7 @@ export class QvaPayClient {
         ? data.offers
         : [];
     const offers = rawOffers.map((offer, index) =>
-      parseOffer(offer, `lista P2P, posición ${index + 1}`),
+      parseOffer(offer, `lista P2P, posición ${index + 1}`, options.analyticsOnly),
     );
     return {
       offers,
@@ -653,7 +654,7 @@ const numberField = (value: unknown, fallback: number): number =>
       ? Number(value)
       : fallback;
 
-function parseOffer(value: unknown, context: string): P2pOffer {
+function parseOffer(value: unknown, context: string, analyticsOnly = false): P2pOffer {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(`Respuesta inválida de QvaPay (${context}): se esperaba una oferta.`);
   const raw = value as Record<string, unknown>;
@@ -672,7 +673,7 @@ function parseOffer(value: unknown, context: string): P2pOffer {
   if (peer !== undefined && peer !== null) validateParty(peer, `${context}, Peer`);
   if (raw.tags !== undefined && (!Array.isArray(raw.tags) || !raw.tags.every((tag) => typeof tag === "string")))
     throw new Error(`Respuesta inválida de QvaPay (${context}): etiquetas inválidas.`);
-  const details = normalizePaymentDetails(raw.details, context);
+  const details = analyticsOnly ? undefined : normalizePaymentDetails(raw.details, context);
   return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status, Peer: peer, details } as P2pOffer;
 }
 

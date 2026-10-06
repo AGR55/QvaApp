@@ -457,6 +457,12 @@ scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudge
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache(),
 );
+scheduler.register("portfolio_commitments", 60_000, () =>
+  dashboardReadModel.refreshPortfolioCommitments().then(() => undefined),
+);
+scheduler.register("completed_offer_history", 60_000, () =>
+  dashboardReadModel.refreshCompletedOfferHistory(),
+);
 scheduler.register("cooperative_reconcile", 60_000, () =>
   huntingSync.reconcile(),
 );

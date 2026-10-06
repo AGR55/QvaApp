@@ -236,6 +236,7 @@ try {
   );
   await command("POST", `/session/${sessionId}/element/${charts}/click`, {});
   await waitFor(() => execute("return document.querySelectorAll('.analytics-chart .recharts-surface').length === 7"));
+  await waitFor(() => execute("return Boolean(document.querySelector('.analytics-capital-intraday .recharts-area-curve'))"));
   await waitFor(() => execute("return document.querySelector('.analytics-activity .recharts-bar path') !== null"));
   const incomingColor = await execute("return getComputedStyle(document.querySelector('.analytics-activity .recharts-bar path')).fill");
   if (!incomingColor || incomingColor === 'rgb(0, 0, 0)') throw new Error('Los colores de analítica no se aplican bajo la política CSP.');
@@ -332,8 +333,8 @@ try {
   await execute("document.documentElement.dataset.theme = 'dark'; return true");
   await screenshot("/tmp/qvaapply-analytics-dark.png");
   await assertPageQuality("Analítica oscura");
-  await execute("document.querySelector('[aria-label=\"Ganancia estimada por mercado\"]').scrollIntoView(); return true");
-  await screenshot("/tmp/qvaapply-analytics-profit-dark.png");
+  await execute("document.querySelector('[aria-label=\"Capital total por día\"]').scrollIntoView(); return true");
+  await screenshot("/tmp/qvaapply-analytics-capital-dark.png");
   await execute("document.documentElement.dataset.theme = 'light'; window.scrollTo(0, 0); return true");
 
   const settings = await find(

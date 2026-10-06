@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { analyticsDay, analyticsTransaction, buildTradingAnalytics, type AnalyticsTransaction } from "../src/trading-analytics.js";
+import { analyticsDay, analyticsOffer, analyticsTransaction, buildTradingAnalytics, type AnalyticsTransaction } from "../src/trading-analytics.js";
 import { analyticsBars } from "../web/lib/analytics-bars.js";
 import { Store } from "../src/store.js";
 import { QvaPayClient } from "../src/qvapay.js";
@@ -28,6 +28,29 @@ test("FIFO usa inventario anterior al filtro, asigna costes parciales y admite p
   assert.equal(result.markets[0]?.estimatedProfit, 0); // +400 then -400.
   assert.equal(result.markets[0]?.matchedQusd, 8);
   assert.equal(result.markets[0]?.fiatSpent, 0);
+});
+
+test("ofertas completadas alimentan volumen aunque las transacciones no incluyan P2P y las cantidades no coincidan", () => {
+  const offers = [
+    { uuid: "buy", type: "buy", coin: "BANK_CUP", amount: 8, receive: 7200, status: "completed", updated_at: new Date(now - 2 * 86_400_000).toISOString(), User: { uuid: "me" }, Peer: { uuid: "other" } },
+    { uuid: "sell", type: "buy", coin: "BANK_CUP", amount: 3, receive: 3000, status: "completed", updated_at: new Date(now - 86_400_000).toISOString(), User: { uuid: "other" }, Peer: { uuid: "me" } },
+  ] as const;
+  const parsed = offers.map((offer) => analyticsOffer(offer as never, "me")!);
+  assert.deepEqual(parsed.map((row) => row.side), ["incoming", "outgoing"]);
+  const result = buildTradingAnalytics({ transactions: [{ uuid: "wallet-only", amount: 5, createdAt: now, updatedAt: now,
+    payerUuid: "other", recipientUuid: "me" }], offers: parsed, accountUuid: "me", fiat: [], markets, days: 7, now });
+  assert.equal(result.completed, 2);
+  assert.equal(result.volume, 11);
+  assert.equal(result.markets[0]?.bought, 8);
+  assert.equal(result.markets[0]?.sold, 3);
+  assert.equal(result.totals.incoming, 5);
+});
+
+test("oferta en revisión o sin participación propia identificada no se cuenta como completada", () => {
+  const offer = { uuid: "review", type: "buy", coin: "BANK_CUP", amount: 8, receive: 7200,
+    updated_at: new Date(now).toISOString(), User: { uuid: "me" } };
+  assert.equal(analyticsOffer({ ...offer, status: "revision" } as never, "me"), undefined);
+  assert.equal(analyticsOffer({ ...offer, status: "completed", User: { uuid: "other" } } as never, "me"), undefined);
 });
 
 test("no atribuye beneficio a inventario inicial desconocido ni mezcla CUP con USD", () => {
@@ -80,6 +103,44 @@ test("el archivo separa cuentas, conserva la última versión y sobrevive a rein
   restored.close();
 });
 
+test("persiste ofertas completadas y fotos de capital sin reconstruir el pasado", () => {
+  const path = mkdtempSync(join(tmpdir(), "qva-portfolio-"));
+  const store = new Store(path);
+  const offer = { uuid: "one", coin: "BANK_CUP", amount: 5, receive: 5000, side: "incoming" as const, completedAt: now };
+  store.saveAnalyticsOffers("me", [offer]);
+  store.recordPortfolioSnapshot({ createdAt: now, accountUuid: "me", qusdFree: 10, qusdCommitted: 5, fiatQusd: 20,
+    totalQusd: 35, fiat: { BANK_CUP: { amount: 20000, rate: 1000, qusd: 20 } } });
+  store.close();
+  const restored = new Store(path);
+  assert.deepEqual(restored.analyticsOffers("me", 0), [offer]);
+  assert.equal(restored.analyticsOffers("other", 0).length, 0);
+  assert.equal(restored.portfolioHistory("me", 0)[0]?.totalQusd, 35);
+  assert.equal(restored.portfolioHistory("other", 0).length, 0);
+  restored.close();
+});
+
+test("la foto de capital suma QUSD libre, ofertas comprometidas y fiat de varios mercados", async () => {
+  const path = mkdtempSync(join(tmpdir(), "qva-capital-total-"));
+  const store = new Store(path), tick = Date.now();
+  store.set("analytics_account_uuid", "me");
+  const runtime = { qusdReserve: 2, maxOpenOwnOffers: 4, buyQusdMaxRate: 930, sellQusdMinRate: 980,
+    buyQusdUsdMaxRate: 1.06, sellQusdUsdMinRate: 1.12, cupPurchaseMaxQusd: 35, initialUsdFiatBalance: 0,
+    paymentDetails: { BANK_CUP: [], BANDECPREPAGO: [] } };
+  const marketConfig = new MarketConfigService(path, runtime as never, store);
+  store.recordMarketObservation({ coin: "BANK_CUP", medianSell: 1000, openOffers: 5, eligible: 5 });
+  store.saveRemoteResource("own-offers", [{ uuid: "open", type: "sell", status: "open", amount: 5, ownerUuid: "me" }], tick);
+  store.saveRemoteResource("portfolio-commitments", [{ uuid: "pending", type: "buy", status: "paid", amount: 3, ownerUuid: "other", peerUuid: "me" }], tick);
+  const trading = { qusdBalance: async () => 10, operationalState: () => ({ fiat: { BANK_CUP: 2000 }, active: 1 }) };
+  const readModel = new DashboardReadModel(trading as never, {} as never, {} as never, store, marketConfig);
+  await readModel.refreshBalance();
+  const point = store.portfolioHistory("me", 0)[0]!;
+  assert.equal(point.qusdFree, 10);
+  assert.equal(point.qusdCommitted, 8);
+  assert.equal(point.fiatQusd, 2);
+  assert.equal(point.totalQusd, 20);
+  store.close();
+});
+
 test("QvaPay pagina con límites oficiales y normaliza decimales sin archivar identidades privadas", async () => {
   let url = "";
   const qva = new QvaPayClient(() => "test-token", { fetch: async (input) => {
@@ -95,6 +156,37 @@ test("QvaPay pagina con límites oficiales y normaliza decimales sin archivar id
   assert.equal(analyticsTransaction(page.transactions[0]!)?.p2p?.receive, 9450);
   assert.doesNotMatch(JSON.stringify(page.transactions), /private/);
   await assert.rejects(qva.listTransactionsPage({ take: 31 }), /Paginación/);
+});
+
+test("el histórico P2P puede leer ofertas completadas con detalles de pago ajenos mal formados", async () => {
+  const qva = new QvaPayClient(() => "test-token", { fetch: async () => new Response(JSON.stringify({
+    total: 1, current_page: 1, per_page: 100, data: [{ uuid: "completed-1", type: "sell", coin: "BANK_CUP",
+      amount: "7", receive: "7000", status: "completed", updated_at: new Date(now).toISOString(),
+      User: { uuid: "me" }, Peer: { uuid: "other" }, details: [{ broken: true }] }],
+  })) });
+  await assert.rejects(qva.listOffersPage({ my: true, status: "completed" }), /datos de pago inválidos/);
+  const page = await qva.listOffersPage({ my: true, status: "completed" }, { analyticsOnly: true });
+  assert.equal(analyticsOffer(page.offers[0]!, "me")?.side, "outgoing");
+});
+
+test("la importación P2P de fondo conserva el cursor y llena las gráficas sin transacciones relacionadas", async () => {
+  const path = mkdtempSync(join(tmpdir(), "qva-offer-history-"));
+  const store = new Store(path);
+  store.set("analytics_account_uuid", "me");
+  const pages: number[] = [];
+  const offer = (index: number) => ({ uuid: `completed-${index}`, type: "buy", coin: "BANK_CUP", amount: 1,
+    receive: 1000, status: "completed", updated_at: new Date().toISOString(), User: { uuid: "me" }, Peer: { uuid: "other" } });
+  const qva = { listOffersPage: async (params: { page: number }) => {
+    pages.push(params.page);
+    return { offers: params.page === 1 ? Array.from({ length: 100 }, (_, index) => offer(index)) : [offer(100)], total: 101 };
+  } };
+  const readModel = new DashboardReadModel({} as never, qva as never, {} as never, store, {} as never);
+  await readModel.refreshCompletedOfferHistory();
+  await readModel.refreshCompletedOfferHistory();
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(store.analyticsOffers("me", 0).length, 101);
+  assert.equal(store.loadRemoteResource<{ complete: boolean }>("analytics_offers_history:me")?.data.complete, true);
+  store.close();
 });
 
 test("la consulta existente alterna actualización reciente y backfill; un fallo conserva el cursor", async () => {

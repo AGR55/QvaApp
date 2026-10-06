@@ -9,7 +9,7 @@ import type {
   RestorableOwnOffer,
 } from "./core/liquidity-plan.js";
 import type { TradingConfig } from "./market-config.js";
-import type { AnalyticsTransaction, AnalyticsFiatMovement } from "./trading-analytics.js";
+import type { AnalyticsTransaction, AnalyticsFiatMovement, AnalyticsOffer } from "./trading-analytics.js";
 import type {
   FiatMarket,
   OperationState,
@@ -17,7 +17,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 23;
+const LATEST_SCHEMA_VERSION = 24;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -854,6 +854,18 @@ export class Store {
         );
         CREATE INDEX IF NOT EXISTS idx_analytics_transactions_account_date ON analytics_transactions(account_uuid, created_at);`);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (23, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 24) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS analytics_offers (
+          account_uuid TEXT NOT NULL, uuid TEXT NOT NULL, completed_at INTEGER NOT NULL,
+          payload_json TEXT NOT NULL, PRIMARY KEY(account_uuid, uuid)
+        );
+        CREATE INDEX IF NOT EXISTS idx_analytics_offers_account_date ON analytics_offers(account_uuid, completed_at);
+        CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+          created_at INTEGER PRIMARY KEY, account_uuid TEXT NOT NULL, qusd_free REAL NOT NULL, qusd_committed REAL NOT NULL,
+          fiat_qusd REAL NOT NULL, total_qusd REAL NOT NULL, fiat_json TEXT NOT NULL
+        );`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (24, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -1990,6 +2002,45 @@ export class Store {
     return (this.db.prepare(`SELECT payload_json FROM analytics_transactions
       WHERE account_uuid = ? AND created_at >= ? ORDER BY created_at ASC`).all(accountUuid, since) as { payload_json: string }[])
       .flatMap((row) => { try { return [JSON.parse(row.payload_json) as AnalyticsTransaction]; } catch { return []; } });
+  }
+
+  saveAnalyticsOffers(accountUuid: string, offers: AnalyticsOffer[]): void {
+    const insert = this.db.prepare(`INSERT INTO analytics_offers(account_uuid, uuid, completed_at, payload_json)
+      VALUES (?, ?, ?, ?) ON CONFLICT(account_uuid, uuid) DO UPDATE SET
+      completed_at=excluded.completed_at, payload_json=excluded.payload_json`);
+    this.transaction(() => { for (const offer of offers) insert.run(accountUuid, offer.uuid, offer.completedAt, JSON.stringify(offer)); });
+  }
+
+  analyticsOffers(accountUuid: string, since: number): AnalyticsOffer[] {
+    return (this.db.prepare(`SELECT payload_json FROM analytics_offers WHERE account_uuid=? AND completed_at>=?
+      ORDER BY completed_at ASC`).all(accountUuid, since) as { payload_json: string }[])
+      .flatMap((row) => { try { return [JSON.parse(row.payload_json) as AnalyticsOffer]; } catch { return []; } });
+  }
+
+  recordPortfolioSnapshot(point: { createdAt: number; accountUuid: string; qusdFree: number; qusdCommitted: number; fiatQusd: number;
+    totalQusd: number; fiat: Record<string, { amount: number; rate: number; qusd: number }> }): void {
+    const latest = this.db.prepare("SELECT created_at FROM portfolio_snapshots WHERE account_uuid=? ORDER BY created_at DESC LIMIT 1")
+      .get(point.accountUuid) as { created_at: number } | undefined;
+    if (latest && point.createdAt - latest.created_at < 300_000) return;
+    this.db.prepare(`INSERT INTO portfolio_snapshots(created_at,account_uuid,qusd_free,qusd_committed,fiat_qusd,total_qusd,fiat_json)
+      VALUES (?,?,?,?,?,?,?)`).run(point.createdAt, point.accountUuid, point.qusdFree, point.qusdCommitted, point.fiatQusd, point.totalQusd, JSON.stringify(point.fiat));
+    this.db.prepare("DELETE FROM portfolio_snapshots WHERE created_at < ?").run(point.createdAt - 365 * 86_400_000);
+  }
+
+  portfolioHistory(accountUuid: string, since: number) {
+    return (this.db.prepare(`SELECT created_at,qusd_free,qusd_committed,fiat_qusd,total_qusd FROM portfolio_snapshots
+      WHERE account_uuid=? AND created_at>=? ORDER BY created_at ASC`).all(accountUuid, since) as Record<string, unknown>[]).map((row) => ({
+      createdAt: Number(row.created_at), qusdFree: Number(row.qusd_free), qusdCommitted: Number(row.qusd_committed),
+      fiatQusd: Number(row.fiat_qusd), totalQusd: Number(row.total_qusd),
+    }));
+  }
+
+  recentValuationRate(coin: FiatMarket, now = Date.now()): number | undefined {
+    const row = this.db.prepare(`SELECT COALESCE(NULLIF(median_sell,0),NULLIF(average_sell,0)) AS rate
+      FROM market_observations WHERE coin=? AND created_at>=? AND created_at<=?
+      AND (median_sell>0 OR average_sell>0) ORDER BY created_at DESC,id DESC LIMIT 1`)
+      .get(coin, now - 3_600_000, now) as { rate: number } | undefined;
+    return row && Number.isFinite(row.rate) && row.rate > 0 ? row.rate : undefined;
   }
 
   analyticsFiatMovements(): AnalyticsFiatMovement[] {

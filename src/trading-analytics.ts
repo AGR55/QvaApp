@@ -1,4 +1,19 @@
 import type { QvaTransaction } from "./types.js";
+import type { P2pOffer } from "./types.js";
+
+export interface AnalyticsOffer {
+  uuid: string; coin: string; amount: number; receive: number; side: "incoming" | "outgoing";
+  completedAt: number;
+}
+
+export function analyticsOffer(offer: P2pOffer, account: string): AnalyticsOffer | undefined {
+  const completedAt = Date.parse(offer.updated_at ?? "");
+  const owner = offer.User?.uuid === account, peer = offer.Peer?.uuid === account;
+  if (offer.status !== "completed" || !Number.isFinite(completedAt) || !Number.isFinite(offer.amount) || offer.amount <= 0 ||
+    !Number.isFinite(offer.receive) || offer.receive <= 0 || owner === peer) return undefined;
+  return { uuid: offer.uuid, coin: offer.coin, amount: offer.amount, receive: offer.receive,
+    side: (owner && offer.type === "buy") || (peer && offer.type === "sell") ? "incoming" : "outgoing", completedAt };
+}
 
 export interface AnalyticsTransaction {
   uuid: string;
@@ -44,6 +59,7 @@ function direction(tx: AnalyticsTransaction, account: string): Direction {
 
 export function buildTradingAnalytics(input: {
   transactions: AnalyticsTransaction[];
+  offers?: AnalyticsOffer[];
   accountUuid: string;
   fiat: AnalyticsFiatMovement[];
   markets: { code: string; label: string; currency: string }[];
@@ -72,14 +88,18 @@ export function buildTradingAnalytics(input: {
     rows.push(tx); groups.set(tx.p2p.uuid, rows);
   }
   const fiatByUuid = new Map(input.fiat.map((movement) => [movement.uuid, movement]));
-  const trades = [...groups.values()].map((rows) => {
+  const transactionTrades = [...groups.values()].map((rows) => {
     const tx = rows.reduce((latest, row) => row.updatedAt > latest.updatedAt ? row : latest);
     const p = tx.p2p!;
     const fiat = fiatByUuid.get(p.uuid);
     const sides = new Set(rows.map((row) => direction(row, input.accountUuid)).filter((side) => side !== "unknown"));
     const side: Direction = fiat ? fiat.direction === "debit" ? "incoming" : "outgoing" : sides.size === 1 ? [...sides][0]! : "unknown";
     return { uuid: p.uuid, coin: p.coin, qusd: p.amount, fiat: fiat?.amount ?? p.receive, side, at: tx.updatedAt };
-  }).sort((a, b) => a.at - b.at || a.uuid.localeCompare(b.uuid));
+  });
+  const offerTrades = (input.offers ?? []).map((offer) => ({ uuid: offer.uuid, coin: offer.coin, qusd: offer.amount,
+    fiat: fiatByUuid.get(offer.uuid)?.amount ?? offer.receive, side: offer.side, at: offer.completedAt }));
+  const trades = [...new Map([...transactionTrades, ...offerTrades].map((trade) => [trade.uuid, trade])).values()]
+    .sort((a, b) => a.at - b.at || a.uuid.localeCompare(b.uuid));
   const markets = new Map<string, {
     code: string; label: string; currency: string; volume: number; count: number; bought: number; sold: number; unknown: number;
     fiatSpent: number; fiatReceived: number; estimatedProfit: number; matchedQusd: number; unmatchedSoldQusd: number; matchedCost: number;
