@@ -280,6 +280,7 @@ export class PaymentSmsService {
     }
 
     const candidates = this.store.activeOperations().filter((operation) =>
+      !this.store.get(`cooperative_owner_fiat:${operation.uuid}`) &&
       operation.offerType === "sell" && ["applied", "acknowledged"].includes(operation.state) &&
       operation.createdAt <= receipt.receivedAt && receipt.receivedAt - operation.createdAt <= (isEtecsa ? ETECSA_OPERATION_WINDOW_MS : 24 * 60 * 60_000) &&
       operation.receive === receipt.amount &&

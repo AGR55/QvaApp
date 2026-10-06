@@ -107,6 +107,7 @@ export class QvaPayClient {
   private readonly throttleState?: QvaPayRuntime["throttleState"];
   private queue = Promise.resolve();
   private applyQueue = Promise.resolve();
+  private primaryApplyPending = 0;
   private urgentReadQueue = Promise.resolve();
   private readonly applyState = new Map<string, string>();
   private lastRequestAt = 0;
@@ -286,6 +287,17 @@ export class QvaPayClient {
       ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}),
     });
   }
+
+  secondaryApplyAvailable(): boolean {
+    const state = { get: (key: string) => this.throttleState?.get(key) ?? this.applyState.get(key) };
+    const now = this.now();
+    return this.primaryApplyPending === 0 && applyReadyAt(state, now) <= now &&
+      applyAttempts(state).filter(at => at + APPLY_WINDOW_MS > now).length === 0;
+  }
+
+  async applySecondary(uuid: string, beforeDispatch: () => boolean | Promise<boolean>): Promise<void> {
+    await this.request(`/p2p/${uuid}/apply`, { method: "POST", policy: "apply", secondary: true, beforeDispatch });
+  }
   async cancel(uuid: string): Promise<void> {
     await this.request(`/p2p/${uuid}/cancel`, {
       method: "POST",
@@ -413,6 +425,7 @@ export class QvaPayClient {
       policy?: RequestPolicy;
       retryRead?: boolean;
       beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>;
+      secondary?: boolean;
     } = {},
   ): Promise<Record<string, unknown>> {
     const token = this.tokenProvider();
@@ -449,7 +462,7 @@ export class QvaPayClient {
         throw error;
       }
       return this.json(response);
-    }, options.beforeDispatch);
+    }, options.beforeDispatch, options.secondary);
   }
 
   private async fetchRead(
@@ -530,7 +543,9 @@ export class QvaPayClient {
     policy: RequestPolicy,
     task: () => Promise<T>,
     beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>,
+    secondary = false,
   ): Promise<T> {
+    if (policy === "apply" && secondary) return this.enqueueSecondaryApplication(task, beforeDispatch);
     if (policy === "apply") return this.enqueueApplication(task, beforeDispatch);
     const priorityRead = policy === "urgent_read";
     const run = (priorityRead ? this.urgentReadQueue : this.queue)
@@ -570,6 +585,7 @@ export class QvaPayClient {
   }
 
   private enqueueApplication<T>(task: () => Promise<T>, beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>): Promise<T> {
+    this.primaryApplyPending++;
     const queuedAt = this.now();
     const state = { get: (key: string) => this.throttleState?.get(key) ?? this.applyState.get(key) };
     const save = (key: string, value: string) => {
@@ -606,7 +622,34 @@ export class QvaPayClient {
       }
     });
     this.applyQueue = run.then(() => undefined, () => undefined);
-    return run;
+    return run.finally(() => { this.primaryApplyPending--; });
+  }
+
+  private async enqueueSecondaryApplication<T>(task: () => Promise<T>, guard?: (queuedForMs: number) => boolean | Promise<boolean>): Promise<T> {
+    const yieldError = () => new QvaApiError(409, "La cacería cooperativa cedió el cupo a las operaciones propias.", undefined, "LOCAL_SECONDARY_YIELD");
+    if (!this.secondaryApplyAvailable()) throw yieldError();
+    if (guard) {
+      let eligible: boolean;
+      try { eligible = await guard(0); }
+      catch { throw new QvaApiError(409,"No se pudo revalidar la cacería cooperativa; no se envió la aplicación.",undefined,"LOCAL_SECONDARY_PREFLIGHT_FAILED"); }
+      if (!eligible) throw yieldError();
+    }
+    // Recheck after the async guard: a primary application may have arrived.
+    if (!this.secondaryApplyAvailable()) throw yieldError();
+    const at = this.now();
+    this.applyState.set(APPLY_WINDOW_KEY, JSON.stringify([at]));
+    this.throttleState?.set(APPLY_WINDOW_KEY, JSON.stringify([at]));
+    this.applyState.set("qva_throttle:apply", String(at));
+    this.throttleState?.set("qva_throttle:apply", String(at));
+    try { return await task(); }
+    catch (error) {
+      if (error instanceof QvaApiError && error.status === 429) {
+        const until = String(this.now() + (error.retryAfterMs ?? APPLY_WINDOW_MS));
+        this.applyState.set("qva_throttle:apply_retry_at", until);
+        this.throttleState?.set("qva_throttle:apply_retry_at", until);
+      }
+      throw error;
+    }
   }
 
   private persistedPolicyAt(policy: RequestPolicy): number {

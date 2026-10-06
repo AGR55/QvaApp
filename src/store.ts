@@ -17,7 +17,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 24;
+const LATEST_SCHEMA_VERSION = 25;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -867,6 +867,10 @@ export class Store {
         );`);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (24, ?)").run(Date.now());
       }
+      if (this.currentSchemaVersion() < 25) {
+        this.ensureColumn("portfolio_snapshots", "liability_qusd", "REAL NOT NULL DEFAULT 0");
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (25, ?)").run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -885,7 +889,7 @@ export class Store {
   }
 
   private ensureColumn(
-    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts" | "mutation_intents" | "payment_receipts",
+    table: "operations" | "fiat_ledger" | "market_observations" | "market_config" | "bot_config" | "trading_alerts" | "mutation_intents" | "payment_receipts" | "portfolio_snapshots",
     column: string,
     definition: string,
   ): void {
@@ -2018,20 +2022,21 @@ export class Store {
   }
 
   recordPortfolioSnapshot(point: { createdAt: number; accountUuid: string; qusdFree: number; qusdCommitted: number; fiatQusd: number;
-    totalQusd: number; fiat: Record<string, { amount: number; rate: number; qusd: number }> }): void {
+    totalQusd: number; liabilityQusd?: number; fiat: Record<string, { amount: number; rate: number; qusd: number }> }): void {
     const latest = this.db.prepare("SELECT created_at FROM portfolio_snapshots WHERE account_uuid=? ORDER BY created_at DESC LIMIT 1")
       .get(point.accountUuid) as { created_at: number } | undefined;
     if (latest && point.createdAt - latest.created_at < 300_000) return;
-    this.db.prepare(`INSERT INTO portfolio_snapshots(created_at,account_uuid,qusd_free,qusd_committed,fiat_qusd,total_qusd,fiat_json)
-      VALUES (?,?,?,?,?,?,?)`).run(point.createdAt, point.accountUuid, point.qusdFree, point.qusdCommitted, point.fiatQusd, point.totalQusd, JSON.stringify(point.fiat));
+    this.db.prepare(`INSERT INTO portfolio_snapshots(created_at,account_uuid,qusd_free,qusd_committed,fiat_qusd,total_qusd,fiat_json,liability_qusd)
+      VALUES (?,?,?,?,?,?,?,?)`).run(point.createdAt, point.accountUuid, point.qusdFree, point.qusdCommitted, point.fiatQusd, point.totalQusd, JSON.stringify(point.fiat),point.liabilityQusd ?? 0);
     this.db.prepare("DELETE FROM portfolio_snapshots WHERE created_at < ?").run(point.createdAt - 365 * 86_400_000);
   }
 
   portfolioHistory(accountUuid: string, since: number) {
-    return (this.db.prepare(`SELECT created_at,qusd_free,qusd_committed,fiat_qusd,total_qusd FROM portfolio_snapshots
+    return (this.db.prepare(`SELECT created_at,qusd_free,qusd_committed,fiat_qusd,total_qusd,liability_qusd FROM portfolio_snapshots
       WHERE account_uuid=? AND created_at>=? ORDER BY created_at ASC`).all(accountUuid, since) as Record<string, unknown>[]).map((row) => ({
       createdAt: Number(row.created_at), qusdFree: Number(row.qusd_free), qusdCommitted: Number(row.qusd_committed),
       fiatQusd: Number(row.fiat_qusd), totalQusd: Number(row.total_qusd),
+      liabilityQusd: Number(row.liability_qusd),
     }));
   }
 

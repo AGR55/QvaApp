@@ -68,6 +68,7 @@ test("normaliza únicamente los aportes activos de la cuenta autenticada", () =>
         price: 390,
         state: "confirmed",
         updatedAt: Date.parse("2026-09-27T12:00:00Z"),
+        revision: "2026-09-27T12:00:00Z",
       },
     },
   );
@@ -132,6 +133,25 @@ test("retira el aporte usando la ruta REST por moneda", async () => {
 test("acepta el booleano de éxito que devuelve Sync Core al retirar", async () => {
   const client = new SyncCoreClient("http://127.0.0.1:8080", async () => Response.json(true));
   await client.withdraw("csk_test", "BANK_CUP");
+});
+
+test("la reserva cooperativa valida el reparto y exige el protocolo nuevo antes de aplicar", async () => {
+  let legacy = false;
+  const calls: string[] = [];
+  const client = new SyncCoreClient("http://127.0.0.1:8080", async (url,init) => {
+    calls.push(String(url));
+    if (String(url).endsWith("/hunts/reserve")) {
+      assert.equal(JSON.parse(String(init?.body)).external_id,"offer-1");
+      return Response.json({ external_id:"offer-1", ...(legacy?{}:{state:"reserved"}), owner_fiat:400,
+        contributions:[{user_id:"friend",fiat_amount:600,qusd_owed:6}] });
+    }
+    return Response.json({state:"completed"});
+  });
+  const offer={uuid:"offer-1",coin:"BANK_CUP",amount:10,receive:1000};
+  assert.equal((await client.reserve("csk_test",offer)).ownerFiat,400);
+  await client.settle("csk_test",offer.uuid,"commit");
+  assert.ok(calls[1]?.endsWith("/hunts/reservations/offer-1/commit"));
+  legacy=true; await assert.rejects(client.reserve("csk_test",offer),/reserva verificable/);
 });
 
 test("clasifica rechazos HTTP sin incluir credenciales", async () => {

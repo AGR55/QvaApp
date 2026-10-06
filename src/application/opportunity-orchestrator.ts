@@ -217,9 +217,10 @@ export class OpportunityOrchestrator {
       this.qva.listOffers({ my: true, take: 100, page: 1, status: "open" }),
     ]);
     const current = this.config.current();
+    const ownQusdBalance = Math.max(0, qusdBalance - Number(this.store.get("cooperative_qusd_owed") ?? 0));
     const liquidity = planLiquidity({
       target: input.target,
-      availableQusd: qusdBalance,
+      availableQusd: ownQusdBalance,
       reserveQusd: current.risk.minQusdReserve,
       ownOffers,
       marketEconomics: Object.fromEntries(
@@ -265,7 +266,7 @@ export class OpportunityOrchestrator {
         : liquidity.reason,
       expectedMarginPercent: input.expectedMarginPercent,
       qusdBalance:
-        qusdBalance +
+        ownQusdBalance +
         (liquidity.feasible
           ? liquidity.plannedReleaseQusd
           : liquidity.potentialReleaseQusd),

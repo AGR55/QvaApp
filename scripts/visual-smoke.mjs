@@ -147,6 +147,12 @@ try {
   );
   const networkDesktop = await assertPageQuality("Red cooperativa");
   await screenshot("/tmp/qvaapply-cooperative-network-desktop.png");
+  const distributed = await find("xpath", "//button[normalize-space(.)='Ya repartí los QUSD']");
+  await command("POST", `/session/${sessionId}/element/${distributed}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Confirmar reparto manual')"));
+  await assertPageQuality("Confirmación de reparto cooperativo");
+  const keepDistribution = await find("xpath", "//*[@role='alertdialog']//button[normalize-space(.)='Volver']");
+  await command("POST", `/session/${sessionId}/element/${keepDistribution}/click`, {});
 
   const capital = await find(
     "xpath",

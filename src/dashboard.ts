@@ -13,6 +13,7 @@ import type {
 import { proportionalBudgetPlan, type BudgetPlan } from "./budget.js";
 import { median, MIN_OFFER_QUSD, ownOfferFiatTotal } from "./market-math.js";
 import type { HuntingSyncCoordinator } from "./hunting-sync.js";
+import type { CooperativeHunter } from "./cooperative-hunter.js";
 import { PaymentSmsService, type PaymentReceiptInput } from "./payment-sms.js";
 import { MobileOperatorService } from "./mobile-operator.js";
 import {
@@ -148,6 +149,7 @@ export class DashboardReadModel {
       event: "completed" | "attention",
     ) => void | Promise<void>,
     private readonly huntingSync?: HuntingSyncCoordinator,
+    private readonly cooperativeHunter?: CooperativeHunter,
   ) {
     this.paymentSms = new PaymentSmsService(
       store,
@@ -168,6 +170,16 @@ export class DashboardReadModel {
 
   recoveryItems() {
     return this.recovery.list();
+  }
+
+  setCooperativeHunting(enabled: boolean): void {
+    if (!this.cooperativeHunter) throw new Error("Cacería cooperativa no disponible.");
+    this.cooperativeHunter.setEnabled(enabled);
+  }
+  async checkCooperativeHunting(): Promise<void> { await this.cooperativeHunter?.reconcile(); }
+  markCooperativeDistributed(uuid: string): void {
+    if (!this.cooperativeHunter) throw new Error("Cacería cooperativa no disponible.");
+    this.cooperativeHunter.markDistributed(uuid);
   }
 
   checkRecoveryIntent(intentId: string) {
@@ -672,7 +684,7 @@ export class DashboardReadModel {
         qusd: {
           reported: balance,
           reserve: strategy.reserve,
-          available: Math.max(0, balance - strategy.reserve),
+          available: Math.max(0, balance - strategy.reserve - Number(this.store.get("cooperative_qusd_owed") ?? 0)),
           committedSell: ownOfferViews
             .filter((offer) => offer.type === "sell" && offer.status === "open")
             .reduce((sum, offer) => sum + offer.amount, 0),
@@ -727,9 +739,14 @@ export class DashboardReadModel {
       ),
       capitalReservations: this.store.capitalReservations(),
       cooperativeNetwork: this.cooperativeNetwork(),
+      cooperativeHunting: { enabled: this.cooperativeHunter?.enabled() ?? false,
+        executions: this.cooperativeHunter?.executions() ?? [], qusdOwed: Number(this.store.get("cooperative_qusd_owed") ?? 0) },
       mutationIntents: this.store.recentMutationIntents(100),
       unresolvedMutations: this.store.unresolvedMutationIntents(),
-      operations: this.store.visibleOperations(),
+      operations: this.store.visibleOperations().map(operation => {
+        const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
+        return { ...operation, ...(raw === undefined || raw === "" ? {} : { cooperativeOwnerFiat: Number(raw) }) };
+      }),
       integrity: {
         schemaVersion: this.store.schemaVersion(),
         configRevisionChainValid: this.store.verifyConfigRevisionChain(),
@@ -1040,8 +1057,9 @@ export class DashboardReadModel {
         ? `Falta cotización reciente para: ${missing.join(", ")}.` : "Esperando identidad de QvaPay." }, now);
       return;
     }
+    const liabilityQusd = Number(this.store.get("cooperative_qusd_owed") ?? 0);
     this.store.recordPortfolioSnapshot({ createdAt: now, accountUuid: account, qusdFree: balance, qusdCommitted,
-      fiatQusd, totalQusd: balance + qusdCommitted + fiatQusd, fiat });
+      fiatQusd, liabilityQusd, totalQusd: balance + qusdCommitted + fiatQusd - liabilityQusd, fiat });
     this.store.saveRemoteResource("portfolio-status", { reason: null, updatedAt: now }, now);
   }
 

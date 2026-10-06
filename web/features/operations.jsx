@@ -82,9 +82,9 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
                   {data.operations.map((operation) => (
                     <TableRow key={operation.uuid}>
                       <TableCell className="whitespace-nowrap"><State value={operation.state} /></TableCell>
-                      <TableCell className="whitespace-nowrap">{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}</TableCell>
+                      <TableCell className="whitespace-nowrap">{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}{operation.cooperativeOwnerFiat !== undefined ? <small>Cacería conjunta</small> : null}</TableCell>
                       <TableCell className="whitespace-nowrap">{label(operation.coin)}</TableCell>
-                      <TableCell className="whitespace-nowrap">{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}</small></TableCell>
+                      <TableCell className="whitespace-nowrap">{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}{operation.cooperativeOwnerFiat !== undefined ? ` · Tu parte: ${money(operation.cooperativeOwnerFiat)}` : ""}</small></TableCell>
                       <TableCell className="row-actions whitespace-nowrap">
                         {operation.state === "applied" && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</Button> : null}
                         {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</Button> : null}
@@ -119,7 +119,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
           <DialogContent className="review-dialog" showCloseButton={false}>
             <DialogHeader>
               <DialogTitle>{actionTitle(pending.action)}</DialogTitle>
-              <DialogDescription>{money(pending.operation.amount)} QUSD en {label(pending.operation.coin)}.</DialogDescription>
+              <DialogDescription>{money(pending.operation.amount)} QUSD en {label(pending.operation.coin)}.{pending.operation.cooperativeOwnerFiat !== undefined && pending.action === "paid" ? " Confirma únicamente cuando todos los participantes hayan pagado al vendedor. Tu SMS solo demuestra tu parte." : ""}</DialogDescription>
             </DialogHeader>
             {pending.action === "paid" ? (
               <FieldGroup>

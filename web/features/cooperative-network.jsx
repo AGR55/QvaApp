@@ -11,12 +11,23 @@ import {
 } from "../components/ui/card.tsx";
 import { requestJson } from "../lib/http.js";
 import { money } from "../lib/format.js";
+import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from "../components/ui/alert-dialog.tsx";
 
 export function CooperativeNetwork({ data, label, unit, onChanged }) {
   const network = data.cooperativeNetwork || disabledState;
   const [drafts, setDrafts] = useState({});
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const [distribution, setDistribution] = useState(null);
+  const hunting = data.cooperativeHunting ?? { enabled: false, executions: [], qusdOwed: 0 };
+  const cooperativeAction = async (path, body = {}, method = "POST") => {
+    setBusy("hunting"); setNotice("");
+    try {
+      await requestJson(path, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      setDistribution(null); setNotice("Acción cooperativa guardada."); await onChanged();
+    } catch (error) { setNotice(error instanceof Error ? error.message : "La acción falló."); }
+    finally { setBusy(""); }
+  };
   const aggregates = Object.values(network.snapshot || {}).sort((a, b) =>
     a.coin.localeCompare(b.coin),
   );
@@ -116,6 +127,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
             : "Sin snapshot"}
         </span>
       </div>
+      {notice ? <p className="network-notice" role="status">{notice}</p> : null}
 
       {!network.enabled ? (
         <Panel title="Sincronización">
@@ -132,6 +144,31 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
           <span>{network.lastError}</span>
         </div>
       ) : null}
+
+      <Panel title="Cacería cooperativa · segunda prioridad" wide>
+        <div className="flex flex-wrap items-center gap-3">
+          <Badge variant={hunting.enabled ? "success" : "neutral"}>{hunting.enabled ? "Activa" : "Detenida"}</Badge>
+          <Button variant="outline" disabled={!network.enabled || Boolean(busy)} onClick={() => cooperativeAction("/api/cooperative-network/hunting", { enabled: !hunting.enabled }, "PUT")}>
+            {hunting.enabled ? "Detener cacería conjunta" : "Activar cacería conjunta"}
+          </Button>
+          <Button variant="outline" disabled={Boolean(busy)} onClick={() => cooperativeAction("/api/cooperative-network/executions/check")}>Comprobar pendientes</Button>
+        </div>
+        <p className="network-capacity-hint">Tus operaciones tienen prioridad. La cacería conjunta usa el fiat elegible del grupo y conserva un intento disponible para la cacería propia.</p>
+        <p className="network-capacity-hint">QUSD pendientes de repartir: {money(hunting.qusdOwed)}. El bot conserva esta cantidad hasta que declares terminado el reparto manual.</p>
+        <div className="flex flex-col gap-3">{hunting.executions.filter(job => !["released", "settled"].includes(job.phase)).map(job => <Card key={job.offer.uuid} size="sm">
+          <CardHeader><CardTitle>{label(job.offer.coin)} · {money(job.offer.amount)} QUSD</CardTitle><CardAction><Badge variant="neutral">{({ completed: "Por repartir", cancelled: "Cancelada · revisar", committed: "Esperando pagos", commit_pending: "Confirmación pendiente", uncertain: "Revisar", applying: "Aplicando", reserving: "Reservando", release_pending: "Liberación pendiente", reserved: "Reservada", applied: "Aplicada" })[job.phase] ?? job.phase}</Badge></CardAction></CardHeader>
+          <CardContent className="flex flex-col gap-3"><p>Total: {money(job.offer.receive)} {unit(job.offer.coin)} · Tu parte: {money(job.reservation?.ownerFiat ?? 0)} {unit(job.offer.coin)}.</p>
+            {job.error ? <p role="status">{job.error}</p> : null}
+            <a href={`/?view=operaciones&operation=${encodeURIComponent(job.offer.uuid)}`}>Abrir operación</a>
+            {job.phase === "completed" ? <Button variant="outline" disabled={Boolean(busy)} onClick={() => setDistribution(job)}>Ya repartí los QUSD</Button> : null}
+          </CardContent>
+        </Card>)}</div>
+      </Panel>
+      <AlertDialog open={Boolean(distribution)} onOpenChange={open => { if (!open) setDistribution(null); }}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Confirmar reparto manual</AlertDialogTitle><AlertDialogDescription>Confirma que transferiste todos los QUSD correspondientes a los participantes de esta cacería. La cantidad se liberará para tus operaciones propias.</AlertDialogDescription></AlertDialogHeader>
+          <AlertDialogFooter><AlertDialogCancel>Volver</AlertDialogCancel><Button disabled={Boolean(busy)} onClick={() => cooperativeAction(`/api/cooperative-network/executions/${encodeURIComponent(distribution.offer.uuid)}/distributed`, { confirmed: true })}>Confirmo que repartí todo</Button></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Panel
         title="Liquidez global"
@@ -166,7 +203,6 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
         wide
       >
         <p className="network-capacity-hint">El aporte usa el saldo fiat del mercado. Se actualiza automáticamente y se retira si queda por debajo de 5 QUSD al precio indicado.</p>
-        {notice ? <p className="network-notice" role="status">{notice}</p> : null}
         <div className="network-contribution-table-wrap">
           <table className="network-contribution-table">
             <caption className="sr-only">Aportaciones por mercado a la red cooperativa</caption>

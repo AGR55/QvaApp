@@ -89,6 +89,8 @@ export class TradingEngine {
     action?: string;
   }> | undefined;
   private decisionTail: Promise<void> = Promise.resolve();
+  private ownDecisionPending = 0;
+  private secondaryObserver?: (offer: P2pOffer, receivedAt: number) => void;
   private readonly marketSnapshotCache = new Map<
     string,
     MarketSnapshot & { coin: FiatMarket; side: "buy" | "sell" }
@@ -141,6 +143,56 @@ export class TradingEngine {
 
   markets(): MarketConfig[] {
     return this.marketConfig.markets();
+  }
+
+  observeSecondaryOpportunities(observer: (offer: P2pOffer, receivedAt: number) => void): void {
+    this.secondaryObserver = observer;
+  }
+
+  ownDecisionBusy(): boolean { return this.ownDecisionPending > 0; }
+
+  cooperativeOwnCapacity(coin: string, ownerFiat: number): boolean {
+    const committed = this.store.activeOperations().filter(op => op.coin === coin && op.offerType === "sell" && !this.store.hasFiatMovement(op.uuid))
+      .reduce((sum,op) => sum + this.operationFiatCost(op),0);
+    const reserved = Number(this.store.get(`cooperative_fiat_reserved:${coin}`) ?? 0);
+    const open = this.store.loadRemoteResource<{ type: string; coin: string; status: string; receive: number }[]>("own-offers")?.data ?? [];
+    const advertised = open.filter(offer => offer.type === "buy" && offer.coin === coin && offer.status === "open")
+      .reduce((sum,offer) => sum + this.cooperativeOwnerCost(coin, offer.receive), 0);
+    return Number.isFinite(ownerFiat) && ownerFiat >= 0 && this.fiatBalance(coin) - committed - advertised >= reserved;
+  }
+
+  cooperativeOwnerCost(coin: string, amount: number): number { return amount + (amount > 0 ? this.market(coin)?.outgoingTransferFee ?? 0 : 0); }
+
+  private operationFiatCost(operation: { uuid: string; coin: string; receive: number }): number {
+    const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
+    const amount = raw !== undefined && raw !== "" ? Number(raw) : operation.receive;
+    return this.cooperativeOwnerCost(operation.coin, amount);
+  }
+
+  private recordOutgoingFiat(operation: { uuid: string; coin: string; receive: number }, source: string): boolean {
+    const cost = this.operationFiatCost(operation);
+    if (cost === 0) return false;
+    const changed = this.store.recordFiatMovement(operation.uuid, operation.coin, "debit", cost, source);
+    const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
+    if (changed && raw !== undefined && raw !== "") {
+      const fee = Number(raw) > 0 ? this.market(operation.coin)?.outgoingTransferFee ?? 0 : 0;
+      // The synchronized allocation was already debited when reserved. Only
+      // the owner's transfer fee is a new capacity delta.
+      this.store.set(`cooperative_local_balance:${operation.coin}`, String(this.fiatBalance(operation.coin) + fee));
+    }
+    return changed;
+  }
+
+  cooperativeSafetyReason(offer: P2pOffer): string | undefined {
+    if (this.mode() !== "real" || this.isPaused() || this.store.get("emergency_stop") === "true" || this.store.hasUnresolvedMutation()) return "Motor propio detenido o pendiente de conciliación";
+    if (!this.isMarket(offer.coin) || offer.type !== "sell" || offer.status !== "open" || offer.offer_kind === "flexible") return "Oferta no compatible";
+    if (explicitFlag(offer.only_vip) !== "false") return "Restricción VIP";
+    const account = this.store.get("analytics_account_uuid");
+    if (this.ownsOfferUuid(offer.uuid) || account && (offer.owner_uuid === account || offer.User?.uuid === account)) return "Oferta propia";
+    if (this.isExcludedAfterManualCancel(offer.uuid) || this.store.getOperation(offer.uuid)) return "Oferta excluida o ya registrada";
+    const state = this.store.latestMarketFeedState(offer.uuid);
+    if (state && state.status !== "open") return "Oferta invalidada por el feed";
+    return this.suspiciousBuyPriceReason(offer);
   }
   activeMarkets(): MarketConfig[] {
     return this.marketConfig.activeMarkets();
@@ -690,7 +742,7 @@ export class TradingEngine {
     event: "p2p.created" | "p2p.reopened" = "p2p.created",
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
-    return this.withDecisionTurn(async () => {
+    const result = await this.withDecisionTurn(async () => {
       if (event === "p2p.reopened" && offer.status === "open" && this.ownsOfferUuid(offer.uuid)) {
         const cycleKey = `trading:own_offer_cycle:${offer.uuid}`;
         const current = Number(this.store.get(cycleKey) ?? 0);
@@ -698,12 +750,16 @@ export class TradingEngine {
       }
       return this.ingestPreparedMarketOffer(offer, receivedAt, event, sentAt);
     });
+    const secondary = this.secondaryObserver;
+    if (result.candidates === 0 && secondary) setImmediate(() => secondary(offer, receivedAt));
+    return result;
   }
 
   private withDecisionTurn<T>(action: () => Promise<T>): Promise<T> {
+    this.ownDecisionPending++;
     const next = this.decisionTail.then(action, action);
     this.decisionTail = next.then(() => undefined, () => undefined);
-    return next;
+    return next.finally(() => { this.ownDecisionPending--; });
   }
 
   private async ingestRealtimeRecovery(update: MarketPageUpdate): Promise<{ inspected: number; candidates: number; action?: string }> {
@@ -962,7 +1018,7 @@ export class TradingEngine {
       this.store.audit(error.code?.startsWith("LOCAL_") ? "automatic_apply_not_sent" : "qvapay_apply_rejected", detail, offer.uuid);
       return { inspected: 1, candidates: 1, action: `rechazada ${offer.uuid}` };
     }
-    this.qusdBalanceCache = { value: Math.max(0, availableQusd - offer.amount), updatedAt: Date.now() };
+    this.qusdBalanceCache = { value: Math.max(0, availableQusd + this.cooperativeQusdOwed() - offer.amount), updatedAt: Date.now() };
     this.store.createOperation({
       uuid: offer.uuid,
       offerType: "buy",
@@ -1012,10 +1068,15 @@ export class TradingEngine {
 
   private async fastLaneQusdBalance(): Promise<number> {
     if (this.qusdBalanceCache && Date.now() - this.qusdBalanceCache.updatedAt <= 15_000)
-      return this.qusdBalanceCache.value;
+      return Math.max(0, this.qusdBalanceCache.value - this.cooperativeQusdOwed());
     const value = await this.qva.qusdBalance({ priority: true });
     this.qusdBalanceCache = { value, updatedAt: Date.now() };
-    return value;
+    return Math.max(0, value - this.cooperativeQusdOwed());
+  }
+
+  private cooperativeQusdOwed(): number {
+    const value = Number(this.store.get("cooperative_qusd_owed") ?? 0);
+    return Number.isFinite(value) && value >= 0 ? value : Infinity;
   }
 
   async ingestMarketStateEvent(
@@ -1049,13 +1110,7 @@ export class TradingEngine {
       if (
         (event === "p2p.paid" || event === "p2p.completed") &&
         operation.offerType === "sell"
-      ) this.store.recordFiatMovement(
-        operation.uuid,
-        operation.coin,
-        "debit",
-        operation.receive + (this.market(operation.coin)?.outgoingTransferFee ?? 0),
-        "Feed QvaPay",
-      );
+      ) this.recordOutgoingFiat(operation, "Feed QvaPay");
       if (event === "p2p.completed" && operation.offerType === "buy")
         this.store.recordFiatMovement(
           operation.uuid,
@@ -1538,7 +1593,7 @@ export class TradingEngine {
       throw new Error(
         `La tasa ${rate(offer).toFixed(2)} no alcanza tu mínimo de venta.`,
       );
-    const balance = await this.qva.qusdBalance();
+    const balance = Math.max(0, await this.qva.qusdBalance() - this.cooperativeQusdOwed());
     if (balance - strategy.reserve < offer.amount)
       throw new Error(
         `Saldo QUSD insuficiente. Disponible para operar: ${(balance - strategy.reserve).toFixed(2)} QUSD.`,
@@ -1611,7 +1666,7 @@ export class TradingEngine {
       ]);
       const liquidity = planLiquidity({
         target: offer,
-        availableQusd: balance,
+        availableQusd: Math.max(0, balance - this.cooperativeQusdOwed()),
         reserveQusd: this.marketConfig.current().risk.minQusdReserve,
         ownOffers,
         marketEconomics: liquidityEconomics(this.marketConfig.current()),
@@ -2003,13 +2058,7 @@ export class TradingEngine {
       if (
         paysFiat &&
         ["paid", "completed"].includes(offer.status) &&
-        this.store.recordFiatMovement(
-          offer.uuid,
-          coin,
-          "debit",
-          fiatAmount + (this.market(coin)?.outgoingTransferFee ?? 0),
-          "QvaPay reconciliado",
-        )
+        this.recordOutgoingFiat({ uuid: offer.uuid, coin, receive: fiatAmount }, "QvaPay reconciliado")
       )
         movements += 1;
       if (
@@ -2092,6 +2141,8 @@ export class TradingEngine {
       type,
       market.currency,
     );
+    if (type === "sell" && this.cooperativeQusdOwed() > 0 && amount > await this.fastLaneQusdBalance())
+      throw new Error("QUSD disponibles insuficientes: el saldo pendiente de repartir al grupo está reservado.");
     if (type === "buy") {
       const committed = open
         .filter(
@@ -2159,6 +2210,8 @@ export class TradingEngine {
     if (!this.isMarket(offer.coin))
       throw new Error("La oferta no usa un mercado fiat compatible.");
     const market = this.market(offer.coin);
+    if (offer.type === "sell" && this.cooperativeQusdOwed() > 0 && amount > offer.amount + await this.fastLaneQusdBalance())
+      throw new Error("QUSD disponibles insuficientes: el saldo pendiente de repartir al grupo está reservado.");
     if (
       offer.type === "buy" &&
       market &&
@@ -2602,15 +2655,15 @@ export class TradingEngine {
     const committed = this.store
       .activeOperations()
       .filter(
-        (op) => op.offerType === "sell" && op.coin === this.offerMarket(offer),
+        (op) => op.offerType === "sell" && op.coin === this.offerMarket(offer) && !this.store.hasFiatMovement(op.uuid),
       )
       .reduce(
         (sum, op) =>
-          sum + op.receive + (this.market(op.coin)?.outgoingTransferFee ?? 0),
+          sum + this.operationFiatCost(op),
         0,
       );
     return (
-      this.fiatBalance(this.offerMarket(offer)) - committed >=
+      this.fiatBalance(this.offerMarket(offer)) - committed - Number(this.store.get(`cooperative_fiat_reserved:${offer.coin}`) ?? 0) >=
       offer.receive +
         (this.market(this.offerMarket(offer))?.outgoingTransferFee ?? 0)
     );
@@ -2675,6 +2728,7 @@ export class TradingEngine {
       (candidate.type === "sell" ? this.isAutomaticBuyStillEligible(candidate, ownIntentId) :
         this.isAutomaticSellStillEligible(candidate, ownIntentId));
     if (!eligible(offer)) return false;
+    if (offer.type === "buy" && this.cooperativeQusdOwed() > 0 && await this.fastLaneQusdBalance() < offer.amount) return false;
     if (queuedForMs <= 5_000) return true;
     const fresh = await this.qva.getOffer(offer.uuid, { priority: true });
     // A delayed apply must not use a different monetary snapshot, even if the
@@ -2734,7 +2788,7 @@ export class TradingEngine {
             ? "La tasa cumple el máximo de compra configurado."
             : "No existe una referencia de mercado válida.",
       expectedMarginPercent: expectedMargin,
-      qusdBalance: await this.qva.qusdBalance(),
+      qusdBalance: Math.max(0, await this.qva.qusdBalance() - this.cooperativeQusdOwed()),
       fiatAvailable: this.fiatBalance(offer.coin),
       concurrentQusdExposure:
         store.activeOperations().reduce(

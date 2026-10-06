@@ -25,6 +25,10 @@ const balanceKey = (coin: string) => `cooperative_local_balance:${coin}`;
 const declaredKey = (coin: string) => `cooperative_balance_declared:${coin}`;
 const roundDownFiat = (amount: number) => Math.floor((amount + 1e-9) * 100) / 100;
 type ContributionDraft = Pick<CooperativeContribution, "coin" | "minimal" | "price">;
+export interface CooperativeReservation {
+  externalId: string; ownerFiat: number; state: "reserved" | "completed" | "released";
+  contributions: { userId: string; fiat: number; qusd: number }[];
+}
 
 export interface CooperativeAggregate {
   coin: string;
@@ -32,6 +36,7 @@ export interface CooperativeAggregate {
   price: number;
   minimal: number;
   offersCount: number;
+  capacities?: { fiat: number; price: number; minimal: number }[];
 }
 
 export interface CooperativeContribution {
@@ -41,6 +46,7 @@ export interface CooperativeContribution {
   price: number;
   state: "pending" | "confirmed";
   updatedAt: number;
+  revision?: string;
 }
 
 export interface CooperativeNetworkState {
@@ -117,6 +123,7 @@ export class SyncCoreClient {
         fiat: input.fiat,
         minimal: input.minimal,
         price: input.price,
+        ...(input.revision ? { expected_updated_at: input.revision } : {}),
       }),
     }, token);
   }
@@ -125,6 +132,27 @@ export class SyncCoreClient {
     await this.request(`/hunts/${encodeURIComponent(coin)}`, {
       method: "DELETE",
     }, token);
+  }
+
+  async reserve(token: string, offer: { uuid: string; coin: string; amount: number; receive: number }): Promise<CooperativeReservation> {
+    const data = await this.request("/hunts/reserve", { method: "POST", body: JSON.stringify({
+      external_id: offer.uuid, coin: offer.coin, amount: offer.amount, price: offer.receive / offer.amount, fiat: offer.receive,
+    }) }, token);
+    if (data.external_id !== offer.uuid || !["reserved", "completed", "released"].includes(String(data.state)) || !Array.isArray(data.contributions))
+      throw new SyncCoreError(undefined, "Sync Core no devolvió una reserva verificable.");
+    const ownerFiat = finiteNonNegative(data.owner_fiat, "owner_fiat");
+    const contributions = data.contributions.map((value: unknown) => {
+      if (!record(value)) throw new Error("Reparto cooperativo inválido.");
+      return { userId: stringField(value.user_id, "user_id"), fiat: finiteNonNegative(value.fiat_amount, "fiat_amount"),
+        qusd: finiteNonNegative(value.qusd_owed, "qusd_owed") };
+    });
+    if (Math.abs(ownerFiat + contributions.reduce((sum, row) => sum + row.fiat, 0) - offer.receive) > 0.011)
+      throw new SyncCoreError(undefined, "El reparto no coincide con el fiat de la oferta.");
+    return { externalId: offer.uuid, ownerFiat, contributions, state: data.state as CooperativeReservation["state"] };
+  }
+
+  async settle(token: string, uuid: string, outcome: "commit" | "release"): Promise<void> {
+    await this.request(`/hunts/reservations/${encodeURIComponent(uuid)}/${outcome}`, { method: "POST" }, token);
   }
 
   private async request(
@@ -191,6 +219,11 @@ export function parseCooperativeSnapshot(raw: unknown): Record<string, Cooperati
       price: finiteNonNegative(value.price, `${coin}.price`),
       minimal: finiteNonNegative(value.minimal, `${coin}.minimal`),
       offersCount: integerNonNegative(value.offers_count, `${coin}.offers_count`),
+      ...(Array.isArray(value.capacities) ? { capacities: value.capacities.map((level: unknown) => {
+        if (!record(level)) throw new Error("Nivel cooperativo inválido.");
+        return { fiat: finiteNonNegative(level.fiat, "fiat"), price: finitePositive(level.price, "price"),
+          minimal: finitePositive(level.minimal, "minimal") };
+      }) } : {}),
     };
   }
   return parsed;
@@ -213,12 +246,14 @@ export function parseCooperativeContributions(raw: unknown): Record<string, Coop
       price: finitePositive(item.price, `${coin}.price`),
       state: "confirmed",
       updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+      ...(typeof item.updated_at === "string" ? { revision: item.updated_at } : {}),
     };
   }
   return parsed;
 }
 
 export class HuntingSyncCoordinator {
+  private cachedState!: CooperativeNetworkState;
   private readonly client: SyncCoreClient | undefined;
   private connection: NatsConnection | undefined;
   private connectionToken: string | undefined;
@@ -250,8 +285,22 @@ export class HuntingSyncCoordinator {
   }
 
   state(): CooperativeNetworkState {
-    return this.store.loadRemoteResource<CooperativeNetworkState>(NETWORK_RESOURCE)?.data ??
-      emptyNetworkState(this.config.enabled);
+    return structuredClone(this.cachedState);
+  }
+  isEnabled(): boolean { return this.config.enabled; }
+
+  aggregate(coin: string, now = Date.now()): CooperativeAggregate | undefined {
+    if (!this.config.enabled || !this.cachedState.httpConnected || !this.cachedState.lastHttpAt || now - this.cachedState.lastHttpAt > 90_000)
+      return undefined;
+    return this.cachedState.snapshot[coin];
+  }
+
+  async reserve(offer: { uuid: string; coin: string; amount: number; receive: number }): Promise<CooperativeReservation> {
+    return this.authorized(token => this.requiredClient().reserve(token, offer));
+  }
+
+  async settle(uuid: string, outcome: "commit" | "release"): Promise<void> {
+    return this.authorized(token => this.requiredClient().settle(token, uuid, outcome));
   }
 
   async start(): Promise<void> {
@@ -409,7 +458,7 @@ export class HuntingSyncCoordinator {
         this.store.audit("cooperative_capacity_withdrawn", `${coin}: capacidad inferior a ${COOPERATIVE_MIN_QUSD} QUSD al precio ${current.price}.`);
       } else if (Math.abs(available - current.fiat) > CAPACITY_EPSILON) {
         const updated = { coin, fiat: available,
-          minimal: current.minimal, price: current.price };
+          minimal: current.minimal, price: current.price, ...(current.revision ? { revision: current.revision } : {}) };
         await this.authorized((token) => this.requiredClient().publish(token, updated));
         state.contributions[coin] = { ...updated, state: "pending", updatedAt: Date.now() };
         this.store.set(balanceKey(coin), String(local));
@@ -564,6 +613,7 @@ export class HuntingSyncCoordinator {
   }
 
   private saveState(state: CooperativeNetworkState): void {
+    this.cachedState = structuredClone(state);
     this.store.saveRemoteResource(NETWORK_RESOURCE, state);
   }
 
