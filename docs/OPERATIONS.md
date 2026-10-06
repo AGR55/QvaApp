@@ -77,7 +77,9 @@ credenciales por chat, logs o tickets. QvaPay documenta ambos canales en
 
 - Las ofertas propias vencen cinco minutos después de su última actualización conocida.
 - El proceso comprueba cada cinco segundos, refresca solo una oferta por vez y respeta 20 segundos entre ediciones.
-- Se intenta como máximo una aplicación por ronda y se conserva una separación superior a 30 segundos entre intentos, incluso después de reiniciar.
+- El feed evalúa al recibir el evento y puede utilizar dos intentos seguidos cuando están disponibles. El transporte conserva una ventana móvil de dos aplicaciones por 60 segundos incluso después de reiniciar y respeta `Retry-After`. Las lecturas del panel y el chat no ocupan ese turno.
+- Antes del envío se vuelven a comprobar saldo fiat comprometido, precio, mediana reciente, cacería activa, exclusiones y mutaciones inciertas. Si el turno esperó más de cinco segundos, se verifica que la oferta remota siga abierta y conserve sus importes. Un resultado incierto nunca se reintenta como una aplicación nueva.
+- En **Estrategia → Fuente de mercado**, el último intento distingue evaluación, cola, espera de cupo y respuesta de QvaPay. Son mediciones diferentes: la entrega del evento también depende de QvaPay y de la red.
 - Un rechazo confirmado después de liberar QUSD activa la restauración de las ofertas propias originales.
 - Un timeout o respuesta incierta no activa restauración ni reintento: exige conciliación.
 
@@ -90,6 +92,8 @@ credenciales por chat, logs o tickets. QvaPay documenta ambos canales en
 5. Guarda la hora, UUID y evidencia; exporta `/api/audit` desde una sesión autenticada.
 
 ## Backup y restauración
+
+Cada despliegue sano conserva el release y la imagen activos y una versión anterior para rollback. La limpieza retira las demás imágenes `qvaapply:<SHA>`, incluso si ya no tienen carpeta de release, y la caché de las etapas de compilación propias que no esté en uso ni compartida. Los contenedores existentes, volúmenes, datos, backups y las imágenes de otros servicios se conservan. Si el healthcheck falla, se restaura primero la versión anterior y no se ejecuta la limpieza.
 
 SQLite usa WAL. Para una copia coherente sencilla, detén QvaApply antes de copiar:
 

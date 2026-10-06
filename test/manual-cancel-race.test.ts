@@ -8,6 +8,97 @@ import { MarketConfigService } from "../src/market-config.js";
 import { Store } from "../src/store.js";
 import { TradingEngine } from "../src/trading.js";
 import type { P2pOffer } from "../src/types.js";
+import { QvaPayClient } from "../src/qvapay.js";
+
+for (const type of ["sell", "buy"] as const) {
+  for (const change of ["price", "manual-cancel", "feed-applied"] as const) {
+    test(`revalida ${type} después de esperar la cuota: ${change}`, async t => {
+      const { store, cfg, markets } = setup();
+      t.after(() => store.close());
+      let now = Date.now();
+      store.set("qva_throttle:apply_window", JSON.stringify([now, now]));
+      let ready!: () => void;
+      const waiting = new Promise<void>(resolve => { ready = resolve; });
+      let release!: () => void;
+      const blocked = new Promise<void>(resolve => { release = resolve; });
+      let applications = 0;
+      const qva = new QvaPayClient(() => "token", {
+        now: () => now,
+        throttleState: store,
+        sleep: async ms => { ready(); await blocked; now += ms; },
+        fetch: async (input) => {
+          if (String(input).endsWith("/apply")) applications++;
+          return new Response(JSON.stringify({ balance: 100 }));
+        },
+      });
+      const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
+      const uuid = `dispatch-${type}-${change}`;
+      const offer: P2pOffer = { uuid, type, coin: "BANK_CUP", amount: 10, receive: type === "sell" ? 9200 : 10200, status: "open" };
+      const run = trading.ingestMarketOffer(offer);
+      await waiting;
+      if (change === "manual-cancel") store.excludeAutomaticReapplyAfterManualCancel(uuid);
+      else if (change === "feed-applied") store.enqueueMarketFeedEvent({
+        key: `taken-${uuid}`, event: "p2p.applied", receivedAt: Date.now(),
+        payload: { event: "p2p.applied", sent_at: new Date().toISOString(), data: { uuid, status: "processing" } },
+      });
+      else {
+        const next = markets.current();
+        const market = next.markets.find(m => m.code === "BANK_CUP")!;
+        if (type === "sell") market.buyMaxRate = 910;
+        else market.sellMinRate = 1030;
+        markets.save(next);
+      }
+      release();
+      const result = await run;
+      assert.equal(applications, 0);
+      assert.equal(store.getOperation(uuid), undefined);
+      assert.equal(store.hasUnresolvedMutation(), false, "una aplicación no enviada no deja un bloqueo incierto");
+      assert.match(result.action ?? "", /rechazada/);
+    });
+  }
+}
+
+test("una oferta que envejeció en la cola se revalida y no aplica con importes distintos", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  let detailReads = 0, applications = 0;
+  const offer: P2pOffer = { uuid: "aged-in-queue", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" };
+  const qva = new QvaPayClient(() => "token", {
+    throttleState: store,
+    sleep: async () => undefined,
+    fetch: async input => {
+      if (String(input).endsWith("/apply")) applications++;
+      else detailReads++;
+      return new Response(JSON.stringify({ p2p: { ...offer, receive: 9400 } }));
+    },
+  });
+  const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
+  await trading.ingestMarketOffer(offer, Date.now() - 6_000);
+  assert.equal(detailReads, 1);
+  assert.equal(applications, 0);
+  assert.equal(store.hasUnresolvedMutation(), false);
+  assert.equal(store.get("qva_throttle:apply"), undefined);
+});
+
+for (const type of ["sell", "buy"] as const) {
+  test(`la intención propia no bloquea el envío automático de ${type}`, async t => {
+    const { store, cfg, markets } = setup();
+    t.after(() => store.close());
+    let applications = 0;
+    const qva = new QvaPayClient(() => "token", {
+      throttleState: store, sleep: async () => undefined,
+      fetch: async input => {
+        if (String(input).endsWith("/apply")) applications++;
+        return new Response(JSON.stringify({ balance: 100 }));
+      },
+    });
+    const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
+    await trading.ingestMarketOffer({ uuid: `guard-own-intent-${type}`, type, coin: "BANK_CUP", amount: 10, receive: type === "sell" ? 9200 : 10200, status: "open" });
+    assert.equal(applications, 1);
+    assert.equal(store.hasUnresolvedMutation(), false);
+    await new Promise(resolve => setImmediate(resolve));
+  });
+}
 
 function setup() {
   const dataDir = mkdtempSync(join(tmpdir(), "qva-cancel-race-"));

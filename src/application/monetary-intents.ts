@@ -12,7 +12,7 @@ export interface MonetaryMutation<T> {
   operationUuid?: string;
   workflowId?: string;
   request: unknown;
-  action: () => Promise<T>;
+  action: (intentId: string) => Promise<T>;
   idempotencyKey?: string;
 }
 
@@ -55,7 +55,7 @@ export class MonetaryIntents {
     });
 
     try {
-      const response = await mutation.action();
+      const response = await mutation.action(intentId);
       this.repository.updateMutationIntent(intentId, "confirmed", response);
       return response;
     } catch (error) {

@@ -28,6 +28,7 @@ export interface P2pOffer {
   tags?: string[];
   only_kyc?: boolean | number;
   only_vip?: boolean | number;
+  owner_uuid?: string;
   offer_kind?: "fixed" | "flexible" | string;
   available_amount?: number | string | null;
   order_min?: number | string | null;

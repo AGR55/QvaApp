@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { PollingMarketSource } from "./market-source.js";
 import type { MarketDataSource, MarketPageUpdate, MarketSourceStatus } from "./market-source.js";
-import type { Store } from "./store.js";
+import type { MarketFeedEvent, Store } from "./store.js";
 import type { P2pFeedEvent, P2pOffer } from "./types.js";
 import type { Vault } from "./vault.js";
 import {
@@ -25,6 +25,7 @@ export class MarketFeedRequestError extends Error {
 
 export class MarketSourceCoordinator implements MarketDataSource {
   private processing = false;
+  private processingState = false;
   private recoveryRequested = false;
   private lastRecoveryPollAt = 0;
   private readonly stream: QvaPayFeedStream;
@@ -160,6 +161,10 @@ export class MarketSourceCoordinator implements MarketDataSource {
         : {}),
       lastEventLatencyMs: optionalStoredNonNegativeNumber(this.store, "market_feed_last_latency_ms"),
       lastDeliveryLagMs: optionalStoredNonNegativeNumber(this.store, "market_feed_last_delivery_lag_ms"),
+      lastDecisionLatencyMs: optionalStoredNonNegativeNumber(this.store, "market_feed_last_decision_ms"),
+      lastApplyQueueMs: optionalStoredNonNegativeNumber(this.store, "qva_apply_last_queue_ms"),
+      lastApplyBudgetWaitMs: optionalStoredNonNegativeNumber(this.store, "qva_apply_last_budget_wait_ms"),
+      lastApplyResponseMs: optionalStoredNonNegativeNumber(this.store, "qva_apply_last_response_ms"),
       ...(this.store.get("market_feed_last_outcome")
         ? { lastEventOutcome: this.store.get("market_feed_last_outcome")! }
         : {}),
@@ -185,60 +190,73 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   async processNext(): Promise<boolean> {
-    if (this.processing || this.mode() !== "hybrid" || !this.canProcess()) return false;
+    if (this.mode() !== "hybrid" || !this.canProcess()) return false;
+    const stateProcessed = await this.processStateEvents();
+    if (this.processing) return stateProcessed;
     this.processing = true;
-    let processed = false;
+    let processed = stateProcessed;
     try {
       while (this.mode() === "hybrid" && this.canProcess()) {
-        const event = this.store.nextMarketFeedEvent(this.now());
+        const event = this.store.nextMarketFeedEvent(this.now(), "opportunity");
         if (!event) break;
         processed = true;
-        try {
-          const payload = normalizeStoredPayload(event.payload);
-          if (!isMarketFeedEvent(payload.event)) {
-            this.store.completeMarketFeedEvent(event.key, "ignored");
-            continue;
-          }
-          let outcome: string = payload.event;
-          if (isOpportunityEvent(payload.event) && payload.data.status === "open") {
-            if (this.store.hasPendingMarketFeedInvalidation(payload.data.uuid)) {
-              outcome = "invalidada antes de evaluar";
-            } else {
-              const result = await this.ingest(
-                payload.data,
-                event.receivedAt,
-                payload.event,
-                payload.sent_at,
-              );
-              if (isRecord(result) && typeof result.action === "string") outcome = result.action;
-            }
-          } else if (!isOpportunityEvent(payload.event))
-            await this.ingestState(payload.event, payload.data, event.receivedAt);
-          this.store.completeMarketFeedEvent(event.key, "processed");
-          this.store.set("market_feed_last_processed_at", String(this.now()));
-          this.store.set("market_feed_last_latency_ms", String(Math.max(0, this.now() - event.receivedAt)));
-          this.store.set("market_feed_last_outcome", outcome.slice(0, 200));
-          this.store.set("market_feed_last_error", "");
-          this.store.audit(
-            "market_feed_processed",
-            `Evento ${payload.event} de oferta ${payload.data.uuid} (${payload.data.coin}) procesado desde el feed: ${outcome.slice(0, 200)}.`,
-            payload.data.uuid,
-          );
-        } catch (error) {
-          const message = safeError(error);
-          this.store.failMarketFeedEvent(event.key, message, this.now());
-          this.store.set("market_feed_last_error", message);
-          const metadata = eventMetadata(event.payload);
-          this.store.audit(
-            "market_feed_processing_error",
-            `${metadata.text}. Error: ${message}`,
-            metadata.uuid,
-          );
-        }
+        await this.processEvent(event);
       }
       return processed;
     } finally {
       this.processing = false;
+    }
+  }
+
+  private async processStateEvents(): Promise<boolean> {
+    if (this.processingState) return false;
+    this.processingState = true;
+    let processed = false;
+    try {
+      while (this.mode() === "hybrid" && this.canProcess()) {
+        const event = this.store.nextMarketFeedEvent(this.now(), "state");
+        if (!event) break;
+        processed = true;
+        await this.processEvent(event);
+      }
+      return processed;
+    } finally {
+      this.processingState = false;
+    }
+  }
+
+  private async processEvent(event: MarketFeedEvent): Promise<void> {
+    try {
+      const payload = normalizeStoredPayload(event.payload);
+      if (!isMarketFeedEvent(payload.event)) {
+        this.store.completeMarketFeedEvent(event.key, "ignored");
+        return;
+      }
+      let outcome: string = payload.event;
+      if (isOpportunityEvent(payload.event) && payload.data.status === "open") {
+        if (this.store.hasPendingMarketFeedInvalidation(payload.data.uuid, Date.parse(payload.sent_at))) {
+          outcome = "invalidada antes de evaluar";
+        } else {
+          const result = await this.ingest(payload.data, event.receivedAt, payload.event, payload.sent_at);
+          if (isRecord(result) && typeof result.action === "string") outcome = result.action;
+        }
+      } else if (!isOpportunityEvent(payload.event)) {
+        await this.ingestState(payload.event, payload.data, event.receivedAt);
+      }
+      this.store.completeMarketFeedEvent(event.key, "processed");
+      this.store.set("market_feed_last_processed_at", String(this.now()));
+      this.store.set("market_feed_last_latency_ms", String(Math.max(0, this.now() - event.receivedAt)));
+      this.store.set("market_feed_last_outcome", outcome.slice(0, 200));
+      this.store.set("market_feed_last_error", "");
+      this.store.audit("market_feed_processed",
+        `Evento ${payload.event} de oferta ${payload.data.uuid} (${payload.data.coin}) procesado desde el feed: ${outcome.slice(0, 200)}.`,
+        payload.data.uuid);
+    } catch (error) {
+      const message = safeError(error);
+      this.store.failMarketFeedEvent(event.key, message, this.now());
+      this.store.set("market_feed_last_error", message);
+      const metadata = eventMetadata(event.payload);
+      this.store.audit("market_feed_processing_error", `${metadata.text}. Error: ${message}`, metadata.uuid);
     }
   }
 

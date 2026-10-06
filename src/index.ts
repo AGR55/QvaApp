@@ -427,7 +427,7 @@ scheduler.register("scan", 250, async () => {
   if (trading.isPaused()) return;
   if (marketSource.mode() === "hybrid" && await marketSource.processNext()) return;
   const update = await marketSource.pollNext();
-  if (update) await trading.ingestMarketUpdate(update);
+  if (update) await trading.ingestMarketUpdate(update, { realtimeRecovery: marketSource.mode() === "hybrid" });
 });
 scheduler.register("expire", 15_000, () => trading.expireOperations());
 scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());

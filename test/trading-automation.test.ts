@@ -43,6 +43,68 @@ function setup() {
   return { dataDir, store, cfg, markets };
 }
 
+test("el feed decide sin esperar los promedios de una lectura de recuperación", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  let release!: () => void;
+  let averaging!: () => void;
+  const started = new Promise<void>(resolve => { averaging = resolve; });
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  let applies = 0;
+  const trading = new TradingEngine(store, {
+    p2pAverages: async () => { averaging(); await blocked; return {}; },
+    apply: async () => { applies++; }, sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  const background = trading.ingestMarketUpdate({ coin: "BANK_CUP", side: "sell",
+    page: { offers: [], total: 0, currentPage: 1, perPage: 100 }, scannedAt: Date.now(), sourceAccountId: "primary" });
+  await started;
+  const offer = trading.ingestMarketOffer({ uuid: "fast-over-background", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(applies, 1);
+  release();
+  await Promise.all([offer, background]);
+});
+
+test("una ráfaga concurrente del feed no comparte el mismo saldo fiat", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  store.set("fiat_balance:BANK_CUP", "10000");
+  const applications: string[] = [];
+  const trading = new TradingEngine(store, {
+    apply: async (uuid: string) => { await new Promise(resolve => setImmediate(resolve)); applications.push(uuid); },
+    sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  await Promise.all([1, 2, 3].map(i => trading.ingestMarketOffer({ uuid: `burst-${i}`, type: "sell", coin: "BANK_CUP", amount: 10, receive: i === 1 ? 9500 : 9200, status: "open" })));
+  assert.equal(applications.length, 1);
+  assert.equal(store.activeOperations().length, 1);
+});
+
+test("la recuperación en tiempo real evalúa una página sin esperar todos los mercados", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  let applies = 0;
+  const trading = new TradingEngine(store, {
+    p2pAverages: async () => { throw new Error("no esperar promedios para recuperar el feed"); },
+    apply: async () => { applies++; }, sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  await trading.ingestMarketUpdate({ coin: "BANK_CUP", side: "sell",
+    page: { offers: [{ uuid: "recovery-now", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" }], total: 1, currentPage: 1, perPage: 100 },
+    scannedAt: Date.now(), sourceAccountId: "primary" }, { realtimeRecovery: true });
+  assert.equal(applies, 1);
+});
+
+test("las ofertas propias del feed no gastan intentos de aplicación", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  store.set("analytics_account_uuid", "me");
+  const trading = new TradingEngine(store, { apply: async () => { throw new Error("no aplicar a una oferta propia"); } } as never,
+    cfg as never, markets, async () => undefined);
+  const result = await trading.ingestMarketOffer({ uuid: "own-feed-offer", type: "sell", coin: "BANK_CUP", owner_uuid: "me",
+    amount: 10, receive: 9200, status: "open" });
+  assert.match(result.action ?? "", /oferta propia/);
+  assert.equal(store.recentMutationIntents(10).length, 0);
+});
+
 for (const lifecycle of ["none", "applied", "cancelled"] as const) {
   test(`detalle 404 ambiguo conserva evidencia del feed: ${lifecycle}`, async () => {
     const { store, cfg, markets } = setup();

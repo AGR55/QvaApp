@@ -930,6 +930,15 @@ function MarketSourceSettings() {
         </p>
       ) : null}
       {source?.lastWebhookError ? <p className="reader-error" role="status">Webhook: {source.lastWebhookError}</p> : null}
+      {source?.mode === "hybrid" && Number.isFinite(source?.lastApplyResponseMs) ? (
+        <p className="reader-health-detail" role="status">
+          Último intento de aplicación
+          {Number.isFinite(source?.lastDecisionLatencyMs) ? ` · evaluación ${source.lastDecisionLatencyMs} ms` : ""}
+          {Number.isFinite(source?.lastApplyQueueMs) ? ` · cola ${source.lastApplyQueueMs} ms` : ""}
+          {Number.isFinite(source?.lastApplyBudgetWaitMs) ? ` · espera de cupo ${source.lastApplyBudgetWaitMs} ms` : ""}
+          {` · respuesta QvaPay ${source.lastApplyResponseMs} ms`}
+        </p>
+      ) : null}
       {source?.lastStreamError ? <p className="reader-error" role="status">Stream: {source.lastStreamError}</p> : null}
       <div className="market-reader-list">
         <MarketReaderCard account={{
