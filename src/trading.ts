@@ -163,6 +163,7 @@ export class TradingEngine {
     source = "panel",
     reason = "Configuración actualizada desde el panel local",
   ): void {
+    const previousBalances = new Map(this.marketConfig.markets().map((market) => [market.code, this.fiatBalance(market.code)]));
     const saved = this.marketConfig.save(
       next,
       source,
@@ -170,6 +171,8 @@ export class TradingEngine {
     );
     for (const market of saved.markets) {
       this.store.set(`fiat_balance:${market.code}`, String(market.fiatBalance));
+      if (source === "panel" && previousBalances.get(market.code) !== market.fiatBalance)
+        this.store.set(`cooperative_balance_declared:${market.code}`, "true");
     }
     this.store.audit(
       "config",
@@ -244,6 +247,7 @@ export class TradingEngine {
     if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
     this.store.set(`fiat_balance:${coin}`, String(amount));
     this.marketConfig.updateBalance(coin, amount);
+    this.store.set(`cooperative_balance_declared:${coin}`, "true");
     this.store.audit(
       "fiat_balance",
       `Saldo fiat declarado: ${amount} ${this.marketCurrency(coin)} (${coin})`,

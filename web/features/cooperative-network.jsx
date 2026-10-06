@@ -24,7 +24,6 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
   const draftFor = (market) => {
     const current = network.contributions?.[market.code];
     return drafts[market.code] || {
-      fiat: current?.fiat ?? "",
       minimal: current?.minimal ?? "",
       price: current?.price ?? "",
     };
@@ -32,7 +31,6 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
   const updateDraft = (coin, field, value) =>
     setDrafts((current) => {
       const base = current[coin] || network.contributions?.[coin] || {
-        fiat: "",
         minimal: "",
         price: "",
       };
@@ -48,7 +46,6 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           coin: market.code,
-          fiat: Number(draft.fiat),
           minimal: Number(draft.minimal),
           price: Number(draft.price),
         }),
@@ -168,6 +165,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
         title="Aportaciones"
         wide
       >
+        <p className="network-capacity-hint">El aporte usa el saldo fiat del mercado. Se actualiza automáticamente y se retira si queda por debajo de 5 QUSD al precio indicado.</p>
         {notice ? <p className="network-notice" role="status">{notice}</p> : null}
         <div className="network-contribution-table-wrap">
           <table className="network-contribution-table">
@@ -176,7 +174,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
               <tr>
                 <th scope="col">Mercado</th>
                 <th scope="col">Estado</th>
-                <th scope="col">Fiat disponible</th>
+                <th scope="col">Fiat aportado</th>
                 <th scope="col">Mínimo</th>
                 <th scope="col">Precio objetivo</th>
                 <th scope="col">Acciones</th>
@@ -199,8 +197,9 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
                     <td data-label="Estado">
                       <Badge variant="neutral">{status}</Badge>
                     </td>
-                    <td data-label={`Fiat (${market.currency})`}>
-                      <Input form={formId} id={`${market.code}-fiat`} name="fiat" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required aria-label={`Fiat disponible en ${market.currency} para ${market.label}`} value={draft.fiat} onChange={(event) => updateDraft(market.code, "fiat", event.target.value)} />
+                    <td data-label={`Fiat aportado (${market.currency})`}>
+                      <strong>{money(current?.fiat ?? market.fiatBalance)} {market.currency}</strong>
+                      {current && Math.abs(current.fiat - market.fiatBalance) > 0.01 ? <small className="network-local-balance">Saldo local: {money(market.fiatBalance)} {market.currency}</small> : null}
                     </td>
                     <td data-label="Mínimo">
                       <Input form={formId} id={`${market.code}-minimal`} name="minimal" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required aria-label={`Mínimo para ${market.label}`} value={draft.minimal} onChange={(event) => updateDraft(market.code, "minimal", event.target.value)} />

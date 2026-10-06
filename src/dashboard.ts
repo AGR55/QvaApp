@@ -268,7 +268,6 @@ export class DashboardReadModel {
   }
   async publishCooperativeContribution(input: {
     coin: string;
-    fiat: number;
     minimal: number;
     price: number;
   }): Promise<void> {
@@ -282,6 +281,7 @@ export class DashboardReadModel {
   async reconcileCooperativeNetwork(): Promise<void> {
     if (!this.huntingSync) throw new Error("La red cooperativa no está configurada.");
     await this.huntingSync.reconcile();
+    await this.huntingSync.syncCapacity();
   }
   async createOwnOffer(
     coin: FiatMarket,

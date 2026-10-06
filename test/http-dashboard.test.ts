@@ -476,7 +476,7 @@ test("la API cooperativa publica y retira aportaciones sin exponer ejecución co
     method: "PUT",
     url: "/api/cooperative-network/contributions",
     headers,
-    payload: { coin: "BANK_CUP", fiat: 0, minimal: 100, price: 390 },
+    payload: { coin: "BANK_CUP", minimal: 100, price: 0 },
   });
   assert.equal(invalid.statusCode, 400);
 
@@ -484,11 +484,11 @@ test("la API cooperativa publica y retira aportaciones sin exponer ejecución co
     method: "PUT",
     url: "/api/cooperative-network/contributions",
     headers,
-    payload: { coin: "BANK_CUP", fiat: 12_500, minimal: 1_000, price: 390 },
+    payload: { coin: "BANK_CUP", fiat: 999_999, minimal: 1_000, price: 390 },
   });
   assert.equal(accepted.statusCode, 204);
   assert.deepEqual(published, [
-    { coin: "BANK_CUP", fiat: 12_500, minimal: 1_000, price: 390 },
+    { coin: "BANK_CUP", minimal: 1_000, price: 390 },
   ]);
 
   const removed = await app.inject({

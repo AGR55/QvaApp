@@ -605,16 +605,15 @@ export function buildDashboard(
     reply.status(204);
   });
   app.put<{
-    Body: { coin: string; fiat: number; minimal: number; price: number };
+    Body: { coin: string; minimal: number; price: number };
   }>("/api/cooperative-network/contributions", {
     schema: {
       body: {
         type: "object",
         additionalProperties: false,
-        required: ["coin", "fiat", "minimal", "price"],
+        required: ["coin", "minimal", "price"],
         properties: {
           coin: { type: "string", pattern: "^[A-Z0-9_]{2,40}$" },
-          fiat: { type: "number", exclusiveMinimum: 0 },
           minimal: { type: "number", exclusiveMinimum: 0 },
           price: { type: "number", exclusiveMinimum: 0 },
         },

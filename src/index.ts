@@ -460,6 +460,9 @@ scheduler.register("dashboard_cache", 30_000, () =>
 scheduler.register("cooperative_reconcile", 60_000, () =>
   huntingSync.reconcile(),
 );
+scheduler.register("cooperative_capacity", 5_000, () =>
+  huntingSync.syncCapacity(),
+);
 void bootstrap();
 
 async function installTelegramMenu(): Promise<void> {
@@ -506,6 +509,7 @@ async function bootstrap(): Promise<void> {
   void scheduler.run("sms_receipts");
   void scheduler.run("capital_rebalance");
   void scheduler.run("fiat_sync");
+  void scheduler.run("cooperative_capacity");
   void scheduler.run("operation_sync");
   void scheduler.run("dashboard_cache");
   void startPolling();
@@ -1001,6 +1005,7 @@ async function handleCooperativeAction(ctx: Context, data: string): Promise<void
       return showCooperativeNetwork(ctx);
     case "refresh":
       await huntingSync.reconcile();
+      await huntingSync.syncCapacity();
       return showCooperativeNetwork(ctx, "✅ Red reconciliada con Sync Core.");
     case "edit": {
       const market = trading.market(action.coin);
@@ -1052,16 +1057,11 @@ async function continueCooperativeContribution(ctx: Context, input: string): Pro
     await cooperativePrompt(ctx, "Escribe el importe mínimo que debe tener una operación.", "Importe mínimo");
     return;
   }
-  if (session.stage === "fiat") {
-    await cooperativePrompt(ctx, "Escribe el fiat total que QvaApply aportará.", "Fiat disponible");
-    return;
-  }
   if (session.stage !== "confirm") return;
   const contribution: CooperativeDraft = {
     coin: session.coin,
     price: session.price!,
     minimal: session.minimal!,
-    fiat: session.fiat!,
   };
   await ctx.reply(cooperativeConfirmationText(contribution), {
     parse_mode: "HTML",
@@ -1086,7 +1086,7 @@ function cooperativeConfirmationText(contribution: CooperativeDraft): string {
     `Mercado: <b>${networkContributionLabel(contribution.coin)}</b>`,
     `Precio objetivo: <b>${money(contribution.price)}</b>`,
     `Mínimo: <b>${money(contribution.minimal)} ${escapeHtml(currency)}</b>`,
-    `Fiat disponible: <b>${money(contribution.fiat)} ${escapeHtml(currency)}</b>`,
+    `Fiat disponible: <b>${money(trading.fiatBalance(contribution.coin))} ${escapeHtml(currency)}</b>`,
   ].join("\n");
 }
 
