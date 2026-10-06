@@ -129,6 +129,7 @@ const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
   safetyReason: offer => trading.cooperativeSafetyReason(offer),
   canReserveOwn: (coin, fiat) => trading.cooperativeOwnCapacity(coin, fiat),
   ownerCost: (coin, fiat) => trading.cooperativeOwnerCost(coin, fiat),
+  projectState: (event, offer) => trading.ingestMarketStateEvent(event, offer),
   notify: (message, uuid) => notifications.publish({ message, operationUuid: uuid,
     event: { kind: message.startsWith("⚠️") ? "reconciliation-required" : "operation-applied", uuid } }),
 });

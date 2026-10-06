@@ -14,6 +14,7 @@ type HunterRuntime = {
   safetyReason(offer: P2pOffer): string | undefined;
   canReserveOwn(coin: string, fiat: number): boolean;
   ownerCost(coin: string, fiat: number): number;
+  projectState?(event: "p2p.paid" | "p2p.completed", offer: P2pOffer): Promise<void>;
   notify(message: string, uuid: string): Promise<void>;
 };
 const RESOURCE = "cooperative-executions";
@@ -135,7 +136,7 @@ export class CooperativeHunter {
         throw error;
       }
       this.save(job, "applied");
-      this.projectOperation(job);
+      await this.projectOperation(job);
       await this.commit(job);
       void this.runtime.notify(`🤝 Cacería conjunta: ${offer.amount} QUSD por ${offer.receive} ${offer.coin}. Tu parte: ${job.reservation.ownerFiat}. Cada participante paga directamente al vendedor. Confirma el pago total cuando hayan pagado todos. Después debes repartir ${job.reservation.contributions.reduce((sum,row) => sum + row.qusd,0).toFixed(2)} QUSD al grupo.`, offer.uuid);
     } catch (error) {
@@ -146,13 +147,25 @@ export class CooperativeHunter {
     }
   }
 
-  private projectOperation(job: CooperativeExecution): void {
+  private async projectOperation(job: CooperativeExecution): Promise<void> {
     if (!job.reservation) return;
     this.store.set(`cooperative_owner_fiat:${job.offer.uuid}`, String(job.reservation.ownerFiat));
     if (!this.store.getOperation(job.offer.uuid)) this.store.createOperation({ uuid: job.offer.uuid, offerType: "sell",
       coin: job.offer.coin, amount: job.offer.amount, receive: job.offer.receive, rate: job.offer.receive/job.offer.amount,
       state: "acknowledged", autoApplied: true, cancelAt: null, createdAt: job.createdAt,
       ...(job.offer.User?.uuid ?? job.offer.owner_uuid ? { counterpartyId: (job.offer.User?.uuid ?? job.offer.owner_uuid)! } : {}) });
+    // A feed event can beat the HTTP apply acknowledgement. Replay its durable
+    // evidence only after this account's successful application is established.
+    const latest = this.store.latestMarketFeedState(job.offer.uuid);
+    if (latest && latest.receivedAt >= job.createdAt && (latest.event === "p2p.completed" || latest.event === "p2p.paid")) {
+      const offer = { ...job.offer, status: latest.event === "p2p.completed" ? "completed" as const : "paid" as const };
+      await this.runtime.projectState?.(latest.event, offer);
+      if (latest.event === "p2p.completed") {
+        job.credited = true;
+        this.save(job);
+        this.updateOwed();
+      }
+    }
   }
 
   private async commit(job: CooperativeExecution): Promise<void> {
@@ -216,7 +229,7 @@ export class CooperativeHunter {
         const account = this.store.get("analytics_account_uuid");
         if (!account || offer.Peer?.uuid !== account || !["processing", "paid", "completed"].includes(offer.status)) continue;
         if (!job.reservation) { try { job.reservation = await this.sync.reserve(job.offer); } catch { continue; } }
-        this.projectOperation(job);
+        await this.projectOperation(job);
         if (job.phase !== "committed") await this.commit(job);
         if (offer.status === "completed") this.onState("p2p.completed", offer);
       }

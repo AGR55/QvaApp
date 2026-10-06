@@ -58,3 +58,10 @@ test("cooperative quota leaves a slot for personal apply without waiting for coo
   await qva.apply("personal"); assert.equal(sent.length,2); release(); await group;
   await assert.rejects(qva.applySecondary("other",() => true), error => error instanceof QvaApiError && error.code==="LOCAL_SECONDARY_YIELD");
 });
+test("completion arriving before the apply response still protects participants' QUSD", async () => {
+ const s=setup();
+ s.store.latestMarketFeedState=()=>({event:"p2p.completed",status:"completed",receivedAt:Date.now()+1,sentAt:Date.now()});
+ s.hunter.enqueue(offer,Date.now());await until(()=>s.hunter.executions()[0]?.phase==="completed");
+ assert.equal(s.store.get("cooperative_qusd_owed"),"6");
+ await s.hunter.stop();s.store.close();
+});
