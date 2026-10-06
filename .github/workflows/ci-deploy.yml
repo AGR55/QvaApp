@@ -68,7 +68,7 @@ jobs:
           tar --create --gzip
           --file "qvaapply-${GITHUB_SHA}.tar.gz"
           package.json pnpm-lock.yaml dist public deploy
-          scripts/deploy-vps.sh scripts/backup-vps.sh scripts/enable-vps-tls.sh
+          scripts/deploy-vps.sh scripts/cleanup-vps.sh scripts/backup-vps.sh scripts/enable-vps-tls.sh
 
       - name: Configure production SSH
         env:
@@ -100,11 +100,8 @@ jobs:
           scp -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=15 \
             -P "$ssh_port" "$archive" "$remote:$remote_root/uploads/$archive"
           ssh "${ssh_options[@]}" "$remote" \
-            "if [ -x \"$remote_root/current/scripts/deploy-vps.sh\" ]; then
-               bash \"$remote_root/current/scripts/deploy-vps.sh\" \"$remote_root/uploads/$archive\" \"$GITHUB_SHA\"
-             else
-               tmp=\"$remote_root/bootstrap-$GITHUB_SHA\"
-               mkdir -p \"\$tmp\"
-               tar -xzf \"$remote_root/uploads/$archive\" -C \"\$tmp\"
-               bash \"\$tmp/scripts/deploy-vps.sh\" \"$remote_root/uploads/$archive\" \"$GITHUB_SHA\"
-             fi"
+            "set -eu
+             task_tmp=\$(mktemp -d '$remote_root/deploy-script.XXXXXX')
+             trap 'rm -rf -- \"\$task_tmp\"' EXIT
+             tar -xzf '$remote_root/uploads/$archive' -C \"\$task_tmp\" scripts/deploy-vps.sh
+             bash \"\$task_tmp/scripts/deploy-vps.sh\" '$remote_root/uploads/$archive' '$GITHUB_SHA'"

@@ -26,7 +26,7 @@ export interface OpportunityInput {
   expectedMarginPercent: number;
   priceDecision: "eligible" | "manual_review" | "blocked" | "ignored";
   priceReason: string;
-  canApply?: () => boolean;
+  canApply?: (ownIntentId?: string, queuedForMs?: number) => boolean | Promise<boolean>;
 }
 
 export interface OpportunityResult {
@@ -338,19 +338,21 @@ export class OpportunityOrchestrator {
     }
     this.store.updateWorkflowState(workflowId, "capital_reserved");
     try {
-      if (input.canApply && !input.canApply())
+      if (input.canApply && !await input.canApply())
         throw new Error("La cacería de venta fue detenida antes de aplicar.");
       await this.cancelOwnOffers(workflowId);
       this.store.updateWorkflowState(workflowId, "own_offers_cancelled");
       this.store.updateWorkflowState(workflowId, "applying_external");
-      if (input.canApply && !input.canApply())
+      if (input.canApply && !await input.canApply())
         throw new Error("La cacería de venta fue detenida antes de aplicar.");
       await this.monetaryIntents.execute({
         kind: "apply",
         operationUuid: input.target.uuid,
         workflowId,
         request: { workflowId },
-        action: () => this.qva.apply(input.target.uuid),
+        action: (intentId) => this.qva.apply(input.target.uuid, input.canApply ? {
+          beforeDispatch: (queuedForMs) => input.canApply!(intentId, queuedForMs),
+        } : {}),
       });
       this.store.createOperation({
         uuid: input.target.uuid,

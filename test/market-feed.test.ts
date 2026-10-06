@@ -277,6 +277,33 @@ test("un evento aplicado en cola invalida la oportunidad antes de consumir apply
   state.store.close();
 });
 
+test("los estados y avisos no esperan una aplicación pendiente de respuesta o cuota", async () => {
+  const state = setup();
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const lifecycle: string[] = [];
+  const coordinator = new MarketSourceCoordinator(state.store, new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl, async () => { await blocked; }, () => true,
+    () => Date.parse("2026-09-24T12:00:10Z"),
+    { fetch: async () => new Response("retry: 60000\n\n", { status: 200 }) },
+    async event => { lifecycle.push(event); });
+  enableRealtime(coordinator);
+  const first = Buffer.from(JSON.stringify(payload()));
+  coordinator.acceptWebhook(first, signed(first, Date.parse("2026-09-24T12:00:10Z")));
+  await new Promise(resolve => setImmediate(resolve));
+  const source = payload("another-operation", "p2p.completed");
+  const next = Buffer.from(JSON.stringify({ ...source, data: { ...source.data, status: "completed" } }));
+  coordinator.acceptWebhook(next, signed(next, Date.parse("2026-09-24T12:00:10Z")));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(lifecycle, ["p2p.completed"]);
+  assert.equal(state.coordinator.status().pendingWebhookEvents, 1);
+  release();
+  await new Promise(resolve => setImmediate(resolve));
+  coordinator.stop();
+  state.store.close();
+});
+
 test("rechaza firma inválida y timestamp fuera de la ventana", async () => {
   const state = setup();
   enableRealtime(state.coordinator);

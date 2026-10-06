@@ -57,9 +57,9 @@ Las operaciones automáticas con autocancelación vigilan el chat cada 15 segund
 
 ## Presupuesto de mercado y mutaciones
 
-El scheduler inicia una ronda de mercado cada 15 segundos sin solaparlas. Cada ronda consulta primero `sell` para todos los mercados activos con `take=100` y `best_rate`; `buy` se consulta en rondas alternas. La cola única del adaptador mantiene como máximo 30 listados por minuto aunque sincronización y panel coincidan con el escáner.
+En modo híbrido, stream y webhook persisten y deduplican eventos e inician su evaluación inmediatamente. Las oportunidades y los cambios de estado se drenan por separado, de modo que una aplicación esperando cuota o respuesta no retrasa pagos, cancelaciones y avisos. El polling se utiliza para recuperar una desconexión; cada página se evalúa con referencias locales, sin esperar una ronda completa de todos los mercados.
 
-El escáner compara márgenes porcentuales entre mercados, prueba candidatas ordenadas hasta encontrar una que pase toda la política y ejecuta como máximo una aplicación por ronda. Las marcas temporales de `apply`, `edit` y `cancel` se escriben antes de enviar la petición, por lo que un reinicio no reinicia el presupuesto remoto. El refresco comprueba la cola cada cinco segundos, pero edita una sola oferta vencida por turno y deja al menos 20 segundos entre ediciones.
+Las decisiones financieras siguen serializadas para no comprometer dos veces el mismo capital. La preparación remota del escaneo, los avisos y el chat posterior quedan fuera de ese turno. El transporte mantiene colas independientes para aplicaciones, lecturas críticas y tareas normales. `apply` usa una ventana durable de dos intentos por 60 segundos; cada intento pasa una comprobación final antes de gastar cuota. Las marcas de `edit` y `cancel` conservan 20 segundos entre envíos. El listado mantiene como máximo 25 consultas por minuto, siguiendo la sección de límites vigente, más conservadora que la tabla de errores que aún indica 30.
 
 ## Cómo añadir una feature
 

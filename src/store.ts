@@ -1314,13 +1314,13 @@ export class Store {
     ).map(mutationIntentFromRow);
   }
 
-  hasUnresolvedMutation(): boolean {
+  hasUnresolvedMutation(excludeIntentId?: string): boolean {
     return Boolean(
       this.db
         .prepare(
-          "SELECT 1 FROM mutation_intents WHERE state IN ('submitted', 'uncertain') LIMIT 1",
+          "SELECT 1 FROM mutation_intents WHERE state IN ('submitted', 'uncertain') AND intent_id != ? LIMIT 1",
         )
-        .get(),
+        .get(excludeIntentId ?? ""),
     );
   }
 
@@ -1638,10 +1638,12 @@ export class Store {
     return inserted.changes > 0;
   }
 
-  nextMarketFeedEvent(now = Date.now()): MarketFeedEvent | undefined {
+  nextMarketFeedEvent(now = Date.now(), lane?: "opportunity" | "state"): MarketFeedEvent | undefined {
     const row = this.db.prepare(
       `SELECT * FROM market_feed_events
        WHERE state = 'pending' AND next_attempt_at <= ?
+         ${lane === "opportunity" ? "AND event IN ('p2p.created', 'p2p.reopened')" :
+           lane === "state" ? "AND event NOT IN ('p2p.created', 'p2p.reopened')" : ""}
        ORDER BY received_at ASC LIMIT 1`,
     ).get(now) as Record<string, unknown> | undefined;
     return row ? marketFeedEventFromRow(row) : undefined;
@@ -1718,7 +1720,18 @@ export class Store {
     return latest[0];
   }
 
-  hasPendingMarketFeedInvalidation(uuid: string): boolean {
+  hasPendingMarketFeedInvalidation(uuid: string, since?: number): boolean {
+    if (since !== undefined) {
+      const rows = this.db.prepare(`SELECT payload_json FROM market_feed_events
+        WHERE event IN ('p2p.applied', 'p2p.paid', 'p2p.completed', 'p2p.cancelled')
+          AND json_extract(payload_json, '$.data.uuid') = ?`).all(uuid) as Array<{ payload_json: string }>;
+      return rows.some(row => {
+        try {
+          const payload = JSON.parse(row.payload_json) as { sent_at?: string };
+          return Date.parse(payload.sent_at ?? "") >= since;
+        } catch { return false; }
+      });
+    }
     return Boolean(this.db.prepare(
       `SELECT 1 FROM market_feed_events
        WHERE state = 'pending'

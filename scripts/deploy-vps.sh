@@ -80,17 +80,5 @@ if [[ $healthy != true ]]; then
 fi
 
 rm -f "$archive"
-find "$app_root/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
-  | sort -nr \
-  | awk 'NR > 5 { sub(/^[^ ]+ /, ""); print }' \
-  | while IFS= read -r stale_release; do
-      if [[ $stale_release != "$release_dir" && $stale_release != "$previous_release" ]]; then
-        stale_revision=$(basename "$stale_release")
-        if [[ $stale_revision =~ ^[0-9a-f]{40}$ ]]; then
-          docker image rm "qvaapply:$stale_revision" >/dev/null 2>&1 || true
-        fi
-        rm -rf -- "$stale_release"
-      fi
-    done
-docker image prune -f --filter "label=qvaapply.release=true" --filter "until=168h" >/dev/null
+bash "$release_dir/scripts/cleanup-vps.sh" "$app_root" "$revision" "${previous_release##*/}"
 echo "QvaApply desplegado en $release_dir"

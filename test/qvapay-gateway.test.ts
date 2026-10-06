@@ -78,7 +78,30 @@ test("falla cerrado para detalles de pago malformados o con claves duplicadas", 
   }
 });
 
-test("serializa mutaciones distintas bajo un único límite global", async () => {
+test("las aplicaciones no esperan una lectura remota colgada", async () => {
+  let release!: () => void;
+  let reading!: () => void;
+  const started = new Promise<void>(resolve => { reading = resolve; });
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const calls: string[] = [];
+  const client = new QvaPayClient(() => "token", {
+    sleep: async () => undefined,
+    fetch: async (_input, init) => {
+      calls.push(init?.method ?? "GET");
+      if (init?.method === "GET") { reading(); await blocked; }
+      return new Response(JSON.stringify({ p2p: { uuid: "slow", type: "sell", coin: "BANK_CUP", amount: 5, receive: 4600, status: "open" } }));
+    },
+  });
+  const read = client.getOffer("slow");
+  await started;
+  const applying = client.apply("fast");
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(calls, ["GET", "POST"], "el POST debe salir antes de que termine el GET");
+  release();
+  await Promise.all([read, applying]);
+});
+
+test("mantiene la cuota independiente de las otras mutaciones", async () => {
   let now = 1_000;
   const calls: { url: string; at: number }[] = [];
   const client = new QvaPayClient(() => "token", {
@@ -97,10 +120,31 @@ test("serializa mutaciones distintas bajo un único límite global", async () =>
   assert.equal(calls.length, 2);
   assert.match(calls[0]!.url, /one\/apply$/);
   assert.match(calls[1]!.url, /two\/cancel$/);
-  assert.ok(calls[1]!.at - calls[0]!.at >= 1_600);
+  assert.equal(calls[1]!.at, calls[0]!.at);
 });
 
-test("conserva entre reinicios la separación de aplicaciones", async () => {
+test("una lectura crítica de saldo no espera el panel y conserva la clasificación de fallo de lectura", async () => {
+  let release!: () => void;
+  let reading!: () => void;
+  const started = new Promise<void>(resolve => { reading = resolve; });
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const client = new QvaPayClient(() => "token", {
+    sleep: async () => undefined,
+    fetch: async input => {
+      if (String(input).includes("/p2p/slow")) { reading(); await blocked; }
+      return new Response(JSON.stringify({ balance: 100, p2p: { uuid: "slow", type: "sell", coin: "BANK_CUP", amount: 5, receive: 4600, status: "open" } }));
+    },
+  });
+  const read = client.getOffer("slow");
+  await started;
+  assert.equal(await client.qusdBalance({ priority: true }), 100);
+  release();
+  await read;
+  const failing = new QvaPayClient(() => "token", { sleep: async () => undefined, fetch: async () => { throw new TypeError("fetch failed"); } });
+  await assert.rejects(failing.qusdBalance({ priority: true }), QvaConnectionError);
+});
+
+test("permite dos aplicaciones seguidas y conserva la ventana entre reinicios", async () => {
   let now = 1_000;
   const state = new Map<string, string>();
   const waits: number[] = [];
@@ -125,8 +169,55 @@ test("conserva entre reinicios la separación de aplicaciones", async () => {
   await new QvaPayClient(() => "token", runtime).apply("two");
   await new QvaPayClient(() => "token", runtime).apply("three");
 
-  assert.ok(waits.some((milliseconds) => milliseconds >= 30_000));
+  assert.equal(calls[1], calls[0], "la segunda aplicación usa el segundo intento disponible");
+  assert.ok(waits.some((milliseconds) => milliseconds >= 60_000));
   assert.ok(calls[2]! - calls[0]! > 60_000);
+});
+
+test("vuelve a comprobar las condiciones al despachar sin gastar cuota si cambiaron", async () => {
+  const state = new Map<string, string>();
+  let calls = 0;
+  const client = new QvaPayClient(() => "token", {
+    throttleState: { get: key => state.get(key), set: (key, value) => void state.set(key, value) },
+    fetch: async () => { calls++; return new Response("{}"); },
+  });
+  await assert.rejects(client.apply("changed", { beforeDispatch: () => false }),
+    (error: unknown) => error instanceof QvaApiError && error.code === "LOCAL_CONDITIONS_CHANGED");
+  assert.equal(calls, 0);
+  assert.equal(state.get("qva_throttle:apply"), undefined);
+});
+
+test("respeta Retry-After de aplicación incluso después de reiniciar y no reintenta POST", async () => {
+  let now = 1_000;
+  let calls = 0;
+  const state = new Map<string, string>();
+  const runtime = {
+    now: () => now,
+    sleep: async (ms: number) => { now += ms; },
+    throttleState: { get: (key: string) => state.get(key), set: (key: string, value: string) => void state.set(key, value) },
+    fetch: async () => {
+      calls++;
+      return calls === 1 ? new Response('{"error":"Demasiadas solicitudes"}', { status: 429, headers: { "retry-after": "90" } }) : new Response("{}");
+    },
+  };
+  await assert.rejects(new QvaPayClient(() => "token", runtime).apply("one"), QvaApiError);
+  assert.equal(calls, 1);
+  await new QvaPayClient(() => "token", runtime).apply("two");
+  assert.equal(now, 91_000);
+  assert.equal(calls, 2);
+});
+
+test("una prevalidación fallida no envía POST, no consume cuota y no se declara incierta", async () => {
+  let calls = 0;
+  const state = new Map<string, string>();
+  const client = new QvaPayClient(() => "token", {
+    throttleState: { get: key => state.get(key), set: (key, value) => void state.set(key, value) },
+    fetch: async () => { calls++; return new Response("{}"); },
+  });
+  await assert.rejects(client.apply("preflight-failed", { beforeDispatch: async () => { throw new QvaConnectionError("timeout", new Error("offline")); } }),
+    (error: unknown) => error instanceof QvaApiError && error.code === "LOCAL_PREFLIGHT_FAILED" && error.status < 500);
+  assert.equal(calls, 0);
+  assert.equal(state.get("qva_throttle:apply"), undefined);
 });
 
 test("incluye una clave de idempotencia al crear ofertas", async () => {

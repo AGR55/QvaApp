@@ -5,6 +5,7 @@ import type {
   QvaTransaction,
   QvaTransactionPage,
 } from "./types.js";
+import { APPLY_WINDOW_KEY, APPLY_WINDOW_MS, applyAttempts, applyReadyAt } from "./core/apply-budget.js";
 
 const API = "https://api.qvapay.com";
 
@@ -73,6 +74,7 @@ export interface QvaPayRuntime {
 
 type RequestPolicy =
   | "read"
+  | "urgent_read"
   | "list"
   | "create"
   | "apply"
@@ -84,9 +86,10 @@ type RequestPolicy =
 
 const POLICY_INTERVAL_MS: Record<RequestPolicy, number> = {
   read: 1_667,
-  list: 2_001,
+  urgent_read: 1_667,
+  list: 2_401,
   create: 5_000,
-  apply: 30_001,
+  apply: 0, // Governed by the durable rolling window, independently of reads.
   edit: 20_000,
   cancel: 20_000,
   paid: 10_000,
@@ -103,6 +106,9 @@ export class QvaPayClient {
   private readonly mutationTimeoutMs: number;
   private readonly throttleState?: QvaPayRuntime["throttleState"];
   private queue = Promise.resolve();
+  private applyQueue = Promise.resolve();
+  private urgentReadQueue = Promise.resolve();
+  private readonly applyState = new Map<string, string>();
   private lastRequestAt = 0;
   private readonly lastPolicyAt = new Map<RequestPolicy, number>();
 
@@ -194,18 +200,18 @@ export class QvaPayClient {
     };
   }
 
-  async getOffer(uuid: string): Promise<P2pOffer> {
+  async getOffer(uuid: string, options: { priority?: boolean } = {}): Promise<P2pOffer> {
     const data = (await this.request(`/p2p/${uuid}`, {
-      policy: "read",
+      policy: options.priority ? "urgent_read" : "read",
       retryRead: true,
     })) as { p2p?: P2pOffer };
     if (!data.p2p) throw new Error("QvaPay no devolvió la oferta solicitada");
     return parseOffer(data.p2p, "oferta solicitada");
   }
 
-  async qusdBalance(): Promise<number> {
+  async qusdBalance(options: { priority?: boolean } = {}): Promise<number> {
     const data = await this.request("/user", {
-      policy: "read",
+      policy: options.priority ? "urgent_read" : "read",
       retryRead: true,
     });
     if (typeof data.uuid === "string") this.throttleState?.set("analytics_account_uuid", data.uuid);
@@ -272,10 +278,11 @@ export class QvaPayClient {
     return { transactions: rows.map(parseTransaction), ...(Number.isSafeInteger(total) && total >= 0 ? { total } : {}) };
   }
 
-  async apply(uuid: string): Promise<void> {
+  async apply(uuid: string, options: { beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean> } = {}): Promise<void> {
     await this.request(`/p2p/${uuid}/apply`, {
       method: "POST",
       policy: "apply",
+      ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}),
     });
   }
   async cancel(uuid: string): Promise<void> {
@@ -404,6 +411,7 @@ export class QvaPayClient {
       body?: unknown;
       policy?: RequestPolicy;
       retryRead?: boolean;
+      beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>;
     } = {},
   ): Promise<Record<string, unknown>> {
     const token = this.tokenProvider();
@@ -435,12 +443,12 @@ export class QvaPayClient {
               signal: AbortSignal.timeout(this.mutationTimeoutMs),
             });
       } catch (error) {
-        if (policy !== "read" && policy !== "list")
+        if (policy !== "read" && policy !== "urgent_read" && policy !== "list")
           throw new QvaMutationUncertainError(policy, error);
         throw error;
       }
       return this.json(response);
-    });
+    }, options.beforeDispatch);
   }
 
   private async fetchRead(
@@ -520,13 +528,16 @@ export class QvaPayClient {
   private enqueue<T>(
     policy: RequestPolicy,
     task: () => Promise<T>,
+    beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>,
   ): Promise<T> {
-    const run = this.queue
+    if (policy === "apply") return this.enqueueApplication(task, beforeDispatch);
+    const priorityRead = policy === "urgent_read";
+    const run = (priorityRead ? this.urgentReadQueue : this.queue)
       .catch(() => undefined)
       .then(async () => {
         const current = this.now();
         const persistedAt = this.persistedPolicyAt(policy);
-        const generalDelay = this.lastRequestAt
+        const generalDelay = !priorityRead && this.lastRequestAt
           ? this.lastRequestAt + POLICY_INTERVAL_MS.read - current
           : 0;
         const policyAt = Math.max(
@@ -548,10 +559,52 @@ export class QvaPayClient {
           );
         return task();
       });
-    this.queue = run.then(
+    const settled = run.then(
       () => undefined,
       () => undefined,
     );
+    if (priorityRead) this.urgentReadQueue = settled;
+    else this.queue = settled;
+    return run;
+  }
+
+  private enqueueApplication<T>(task: () => Promise<T>, beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>): Promise<T> {
+    const queuedAt = this.now();
+    const state = { get: (key: string) => this.throttleState?.get(key) ?? this.applyState.get(key) };
+    const save = (key: string, value: string) => {
+      this.applyState.set(key, value);
+      this.throttleState?.set(key, value);
+    };
+    const run = this.applyQueue.catch(() => undefined).then(async () => {
+      const delay = Math.max(0, applyReadyAt(state, this.now()) - this.now());
+      if (delay) await this.sleep(delay);
+      if (beforeDispatch) {
+        let eligible: boolean;
+        try {
+          eligible = await beforeDispatch(Math.max(0, this.now() - queuedAt));
+        } catch {
+          throw new QvaApiError(409, "No se pudo revalidar la oferta antes del envío; no se envió la aplicación.", undefined, "LOCAL_PREFLIGHT_FAILED");
+        }
+        if (!eligible)
+          throw new QvaApiError(409, "Las condiciones de la oferta cambiaron antes del envío; no se aplicó.", undefined, "LOCAL_CONDITIONS_CHANGED");
+      }
+      const dispatchedAt = this.now();
+      const attempts = applyAttempts(state).filter(at => at + APPLY_WINDOW_MS > dispatchedAt);
+      save(APPLY_WINDOW_KEY, JSON.stringify([...attempts, dispatchedAt].slice(-2)));
+      save("qva_throttle:apply", String(dispatchedAt));
+      save("qva_apply_last_queue_ms", String(Math.max(0, dispatchedAt - queuedAt)));
+      save("qva_apply_last_budget_wait_ms", String(delay));
+      try {
+        return await task();
+      } catch (error) {
+        if (error instanceof QvaApiError && error.status === 429)
+          save("qva_throttle:apply_retry_at", String(this.now() + (error.retryAfterMs ?? APPLY_WINDOW_MS)));
+        throw error;
+      } finally {
+        save("qva_apply_last_response_ms", String(Math.max(0, this.now() - dispatchedAt)));
+      }
+    });
+    this.applyQueue = run.then(() => undefined, () => undefined);
     return run;
   }
 

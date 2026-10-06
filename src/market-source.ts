@@ -53,6 +53,10 @@ export interface MarketSourceStatus {
   lastEventLatencyMs?: number | null;
   lastDeliveryLagMs?: number | null;
   lastEventOutcome?: string;
+  lastDecisionLatencyMs?: number | null;
+  lastApplyQueueMs?: number | null;
+  lastApplyBudgetWaitMs?: number | null;
+  lastApplyResponseMs?: number | null;
 }
 
 export interface MarketDataSource {
