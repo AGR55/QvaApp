@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowDownLeft, ArrowUpRight, ChartNoAxesCombined, RefreshCw } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Label, Pie, PieChart, ReferenceLine, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Label, Pie, PieChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Empty, Skeleton } from "../components/common.jsx";
 import { Button, Field, Select, Tabs } from "../components/ui.jsx";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter, CardAction } from "../components/ui/card.tsx";
@@ -17,15 +17,20 @@ const FLOW_CONFIG = {
   incoming: { label: "Entradas", color: "var(--chart-2)" }, outgoing: { label: "Salidas", color: "var(--chart-1)" },
   unknown: { label: "Sin clasificar", color: "var(--chart-5)" }, count: { label: "Transacciones", color: "var(--chart-1)" },
   bought: { label: "Comprado", color: "var(--chart-2)" }, sold: { label: "Vendido", color: "var(--chart-1)" },
-  profit: { label: "Ganancia estimada", color: "var(--chart-2)" }, balance: { label: "Saldo QUSD", color: "var(--chart-1)" },
+  totalQusd: { label: "Capital total", color: "var(--chart-1)" }, change: { label: "Variación", color: "var(--chart-2)" },
 };
 const dateLabel = (date) => new Date(`${date}T12:00:00Z`).toLocaleDateString("es-CU", { day: "numeric", month: "short", timeZone: "UTC" });
+const capitalDayFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Havana", year: "numeric", month: "2-digit", day: "2-digit" });
+const capitalDay = (time) => {
+  const parts = capitalDayFormat.formatToParts(time);
+  return ["year", "month", "day"].map((type) => parts.find((part) => part.type === type).value).join("-");
+};
 const compact = (value) => new Intl.NumberFormat("es-CU", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 const reportCache = new Map();
 
 export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
   const [days, setDays] = useState("30"), [reports, setReports] = useState(() => Object.fromEntries(reportCache)), [loading, setLoading] = useState(true), [error, setError] = useState(""), [retry, setRetry] = useState(0);
-  const [density, setDensity] = useState("20"), [activityMetric, setActivityMetric] = useState("amount"), [shareMetric, setShareMetric] = useState("volume"), [currency, setCurrency] = useState("");
+  const [density, setDensity] = useState("20"), [activityMetric, setActivityMetric] = useState("amount"), [shareMetric, setShareMetric] = useState("volume");
   useEffect(() => {
     let active = true, pending = false;
     const read = async () => {
@@ -47,17 +52,17 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
   const bars = useMemo(() => analyticsBars(report?.daily ?? [], Number(density)), [report, density]);
   const rows = useMemo(() => (report?.markets ?? []).map((row, index) => ({ ...row, key: `market${index}`, fill: COLORS[index % COLORS.length] })), [report]);
   const config = useMemo(() => ({ ...FLOW_CONFIG, ...Object.fromEntries(rows.map((row) => [row.key, { label: row.label, color: row.fill }])) }), [rows]);
-  const selectedCurrency = report?.currencies.some((item) => item.currency === currency) ? currency : report?.currencies[0]?.currency ?? markets[0]?.currency ?? "CUP";
-  const profitRows = rows.filter((row) => row.currency === selectedCurrency);
-  const balanceRows = useMemo(() => (report?.balanceHistory ?? initialBalanceHistory).map((point) => ({ at: point.createdAt, balance: point.qusdBalance })), [report, initialBalanceHistory]);
+  const balanceRows = useMemo(() => (report?.portfolioHistory ?? []).map((point) => ({ ...point, at: point.createdAt })), [report]);
+  const dailyCapital = useMemo(() => {
+    const byDay = new Map();
+    for (const point of balanceRows) byDay.set(capitalDay(point.createdAt), point);
+    return [...byDay.entries()].map(([date, point], index, all) => ({ date, totalQusd: point.totalQusd,
+      change: index && Date.parse(`${date}T12:00:00Z`) - Date.parse(`${all[index - 1][0]}T12:00:00Z`) === 86_400_000
+        ? point.totalQusd - all[index - 1][1].totalQusd : null }));
+  }, [balanceRows]);
   const totalShare = rows.reduce((sum, row) => sum + row[shareMetric], 0);
-  const profitTimeline = useMemo(() => {
-    let cumulative = 0;
-    return (report?.daily ?? []).map((point) => {
-      cumulative += report.profits.find((item) => item.date === point.date && item.currency === selectedCurrency)?.profit ?? 0;
-      return { date: point.date, profit: cumulative };
-    });
-  }, [report, selectedCurrency]);
+  const latestCapital = balanceRows.at(-1);
+  const dailyChange = dailyCapital.at(-1)?.change;
   const unknown = report?.totals.unknown ?? 0;
   return <section className="analytics-workspace" aria-label="Análisis de tu actividad">
     <div className="analytics-toolbar">
@@ -72,7 +77,7 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
       <Metric label="Volumen P2P completado" value={report ? `${money(report.volume)} QUSD` : null} detail={report ? `${report.completed} operaciones completadas` : "Operaciones finalizadas"} icon={ChartNoAxesCombined} />
       <Metric label="Entradas en la cuenta" value={report ? `${money(report.totals.incoming)} QUSD` : null} detail="Transacciones recibidas" icon={ArrowDownLeft} />
       <Metric label="Salidas de la cuenta" value={report ? `${money(report.totals.outgoing)} QUSD` : null} detail="Transacciones enviadas" icon={ArrowUpRight} />
-      <Metric label="Ganancia estimada" value={report ? report.currencies.filter((item) => item.matchedQusd > 0).map((item) => `${money(item.profit)} ${item.currency}`).join(" · ") || "Sin coste emparejado" : null} detail="Ventas con compras previas del mismo mercado" icon={Activity} />
+      <Metric label="Capital total estimado" value={report ? latestCapital ? `${money(latestCapital.totalQusd)} QUSD` : "Esperando cotizaciones" : null} detail={latestCapital ? `${money(latestCapital.qusdFree)} libre · ${money(latestCapital.qusdCommitted)} comprometido · ${money(latestCapital.fiatQusd)} en fiat` : report?.portfolioStatus?.reason ?? "QUSD y fiat convertidos"} icon={Activity} />
     </div>
     <AnalyticsCard title="Actividad de transacciones" description="Entradas y salidas en QUSD; incluye movimientos fuera del P2P." wide
       action={<Tabs value={activityMetric} onChange={setActivityMetric} items={[{ value: "amount", label: "Importe" }, { value: "count", label: "Cantidad" }]} />}
@@ -125,30 +130,28 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
           </ChartContainer>
         </ChartOrEmpty>
       </AnalyticsCard>
-      <AnalyticsCard title="Ganancia estimada por mercado" description="Diferencia entre venta y coste de compra conocido, usando primero las compras más antiguas."
-        action={report?.currencies.length ? <Field label="Moneda" htmlFor="analytics-profit-currency"><Select id="analytics-profit-currency" value={selectedCurrency} onValueChange={setCurrency} options={report.currencies.map((item) => ({ value: item.currency, label: item.currency }))} /></Field> : null}
-        footer={<span>Costes y ventas en {selectedCurrency}. Las comisiones que no constan en el histórico están excluidas.</span>}>
-        <ChartOrEmpty ready={Boolean(report)} hasData={profitRows.some((row) => row.matchedQusd > 0)} title="Falta emparejar compras y ventas" description="La ganancia aparecerá cuando una venta tenga compras anteriores del mismo mercado con coste conocido.">
+      <AnalyticsCard title="Capital total por día" description="Última valoración de cada día en QUSD, con saldo libre, comprometido y fiat convertido."
+        footer={<span>El historial completo comienza desde la primera foto guardada tras esta actualización.</span>}>
+        <ChartOrEmpty ready={Boolean(report)} hasData={dailyCapital.length > 0} title="Esperando primera valoración completa" description={report?.portfolioStatus?.reason ?? "Se guardará la primera foto al llegar saldos y cotizaciones recientes."}>
           <ChartContainer config={FLOW_CONFIG} className="analytics-chart">
-            <BarChart accessibilityLayer data={profitRows.map((row) => ({ ...row, profit: row.estimatedProfit }))} margin={{ left: 0, right: 8, top: 12 }}>
-              <CartesianGrid vertical={false} /><ReferenceLine y={0} stroke="var(--border)" />
-              <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fontSize: 11 }} />
+            <AreaChart accessibilityLayer data={dailyCapital} margin={{ left: 0, right: 8, top: 12 }}>
+              <CartesianGrid vertical={false} /><XAxis dataKey="date" axisLine={false} tickLine={false} tickFormatter={dateLabel} />
               <YAxis axisLine={false} tickLine={false} width={55} tickFormatter={compact} />
-              <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="profit" radius={3} animationDuration={350}>{profitRows.map((row) => <Cell key={row.code} fill={row.estimatedProfit >= 0 ? "var(--chart-2)" : "var(--destructive)"} />)}</Bar>
-            </BarChart>
+              <ChartTooltip content={<ChartTooltipContent labelFormatter={dateLabel} />} />
+              <Area dataKey="totalQusd" type="monotone" fill="var(--color-totalQusd)" fillOpacity={0.12} stroke="var(--color-totalQusd)" strokeWidth={2} animationDuration={350} />
+            </AreaChart>
           </ChartContainer>
         </ChartOrEmpty>
       </AnalyticsCard>
-      <AnalyticsCard title="Evolución de tu saldo" description="Saldo QUSD registrado por QvaApply a lo largo del periodo." footer={<span>El saldo incluye transferencias, depósitos y retiradas; no representa solo ganancias.</span>}>
-        <ChartOrEmpty ready={Boolean(report) || balanceRows.length > 0} hasData={balanceRows.length > 0} title="Esperando registros de saldo" description="Las lecturas de saldo irán construyendo esta evolución.">
-          <ChartContainer config={FLOW_CONFIG} className="analytics-chart">
+      <AnalyticsCard title="Evolución intradía del capital" description="Valoración completa actualizada durante el día." footer={<span>La conversión de fiat usa la última tasa de venta observada. Puede variar con el mercado.</span>}>
+        <ChartOrEmpty ready={Boolean(report)} hasData={balanceRows.length > 0} title="Esperando registros de capital" description={report?.portfolioStatus?.reason ?? "Las lecturas irán construyendo esta evolución."}>
+          <ChartContainer config={FLOW_CONFIG} className="analytics-chart analytics-capital-intraday">
             <AreaChart accessibilityLayer data={balanceRows} margin={{ left: 0, right: 8, top: 12 }}>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="at" axisLine={false} tickLine={false} minTickGap={40} tickFormatter={(time) => new Date(time).toLocaleDateString("es-CU", { day: "numeric", month: "short" })} />
               <YAxis axisLine={false} tickLine={false} width={55} tickFormatter={compact} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(_, payload) => payload[0] ? new Date(payload[0].payload.at).toLocaleString("es-CU") : ""} />} />
-              <Area dataKey="balance" type="monotone" fill="var(--color-balance)" fillOpacity={0.12} stroke="var(--color-balance)" strokeWidth={2} animationDuration={350} />
+              <Area dataKey="totalQusd" type="monotone" fill="var(--color-totalQusd)" fillOpacity={0.12} stroke="var(--color-totalQusd)" strokeWidth={2} animationDuration={350} />
             </AreaChart>
           </ChartContainer>
         </ChartOrEmpty>
@@ -170,23 +173,23 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
           </ChartContainer>
         </ChartOrEmpty>
       </AnalyticsCard>
-      <AnalyticsCard title="Ganancia estimada acumulada" description={`Resultado de ventas con coste conocido durante el periodo, en ${selectedCurrency}.`}>
-        <ChartOrEmpty ready={Boolean(report)} hasData={profitRows.some((row) => row.matchedQusd > 0)} title="Esperando ventas con coste conocido" description="Al completar compras y ventas del mismo mercado verás cómo evoluciona la estimación.">
+      <AnalyticsCard title="Variación diaria del capital" description="Diferencia entre las últimas valoraciones de días consecutivos, en QUSD." footer={<span>{dailyChange == null ? "Aparecerá con dos días de datos." : `Último cambio: ${money(dailyChange)} QUSD.`} Incluye depósitos, retiradas y cambios de cotización; no es beneficio neto.</span>}>
+        <ChartOrEmpty ready={Boolean(report)} hasData={dailyCapital.some((point) => point.change != null)} title="Esperando otro cierre diario" description="La variación requiere valoraciones de dos días consecutivos.">
           <ChartContainer config={FLOW_CONFIG} className="analytics-chart">
-            <AreaChart accessibilityLayer data={profitTimeline} margin={{ left: 0, right: 8, top: 12 }}>
+            <BarChart accessibilityLayer data={dailyCapital.filter((point) => point.change != null)} margin={{ left: 0, right: 8, top: 12 }}>
               <CartesianGrid vertical={false} /><ReferenceLine y={0} stroke="var(--border)" />
               <XAxis dataKey="date" axisLine={false} tickLine={false} minTickGap={32} tickFormatter={dateLabel} />
               <YAxis axisLine={false} tickLine={false} width={55} tickFormatter={compact} />
               <ChartTooltip content={<ChartTooltipContent labelFormatter={(label) => dateLabel(label)} />} />
-              <Area dataKey="profit" type="stepAfter" fill="var(--color-profit)" fillOpacity={0.12} stroke="var(--color-profit)" strokeWidth={2} animationDuration={350} />
-            </AreaChart>
+              <Bar dataKey="change" fill="var(--color-change)" radius={3} animationDuration={350} />
+            </BarChart>
           </ChartContainer>
         </ChartOrEmpty>
       </AnalyticsCard>
     </div>
-    <AnalyticsCard title="Resultados por mercado" description="Importes reales por moneda y cobertura de la estimación de ganancia."
-      footer={<div className="analytics-coverage"><Badge variant="outline">{report?.sync.limited ? "Histórico parcial" : report?.sync.complete ? "Histórico importado" : "Histórico en actualización"}</Badge><span>{report?.coverage.transactions ?? 0} transacciones guardadas{report?.coverage.oldestAt ? ` · Desde ${new Date(report.coverage.oldestAt).toLocaleDateString("es-CU")}` : ""}. {money(report?.coverage.unmatchedSoldQusd ?? 0)} QUSD vendidos sin coste conocido.</span></div>}>
-      {!report ? <Skeleton rows={3} label="Cargando resultados por mercado" /> : rows.length ? <Table><TableHeader><TableRow><TableHead>Mercado</TableHead><TableHead>Operaciones</TableHead><TableHead>Volumen QUSD</TableHead><TableHead>Fiat pagado</TableHead><TableHead>Fiat recibido</TableHead><TableHead>Ganancia estimada</TableHead><TableHead>Ventas con coste</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.code}><TableCell>{row.label}</TableCell><TableCell>{row.count}</TableCell><TableCell>{money(row.volume)}</TableCell><TableCell>{money(row.fiatSpent)} {row.currency}</TableCell><TableCell>{money(row.fiatReceived)} {row.currency}</TableCell><TableCell>{row.matchedQusd > 0 ? `${money(row.estimatedProfit)} ${row.currency}` : "—"}</TableCell><TableCell>{row.sold ? `${money(row.matchedQusd / row.sold * 100, 1)}%` : "—"}</TableCell></TableRow>)}</TableBody></Table> : <Empty title="Sin operaciones completadas" icon={Activity}>El historial se completará en segundo plano. Las operaciones en revisión no cuentan como ganancias.</Empty>}
+    <AnalyticsCard title="Resultados por mercado" description="Compras, ventas y flujo fiat por mercado, sin exigir cantidades iguales."
+      footer={<div className="analytics-coverage"><Badge variant="outline">{report?.sync.offersComplete ? "Ofertas importadas" : "Importando ofertas"}</Badge><span>{report?.completed ?? 0} ofertas completadas en este periodo. Las operaciones en revisión no se incluyen.</span></div>}>
+      {!report ? <Skeleton rows={3} label="Cargando resultados por mercado" /> : rows.length ? <Table><TableHeader><TableRow><TableHead>Mercado</TableHead><TableHead>Operaciones</TableHead><TableHead>Volumen QUSD</TableHead><TableHead>Comprado QUSD</TableHead><TableHead>Vendido QUSD</TableHead><TableHead>Fiat pagado</TableHead><TableHead>Fiat recibido</TableHead></TableRow></TableHeader><TableBody>{rows.map((row) => <TableRow key={row.code}><TableCell>{row.label}</TableCell><TableCell>{row.count}</TableCell><TableCell>{money(row.volume)}</TableCell><TableCell>{money(row.bought)}</TableCell><TableCell>{money(row.sold)}</TableCell><TableCell>{money(row.fiatSpent)} {row.currency}</TableCell><TableCell>{money(row.fiatReceived)} {row.currency}</TableCell></TableRow>)}</TableBody></Table> : <Empty title="Sin operaciones completadas" icon={Activity}>El historial de ofertas se completará en segundo plano. Las operaciones en revisión no cuentan.</Empty>}
     </AnalyticsCard>
     <span className="sr-only" role="status">{loading ? "Actualizando análisis en segundo plano" : "Análisis actualizado"}</span>
   </section>;

@@ -19,7 +19,7 @@ import {
   SelfServiceRecovery,
   type ManualRecoveryOutcome,
 } from "./self-service-recovery.js";
-import { analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
+import { analyticsOffer, analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -755,6 +755,38 @@ export class DashboardReadModel {
     return { data, updatedAt };
   }
 
+  async refreshPortfolioCommitments() {
+    return this.coalesceRead("portfolio-commitments", async () => {
+      const processing = await this.qva.listOffersPage({ my: true, take: 100, page: 1, status: "processing", sortByStatus: false }, { analyticsOnly: true });
+      const paid = await this.qva.listOffersPage({ my: true, take: 100, page: 1, status: "paid", sortByStatus: false }, { analyticsOnly: true });
+      if (processing.total > processing.offers.length || paid.total > paid.offers.length)
+        throw new Error("Demasiadas operaciones pendientes para valorar el capital con una sola página.");
+      const offers = [...processing.offers, ...paid.offers].map(offerView);
+      const updatedAt = Date.now();
+      this.store.saveRemoteResource("portfolio-commitments", offers, updatedAt);
+      this.recordDashboardPoint();
+      return { data: offers, updatedAt };
+    });
+  }
+
+  async refreshCompletedOfferHistory() {
+    return this.coalesceRead("completed-offer-history", async () => {
+      const account = this.store.get("analytics_account_uuid");
+      if (!account) return;
+      const key = `analytics_offers_history:${account}`;
+      const previous = this.store.loadRemoteResource<{ page: number; complete: boolean; limited?: boolean }>(key)?.data
+        ?? { page: 1, complete: false };
+      const pageNumber = previous.complete ? 1 : previous.page;
+      const page = await this.qva.listOffersPage({ my: true, take: 100, page: pageNumber,
+        status: "completed", sortByStatus: false, orderBy: "updated_at", orderType: "desc" }, { analyticsOnly: true });
+      this.store.saveAnalyticsOffers(account, page.offers.flatMap((offer) => {
+        const row = analyticsOffer(offer, account); return row ? [row] : [];
+      }));
+      const complete = page.offers.length < 100 || pageNumber * 100 >= page.total;
+      this.store.saveRemoteResource(key, { page: complete ? pageNumber : pageNumber + 1, complete }, Date.now());
+    });
+  }
+
   async refreshTransactions() {
     return this.coalesceRead("transactions", async () => {
     const account = this.store.get("analytics_account_uuid");
@@ -813,10 +845,15 @@ export class DashboardReadModel {
     if (![7, 30, 90].includes(days)) throw new Error("Periodo de análisis inválido.");
     const now = Date.now(), account = this.store.get("analytics_account_uuid") ?? "";
     const report = buildTradingAnalytics({ transactions: account ? this.store.analyticsTransactions(account, now - 365 * 86_400_000) : [],
+      offers: account ? this.store.analyticsOffers(account, now - 365 * 86_400_000) : [],
       accountUuid: account, fiat: this.store.analyticsFiatMovements(), markets: this.marketConfig.publicMarkets(), days, now });
     const history = this.store.loadRemoteResource<{ complete: boolean; page: number; limited?: boolean }>(`analytics_history:${account}`);
+    const offersHistory = this.store.loadRemoteResource<{ complete: boolean; page: number }>(`analytics_offers_history:${account}`);
     return { ...report, balanceHistory: sampleHistory(this.store.dashboardHistory(now - days * 86_400_000), 120),
+      portfolioHistory: account ? this.store.portfolioHistory(account, now - days * 86_400_000) : [],
+      portfolioStatus: this.store.loadRemoteResource("portfolio-status")?.data ?? null,
       sync: { accountKnown: Boolean(account), complete: Boolean(history?.data.complete && !history.data.limited), limited: history?.data.limited ?? false,
+        offersComplete: Boolean(offersHistory?.data.complete), offerPages: offersHistory?.data.page ?? 0,
         pages: Math.max(0, (history?.data.page ?? 1) - 1), updatedAt: history?.updatedAt ?? this.store.loadRemoteResource("transactions")?.updatedAt ?? null } };
   }
 
@@ -961,9 +998,10 @@ export class DashboardReadModel {
 
   private recordDashboardPoint(): void {
     const state = this.trading.operationalState();
-    const balance = this.store.loadRemoteResource<number>("balance")?.data;
-    const ownOffers =
-      this.store.loadRemoteResource<OfferView[]>("own-offers")?.data;
+    const balanceResource = this.store.loadRemoteResource<number>("balance");
+    const ownResource = this.store.loadRemoteResource<OfferView[]>("own-offers");
+    const balance = balanceResource?.data;
+    const ownOffers = ownResource?.data;
     if (balance === undefined || ownOffers === undefined) return;
     this.store.recordDashboardSnapshot({
       qusdBalance: balance,
@@ -972,6 +1010,39 @@ export class DashboardReadModel {
       openOffers: ownOffers.length,
       activeOperations: state.active,
     });
+    const pending = this.store.loadRemoteResource<OfferView[]>("portfolio-commitments");
+    const now = Date.now();
+    if (!pending || !balanceResource || !ownResource ||
+      [pending.updatedAt, balanceResource.updatedAt, ownResource.updatedAt].some((at) => now - at > 300_000)) {
+      this.store.saveRemoteResource("portfolio-status", { reason: "Esperando saldos y ofertas recientes." }, now);
+      return;
+    }
+    const account = this.store.get("analytics_account_uuid");
+    const commitments = new Map([...ownOffers, ...pending.data].map((offer) => [offer.uuid, offer]));
+    const qusdCommitted = [...commitments.values()].filter((offer) =>
+      (offer.type === "sell" && offer.ownerUuid === account) || (offer.type === "buy" && offer.peerUuid === account))
+      .reduce((total, offer) => total + (offer.status === "open" && offer.offerKind === "flexible"
+        ? offer.availableAmount ?? offer.amount : offer.amount), 0);
+    const fiat: Record<string, { amount: number; rate: number; qusd: number }> = {};
+    const missing: string[] = [];
+    let fiatQusd = 0;
+    for (const market of this.marketConfig.publicMarkets()) {
+      const amount = state.fiat[market.code] ?? 0;
+      if (!Number.isFinite(amount) || amount < 0) { missing.push(market.label); continue; }
+      if (amount === 0) continue;
+      const rate = this.store.recentValuationRate(market.code, now);
+      if (!rate) { missing.push(market.label); continue; }
+      const qusd = amount / rate;
+      fiat[market.code] = { amount, rate, qusd }; fiatQusd += qusd;
+    }
+    if (missing.length || !account) {
+      this.store.saveRemoteResource("portfolio-status", { reason: missing.length
+        ? `Falta cotización reciente para: ${missing.join(", ")}.` : "Esperando identidad de QvaPay." }, now);
+      return;
+    }
+    this.store.recordPortfolioSnapshot({ createdAt: now, accountUuid: account, qusdFree: balance, qusdCommitted,
+      fiatQusd, totalQusd: balance + qusdCommitted + fiatQusd, fiat });
+    this.store.saveRemoteResource("portfolio-status", { reason: null, updatedAt: now }, now);
   }
 
   marketAnalytics(coin: string) {
@@ -1105,6 +1176,11 @@ export function offerView(offer: P2pOffer) {
     receive: offer.receive,
     rate: rate(offer),
     status: offer.status,
+    ownerUuid: offer.User?.uuid ?? offer.owner_uuid,
+    peerUuid: offer.Peer?.uuid,
+    offerKind: offer.offer_kind,
+    availableAmount: offer.available_amount != null && Number.isFinite(Number(offer.available_amount)) && Number(offer.available_amount) >= 0
+      ? Number(offer.available_amount) : undefined,
     updatedAt: offer.updated_at,
     createdAt: offer.created_at,
   };
