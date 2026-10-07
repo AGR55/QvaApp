@@ -151,6 +151,12 @@ export class TradingEngine {
 
   ownDecisionBusy(): boolean { return this.ownDecisionPending > 0; }
 
+  isOwnMarketOffer(offer: P2pOffer): boolean {
+    const account = this.store.get("analytics_account_uuid");
+    return this.ownsOfferUuid(offer.uuid) || Boolean(account &&
+      [offer.owner_uuid,offer.User?.uuid,offer.Peer?.uuid].includes(account));
+  }
+
   cooperativeOwnCapacity(coin: string, ownerFiat: number): boolean {
     const committed = this.store.activeOperations().filter(op => op.coin === coin && op.offerType === "sell" && !this.store.hasFiatMovement(op.uuid))
       .reduce((sum,op) => sum + this.operationFiatCost(op),0);
@@ -751,7 +757,9 @@ export class TradingEngine {
       return this.ingestPreparedMarketOffer(offer, receivedAt, event, sentAt);
     });
     const secondary = this.secondaryObserver;
-    if (result.candidates === 0 && secondary) setImmediate(() => secondary(offer, receivedAt));
+    const publishedAt = sentAt ? Date.parse(sentAt) : Number.NaN;
+    if (result.candidates === 0 && secondary) setImmediate(() => secondary(offer,
+      Number.isFinite(publishedAt) ? Math.min(receivedAt, publishedAt) : receivedAt));
     return result;
   }
 
@@ -811,26 +819,11 @@ export class TradingEngine {
       return { inspected: 1, candidates: 0, action: "Oferta exclusiva para usuarios VIP" };
     if (vipFlag === "unknown")
       return { inspected: 1, candidates: 0, action: "restricción VIP no interpretable" };
-    let candidate = offer;
-    let observedAt = receivedAt;
+    const candidate = offer;
+    const observedAt = receivedAt;
     const publishedAt = sentAt ? Date.parse(sentAt) : Number.NaN;
     if (Number.isFinite(publishedAt) && Date.now() - publishedAt > 5_000) {
-      const market = this.market(offer.coin)!;
-      if (offer.type === "sell" && (outgoingFiatCost(offer.amount, rate(offer), market.outgoingTransferFee).effectiveRate > market.buyMaxRate ||
-        !this.canFund(offer) || this.suspiciousBuyPriceReason(offer)))
-        return this.ingestFastFiatFundedOffer(offer, receivedAt, event);
-      if (offer.type === "buy" && (rate(offer) < market.sellMinRate || offer.offer_kind === "flexible"))
-        return this.ingestFastQusdFundedOffer(offer, receivedAt, event);
-      try {
-        candidate = await this.qva.getOffer(offer.uuid, { priority: true });
-        observedAt = Date.now();
-      } catch (error) {
-        if (error instanceof QvaApiError && error.status === 404)
-          return { inspected: 1, candidates: 0, action: this.offerRejectionDetail("consultar la oferta", error, offer.uuid) };
-        throw error;
-      }
-      if (candidate.status !== "open")
-        return { inspected: 1, candidates: 0, action: `ya no disponible (${candidate.status})` };
+      return { inspected: 1, candidates: 0, action: "Cotización del feed antigua (>5 s); pendiente de una observación fresca" };
     }
     return candidate.type === "sell"
       ? this.ingestFastFiatFundedOffer(candidate, receivedAt, event, observedAt)
@@ -867,7 +860,7 @@ export class TradingEngine {
       reason = "Cacería de compra detenida";
     } else if (transfer.effectiveRate > market.buyMaxRate) {
       decision = "ignored";
-      reason = `La tasa efectiva ${transfer.effectiveRate.toFixed(2)} supera el máximo ${market.buyMaxRate.toFixed(2)}`;
+      reason = `La tasa efectiva ${transfer.effectiveRate.toFixed(6)} supera el máximo ${market.buyMaxRate.toFixed(6)}`;
     } else if (!this.canFund(offer)) {
       decision = "ignored";
       reason = "Saldo fiat declarado insuficiente";
@@ -911,9 +904,9 @@ export class TradingEngine {
     } catch (error) {
       if (!isDefinitiveQvaApplyRejection(error)) throw error;
       const detail = this.offerRejectionDetail("aplicar a la oferta", error, offer.uuid);
-      this.store.markSeen(offer.uuid);
+      if (error.code !== "LOCAL_APPLY_QUOTA" && error.code !== "LOCAL_CONDITIONS_CHANGED") this.store.markSeen(offer.uuid);
       this.store.audit(error.code?.startsWith("LOCAL_") ? "automatic_apply_not_sent" : "qvapay_apply_rejected", detail, offer.uuid);
-      return { inspected: 1, candidates: 1, action: `rechazada ${offer.uuid}` };
+      return { inspected: 1, candidates: 1, action: detail };
     }
     this.store.markSeen(offer.uuid);
     this.store.audit(
@@ -971,7 +964,7 @@ export class TradingEngine {
       reason = "Cacería de venta detenida";
     } else if (quotedRate < market.sellMinRate) {
       decision = "ignored";
-      reason = `La tasa ${quotedRate.toFixed(2)} no alcanza el mínimo ${market.sellMinRate.toFixed(2)}`;
+      reason = `La tasa ${quotedRate.toFixed(6)} no alcanza el mínimo ${market.sellMinRate.toFixed(6)}`;
     } else if (this.store.isSeen(offer.uuid) && event !== "p2p.reopened") {
       decision = "ignored";
       reason = "Oferta ya evaluada";
@@ -1014,9 +1007,9 @@ export class TradingEngine {
     } catch (error) {
       if (!isDefinitiveQvaApplyRejection(error)) throw error;
       const detail = this.offerRejectionDetail("aplicar a la oferta", error, offer.uuid);
-      this.store.markSeen(offer.uuid);
+      if (error.code !== "LOCAL_APPLY_QUOTA" && error.code !== "LOCAL_CONDITIONS_CHANGED") this.store.markSeen(offer.uuid);
       this.store.audit(error.code?.startsWith("LOCAL_") ? "automatic_apply_not_sent" : "qvapay_apply_rejected", detail, offer.uuid);
-      return { inspected: 1, candidates: 1, action: `rechazada ${offer.uuid}` };
+      return { inspected: 1, candidates: 1, action: detail };
     }
     this.qusdBalanceCache = { value: Math.max(0, availableQusd + this.cooperativeQusdOwed() - offer.amount), updatedAt: Date.now() };
     this.store.createOperation({
@@ -2730,11 +2723,7 @@ export class TradingEngine {
     if (!eligible(offer)) return false;
     if (offer.type === "buy" && this.cooperativeQusdOwed() > 0 && await this.fastLaneQusdBalance() < offer.amount) return false;
     if (queuedForMs <= 5_000) return true;
-    const fresh = await this.qva.getOffer(offer.uuid, { priority: true });
-    // A delayed apply must not use a different monetary snapshot, even if the
-    // new price would also pass the strategy. Re-evaluate it as a new event.
-    return fresh.uuid === offer.uuid && fresh.type === offer.type && fresh.coin === offer.coin &&
-      fresh.amount === offer.amount && fresh.receive === offer.receive && eligible(fresh);
+    return false;
   }
 
   private async evaluateAutomaticBuy(

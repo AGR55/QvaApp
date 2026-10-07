@@ -49,6 +49,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
       event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened">,
       offer: P2pOffer,
       receivedAt: number,
+      sentAt: string,
     ) => Promise<unknown> = async () => undefined,
   ) {
     this.stream = new QvaPayFeedStream(
@@ -241,7 +242,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
           if (isRecord(result) && typeof result.action === "string") outcome = result.action;
         }
       } else if (!isOpportunityEvent(payload.event)) {
-        await this.ingestState(payload.event, payload.data, event.receivedAt);
+        await this.ingestState(payload.event, payload.data, event.receivedAt, payload.sent_at);
       }
       this.store.completeMarketFeedEvent(event.key, "processed");
       this.store.set("market_feed_last_processed_at", String(this.now()));

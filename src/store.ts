@@ -190,6 +190,8 @@ export type NotificationKind =
   | "blocked-offer"
   | "operation-applied"
   | "own-offer-applied"
+  | "offer-taken"
+  | "offer-rejected"
   | "reconciliation-required"
   | "recovery-blocked"
   | "rebalance-completed"
@@ -354,6 +356,9 @@ export class Store {
     this.migrate();
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_market_feed_offer_uuid
       ON market_feed_events(json_extract(payload_json, '$.data.uuid'));`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_offer_action ON audit_log(offer_uuid, action, id DESC);`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_apply_intent_offer
+      ON mutation_intents(operation_uuid, created_at DESC) WHERE kind='apply';`);
   }
 
   private migrate(): void {
@@ -2187,6 +2192,16 @@ export class Store {
       .run(Date.now(), action, uuid ?? null, detail);
   }
 
+  latestOfferAudit(uuid: string, action: string): { detail: string; createdAt: number } | undefined {
+    const row = this.db.prepare("SELECT detail,created_at FROM audit_log WHERE offer_uuid=? AND action=? ORDER BY id DESC LIMIT 1").get(uuid,action) as {detail:string;created_at:number}|undefined;
+    return row ? {detail:row.detail,createdAt:row.created_at} : undefined;
+  }
+
+  latestOfferMutation(uuid: string): MutationIntent | undefined {
+    const row = this.db.prepare("SELECT * FROM mutation_intents WHERE operation_uuid=? AND kind='apply' ORDER BY created_at DESC, rowid DESC LIMIT 1").get(uuid) as Record<string,unknown>|undefined;
+    return row ? mutationIntentFromRow(row) : undefined;
+  }
+
   excludeAutomaticReapplyAfterManualCancel(uuid: string): void {
     this.transaction(() => {
       const inserted = this.db.prepare(
@@ -2603,7 +2618,7 @@ export class Store {
          WHERE (kind <> 'recovery-blocked' OR acknowledged_at IS NULL)
            AND ((telegram_delivered_at IS NULL AND telegram_next_attempt_at <= ?)
              OR (push_delivered_at IS NULL AND push_next_attempt_at <= ?))
-         ORDER BY created_at ASC LIMIT ?`,
+         ORDER BY CASE WHEN kind IN ('offer-taken','offer-rejected') THEN 1 ELSE 0 END, created_at ASC LIMIT ?`,
       ).all(now, now, limit) as Record<string, unknown>[]
     ).map(notificationFromRow);
   }
