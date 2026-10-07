@@ -357,6 +357,8 @@ export class Store {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_market_feed_offer_uuid
       ON market_feed_events(json_extract(payload_json, '$.data.uuid'));`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_offer_action ON audit_log(offer_uuid, action, id DESC);`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_apply_intent_offer
+      ON mutation_intents(operation_uuid, created_at DESC) WHERE kind='apply';`);
   }
 
   private migrate(): void {
