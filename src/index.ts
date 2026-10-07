@@ -13,6 +13,7 @@ import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
+import { OfferRaceMonitor } from "./offer-race-monitor.js";
 import { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { CooperativeHunter } from "./cooperative-hunter.js";
 import {
@@ -50,6 +51,7 @@ const huntingSync = new HuntingSyncCoordinator(
 );
 const qva = new QvaPayClient(() => session.token(), {
   throttleState: store,
+  onApplyTiming: timing => store.audit("offer_apply_timing",JSON.stringify(timing),timing.uuid),
 });
 const bot = new Bot(config.telegramToken);
 const huntingRates = new HuntingRateSessions();
@@ -68,6 +70,7 @@ const notifications = new NotificationDispatcher(store, {
     });
   },
   webPush: async (notification) => {
+    if (notification.kind === "offer-taken" || notification.kind === "offer-rejected") return;
     const event = notification.payload;
     if (notification.kind === "blocked-offer")
       await webPush.notifyBlocked(event.alert as never);
@@ -134,18 +137,28 @@ const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
     event: { kind: message.startsWith("⚠️") ? "reconciliation-required" : "operation-applied", uuid } }),
 });
 trading.observeSecondaryOpportunities((offer, receivedAt) => cooperativeHunter.enqueue(offer, receivedAt));
+const raceMonitor = new OfferRaceMonitor(store,input=>notifications.publish(input),coin=>{
+  const market=trading.market(coin);
+  return market && (trading.huntEnabled(coin,"buy") || trading.huntEnabled(coin,"sell")) ? market.label : undefined;
+},offer=>trading.isOwnMarketOffer(offer));
+const traceFailure=(error:unknown)=>store.audit("offer_trace_error",error instanceof Error ? error.message : String(error));
 const marketSource = new MarketSourceCoordinator(
   store,
   vault,
   pollingMarketSource,
   new URL("/webhooks/qvapay/p2p-feed", config.dashboardTrustedOrigin).toString(),
-  (offer, receivedAt, event, sentAt) => trading.ingestMarketOffer(offer, receivedAt, event, sentAt),
+  async (offer, receivedAt, event, sentAt) => {
+    const result=await trading.ingestMarketOffer(offer, receivedAt, event, sentAt);
+    void raceMonitor.evaluated(offer,receivedAt,sentAt,result.action ?? "Sin acción").catch(traceFailure);
+    return result;
+  },
   () => !trading.isPaused(),
   Date.now,
   {},
-  async (event, offer, receivedAt) => {
+  async (event, offer, receivedAt, sentAt) => {
     await trading.ingestMarketStateEvent(event, offer, receivedAt);
     cooperativeHunter.onState(event, offer);
+    if(event==="p2p.applied") void raceMonitor.taken(offer,receivedAt,sentAt).catch(traceFailure);
   },
 );
 marketSource.start();

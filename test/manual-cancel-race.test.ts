@@ -10,13 +10,36 @@ import { TradingEngine } from "../src/trading.js";
 import type { P2pOffer } from "../src/types.js";
 import { QvaPayClient } from "../src/qvapay.js";
 
+test("la cuota agotada no bloquea el motor ni excluye una observación fresca posterior", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  store.set("qva_throttle:apply_window", JSON.stringify([Date.now(), Date.now()]));
+  let applications = 0;
+  const qva = new QvaPayClient(() => "token", {
+    throttleState: store,
+    sleep: async () => { assert.fail("no esperar cuota en el motor automático"); },
+    fetch: async input => { if (String(input).endsWith("/apply")) applications++; return new Response("{}"); },
+  });
+  const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
+  const offer: P2pOffer = { uuid: "retry-fresh-after-quota", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" };
+  const result = await trading.ingestMarketOffer(offer);
+  assert.match(result.action!, /Sin cupo/);
+  assert.equal(applications, 0);
+  assert.equal(store.isSeen(offer.uuid), false);
+  assert.equal(store.hasUnresolvedMutation(), false);
+  store.set("qva_throttle:apply_window", "[]");
+  await trading.ingestMarketOffer(offer);
+  assert.equal(applications, 1);
+  assert.equal(store.getOperation(offer.uuid)?.state, "applied");
+  await new Promise(resolve => setImmediate(resolve));
+});
+
 for (const type of ["sell", "buy"] as const) {
   for (const change of ["price", "manual-cancel", "feed-applied"] as const) {
-    test(`revalida ${type} después de esperar la cuota: ${change}`, async t => {
+    test(`revalida ${type} después de esperar un envío previo: ${change}`, async t => {
       const { store, cfg, markets } = setup();
       t.after(() => store.close());
       let now = Date.now();
-      store.set("qva_throttle:apply_window", JSON.stringify([now, now]));
       let ready!: () => void;
       const waiting = new Promise<void>(resolve => { ready = resolve; });
       let release!: () => void;
@@ -25,17 +48,20 @@ for (const type of ["sell", "buy"] as const) {
       const qva = new QvaPayClient(() => "token", {
         now: () => now,
         throttleState: store,
-        sleep: async ms => { ready(); await blocked; now += ms; },
+        sleep: async ms => { now += ms; },
         fetch: async (input) => {
+          if (String(input).endsWith("/blocker/apply")) { ready(); await blocked; return new Response("{}"); }
           if (String(input).endsWith("/apply")) applications++;
           return new Response(JSON.stringify({ balance: 100 }));
         },
       });
       const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
+      const blocker = qva.apply("blocker");
+      await waiting;
       const uuid = `dispatch-${type}-${change}`;
       const offer: P2pOffer = { uuid, type, coin: "BANK_CUP", amount: 10, receive: type === "sell" ? 9200 : 10200, status: "open" };
       const run = trading.ingestMarketOffer(offer);
-      await waiting;
+      await new Promise(resolve => setImmediate(resolve));
       if (change === "manual-cancel") store.excludeAutomaticReapplyAfterManualCancel(uuid);
       else if (change === "feed-applied") store.enqueueMarketFeedEvent({
         key: `taken-${uuid}`, event: "p2p.applied", receivedAt: Date.now(),
@@ -49,16 +75,17 @@ for (const type of ["sell", "buy"] as const) {
         markets.save(next);
       }
       release();
+      await blocker;
       const result = await run;
       assert.equal(applications, 0);
       assert.equal(store.getOperation(uuid), undefined);
       assert.equal(store.hasUnresolvedMutation(), false, "una aplicación no enviada no deja un bloqueo incierto");
-      assert.match(result.action ?? "", /rechazada/);
+      assert.match(result.action ?? "", /rechazó|condiciones/i);
     });
   }
 }
 
-test("una oferta que envejeció en la cola se revalida y no aplica con importes distintos", async t => {
+test("una oferta que envejeció en la cola no envía POST ni bloquea con otra consulta", async t => {
   const { store, cfg, markets } = setup();
   t.after(() => store.close());
   let detailReads = 0, applications = 0;
@@ -74,7 +101,7 @@ test("una oferta que envejeció en la cola se revalida y no aplica con importes 
   });
   const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
   await trading.ingestMarketOffer(offer, Date.now() - 6_000);
-  assert.equal(detailReads, 1);
+  assert.equal(detailReads, 0);
   assert.equal(applications, 0);
   assert.equal(store.hasUnresolvedMutation(), false);
   assert.equal(store.get("qva_throttle:apply"), undefined);

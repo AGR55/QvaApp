@@ -72,7 +72,10 @@ export class NotificationDispatcher {
 
   private async deliverBatch(): Promise<void> {
     const now = this.now();
-    for (const notification of this.store.pendingNotificationDeliveries(now)) {
+    for (let delivered = 0; delivered < 50; delivered++) {
+      // Re-read priority between messages so race traces cannot bury an operation.
+      const notification = this.store.pendingNotificationDeliveries(now, 1)[0];
+      if (!notification) break;
       await Promise.all([
         notification.telegramDeliveredAt === null &&
         notification.telegramNextAttemptAt <= now
@@ -118,7 +121,7 @@ export class NotificationDispatcher {
 function notificationId(event: NotificationEventPayload): string {
   if (event.kind === "recovery-blocked" && event.intentId)
     return `recovery-blocked:${event.intentId}`;
-  if (event.kind === "own-offer-applied" && event.uuid && event.eventVersion)
+  if (["own-offer-applied", "offer-taken", "offer-rejected"].includes(event.kind) && event.uuid && event.eventVersion)
     return `${event.kind}:${event.uuid}:${event.eventVersion}`;
   if (event.kind !== "blocked-offer" && event.uuid)
     return `${event.kind}:${event.uuid}`;

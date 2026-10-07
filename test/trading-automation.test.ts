@@ -106,17 +106,19 @@ test("las ofertas propias del feed no gastan intentos de aplicación", async t =
 });
 
 for (const lifecycle of ["none", "applied", "cancelled"] as const) {
-  test(`detalle 404 ambiguo conserva evidencia del feed: ${lifecycle}`, async () => {
+  test(`aplicación 404 ambigua conserva evidencia del feed recibida durante el envío: ${lifecycle}`, async () => {
     const { store, cfg, markets } = setup();
     const offer: P2pOffer = { uuid: "inaccessible-feed", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open" };
     const trading = new TradingEngine(store, {
-      getOffer: async () => { throw new QvaApiError(404, "No tienes permisos para ver esta oferta"); },
-    } as never, cfg as never, markets, async () => undefined);
-    if (lifecycle !== "none") store.enqueueMarketFeedEvent({
+      apply: async () => {
+        if (lifecycle !== "none") store.enqueueMarketFeedEvent({
       key: lifecycle, event: `p2p.${lifecycle}`, receivedAt: Date.now(),
       payload: { event: `p2p.${lifecycle}`, sent_at: new Date(Date.now() - 1_000).toISOString(), data: { uuid: offer.uuid, status: lifecycle === "applied" ? "processing" : "cancelled" } },
-    });
-    const result = await trading.ingestMarketOffer(offer, Date.now(), "p2p.created", new Date(Date.now() - 6_000).toISOString());
+        });
+        throw new QvaApiError(404, "No tienes permisos para ver esta oferta");
+      },
+    } as never, cfg as never, markets, async () => undefined);
+    const result = await trading.ingestMarketOffer(offer, Date.now(), "p2p.created", new Date().toISOString());
     assert.match(result.action!, /causa no determinada/);
     if (lifecycle === "none") assert.doesNotMatch(result.action!, /ocupada|cancelada|VIP/);
     else assert.match(result.action!, lifecycle === "applied" ? /ocupada por una aplicación/ : /oferta cancelada/);
@@ -806,7 +808,7 @@ test("vende QUSD desde el feed por precio y saldo sin listar el mercado", async 
   store.close();
 });
 
-test("revalida una entrega tardía antes de gastar el cupo de apply", async () => {
+test("una entrega tardía cede paso sin consultar ni gastar cupo de apply", async () => {
   const { store, cfg, markets } = setup();
   const target: P2pOffer = {
     uuid: "delayed-feed-offer",
@@ -831,9 +833,12 @@ test("revalida una entrega tardía antes de gastar el cupo de apply", async () =
     new Date(Date.now() - 30_000).toISOString(),
   );
 
-  assert.equal(result.action, "ya no disponible (processing)");
-  assert.equal(detailReads, 1);
+  assert.match(result.action!, /antigua.*observación fresca/);
+  assert.equal(detailReads, 0);
   assert.equal(applications, 0);
+  assert.equal(store.isSeen(target.uuid), false);
+  await trading.ingestMarketOffer(target, Date.now(), "p2p.created", new Date().toISOString());
+  assert.equal(applications, 1, "una observación nueva puede volver a evaluar la misma oferta");
   store.close();
 });
 

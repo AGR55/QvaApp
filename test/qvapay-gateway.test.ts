@@ -1,6 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { QvaApiError, QvaConnectionError, QvaMutationUncertainError, QvaPayClient } from "../src/qvapay.js";
+import type { ApplyTiming } from "../src/qvapay.js";
+
+test("cuota automática agotada libera la cola sin dormir, enviar ni consumir otro intento", async () => {
+  let now = 1000, calls = 0;
+  const timings: ApplyTiming[] = [];
+  const client = new QvaPayClient(() => "token", {
+    now: () => now,
+    sleep: async () => { assert.fail("la evaluación automática no debe dormir por cuota"); },
+    fetch: async () => { calls++; now += 10; return new Response("{}"); },
+    onApplyTiming: timing => { timings.push(timing); },
+  });
+  const options = { beforeDispatch: () => true };
+  await client.apply("first", options);
+  await client.apply("second", options);
+  await assert.rejects(client.apply("third", options), (error: unknown) =>
+    error instanceof QvaApiError && error.code === "LOCAL_APPLY_QUOTA");
+  assert.equal(calls, 2);
+  assert.equal(timings[2]?.dispatchedAt, null);
+  assert.equal(timings[2]?.outcome, "LOCAL_APPLY_QUOTA");
+  now += 60_001;
+  await client.apply("fresh-observation", options);
+  assert.equal(calls, 3);
+  assert.equal(timings[3]?.finishedAt! - timings[3]?.dispatchedAt!, 10);
+});
+
+test("un fallo de telemetría no convierte un POST confirmado en error", async () => {
+  const client = new QvaPayClient(() => "token", {
+    fetch: async () => new Response("{}"),
+    onApplyTiming: () => { throw new Error("telemetry unavailable"); },
+  });
+  await client.apply("confirmed", { beforeDispatch: () => true });
+});
 
 test("normaliza un Peer vacío como contraparte ausente en una oferta abierta", async () => {
   const client = new QvaPayClient(() => "token", {
