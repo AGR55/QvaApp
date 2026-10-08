@@ -94,8 +94,10 @@ export class NotificationDispatcher {
     channel: "telegram" | "push",
   ): Promise<void> {
     try {
-      if (channel === "telegram") await this.runtime.telegram(notification);
-      else await this.runtime.webPush(notification);
+      if (channel === "telegram") {
+        if (notification.kind === "operation-applied" || notification.kind === "own-offer-applied")
+          await this.runtime.telegram(notification);
+      } else await this.runtime.webPush(notification);
       this.store.markNotificationDelivered(notification.id, channel, this.now());
     } catch (error) {
       const attempts = channel === "telegram"

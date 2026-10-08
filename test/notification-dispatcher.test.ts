@@ -6,6 +6,24 @@ import test from "node:test";
 import { NotificationDispatcher } from "../src/notification-dispatcher.js";
 import { Store } from "../src/store.js";
 
+test("Telegram entrega solo inicios de operación y agota avisos antiguos pendientes", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-quiet-telegram-")));
+  const telegram: string[] = [];
+  const dispatcher = new NotificationDispatcher(store, {
+    telegram: async item => { telegram.push(item.kind); },
+    webPush: async () => undefined,
+  });
+  for (const kind of ["offer-taken", "offer-rejected", "blocked-offer", "recovery-blocked", "reconciliation-required", "rebalance-attention", "operation-applied", "own-offer-applied"] as const)
+    store.enqueueNotification({ id: kind, kind, message: kind, payload: {}, createdAt: Date.now() });
+
+  await dispatcher.deliverDue();
+  assert.deepEqual(telegram.sort(), ["operation-applied", "own-offer-applied"].sort());
+  assert.equal(store.pendingNotificationDeliveries().length, 0);
+  await dispatcher.deliverDue();
+  assert.equal(telegram.length, 2, "ningún aviso silenciado debe volver por reintento");
+  store.close();
+});
+
 test("persiste y reintenta Telegram sin duplicar Web Push", async () => {
   const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-notifications-")));
   let now = 1_000;
@@ -113,7 +131,7 @@ test("el bloqueo incierto produce aviso persistente único y se retira al resolv
     event: { kind: "recovery-blocked" as const, intentId: "i-recovery", uuid: "offer" } };
   await dispatcher.publish(input);
   await dispatcher.publish(input);
-  assert.equal(telegramCalls, 1);
+  assert.equal(telegramCalls, 0);
   assert.equal(store.pendingUserNotifications()[0]?.id, "recovery-blocked:i-recovery");
   store.updateMutationIntent("i-recovery", "reconciled");
   assert.equal(store.pendingUserNotifications().length, 0);

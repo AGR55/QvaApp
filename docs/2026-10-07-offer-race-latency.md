@@ -1,5 +1,9 @@
 # Latencia y trazas de ofertas
 
+> Actualización: las trazas de ofertas ocupadas por Telegram se retiraron a
+> petición del operador. Sigue vigente la optimización de cola; el cierre
+> automático por falta de ACK también quedó desactivado.
+
 ## Diagnóstico
 
 La muestra de producción del 7 de octubre mostró una decisión local reciente de

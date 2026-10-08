@@ -13,7 +13,6 @@ import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
-import { OfferRaceMonitor } from "./offer-race-monitor.js";
 import { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { CooperativeHunter } from "./cooperative-hunter.js";
 import {
@@ -40,6 +39,8 @@ if (!config.realTradingAllowed)
   );
 
 const store = new Store(config.dataDir);
+const clearedAckDeadlines = store.clearAutomaticCancellationDeadlines();
+if (clearedAckDeadlines) store.audit("ack_timeout_disabled", `Plazos de cancelación por falta de ACK retirados: ${clearedAckDeadlines}.`);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
 const vault = new Vault(config.encryptionKey);
 const session = new Session(store, vault);
@@ -62,7 +63,6 @@ const notifications = new NotificationDispatcher(store, {
   telegram: async (notification) => {
     const keyboard = notification.operationUuid && notification.kind === "operation-applied"
       ? new InlineKeyboard()
-          .text("✅ Voy a pagar", `ack:${notification.operationUuid}`)
           .text("✖ Cancelar", `cancel:${notification.operationUuid}`)
       : undefined;
     await bot.api.sendMessage(String(config.adminChatId), notification.message, {
@@ -95,23 +95,7 @@ const trading = new TradingEngine(
       });
       return;
     }
-    const keyboard = uuid
-      ? new InlineKeyboard()
-          .text("✅ Voy a pagar", `ack:${uuid}`)
-          .text("✖ Cancelar", `cancel:${uuid}`)
-      : undefined;
-    const deliveries = await Promise.allSettled([
-      bot.api.sendMessage(String(config.adminChatId), message, {
-        ...(keyboard ? { reply_markup: keyboard } : {}),
-      }),
-    ]);
-    deliveries.forEach((result) => {
-      if (result.status === "rejected") store.audit(
-        "notification_warning",
-        `Telegram: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
-        uuid,
-      );
-    });
+    store.audit("telegram_info_suppressed", message, uuid);
   },
 );
 const pollingMarketSource = new PollingMarketSource(
@@ -137,28 +121,18 @@ const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
     event: { kind: message.startsWith("⚠️") ? "reconciliation-required" : "operation-applied", uuid } }),
 });
 trading.observeSecondaryOpportunities((offer, receivedAt) => cooperativeHunter.enqueue(offer, receivedAt));
-const raceMonitor = new OfferRaceMonitor(store,input=>notifications.publish(input),coin=>{
-  const market=trading.market(coin);
-  return market && (trading.huntEnabled(coin,"buy") || trading.huntEnabled(coin,"sell")) ? market.label : undefined;
-},offer=>trading.isOwnMarketOffer(offer));
-const traceFailure=(error:unknown)=>store.audit("offer_trace_error",error instanceof Error ? error.message : String(error));
 const marketSource = new MarketSourceCoordinator(
   store,
   vault,
   pollingMarketSource,
   new URL("/webhooks/qvapay/p2p-feed", config.dashboardTrustedOrigin).toString(),
-  async (offer, receivedAt, event, sentAt) => {
-    const result=await trading.ingestMarketOffer(offer, receivedAt, event, sentAt);
-    void raceMonitor.evaluated(offer,receivedAt,sentAt,result.action ?? "Sin acción").catch(traceFailure);
-    return result;
-  },
+  (offer, receivedAt, event, sentAt) => trading.ingestMarketOffer(offer, receivedAt, event, sentAt),
   () => !trading.isPaused(),
   Date.now,
   {},
-  async (event, offer, receivedAt, sentAt) => {
+  async (event, offer, receivedAt) => {
     await trading.ingestMarketStateEvent(event, offer, receivedAt);
     cooperativeHunter.onState(event, offer);
-    if(event==="p2p.applied") void raceMonitor.taken(offer,receivedAt,sentAt).catch(traceFailure);
   },
 );
 marketSource.start();
@@ -430,20 +404,12 @@ bot.on("callback_query:data", async (ctx) => {
   }
 });
 
-bot.catch(async (error) => {
+bot.catch((error) => {
   console.error("Error no controlado de Telegram:", error.error);
   store.audit(
     "telegram_error",
     error.error instanceof Error ? error.error.message : String(error.error),
   );
-  try {
-    await bot.api.sendMessage(
-      String(config.adminChatId),
-      "⚠️ Error inesperado del bot. Usa /logs para consultar el diagnóstico.",
-    );
-  } catch {
-    /* sin canal alternativo */
-  }
 });
 
 const scheduler = new Scheduler((name, error) => {
@@ -457,8 +423,6 @@ scheduler.register("scan", 250, async () => {
   const update = await marketSource.pollNext();
   if (update) await trading.ingestMarketUpdate(update, { realtimeRecovery: marketSource.mode() === "hybrid" });
 });
-scheduler.register("expire", 15_000, () => trading.expireOperations());
-scheduler.register("chat_ack", 15_000, () => trading.syncChatAcknowledgements());
 scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );
@@ -860,8 +824,6 @@ async function showOperations(ctx: Context, notice?: string): Promise<void> {
     .join("\n");
   const keyboard = new InlineKeyboard();
   for (const operation of operations) {
-    if (operation.state === "applied")
-      keyboard.text("✅ Voy a pagar", `ack:${operation.uuid}`);
     if (operation.state === "paid")
       keyboard.text("✅ Confirmar recepción", `received:${operation.uuid}`);
     if (operation.state === "applied" || operation.state === "acknowledged")
@@ -1279,7 +1241,7 @@ async function showStrategy(ctx: Context): Promise<void> {
     "━━━━━━━━━━━━━━━━━━━━",
     ...markets,
     `🛡 Reserva QUSD: <b>${money(trading.strategy().reserve)} QUSD</b>`,
-    `⏱ Autocancelación: <b>${marketConfig.current().automation.autoCancelMinutes} min</b>`,
+    "⏱ Cierre automático por falta de respuesta: <b>desactivado</b>",
     `🔄 Refresco de propias: <b>${state.refresh ? "activo" : "apagado"}</b>`,
     `\nUsa /fiat ${marketHint()} IMPORTE y /refresh para modificar la estrategia.`,
   ].join("\n");
