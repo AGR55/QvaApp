@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { Store } from "../src/store.js";
 import { TradingEngine } from "../src/trading.js";
 import { MarketConfigService } from "../src/market-config.js";
+import { CooperativeHunter } from "../src/cooperative-hunter.js";
 
 function setup() {
  const dataDir=mkdtempSync(join(tmpdir(),"qva-coop-capital-")),store=new Store(dataDir);
@@ -55,4 +56,44 @@ test("manual own sale creation and expansion cannot spend participants' QUSD",as
 test("cooperative hunting cannot bypass simulation mode",t=>{
  const s=setup();t.after(()=>s.store.close());s.store.set("mode","simulation");
  assert.match(s.engine.cooperativeSafetyReason({uuid:"group",coin:"BANK_CUP",type:"sell",amount:10,receive:1000,status:"open"})??"",/detenido/);
+});
+
+test("con fiat completo el motor propio aplica y no reserva una cacería conjunta", async t => {
+ const s=setup(); t.after(()=>s.store.close());
+ let reserves=0;
+ const hunter=new CooperativeHunter(s.store,{
+   isEnabled:()=>true, aggregate:()=>({coin:"BANK_CUP",fiat:1000,price:100,minimal:10,offersCount:2}),
+   reserve:async()=>{reserves++;throw new Error("No debía reservar");}, settle:async()=>undefined,
+ },{secondaryApplyAvailable:()=>true,applySecondary:async()=>{throw new Error("No debía aplicar en grupo");},getOffer:async()=>{throw new Error("Sin consulta");}},
+ {ownBusy:()=>s.engine.ownDecisionBusy(),safetyReason:offer=>s.engine.cooperativeSafetyReason(offer),canPayWhole:offer=>s.engine.cooperativeCanPayWhole(offer),
+ canReserveOwn:()=>true,ownerCost:(_,fiat)=>fiat,notify:async()=>undefined});
+ s.engine.observeSecondaryOpportunities((offer,receivedAt)=>hunter.enqueue(offer,receivedAt));
+ const result=await s.engine.ingestMarketOffer({uuid:"all-mine",type:"sell",coin:"BANK_CUP",amount:6,receive:600,status:"open",only_vip:false});
+ assert.match(result.action??"",/aplicada/);
+ assert.equal(s.applies(),1);assert.equal(reserves,0);
+ assert.equal(s.store.getOperation("all-mine")?.receive,600);
+ assert.equal(s.store.get("cooperative_owner_fiat:all-mine"),undefined);
+ await hunter.stop();
+});
+
+test("fiat completo no convierte una tasa fuera del límite propio en compra conjunta", async t => {
+ const s=setup(); t.after(()=>s.store.close());
+ const offer={uuid:"too-expensive",type:"sell" as const,coin:"BANK_CUP",amount:6,receive:660,status:"open" as const,only_vip:false};
+ assert.equal(s.engine.cooperativeCanPayWhole(offer),true);
+ const result=await s.engine.ingestMarketOffer(offer);
+ assert.equal(s.applies(),0);assert.match(result.action??"",/supera el máximo/);
+});
+
+test("el fiat anunciado en ofertas propias no se cuenta dos veces",t=>{
+ const s=setup();t.after(()=>s.store.close());
+ s.store.saveRemoteResource("own-offers",[{uuid:"mine",type:"buy",coin:"BANK_CUP",status:"open",receive:500}]);
+ assert.equal(s.engine.cooperativeCanPayWhole({uuid:"group",type:"sell",coin:"BANK_CUP",amount:6,receive:600,status:"open"}),false);
+});
+
+test("al reevaluar una reserva conjunta no resta dos veces su propio aporte",t=>{
+ const s=setup();t.after(()=>s.store.close());
+ s.store.set("cooperative_fiat_reserved:BANK_CUP","300");
+ const offer={uuid:"group",type:"sell" as const,coin:"BANK_CUP",amount:9,receive:900,status:"open" as const};
+ assert.equal(s.engine.cooperativeCanPayWhole(offer),false);
+ assert.equal(s.engine.cooperativeCanPayWhole(offer,300),true);
 });

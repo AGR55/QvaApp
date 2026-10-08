@@ -168,6 +168,17 @@ export class TradingEngine {
 
   cooperativeOwnerCost(coin: string, amount: number): number { return amount + (amount > 0 ? this.market(coin)?.outgoingTransferFee ?? 0 : 0); }
 
+  cooperativeCanPayWhole(offer: P2pOffer, ownReservationFiat = 0): boolean {
+    if (offer.type !== "sell" || !this.isMarket(offer.coin) || !Number.isFinite(offer.receive) || offer.receive <= 0) return false;
+    const committed = this.store.activeOperations().filter(op => op.coin === offer.coin && op.offerType === "sell" && !this.store.hasFiatMovement(op.uuid))
+      .reduce((sum, op) => sum + this.operationFiatCost(op), 0);
+    const open = this.store.loadRemoteResource<{ type: string; coin: string; status: string; receive: number }[]>("own-offers")?.data ?? [];
+    const advertised = open.filter(item => item.type === "buy" && item.coin === offer.coin && item.status === "open")
+      .reduce((sum, item) => sum + this.cooperativeOwnerCost(offer.coin, item.receive), 0);
+    const reserved = Math.max(0, Number(this.store.get(`cooperative_fiat_reserved:${offer.coin}`) ?? 0) - this.cooperativeOwnerCost(offer.coin, ownReservationFiat));
+    return this.fiatBalance(offer.coin) - committed - advertised - reserved >= this.cooperativeOwnerCost(offer.coin, offer.receive);
+  }
+
   private operationFiatCost(operation: { uuid: string; coin: string; receive: number }): number {
     const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
     const amount = raw !== undefined && raw !== "" ? Number(raw) : operation.receive;
