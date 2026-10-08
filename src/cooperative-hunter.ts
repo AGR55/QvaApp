@@ -12,6 +12,7 @@ export interface CooperativeExecution {
 type HunterRuntime = {
   ownBusy(): boolean;
   safetyReason(offer: P2pOffer): string | undefined;
+  canPayWhole(offer: P2pOffer, ownReservationFiat?: number): boolean;
   canReserveOwn(coin: string, fiat: number): boolean;
   ownerCost(coin: string, fiat: number): number;
   projectState?(event: "p2p.paid" | "p2p.completed", offer: P2pOffer): Promise<void>;
@@ -46,7 +47,11 @@ export class CooperativeHunter {
   }
 
   enqueue(offer: P2pOffer, receivedAt: number): void {
-    if (!this.eligible(offer, receivedAt) || this.jobs.has(offer.uuid)) return;
+    if (this.jobs.has(offer.uuid) || !this.networkEligible(offer, receivedAt)) return;
+    if (this.runtime.canPayWhole(offer)) {
+      this.store.audit("cooperative_self_funded_skipped", "Fiat disponible para pagar la oferta completa; la ruta conjunta no reservó participantes.", offer.uuid);
+      return;
+    }
     const snapshot: P2pOffer = { uuid: offer.uuid, type: offer.type, coin: offer.coin, amount: offer.amount, receive: offer.receive, status: offer.status,
       ...(offer.owner_uuid ? {owner_uuid:offer.owner_uuid}:{}), ...(offer.User?.uuid ? {User:{uuid:offer.User.uuid}}:{}),
       ...(offer.only_vip === undefined ? {} : {only_vip:offer.only_vip}),
@@ -59,6 +64,10 @@ export class CooperativeHunter {
   private kick(): void { this.drainPromise ??= this.drain().finally(() => { this.drainPromise=undefined; }); }
 
   private eligible(offer: P2pOffer, receivedAt: number): boolean {
+    return this.networkEligible(offer, receivedAt) && !this.runtime.canPayWhole(offer);
+  }
+
+  private networkEligible(offer: P2pOffer, receivedAt: number): boolean {
     if (this.stopped || !this.enabled() || this.now() - receivedAt > MAX_AGE_MS || receivedAt > this.now() ||
       !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0 ||
       this.runtime.safetyReason(offer)) return false;
@@ -121,7 +130,7 @@ export class CooperativeHunter {
       if (job.reservation.state !== "reserved") { this.save(job, "uncertain", "La reserva ya tenía un estado terminal; no se reaplicó."); return; }
       this.save(job, "reserved");
       if (!this.enabled() || this.runtime.safetyReason(offer) || this.now() - receivedAt > MAX_AGE_MS ||
-        this.runtime.ownBusy() || !this.qva.secondaryApplyAvailable() ||
+        this.runtime.canPayWhole(offer, job.reservation.ownerFiat) || this.runtime.ownBusy() || !this.qva.secondaryApplyAvailable() ||
         !this.runtime.canReserveOwn(offer.coin, job.reservation.ownerFiat)) {
         await this.release(job); return;
       }
@@ -130,6 +139,7 @@ export class CooperativeHunter {
       try {
         await this.qva.applySecondary(offer.uuid, () => !this.runtime.ownBusy() &&
           !this.runtime.safetyReason(offer) && this.now() - receivedAt <= MAX_AGE_MS && this.enabled() &&
+          !this.runtime.canPayWhole(offer, job.reservation!.ownerFiat) &&
           this.runtime.canReserveOwn(offer.coin, job.reservation!.ownerFiat));
       } catch (error) {
         if (error instanceof QvaApiError && error.status >= 400 && error.status < 500) { await this.release(job); return; }

@@ -14,7 +14,7 @@ async function until(check: () => boolean) { for (let i=0;i<50 && !check();i++) 
 function setup() {
   const store = new Store(mkdtempSync(join(tmpdir(),"qva-coop-hunter-")));
   const actions: string[] = [];
-  let busy = false, error: Error | undefined;
+  let busy = false, full = false, error: Error | undefined;
   const sync = { isEnabled: () => true,
     aggregate: () => ({ coin: "BANK_CUP", fiat: 2000, price: 100, minimal: 10, offersCount: 2 }),
     reserve: async () => { actions.push("reserve"); return { externalId: offer.uuid, state: "reserved" as const, ownerFiat: 400,
@@ -24,9 +24,30 @@ function setup() {
   const hunter = new CooperativeHunter(store,sync,{ secondaryApplyAvailable: () => true,
     applySecondary: async (_uuid, guard) => { if (!await guard()) throw new QvaApiError(409,"yield"); actions.push("apply"); if (error) throw error; },
     getOffer: async () => ({ ...offer, status: "processing", Peer: { uuid: "me" } }),
-  },{ ownBusy: () => busy, safetyReason: () => undefined, canReserveOwn: () => true, ownerCost: (_coin, fiat) => fiat, notify: async () => { actions.push("notify"); } });
-  return { hunter,store,actions, setBusy: (value: boolean) => { busy=value; }, setError: (value: Error) => { error=value; } };
+  },{ ownBusy: () => busy, safetyReason: () => undefined, canPayWhole: () => full, canReserveOwn: () => true, ownerCost: (_coin, fiat) => fiat, notify: async () => { actions.push("notify"); } });
+  return { hunter,store,actions,sync, setBusy: (value: boolean) => { busy=value; }, setFull: (value: boolean) => { full=value; }, setError: (value: Error) => { error=value; } };
 }
+
+test("el fiat propio completo descarta la reserva conjunta antes de llamar al sincronizador", async t => {
+  const s=setup(); t.after(() => s.store.close()); s.setFull(true);
+  s.hunter.enqueue(offer,Date.now()); await tick();
+  assert.deepEqual(s.actions,[]);
+  assert.equal(s.store.countAudit("cooperative_self_funded_skipped"),1);
+});
+
+test("si aparece suficiente fiat durante la reserva, libera a los participantes antes de aplicar", async t => {
+  const s=setup(); t.after(() => s.store.close());
+  let release!: () => void;
+  s.sync.reserve=async () => {
+    s.actions.push("reserve");
+    await new Promise<void>(resolve => { release=resolve; });
+    return {externalId:offer.uuid,state:"reserved",ownerFiat:400,contributions:[{userId:"friend",fiat:600,qusd:6}]};
+  };
+  s.hunter.enqueue(offer,Date.now()); await until(() => Boolean(release));
+  s.setFull(true); release(); await until(() => s.actions.includes("release"));
+  assert.deepEqual(s.actions,["reserve","release"]);
+  await s.hunter.stop();
+});
 
 test("own decision wins before any cooperative reservation or network call", async () => {
   const s=setup(); s.setBusy(true); s.hunter.enqueue(offer,Date.now()); await tick(); await tick();

@@ -114,6 +114,7 @@ const pollingMarketSource = new PollingMarketSource(
 const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
   ownBusy: () => trading.ownDecisionBusy(),
   safetyReason: offer => trading.cooperativeSafetyReason(offer),
+  canPayWhole: (offer, ownReservationFiat) => trading.cooperativeCanPayWhole(offer, ownReservationFiat),
   canReserveOwn: (coin, fiat) => trading.cooperativeOwnCapacity(coin, fiat),
   ownerCost: (coin, fiat) => trading.cooperativeOwnerCost(coin, fiat),
   projectState: (event, offer) => trading.ingestMarketStateEvent(event, offer),
