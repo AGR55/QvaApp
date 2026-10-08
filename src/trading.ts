@@ -19,7 +19,6 @@ import type { QvaPayGateway, TradingRepository } from "./core/ports.js";
 import type { MarketPageUpdate } from "./market-source.js";
 import { OpportunityOrchestrator } from "./application/opportunity-orchestrator.js";
 import {
-  isMutationUncertain,
   MonetaryIntents,
 } from "./application/monetary-intents.js";
 import { evaluateRisk, type RiskDecision } from "./core/risk-policy.js";
@@ -1798,18 +1797,10 @@ export class TradingEngine {
   }
 
   async cancel(uuid: string, automatic = false): Promise<void> {
+    if (automatic) throw new Error("La cancelación automática por falta de ACK está desactivada.");
     this.requireRealMode();
-    const operation = this.requireOperation(uuid);
-    if (
-      automatic &&
-      (operation.offerType !== "sell" ||
-        !operation.autoApplied ||
-        operation.state !== "applied")
-    )
-      throw new Error(
-        "Cancelación automática no permitida para esta operación.",
-      );
-    if (!automatic) this.store.excludeAutomaticReapplyAfterManualCancel(uuid);
+    this.requireOperation(uuid);
+    this.store.excludeAutomaticReapplyAfterManualCancel(uuid);
     await this.qva.getOffer(uuid);
     await this.monetaryIntents.execute({
       kind: "cancel",
@@ -1819,80 +1810,10 @@ export class TradingEngine {
     });
     this.store.updateOperation(uuid, "cancelled");
     this.store.audit(
-      automatic ? "auto_cancel" : "cancel",
-      automatic ? "Venció el plazo de 10 min" : "Cancelada por el usuario",
+      "cancel",
+      "Cancelada por el usuario",
       uuid,
     );
-  }
-
-  async expireOperations(): Promise<void> {
-    if (this.mode() !== "real") return;
-    for (const operation of this.store.pendingCancellations(Date.now())) {
-      try {
-        if (await this.acknowledgeFromOwnChat(operation.uuid, operation.createdAt))
-          continue;
-        const remote = await this.qva.getOffer(operation.uuid);
-        if (isTerminal(remote.status)) {
-          this.closeRemoteOperation(
-            operation.uuid,
-            `Estado remoto terminal: ${remote.status}`,
-          );
-          continue;
-        }
-        await this.monetaryIntents.execute({
-          kind: "cancel",
-          operationUuid: operation.uuid,
-          request: { uuid: operation.uuid, automatic: true },
-          action: () => this.qva.cancel(operation.uuid),
-        });
-        this.store.updateOperation(operation.uuid, "cancelled");
-        this.store.audit(
-          "auto_cancel",
-          `Venció el plazo de ${this.automationConfig().autoCancelMinutes} min`,
-          operation.uuid,
-        );
-        await this.notify(
-          `Operación ${operation.uuid} cancelada automáticamente: no respondiste en ${this.automationConfig().autoCancelMinutes} min.`,
-        );
-      } catch (error) {
-        if (
-          error instanceof QvaApiError &&
-          (error.status === 403 || error.status === 404)
-        ) {
-          this.closeRemoteOperation(
-            operation.uuid,
-            "QvaPay indica que ya no eres participante o la oferta no existe",
-          );
-          continue;
-        }
-        if (isMutationUncertain(error)) {
-          this.store.updateOperation(operation.uuid, "applied", null);
-          this.store.audit(
-            "auto_cancel_reconciliation_required",
-            error instanceof Error ? error.message : String(error),
-            operation.uuid,
-          );
-          try {
-            await this.notify(
-              `⚠️ No se pudo confirmar la cancelación automática de ${operation.uuid}. Se detuvieron los reintentos; requiere conciliación manual con QvaPay.`,
-            );
-          } catch (notificationError) {
-            this.store.audit(
-              "notification_warning",
-              notificationError instanceof Error
-                ? notificationError.message
-                : String(notificationError),
-              operation.uuid,
-            );
-          }
-          continue;
-        }
-        this.scheduleAutoCancelRetry(operation.uuid, error);
-        try {
-          await this.notify(`⚠️ No pude verificar el chat de ${operation.uuid}; aplacé la cancelación automática para proteger una operación que podrías estar pagando.`);
-        } catch { /* el aplazamiento ya quedó persistido */ }
-      }
-    }
   }
 
   async syncChatAcknowledgements(): Promise<void> {
@@ -3040,9 +2961,7 @@ export class TradingEngine {
       rate: rate(offer),
       state: "applied",
       autoApplied: automatic,
-      cancelAt: automatic
-        ? Date.now() + this.automationConfig().autoCancelMinutes * 60_000
-        : null,
+      cancelAt: null,
       createdAt: Date.now(),
       ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}),
       ...(referenceRate === undefined ? {} : { referenceRate }),
@@ -3065,7 +2984,7 @@ export class TradingEngine {
     });
     const postApply = async () => {
       await Promise.all([this.sendChatBestEffort(offer.uuid), this.notify(
-        `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} en ${this.marketLabel(this.offerMarket(offer))}.\nTasa nominal ${rate(offer).toFixed(2)} · comisión ${transfer.fee.toFixed(2)} · tasa efectiva ${transfer.effectiveRate.toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD.\nPaga y usa /paid ${offer.uuid} REFERENCIA.\n${automatic ? `Cancelaré automáticamente en ${this.automationConfig().autoCancelMinutes} min si no indicas que pagarás: /ack ${offer.uuid}` : ""}`,
+        `Aplicaste a ${offer.amount} QUSD por ${offer.receive} ${this.marketCurrency(this.offerMarket(offer))} en ${this.marketLabel(this.offerMarket(offer))}.\nTasa nominal ${rate(offer).toFixed(2)} · comisión ${transfer.fee.toFixed(2)} · tasa efectiva ${transfer.effectiveRate.toFixed(2)} ${this.marketCurrency(this.offerMarket(offer))}/QUSD.\nPaga y usa /paid ${offer.uuid} REFERENCIA.`,
         offer.uuid,
         {
           kind: "operation-applied",
@@ -3194,22 +3113,6 @@ export class TradingEngine {
     this.store.updateOperation(uuid, "cancelled");
     this.store.set(`retry:auto_cancel:${uuid}`, "0");
     this.store.audit("remote_operation_closed", detail, uuid);
-  }
-
-  private scheduleAutoCancelRetry(uuid: string, error: unknown): void {
-    const attempts =
-      Number(this.store.get(`retry:auto_cancel:${uuid}`) ?? 0) + 1;
-    const delay = Math.min(
-      10 * 60_000,
-      60_000 * 2 ** Math.min(attempts - 1, 4),
-    );
-    this.store.set(`retry:auto_cancel:${uuid}`, String(attempts));
-    this.store.updateOperation(uuid, "applied", Date.now() + delay);
-    this.store.audit(
-      "auto_cancel_retry",
-      `Reintento ${attempts} en ${Math.round(delay / 60_000)} min: ${error instanceof Error ? error.message : String(error)}`,
-      uuid,
-    );
   }
 
   private scheduleRefreshRetry(uuid: string, error: unknown): void {
@@ -3426,11 +3329,6 @@ const numeric = (value: unknown): number | undefined =>
       : undefined;
 const snapshotKey = (coin: FiatMarket, side: "buy" | "sell"): string =>
   `${coin}:${side}`;
-const isTerminal = (status: string): boolean =>
-  ["cancelled", "canceled", "completed"].includes(
-    status.toLowerCase(),
-  );
-
 function operationStateFromRemote(
   current: OperationState,
   remoteStatus: string,

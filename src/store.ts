@@ -2137,6 +2137,12 @@ export class Store {
     ).map((row) => this.operationFromRow(row));
   }
 
+  clearAutomaticCancellationDeadlines(): number {
+    return this.db.prepare(
+      "UPDATE operations SET cancel_at = NULL, updated_at = ? WHERE state = 'applied' AND auto_applied = 1 AND cancel_at IS NOT NULL",
+    ).run(Date.now()).changes as number;
+  }
+
   activeOperations(): Operation[] {
     return (
       this.db

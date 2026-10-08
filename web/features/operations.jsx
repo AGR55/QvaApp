@@ -86,7 +86,6 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
                       <TableCell className="whitespace-nowrap">{label(operation.coin)}</TableCell>
                       <TableCell className="whitespace-nowrap">{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}{operation.cooperativeOwnerFiat !== undefined ? ` · Tu parte: ${money(operation.cooperativeOwnerFiat)}` : ""}</small></TableCell>
                       <TableCell className="row-actions whitespace-nowrap">
-                        {operation.state === "applied" && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "ack" })}>Voy a pagar</Button> : null}
                         {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</Button> : null}
                         {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</Button> : null}
                         {["applied", "acknowledged"].includes(operation.state) ? <Button type="button" variant="destructive" size="sm" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</Button> : null}

@@ -923,7 +923,7 @@ test("omite una edición si QvaPay ya refleja el mismo importe y total", async (
   store.close();
 });
 
-test("no reintenta automáticamente una cancelación cuyo resultado remoto es incierto", async () => {
+test("retira vencimientos anteriores y prohíbe cancelar automáticamente", async () => {
   const store = new Store(
     mkdtempSync(join(tmpdir(), "qvaapply-uncertain-cancel-")),
   );
@@ -942,38 +942,26 @@ test("no reintenta automáticamente una cancelación cuyo resultado remoto es in
   });
   let cancelCalls = 0;
   const qva = {
-    profile: async () => ({ uuid: "me" }),
-    listChat: async () => [],
-    getOffer: async () => ({ uuid: "uncertain-cancel", status: "open" }),
     cancel: async () => {
       cancelCalls += 1;
-      throw new QvaMutationUncertainError(
-        "cancel",
-        new Error("socket cerrado"),
-      );
     },
   };
-  const notifications: string[] = [];
   const trading = new TradingService(
     store,
     qva as never,
     { autoCancelMs: 600_000 } as never,
-    async (message) => {
-      notifications.push(message);
-    },
+    async () => undefined,
   );
 
-  await trading.expireOperations();
-  await trading.expireOperations();
+  assert.equal(store.clearAutomaticCancellationDeadlines(), 1);
+  assert.equal(store.clearAutomaticCancellationDeadlines(), 0);
+  await assert.rejects(trading.cancel("uncertain-cancel", true), /desactivada/);
 
-  assert.equal(cancelCalls, 1);
+  assert.equal(cancelCalls, 0);
   assert.equal(store.getOperation("uncertain-cancel")?.state, "applied");
   assert.equal(store.getOperation("uncertain-cancel")?.cancelAt, null);
-  assert.equal(store.recentMutationIntents(1)[0]?.state, "uncertain");
-  assert.equal(store.countAudit("auto_cancel_reconciliation_required"), 1);
-  assert.ok(
-    notifications.some((message) => message.includes("conciliación manual")),
-  );
+  assert.equal(store.recentMutationIntents(1).length, 0);
+  store.close();
 });
 
 test("sincroniza estados terminales cambiados directamente en QvaPay", async () => {

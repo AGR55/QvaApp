@@ -31,6 +31,7 @@ test("la cuota agotada no bloquea el motor ni excluye una observación fresca po
   await trading.ingestMarketOffer(offer);
   assert.equal(applications, 1);
   assert.equal(store.getOperation(offer.uuid)?.state, "applied");
+  assert.equal(store.getOperation(offer.uuid)?.cancelAt, null);
   await new Promise(resolve => setImmediate(resolve));
 });
 
