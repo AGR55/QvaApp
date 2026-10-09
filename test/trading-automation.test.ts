@@ -43,6 +43,52 @@ function setup() {
   return { dataDir, store, cfg, markets };
 }
 
+test("el sondeo compra con fiat sin consultar el saldo QUSD", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  let balanceReads = 0;
+  const trading = new TradingEngine(store, {
+    listOffersPage: async (params: { type?: string }) => ({ offers: params.type === "sell"
+      ? [{ uuid: "fiat-without-qusd-read", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" }] : [],
+      total: 1, currentPage: 1, perPage: 100 }),
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
+    qusdBalance: async () => { balanceReads++; throw new Error("lectura innecesaria"); },
+    apply: async () => undefined,
+    sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  const result = await trading.scan();
+  assert.equal(balanceReads, 0);
+  assert.equal(result.action, "aplicada fiat-without-qusd-read");
+  assert.ok(store.getOperation("fiat-without-qusd-read"));
+});
+
+test("el sondeo aplica la primera página fresca sin esperar otros mercados o lados", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  const config = markets.current();
+  config.markets.find(market => market.code === "CLASICA")!.active = true;
+  markets.save(config);
+  store.saveRemoteResource("market:CLASICA", { offers: [{ uuid: "keep-classic", type: "sell" }] });
+  store.saveRemoteResource("market:BANK_CUP", { offers: [{ uuid: "keep-buy-side", type: "buy" }] });
+  store.upsertTradingAlert({ uuid: "keep-alert", coin: "CLASICA", offerType: "sell", amount: 10,
+    receive: 11, rate: 1.1, decision: "blocked", reason: "Pendiente" });
+  store.upsertTradingAlert({ uuid: "keep-buy-alert", coin: "BANK_CUP", offerType: "buy", amount: 10,
+    receive: 11000, rate: 1100, decision: "blocked", reason: "Pendiente" });
+  const trading = new TradingEngine(store, {
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
+    apply: async () => undefined, sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  const result = await trading.ingestMarketUpdate({ coin: "BANK_CUP", side: "sell",
+    page: { offers: [{ uuid: "first-fresh-page", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" }], total: 1, currentPage: 1, perPage: 100 },
+    scannedAt: Date.now(), sourceAccountId: "primary" });
+  assert.equal(result.action, "aplicada first-fresh-page");
+  assert.ok(store.getOperation("first-fresh-page"));
+  assert.deepEqual(store.loadRemoteResource("market:CLASICA")?.data, { offers: [{ uuid: "keep-classic", type: "sell" }] });
+  assert.equal(store.tradingAlert("keep-alert")?.resolvedAt, null);
+  assert.equal(store.tradingAlert("keep-buy-alert")?.resolvedAt, null);
+  assert.ok(store.loadRemoteResource<{ offers: P2pOffer[] }>("market:BANK_CUP")?.data.offers.some(offer => offer.uuid === "keep-buy-side"));
+});
+
 test("el feed decide sin esperar los promedios de una lectura de recuperación", async t => {
   const { store, cfg, markets } = setup();
   t.after(() => store.close());
@@ -653,13 +699,16 @@ test("revalida la cacería de compra después de evaluar el riesgo", async () =>
   const qva = {
     listOffersPage: async (params: { type?: string }) => ({ offers: params.type === "sell" ? [target] : [], total: 1, currentPage: 1, perPage: 100 }),
     p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
-    qusdBalance: async () => {
-      trading.updateHunting({ buyRunning: false });
-      return 100;
-    },
     apply: async () => void (applications += 1),
   };
   trading = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+
+  const dailyAppliedQusd = store.dailyAppliedQusd.bind(store);
+  store.dailyAppliedQusd = (since) => {
+    // Stop between the risk evaluation and the continuation that applies.
+    queueMicrotask(() => trading.updateHunting({ buyRunning: false }));
+    return dailyAppliedQusd(since);
+  };
 
   const result = await trading.scan();
 

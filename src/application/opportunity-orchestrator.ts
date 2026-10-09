@@ -212,10 +212,13 @@ export class OpportunityOrchestrator {
         decision: this.nonExecutableDecision(input, "blocked", "El mercado no está activo o configurado."),
       };
 
-    const [qusdBalance, ownOffers] = await Promise.all([
-      this.qva.qusdBalance(),
-      this.qva.listOffers({ my: true, take: 100, page: 1, status: "open" }),
-    ]);
+    const qusdBalance = await this.qva.qusdBalance();
+    // Own offers matter only when we must release escrow. Avoid putting an
+    // already funded application behind another throttled network read.
+    const available = Math.max(0, qusdBalance - Number(this.store.get("cooperative_qusd_owed") ?? 0));
+    const ownOffers = available >= input.target.amount + this.config.current().risk.minQusdReserve
+      ? []
+      : await this.qva.listOffers({ my: true, take: 100, page: 1, status: "open" });
     const current = this.config.current();
     const ownQusdBalance = Math.max(0, qusdBalance - Number(this.store.get("cooperative_qusd_owed") ?? 0));
     const liquidity = planLiquidity({

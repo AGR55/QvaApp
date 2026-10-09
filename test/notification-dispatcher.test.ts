@@ -6,6 +6,30 @@ import test from "node:test";
 import { NotificationDispatcher } from "../src/notification-dispatcher.js";
 import { Store } from "../src/store.js";
 
+test("publicar en segundo plano persiste sin esperar una entrega bloqueada", async () => {
+  const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-notify-latency-")));
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const dispatcher = new NotificationDispatcher(store, {
+    telegram: async () => { await blocked; throw new Error("sin conexión"); },
+    webPush: async () => undefined,
+  });
+  let published = false;
+  const publishing = dispatcher.publish({ message: "Aplicada", event: { kind: "operation-applied", uuid: "fast" } },
+    { waitForDelivery: false }).then(() => { published = true; });
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(published, true, "la red no debe retener la decisión de cacería");
+    assert.equal(store.pendingUserNotifications()[0]?.id, "operation-applied:fast");
+  } finally {
+    release();
+    await publishing;
+    await dispatcher.deliverDue();
+  }
+  assert.equal(store.pendingNotificationDeliveries(Date.now() + 60_000)[0]?.telegramAttempts, 1);
+  store.close();
+});
+
 test("Telegram entrega solo inicios de operación y agota avisos antiguos pendientes", async () => {
   const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-quiet-telegram-")));
   const telegram: string[] = [];

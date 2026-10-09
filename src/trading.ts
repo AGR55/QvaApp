@@ -1163,18 +1163,9 @@ export class TradingEngine {
             candidate.side === "sell" ? "buy" : "sell",
           ),
       );
-      const required = this.activeMarkets().flatMap((market) => [
-        ...(this.huntEnabled(market.code, "buy")
-          ? [snapshotKey(market.code, "sell")]
-          : []),
-        ...(this.huntEnabled(market.code, "sell")
-          ? [snapshotKey(market.code, "buy")]
-          : []),
-      ]);
-      const available = new Set(
-        snapshots.map((candidate) => snapshotKey(candidate.coin, candidate.side)),
-      );
-      if (required.some((key) => !available.has(key)))
+      // Each market is independently priced and funded. Waiting for every
+      // configured side can age a good quote out before the round finishes.
+      if (!snapshots.length)
         return {
           inspected: snapshots.reduce((sum, item) => sum + item.items.length, 0),
           candidates: 0,
@@ -1183,7 +1174,7 @@ export class TradingEngine {
       return this.withDecisionTurn(() => this.processSnapshots(
         snapshots,
         snapshots.some((candidate) => candidate.side === "buy"),
-        !required.some((key) => key.endsWith(":buy")),
+        !snapshots.some((candidate) => candidate.side === "buy"),
       ));
     } catch (error) {
       await this.handleError("scan", error);
@@ -2698,7 +2689,9 @@ export class TradingEngine {
             ? "La tasa cumple el máximo de compra configurado."
             : "No existe una referencia de mercado válida.",
       expectedMarginPercent: expectedMargin,
-      qusdBalance: Math.max(0, await this.qva.qusdBalance() - this.cooperativeQusdOwed()),
+      // Buying QUSD spends fiat: capitalCheck ignores QUSD for this side.
+      // A remote balance read only delays dispatch and consumes read quota.
+      qusdBalance: 0,
       fiatAvailable: this.fiatBalance(offer.coin),
       concurrentQusdExposure:
         store.activeOperations().reduce(
@@ -2751,6 +2744,7 @@ export class TradingEngine {
         ];
       }),
       scannedOfferTypes,
+      snapshots.length ? snapshots.map(({ coin, side }) => ({ coin, side })) : undefined,
     );
   }
 
@@ -2785,7 +2779,7 @@ export class TradingEngine {
     includedBuySide: boolean,
   ): void {
     const scannedAt = Date.now();
-    const coverage = this.activeMarkets().map((market) => {
+    const coverage = this.activeMarkets().filter(market => snapshots.some(snapshot => snapshot.coin === market.code)).map((market) => {
       const marketItems = items.filter((item) => item.offer.coin === market.code);
       const sides = snapshots
         .filter((snapshot) => snapshot.coin === market.code)
@@ -2803,9 +2797,7 @@ export class TradingEngine {
         this.store.loadRemoteResource<{
           offers?: Array<P2pOffer & { rate?: number; decision?: string; reason?: string }>;
         }>(`market:${market.code}`)?.data.offers ?? [];
-      const retainedOffers = includedBuySide
-        ? []
-        : previousOffers.filter((offer) => offer.type === "buy");
+      const retainedOffers = previousOffers.filter((offer) => !sides.includes(offer.type));
       const visibleItems = [
         ...marketItems.map((item) => ({
           ...item.offer,

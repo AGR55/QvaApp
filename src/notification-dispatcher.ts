@@ -46,7 +46,7 @@ export class NotificationDispatcher {
     private readonly now: () => number = Date.now,
   ) {}
 
-  async publish(input: NotificationInput): Promise<void> {
+  async publish(input: NotificationInput, options: { waitForDelivery?: boolean } = {}): Promise<void> {
     this.store.enqueueNotification({
       id: notificationId(input.event),
       kind: input.event.kind,
@@ -57,7 +57,12 @@ export class NotificationDispatcher {
       payload: { ...input.event },
       createdAt: this.now(),
     });
-    await this.deliverDue();
+    const delivery = this.deliverDue();
+    if (options.waitForDelivery !== false) await delivery;
+    else void delivery.catch(error => {
+      // The outbox was persisted above; the scheduler can retry a failed batch.
+      this.store.audit("notification_warning", error instanceof Error ? error.message : String(error));
+    });
   }
 
   async deliverDue(): Promise<void> {
