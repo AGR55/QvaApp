@@ -92,7 +92,7 @@ const trading = new TradingEngine(
         message,
         ...(uuid ? { operationUuid: uuid } : {}),
         event,
-      });
+      }, { waitForDelivery: false });
       return;
     }
     store.audit("telegram_info_suppressed", message, uuid);
@@ -118,7 +118,7 @@ const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
   ownerCost: (coin, fiat) => trading.cooperativeOwnerCost(coin, fiat),
   projectState: (event, offer) => trading.ingestMarketStateEvent(event, offer),
   notify: (message, uuid) => notifications.publish({ message, operationUuid: uuid,
-    event: { kind: message.startsWith("⚠️") ? "reconciliation-required" : "operation-applied", uuid } }),
+    event: { kind: message.startsWith("⚠️") ? "reconciliation-required" : "operation-applied", uuid } }, { waitForDelivery: false }),
 });
 trading.observeSecondaryOpportunities((offer, receivedAt) => cooperativeHunter.enqueue(offer, receivedAt));
 const marketSource = new MarketSourceCoordinator(
@@ -1545,6 +1545,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
   await dashboardServer.close();
   await huntingSync.stop();
+  await notifications.deliverDue();
   store.close();
 }
 

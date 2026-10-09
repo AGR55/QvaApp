@@ -2404,9 +2404,14 @@ export class Store {
   syncTradingAlerts(
     alerts: Omit<TradingAlert, "createdAt" | "updatedAt" | "resolvedAt">[],
     offerTypes?: P2pType[],
+    scopes?: Array<{ coin: string; side: P2pType }>,
   ): void {
     const now = Date.now();
-    if (offerTypes?.length) {
+    if (scopes?.length) {
+      const predicates = scopes.map(() => "(coin = ? AND offer_type = ?)").join(" OR ");
+      this.db.prepare(`UPDATE trading_alerts SET resolved_at = ? WHERE resolved_at IS NULL AND (${predicates})`)
+        .run(now, ...scopes.flatMap(scope => [scope.coin, scope.side]));
+    } else if (offerTypes?.length) {
       const placeholders = offerTypes.map(() => "?").join(", ");
       this.db
         .prepare(

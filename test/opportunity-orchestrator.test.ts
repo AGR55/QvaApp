@@ -65,6 +65,38 @@ const input = {
   priceReason: "Supera el mínimo de venta.",
 };
 
+test("con QUSD libre suficiente aplica sin listar ofertas propias", async t => {
+  const { store, markets } = setup();
+  t.after(() => store.close());
+  const calls: string[] = [];
+  const orchestrator = new OpportunityOrchestrator(store, {
+    qusdBalance: async () => 100,
+    listOffers: async () => { calls.push("list"); throw new Error("el listado no debe retrasar una venta financiada"); },
+    apply: async () => { calls.push("apply"); },
+  } as never, markets, { now: () => now });
+  const result = await orchestrator.execute(input);
+  assert.equal(result.applicationConfirmed, true);
+  assert.deepEqual(calls, ["apply"]);
+});
+
+test("el saldo cooperativo y la reserva no se cuentan como QUSD libre", async t => {
+  const { store, markets } = setup();
+  t.after(() => store.close());
+  const config = markets.current();
+  config.risk.minQusdReserve = 5;
+  markets.save(config);
+  store.set("cooperative_qusd_owed", "10");
+  let listed = false;
+  const orchestrator = new OpportunityOrchestrator(store, {
+    qusdBalance: async () => 30,
+    listOffers: async () => { listed = true; return []; },
+    apply: async () => { assert.fail("no hay capital libre suficiente"); },
+  } as never, markets, { now: () => now });
+  const result = await orchestrator.execute(input);
+  assert.equal(listed, true);
+  assert.equal(result.decision.kind, "blocked");
+});
+
 test("hidrata los datos de pago antes de cancelar y los conserva al reponer", async () => {
   const { store, markets } = setup();
   const config = markets.current();
