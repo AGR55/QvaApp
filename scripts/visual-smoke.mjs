@@ -90,6 +90,14 @@ try {
   await screenshot("/tmp/qvaapply-operations-desktop.png");
   const operationsDesktop = await assertPageQuality("Operaciones");
 
+  const chatButton = await find("css selector", "button[aria-label='Abrir chat de la operación op-demo-01']");
+  await command("POST", `/session/${sessionId}/element/${chatButton}/click`, {});
+  await waitFor(() => execute("return document.querySelector('.operation-chat-sheet')?.textContent?.includes('confirmo los datos de pago')"));
+  await screenshot("/tmp/qvaapply-operation-chat-desktop.png");
+  await assertPageQuality("Chat de operación");
+  const closeChat = await find("css selector", "[data-slot='sheet-close']");
+  await command("POST", `/session/${sessionId}/element/${closeChat}/click`, {});
+
   const hunting = await find(
     "xpath",
     "//button[contains(normalize-space(.), 'Cacería')]",

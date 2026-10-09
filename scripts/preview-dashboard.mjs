@@ -141,7 +141,22 @@ let previewRecovery = [{ intentId: "preview-uncertain-apply", kind: "apply", sta
   operationUuid: "preview-external-offer", createdAt: now - 600000, updatedAt: now - 590000,
   error: "HTTP 404: No tienes permisos para ver esta oferta", manualEligible: true,
   retry: { attempts: 3, nextAttemptAt: now + 60000, eligible: false } }];
+let previewChatRead = false;
+const previewChatMessages = [
+  { id: "chat-1", peerId: "preview-counterparty", sender: "counterparty", message: "Hola, confirmo los datos de pago.", createdAt: now - 85_000 },
+  { id: "chat-2", peerId: "preview-me", sender: "own", message: "Perfecto, reviso la transferencia ahora.", createdAt: now - 45_000 },
+];
+const previewChatView = () => ({ uuid: "op-demo-01", messages: previewChatMessages, updatedAt: Date.now(), stale: false, unreadCount: previewChatRead ? 0 : 1 });
 const model = {
+  operationChatUnread: () => ({ "op-demo-01": previewChatRead ? 0 : 1 }),
+  readOperationChat: () => previewChatView(),
+  refreshOperationChat: async () => previewChatView(),
+  markOperationChatRead: () => { previewChatRead = true; return previewChatView(); },
+  sendOperationChat: async (_uuid, message) => {
+    const id = `chat-${previewChatMessages.length + 1}`;
+    previewChatMessages.push({ id, peerId: "preview-me", sender: "own", message, createdAt: Date.now() });
+    return { id, chat: previewChatView() };
+  },
   setCooperativeHunting: enabled => { snapshot.cooperativeHunting.enabled = enabled; },
   checkCooperativeHunting: async () => undefined,
   markCooperativeDistributed: uuid => {

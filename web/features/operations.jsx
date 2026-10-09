@@ -1,10 +1,11 @@
-import React, { useCallback, useState } from "react";
-import { AlertTriangle, ArrowLeftRight, Bell, CheckCircle2, RefreshCcw, Workflow } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import { AlertTriangle, ArrowLeftRight, Bell, CheckCircle2, MessageSquareText, RefreshCcw, Workflow } from "lucide-react";
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { operationActionBody } from "../lib/operation-actions.js";
 import { MobileSmsPanel } from "./mobile-sms.jsx";
+import { OperationChatSheet } from "./operation-chat.jsx";
 import { Badge, Button, Field, Input } from "../components/ui.jsx";
 import { FieldGroup } from "../components/ui/field.tsx";
 import {
@@ -31,6 +32,21 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
   const [pending, setPending] = useState();
   const [reference, setReference] = useState("");
   const [status, setStatus] = useState("");
+  const [chatOperation, setChatOperation] = useState();
+  const [chatUnread, setChatUnread] = useState({});
+  const refreshChatUnread = useCallback(async () => {
+    try {
+      const result = await requestJson("/api/operations/chats/unread", { timeoutMs: 10_000 });
+      setChatUnread(result.data || {});
+    } catch { /* La tabla conserva el último contador conocido. */ }
+  }, []);
+  useEffect(() => {
+    void refreshChatUnread();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void refreshChatUnread();
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [refreshChatUnread]);
   const closePending = useCallback(() => setPending(undefined), []);
   const run = async (path, body = {}) => {
     setStatus("Enviando acción…");
@@ -86,6 +102,10 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
                       <TableCell className="whitespace-nowrap">{label(operation.coin)}</TableCell>
                       <TableCell className="whitespace-nowrap">{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}{operation.cooperativeOwnerFiat !== undefined ? ` · Tu parte: ${money(operation.cooperativeOwnerFiat)}` : ""}</small></TableCell>
                       <TableCell className="row-actions whitespace-nowrap">
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setChatOperation(operation)} aria-label={`Abrir chat de la operación ${operation.uuid}`}>
+                          <MessageSquareText aria-hidden="true" data-icon="inline-start" /> Chat
+                          {chatUnread[operation.uuid] ? <span className="operation-chat-unread" aria-label={`${chatUnread[operation.uuid]} mensajes sin leer`}>{chatUnread[operation.uuid]}</span> : null}
+                        </Button>
                         {["applied", "acknowledged"].includes(operation.state) && operation.offerType === "sell" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "paid" })}>Registrar pago</Button> : null}
                         {["applied", "acknowledged", "paid"].includes(operation.state) && operation.offerType === "buy" ? <Button type="button" variant="outline" size="sm" onClick={() => setPending({ operation, action: "received" })}>Confirmar recepción</Button> : null}
                         {["applied", "acknowledged"].includes(operation.state) ? <Button type="button" variant="destructive" size="sm" onClick={() => setPending({ operation, action: "cancel" })}>Cancelar</Button> : null}
@@ -112,6 +132,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
         </Panel>
       </div>
       <MobileSmsPanel />
+      <OperationChatSheet operation={chatOperation} label={label} onUnreadChange={refreshChatUnread} onClose={() => setChatOperation(undefined)} />
       {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
       <Dialog open={Boolean(pending)} onOpenChange={(open) => !open && closePending()}>
         {pending ? (
