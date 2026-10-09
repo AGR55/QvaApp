@@ -1961,6 +1961,12 @@ export class Store {
     }
   }
 
+  pruneOperationChatCache(olderThan: number): number {
+    return this.db.prepare(
+      "DELETE FROM remote_resource_cache WHERE resource_key LIKE 'operation-chat:%' AND updated_at < ?",
+    ).run(olderThan).changes as number;
+  }
+
   recordFiatMovement(
     uuid: string,
     coin: FiatMarket,

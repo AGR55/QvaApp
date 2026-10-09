@@ -49,7 +49,21 @@ test("normaliza un Peer vacío como contraparte ausente en una oferta abierta", 
   assert.equal(offer.User?.uuid, "creator");
 });
 
-test("normaliza el chat documentado e identifica al autor por peer_id", async () => {
+test("normaliza las respuestas de chat documentadas por QvaPay", async () => {
+  const client = new QvaPayClient(() => "token", {
+    fetch: async (_input, init) => new Response(JSON.stringify(init?.method === "POST"
+      ? { message: "automatic-1" }
+      : { message: "chat", chat: [{ id: "own-2", peer_id: "me", message: "Voy a pagar", created_at: "2026-09-09T12:01:00Z" }] }), { status: 200 }),
+  });
+
+  assert.equal((await client.sendChat("offer", "Hola")).id, "automatic-1");
+  assert.deepEqual(await client.listChat("offer"), [{
+    id: "own-2", peerId: "me", message: "Voy a pagar",
+    createdAt: Date.parse("2026-09-09T12:01:00Z"),
+  }]);
+});
+
+test("conserva compatibilidad con respuestas de chat heredadas", async () => {
   const client = new QvaPayClient(() => "token", {
     fetch: async (_input, init) => new Response(JSON.stringify(init?.method === "POST"
       ? { message: { id: "automatic-1", created_at: "2026-09-09T12:00:00Z" } }

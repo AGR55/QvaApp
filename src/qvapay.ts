@@ -58,6 +58,7 @@ export interface QvaChatMessage {
   peerId: string;
   message: string;
   createdAt?: number;
+  isModerator?: boolean;
 }
 export interface QvaPayRuntime {
   onApplyTiming?: (timing: ApplyTiming) => void;
@@ -337,7 +338,8 @@ export class QvaPayClient {
     });
     const raw = isObject(data.message) ? data.message : isObject(data.data) ? data.data : data;
     return {
-      ...(stringValue(raw.id ?? raw.uuid) ? { id: stringValue(raw.id ?? raw.uuid)! } : {}),
+      ...(stringValue(raw.id ?? raw.uuid ?? (typeof data.message === "string" ? data.message : undefined))
+        ? { id: stringValue(raw.id ?? raw.uuid ?? data.message)! } : {}),
       ...(timestampValue(raw.created_at) ? { createdAt: timestampValue(raw.created_at)! } : {}),
     };
   }
@@ -346,7 +348,9 @@ export class QvaPayClient {
     const data = await this.request(`/p2p/${uuid}/chat`, { policy: "read", retryRead: true });
     const source = Array.isArray(data)
       ? data
-      : Array.isArray(data.messages)
+      : Array.isArray(data.chat)
+        ? data.chat
+        : Array.isArray(data.messages)
         ? data.messages
         : isObject(data.data) && Array.isArray(data.data.messages)
           ? data.data.messages
@@ -361,6 +365,7 @@ export class QvaPayClient {
         peerId,
         message,
         ...(timestampValue(entry.created_at) ? { createdAt: timestampValue(entry.created_at)! } : {}),
+        ...(entry.is_moderator === true ? { isModerator: true } : {}),
       }];
     });
   }

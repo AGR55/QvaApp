@@ -426,6 +426,7 @@ scheduler.register("scan", 250, async () => {
 scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );
+scheduler.register("operation_chat", 15_000, () => dashboardReadModel.syncOperationChats());
 scheduler.register("mutation_reconcile", 60_000, () =>
   trading.reconcilePendingStandaloneMutations().then(() => undefined),
 );

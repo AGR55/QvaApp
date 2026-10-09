@@ -21,6 +21,7 @@ import {
   type ManualRecoveryOutcome,
 } from "./self-service-recovery.js";
 import { analyticsOffer, analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
+import { OperationChatService } from "./operation-chat.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -137,6 +138,7 @@ export class DashboardReadModel {
   private readonly paymentSms: PaymentSmsService;
   private readonly mobileOperator: MobileOperatorService;
   private readonly recovery: SelfServiceRecovery;
+  private readonly operationChat: OperationChatService;
 
   constructor(
     private readonly trading: TradingService,
@@ -151,6 +153,7 @@ export class DashboardReadModel {
     private readonly huntingSync?: HuntingSyncCoordinator,
     private readonly cooperativeHunter?: CooperativeHunter,
   ) {
+    this.operationChat = new OperationChatService(store, qva);
     this.paymentSms = new PaymentSmsService(
       store,
       qva,
@@ -213,6 +216,12 @@ export class DashboardReadModel {
   mobileOperationAction(operatorId: string, uuid: string, action: "paid" | "received" | "cancel", reference?: string) {
     return this.mobileOperator.act(operatorId, uuid, action, reference);
   }
+  readOperationChat(uuid: string) { return this.operationChat.read(uuid); }
+  refreshOperationChat(uuid: string) { return this.operationChat.refresh(uuid); }
+  sendOperationChat(uuid: string, message: string) { return this.operationChat.send(uuid, message); }
+  markOperationChatRead(uuid: string) { return this.operationChat.markRead(uuid); }
+  operationChatUnread() { return this.operationChat.unreadCounts(); }
+  syncOperationChats() { return this.operationChat.syncActive(); }
 
   pairSmsDevice(label: string) { return this.paymentSms.pairDevice(label); }
   revokeSmsDevice(id: string) { return this.paymentSms.revokeDevice(id); }

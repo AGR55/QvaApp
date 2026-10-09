@@ -17,6 +17,7 @@ import type { MarketDataSource } from "./market-source.js";
 import { MarketFeedRequestError, type MarketSourceCoordinator, type MarketSourceMode } from "./market-feed.js";
 import { PaymentSmsError, validPaymentReceipt } from "./payment-sms.js";
 import { RecoveryConflictError, RecoveryInputError } from "./self-service-recovery.js";
+import { OperationChatError } from "./operation-chat.js";
 
 type AuthOptions = {
   password: string;
@@ -851,6 +852,29 @@ export function buildDashboard(
   app.post<{ Params: { workflowId: string } }>("/api/workflows/:workflowId/reconcile", async (request) => ({
     data: await clientAction(() => readModel.reconcileWorkflow(request.params.workflowId)),
   }));
+  app.get("/api/operations/chats/unread", async () => ({ data: readModel.operationChatUnread() }));
+  app.get<{ Params: { uuid: string }; Querystring: { fresh?: string } }>("/api/operations/:uuid/chat", {
+    schema: {
+      params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
+      querystring: { type: "object", properties: { fresh: { type: "string", enum: ["1"] } } },
+    },
+  }, async (request) => ({ data: request.query.fresh === "1"
+    ? await readModel.refreshOperationChat(request.params.uuid)
+    : readModel.readOperationChat(request.params.uuid) }));
+  app.post<{ Params: { uuid: string }; Body: { message: string } }>("/api/operations/:uuid/chat", {
+    schema: {
+      params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
+      body: { type: "object", additionalProperties: false, required: ["message"], properties: {
+        message: { type: "string", minLength: 1, maxLength: 599 },
+      } },
+    },
+  }, async (request, reply) => reply.status(201).send({ data: await readModel.sendOperationChat(request.params.uuid, request.body.message) }));
+  app.post<{ Params: { uuid: string }; Body: Record<string, never> }>("/api/operations/:uuid/chat/read", {
+    schema: {
+      params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
+      body: { type: "object", additionalProperties: false },
+    },
+  }, async (request) => ({ data: readModel.markOperationChatRead(request.params.uuid) }));
   app.post<{ Params: { uuid: string; action: string }; Body: { reference?: string } }>("/api/operations/:uuid/:action", {
     schema: {
       params: {
@@ -1164,6 +1188,7 @@ function headerValue(request: FastifyRequest, name: string): string | undefined 
 }
 
 function httpStatus(error: Error, fallback: number): number {
+  if (error instanceof OperationChatError) return error.status;
   if (error instanceof DashboardAuthError) return error.status;
   if (error instanceof RecoveryConflictError) return error.status;
   if (error instanceof RecoveryInputError) return error.status;
@@ -1206,6 +1231,12 @@ function openApiDocument() {
       "/api/live/transactions": { get: { summary: "Actualizar transacciones" } },
       "/api/trading-analytics": { get: { summary: "Consultar actividad, volumen y beneficio estimado del histórico local" } },
       "/api/live/operations": { get: { summary: "Conciliar operaciones activas con QvaPay" } },
+      "/api/operations/chats/unread": { get: { summary: "Contadores locales de chat por operación" } },
+      "/api/operations/{uuid}/chat": {
+        get: { summary: "Leer la copia local o actualizar el chat de una operación" },
+        post: { summary: "Enviar texto a la contraparte de una operación" },
+      },
+      "/api/operations/{uuid}/chat/read": { post: { summary: "Marcar como leídos los mensajes visibles" } },
       "/api/live/markets/{coin}": { get: { summary: "Actualizar un mercado" } },
       "/api/config": { get: { summary: "Configuración activa" }, put: { summary: "Activar una revisión de configuración" } },
       "/api/control": { put: { summary: "Pausa, refresco y emergencia" } },
