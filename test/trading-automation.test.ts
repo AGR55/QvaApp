@@ -172,7 +172,7 @@ for (const lifecycle of ["none", "applied", "cancelled"] as const) {
   });
 }
 
-test("producción arranca activa y respeta una parada de emergencia", () => {
+test("producción respeta la pausa solicitada y la parada de emergencia", () => {
   const first = setup();
   first.store.set("paused", "true");
   first.store.set("mode", "simulation");
@@ -185,7 +185,7 @@ test("producción arranca activa y respeta una parada de emergencia", () => {
   );
   active.initializeProductionState();
   assert.equal(active.mode(), "real");
-  assert.equal(active.isPaused(), false);
+  assert.equal(active.isPaused(), true);
   first.store.close();
 
   const second = setup();
@@ -202,6 +202,18 @@ test("producción arranca activa y respeta una parada de emergencia", () => {
   assert.equal(stopped.mode(), "real");
   assert.equal(stopped.isPaused(), true);
   second.store.close();
+});
+
+test("el arranque libera una pausa automática heredada sin borrar una pausa manual", () => {
+  const { store, cfg, markets } = setup();
+  const trading = new TradingEngine(store, {} as never, cfg as never, markets, async () => undefined);
+  trading.setPaused(true, "protección automática por errores");
+  trading.initializeProductionState();
+  assert.equal(trading.isPaused(), false);
+  trading.setPaused(true, "panel web");
+  trading.initializeProductionState();
+  assert.equal(trading.isPaused(), true);
+  store.close();
 });
 
 test("la declaración manual de fiat se distingue de un movimiento automático", () => {
@@ -1329,7 +1341,7 @@ test("cualquier mensaje propio posterior al saludo detiene la autocancelación",
   store.close();
 });
 
-test("pausa automáticamente al alcanzar errores consecutivos configurados", async () => {
+test("registra errores consecutivos sin detener la cacería", async () => {
   const { store, cfg, markets } = setup();
   const qva = {
     listOffersPage: async () => { throw new Error("fallo de lectura"); },
@@ -1341,6 +1353,6 @@ test("pausa automáticamente al alcanzar errores consecutivos configurados", asy
   await trading.scan();
 
   assert.equal(store.get("consecutive_errors"), "3");
-  assert.equal(trading.isPaused(), true);
+  assert.equal(trading.isPaused(), false);
   store.close();
 });

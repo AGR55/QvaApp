@@ -109,6 +109,40 @@ test("una oferta que envejeció en la cola no envía POST ni bloquea con otra co
 });
 
 for (const type of ["sell", "buy"] as const) {
+  test(`una mutación incierta de otra oferta no detiene la cacería ${type}`, async t => {
+    const { store, cfg, markets } = setup();
+    t.after(() => store.close());
+    store.createMutationIntent({ intentId: `pending-${type}`, operationUuid: "otra-oferta", kind: "apply", request: {} });
+    store.updateMutationIntent(`pending-${type}`, "uncertain");
+    let applications = 0;
+    const trading = new TradingEngine(store, {
+      apply: async () => { applications++; },
+      qusdBalance: async () => 100,
+    } as never, cfg as never, markets, async () => undefined);
+    const offer: P2pOffer = { uuid: `continua-${type}`, type, coin: "BANK_CUP", amount: 10,
+      receive: type === "sell" ? 9200 : 10200, status: "open" };
+    await trading.ingestMarketOffer(offer);
+    assert.equal(applications, 1);
+    assert.equal(store.getOperation(offer.uuid)?.state, "applied");
+    assert.equal(store.hasUnresolvedMutation(), true);
+  });
+
+  test(`la oferta con aplicación incierta no se vuelve a aplicar automáticamente: ${type}`, async t => {
+    const { store, cfg, markets } = setup();
+    t.after(() => store.close());
+    const uuid = `pendiente-${type}`;
+    store.createMutationIntent({ intentId: uuid, operationUuid: uuid, kind: "apply", request: {} });
+    store.updateMutationIntent(uuid, "uncertain");
+    let applications = 0;
+    const trading = new TradingEngine(store, {
+      apply: async () => { applications++; },
+      qusdBalance: async () => 100,
+    } as never, cfg as never, markets, async () => undefined);
+    await trading.ingestMarketOffer({ uuid, type, coin: "BANK_CUP", amount: 10,
+      receive: type === "sell" ? 9200 : 10200, status: "open" });
+    assert.equal(applications, 0);
+  });
+
   test(`la intención propia no bloquea el envío automático de ${type}`, async t => {
     const { store, cfg, markets } = setup();
     t.after(() => store.close());

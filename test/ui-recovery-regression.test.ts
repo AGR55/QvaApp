@@ -21,11 +21,11 @@ test("la conciliación y resolución manual usan solo el contrato de recuperaci�
   assert.match(recovery, /await onChanged\?\.\(\)/);
 });
 
-test("la revisión terminal y el bloqueo global son visibles sin navegar por varias pantallas", () => {
+test("la revisión terminal y la conciliación son visibles sin navegar por varias pantallas", () => {
   assert.match(recovery, /terminal_reviewed/);
   assert.match(recovery, /no tengo ninguna obligación o dinero pendiente/);
   assert.match(main, /recovery-block-banner/);
-  assert.match(main, /Resolver bloqueo/);
+  assert.match(main, /Ver conciliación/);
 });
 
 test("descartar todas usa el cursor global, confirma cantidad y recarga primera página sin optimismo", () => {

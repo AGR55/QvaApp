@@ -1345,6 +1345,12 @@ export class Store {
     );
   }
 
+  hasUnresolvedMutationForOffer(uuid: string, excludeIntentId?: string): boolean {
+    return Boolean(this.db.prepare(
+      "SELECT 1 FROM mutation_intents WHERE operation_uuid = ? AND state IN ('submitted', 'uncertain') AND intent_id != ? LIMIT 1",
+    ).get(uuid, excludeIntentId ?? ""));
+  }
+
   createTradeWorkflow(
     workflow: Pick<TradeWorkflow, "id" | "targetOffer" | "riskDecision">,
     ownOffers: Array<RestorableOwnOffer | PlannedOwnOffer>,
@@ -2337,6 +2343,13 @@ export class Store {
       uuid: row.offer_uuid === null ? null : String(row.offer_uuid),
       detail: String(row.detail),
     }));
+  }
+
+  lastPauseChange(): { action: string; detail: string } | undefined {
+    const row = this.db.prepare(
+      "SELECT action, detail FROM audit_log WHERE action IN ('paused', 'resumed') ORDER BY id DESC LIMIT 1",
+    ).get() as { action: string; detail: string } | undefined;
+    return row;
   }
 
   operationalLogs(options: OperationalLogOptions = {}): OperationalLogPage {

@@ -8,12 +8,12 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 - El proceso exige `CONFIRM_REAL_TRADING=true` y límites revisados antes de iniciar.
 - Toda mutación se registra antes de enviarse a QvaPay.
 - Las aplicaciones, cancelaciones y ediciones pasan por una cola única; sus separaciones se conservan en SQLite incluso tras reiniciar.
-- Un timeout de una mutación bloquea nuevas operaciones hasta conciliar por lectura.
+- Una mutación con resultado incierto se concilia por lectura y protege la oferta afectada; las demás cacerías habilitadas siguen activas.
 - Las reservas de capital, workflows, configuración, revisiones y auditoría viven en SQLite.
 - Las cuentas secundarias solo reciben capacidad de listado; la cuenta principal es la única que puede consultar fondos privados o mutar operaciones.
 - Cada oferta candidata conserva en SQLite una decisión versionada con todas sus comprobaciones; Auditoría las consulta con paginación y filtros.
 - El saludo automático se excluye al vigilar el chat: cualquier mensaje propio posterior detiene la autocancelación. Si el chat no responde, la cancelación se aplaza.
-- Telegram y Web Push avisan de aplicaciones, bloqueos y conciliaciones mediante canales independientes.
+- Telegram avisa de las aplicaciones P2P y permite registrar el ID del pago; Web Push mantiene sus avisos de operaciones y conciliación.
 - La última lectura válida de cada recurso QvaPay vive en SQLite y se muestra con su fecha cuando la conexión falla.
 - El panel escucha solo en `127.0.0.1`, usa contraseña, sesión `HttpOnly`, `SameSite=Strict`, CSRF y origen exacto.
 - Los pagos y confirmaciones finales siempre requieren intervención humana.
