@@ -115,7 +115,7 @@ export function RecoveryPanel({ onChanged }) {
     >
       <div className="recovery-panel">
         <div className="recovery-summary">
-          <span><ShieldAlert aria-hidden="true" /> {blockedCount(report)} bloqueo(s) pendiente(s)</span>
+          <span><ShieldAlert aria-hidden="true" /> {blockedCount(report)} intención(es) pendiente(s)</span>
           <Button variant="outline" size="sm" disabled={loading || Boolean(busyId)} onClick={() => void load()}>
             <RotateCw data-icon="inline-start" /> Actualizar
           </Button>
@@ -141,7 +141,7 @@ export function RecoveryPanel({ onChanged }) {
       <DialogContent className="decision-dialog recovery-dialog" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>Registrar comprobación manual</DialogTitle>
-          <DialogDescription>Esto registra tu declaración como operador; no es una confirmación de QvaPay ni vuelve a enviar la aplicación. Si era el último bloqueo, el bot podrá volver a tomar ofertas. Verifica antes que no quede dinero comprometido.</DialogDescription>
+          <DialogDescription>Esto registra tu declaración como operador; no es una confirmación de QvaPay ni vuelve a enviar la aplicación. Las demás ofertas siguen disponibles para la cacería. Verifica antes que no quede dinero comprometido.</DialogDescription>
         </DialogHeader>
         {selected ? <div className="recovery-resolution">
           <p className="recovery-intent-id">Intención <code>{selected.intentId}</code></p>

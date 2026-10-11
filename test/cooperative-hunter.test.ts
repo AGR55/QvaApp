@@ -25,7 +25,7 @@ function setup() {
     applySecondary: async (_uuid, guard) => { if (!await guard()) throw new QvaApiError(409,"yield"); actions.push("apply"); if (error) throw error; },
     getOffer: async () => ({ ...offer, status: "processing", Peer: { uuid: "me" } }),
   },{ ownBusy: () => busy, safetyReason: () => undefined, canReserveOwn: () => true, ownerCost: (_coin, fiat) => fiat, notify: async () => { actions.push("notify"); } });
-  return { hunter,store,actions, setBusy: (value: boolean) => { busy=value; }, setError: (value: Error) => { error=value; } };
+  return { hunter,store,actions, setBusy: (value: boolean) => { busy=value; }, setError: (value?: Error) => { error=value; } };
 }
 
 test("own decision wins before any cooperative reservation or network call", async () => {
@@ -48,6 +48,17 @@ test("definitive QvaPay rejection refunds the reservation; uncertain response re
   const second=setup(); second.setError(new QvaMutationUncertainError("apply",new Error("timeout"))); second.hunter.enqueue(offer,Date.now());
   await until(() => second.hunter.executions()[0]?.phase==="uncertain");
   assert.ok(!second.actions.includes("release")); assert.equal(second.store.hasUnresolvedMutation(),false); second.store.close();
+});
+test("una aplicación cooperativa incierta conserva su reserva y permite otra cacería", async () => {
+  const s=setup();
+  s.setError(new QvaMutationUncertainError("apply",new Error("timeout")));
+  s.hunter.enqueue(offer,Date.now());
+  await until(() => s.hunter.executions()[0]?.phase === "uncertain");
+  s.setError();
+  s.hunter.enqueue({ ...offer, uuid: "group-offer-2" },Date.now());
+  await until(() => s.actions.filter(action => action === "apply").length === 2);
+  assert.equal(s.store.get("cooperative_fiat_reserved:BANK_CUP"),"400");
+  await s.hunter.stop(); s.store.close();
 });
 test("cooperative quota leaves a slot for personal apply without waiting for cooperative response", async () => {
   const state = new Map<string,string>(); let release!: () => void; const sent: string[]=[];

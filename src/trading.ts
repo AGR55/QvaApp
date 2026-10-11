@@ -189,7 +189,8 @@ export class TradingEngine {
   }
 
   cooperativeSafetyReason(offer: P2pOffer): string | undefined {
-    if (this.mode() !== "real" || this.isPaused() || this.store.get("emergency_stop") === "true" || this.store.hasUnresolvedMutation()) return "Motor propio detenido o pendiente de conciliación";
+    if (this.mode() !== "real" || this.isPaused() || this.store.get("emergency_stop") === "true") return "Motor propio detenido";
+    if (this.store.hasUnresolvedMutationForOffer(offer.uuid)) return "Oferta pendiente de conciliación";
     if (!this.isMarket(offer.coin) || offer.type !== "sell" || offer.status !== "open" || offer.offer_kind === "flexible") return "Oferta no compatible";
     if (explicitFlag(offer.only_vip) !== "false") return "Restricción VIP";
     const account = this.store.get("analytics_account_uuid");
@@ -380,8 +381,12 @@ export class TradingEngine {
     // El modo queda fijado internamente; no forma parte del estado operativo
     // que puede seleccionar o consultar el usuario.
     this.store.set("mode", "real");
+    const lastPauseChange = this.store.lastPauseChange();
+    const legacyAutomaticPause = lastPauseChange?.action === "paused" &&
+      /desde (protección automática por errores|sesión de QvaPay inválida)/.test(lastPauseChange.detail);
     this.setPaused(
-      this.store.get("emergency_stop") === "true",
+      this.store.get("emergency_stop") === "true" ||
+        (this.store.get("paused") === "true" && !legacyAutomaticPause),
       "arranque del servicio",
     );
   }
@@ -886,8 +891,8 @@ export class TradingEngine {
     }
     if (this.store.get("emergency_stop") === "true")
       return { inspected: 1, candidates: 1, action: "interruptor de emergencia" };
-    if (this.store.hasUnresolvedMutation())
-      throw new Error("Existe una mutación incierta pendiente de conciliación.");
+    if (this.store.hasUnresolvedMutationForOffer(offer.uuid))
+      return { inspected: 1, candidates: 0, action: "oferta pendiente de conciliación" };
 
     const warnings = this.fastLaneWarnings(offer, transfer.total);
     if (warnings.length) this.store.audit(
@@ -980,8 +985,8 @@ export class TradingEngine {
     }
     if (this.store.get("emergency_stop") === "true")
       return { inspected: 1, candidates: 1, action: "interruptor de emergencia" };
-    if (this.store.hasUnresolvedMutation())
-      throw new Error("Existe una mutación incierta pendiente de conciliación.");
+    if (this.store.hasUnresolvedMutationForOffer(offer.uuid))
+      return { inspected: 1, candidates: 0, action: "oferta pendiente de conciliación" };
     const warnings = this.fastLaneWarnings(offer, 0);
     if (warnings.length) this.store.audit(
       "market_fast_lane_warnings",
@@ -1749,6 +1754,8 @@ export class TradingEngine {
   async markPaid(uuid: string, reference: string): Promise<void> {
     this.requireRealMode();
     const operation = this.requireOperation(uuid);
+    if (this.store.hasUnresolvedMutationForOffer(uuid))
+      throw new Error("Esta operación tiene una mutación pendiente de conciliación; no repitas el pago.");
     if (
       operation.offerType !== "sell" ||
       !["applied", "acknowledged"].includes(operation.state)
@@ -1758,7 +1765,9 @@ export class TradingEngine {
       );
     if (!reference.trim())
       throw new Error("La referencia de transferencia es obligatoria.");
-    await this.qva.getOffer(uuid); // comprueba sesión y estado remoto antes de la acción irreversible
+    const remote = await this.qva.getOffer(uuid);
+    if (remote.status.toLowerCase() !== "processing")
+      throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se marcó el pago.`);
     await this.monetaryIntents.execute({
       kind: "paid",
       operationUuid: uuid,
@@ -1772,6 +1781,8 @@ export class TradingEngine {
   async confirmReceived(uuid: string): Promise<void> {
     this.requireRealMode();
     const operation = this.requireOperation(uuid);
+    if (this.store.hasUnresolvedMutationForOffer(uuid))
+      throw new Error("Esta operación tiene una mutación pendiente de conciliación.");
     if (operation.offerType !== "buy")
       throw new Error(
         "En una compra de QUSD debes marcar pago, no confirmar recepción.",
@@ -1790,9 +1801,15 @@ export class TradingEngine {
   async cancel(uuid: string, automatic = false): Promise<void> {
     if (automatic) throw new Error("La cancelación automática por falta de ACK está desactivada.");
     this.requireRealMode();
-    this.requireOperation(uuid);
+    const operation = this.requireOperation(uuid);
+    if (this.store.hasUnresolvedMutationForOffer(uuid))
+      throw new Error("Esta operación tiene una mutación pendiente de conciliación; no se canceló.");
+    if (!["applied", "acknowledged"].includes(operation.state))
+      throw new Error("Esta operación ya no se puede cancelar en su estado actual.");
     this.store.excludeAutomaticReapplyAfterManualCancel(uuid);
-    await this.qva.getOffer(uuid);
+    const remote = await this.qva.getOffer(uuid);
+    if (remote.status.toLowerCase() !== "processing")
+      throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se canceló.`);
     await this.monetaryIntents.execute({
       kind: "cancel",
       operationUuid: uuid,
@@ -2579,6 +2596,8 @@ export class TradingEngine {
   }
 
   private assertManualApplicationAllowed(uuid: string): void {
+    if (this.store.hasUnresolvedMutationForOffer(uuid))
+      throw new Error("Esta oferta tiene una aplicación pendiente de conciliación.");
     const previous = this.store.getOperation(uuid);
     if (previous && (previous.state !== "cancelled" || this.store.hasFiatMovement(uuid)))
       throw new Error("La oferta ya tiene una operación local activa, terminal o con movimientos de dinero; no se puede reaplicar.");
@@ -2586,7 +2605,7 @@ export class TradingEngine {
 
   private isAutomaticSellStillEligible(offer: P2pOffer, ownIntentId?: string): boolean {
     if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
-    if (this.store.hasUnresolvedMutation(ownIntentId) || this.offerInvalidatedByFeed(offer)) return false;
+    if (this.store.hasUnresolvedMutationForOffer(offer.uuid, ownIntentId) || this.offerInvalidatedByFeed(offer)) return false;
     if (this.store.getOperation(offer.uuid)) return false;
     if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0) return false;
     const coin = this.offerMarket(offer);
@@ -2596,7 +2615,7 @@ export class TradingEngine {
 
   private isAutomaticBuyStillEligible(offer: P2pOffer, ownIntentId?: string): boolean {
     if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
-    if (this.store.hasUnresolvedMutation(ownIntentId) || this.offerInvalidatedByFeed(offer)) return false;
+    if (this.store.hasUnresolvedMutationForOffer(offer.uuid, ownIntentId) || this.offerInvalidatedByFeed(offer)) return false;
     if (this.store.getOperation(offer.uuid)) return false;
     if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0) return false;
     const coin = this.offerMarket(offer);
@@ -2703,7 +2722,7 @@ export class TradingEngine {
       consecutiveErrors: Number(store.get("consecutive_errors") ?? 0),
       paused: this.isPaused(),
       emergencyStop: store.get("emergency_stop") === "true",
-      hasUnresolvedMutation: store.hasUnresolvedMutation(),
+      hasUnresolvedMutation: store.hasUnresolvedMutationForOffer(offer.uuid),
       ...this.riskCooldowns(offer),
     });
   }
@@ -3060,28 +3079,16 @@ export class TradingEngine {
         "last_qvapay_error",
         JSON.stringify({ at: Date.now(), action, detail, ...(uuid ? { uuid } : {}) }),
       );
-      if (error instanceof QvaApiError && error.status === 401)
-        this.setPaused(true, "sesión de QvaPay inválida");
       await this.notify(
-        `${detail}\nEste fallo procede de QvaPay o de la conexión y no se contabiliza como error interno del bot.${
-          error instanceof QvaApiError && error.status === 401
-            ? "\nEl bot fue pausado; ejecuta pnpm login."
-            : ""
-        }`,
+        `${detail}\nEste fallo procede de QvaPay o de la conexión y no se contabiliza como error interno del bot.${error instanceof QvaApiError && error.status === 401 ? "\nLa sesión requiere iniciar sesión de nuevo con pnpm login." : ""}`,
       );
       return;
     }
     const failures = Number(this.store.get("consecutive_errors") ?? 0) + 1;
     this.store.set("consecutive_errors", String(failures));
     this.store.audit(`${action}_error`, message, uuid);
-    const threshold = this.marketConfig.current().risk.maxConsecutiveErrors;
-    if (
-      (error instanceof QvaApiError && error.status === 401) ||
-      failures >= threshold
-    )
-      this.setPaused(true, "protección automática por errores");
     await this.notify(
-      `Error en ${action}${uuid ? ` (${uuid})` : ""}: ${message}${error instanceof QvaApiError && error.status === 401 ? "\nEl bot fue pausado; ejecuta pnpm login." : ""}`,
+      `Error en ${action}${uuid ? ` (${uuid})` : ""}: ${message}`,
     );
   }
 

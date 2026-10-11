@@ -157,7 +157,7 @@ export function Audit({ data, onChanged }) {
           <Panel title="Salud e integridad"><dl className="health-list">
             <Health label="Cadena de configuración" ok={integrity} value={integrity ? "Íntegra" : "Alterada"} />
             <Health label="Esquema de datos" ok value={`v${data.integrity?.schemaVersion}`} />
-            <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "Bloqueo activo" : "Ninguna"} />
+            <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "En conciliación" : "Ninguna"} />
             <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
           </dl></Panel>
           <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty title="Sin reservas" icon={WalletCards}>No hay capital apartado por operaciones.</Empty>}</Panel>

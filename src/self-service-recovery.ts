@@ -165,7 +165,7 @@ export class SelfServiceRecovery {
       updatedAt: current.updatedAt,
       message: reconciled
         ? "QvaPay o la evidencia persistida confirmó el resultado; no se repitió la mutación."
-        : "No se obtuvo evidencia concluyente. La intención sigue bloqueando nuevas mutaciones.",
+        : "No se obtuvo evidencia concluyente. Esta oferta sigue excluida de nuevas aplicaciones mientras continúan las demás cacerías.",
       ...(lastCheck?.error || current.error ? { error: lastCheck?.error ?? current.error } : {}),
       ...(lastCheck ? { lastCheck } : {}),
       retry: this.retryView(intentId, checkedAt),

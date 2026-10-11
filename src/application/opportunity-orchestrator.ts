@@ -282,7 +282,7 @@ export class OpportunityOrchestrator {
       consecutiveErrors: Number(this.store.get("consecutive_errors") ?? 0),
       paused: this.store.get("paused") !== "false",
       emergencyStop: this.store.get("emergency_stop") === "true",
-      hasUnresolvedMutation: this.store.hasUnresolvedMutation(),
+      hasUnresolvedMutation: this.store.hasUnresolvedMutationForOffer(input.target.uuid),
       ...riskCooldowns(
         this.store,
         input.target.coin,

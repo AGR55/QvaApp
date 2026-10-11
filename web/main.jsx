@@ -450,10 +450,10 @@ function App() {
             <aside className="recovery-block-banner" role="alert">
               <ShieldCheck aria-hidden="true" />
               <div>
-                <strong>Operaciones automáticas detenidas</strong>
-                <p>Hay {data.unresolvedMutations?.length || "una o más"} intención(es) pendientes de conciliación. Revísalas en Auditoría para desbloquear el bot de forma segura.</p>
+                <strong>Operación en conciliación</strong>
+                <p>Hay {data.unresolvedMutations?.length || "una o más"} intención(es) pendientes. Las demás cacerías continúan; esta oferta no se repetirá mientras se verifica.</p>
               </div>
-              <Button variant="primary" size="sm" onClick={() => navigate("auditoria")}>Resolver bloqueo</Button>
+              <Button variant="primary" size="sm" onClick={() => navigate("auditoria")}>Ver conciliación</Button>
             </aside>
           ) : null}
           {notice ? (

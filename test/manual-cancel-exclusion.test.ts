@@ -48,7 +48,7 @@ test("manual cancellation excludes repeated reopen events across restart", async
   });
   let applications = 0;
   const qva = {
-    getOffer: async () => rejectedOffer,
+    getOffer: async () => ({ ...rejectedOffer, status: "processing" }),
     cancel: async () => undefined,
     apply: async () => { applications += 1; },
   };
@@ -92,6 +92,78 @@ test("manual cancellation remains excluded when the remote cancellation fails", 
   store.close();
 });
 
+test("una operación pagada o completada no se cancela aunque quede un botón antiguo", async () => {
+  for (const state of ["paid", "completed"] as const) {
+    const { store, cfg, markets } = setup();
+    store.createOperation({ uuid: `terminal-${state}`, offerType: "sell", coin: "BANK_CUP",
+      amount: 10, receive: 9200, rate: 920, state, autoApplied: true,
+      cancelAt: null, createdAt: Date.now() });
+    let remoteReads = 0, cancels = 0;
+    const trading = new TradingEngine(store, {
+      getOffer: async () => { remoteReads++; return { ...rejectedOffer, status: "processing" }; },
+      cancel: async () => { cancels++; },
+    } as never, cfg as never, markets, async () => undefined);
+    await assert.rejects(trading.cancel(`terminal-${state}`), /ya no se puede cancelar/);
+    assert.equal(remoteReads, 0);
+    assert.equal(cancels, 0);
+    store.close();
+  }
+});
+
+test("el estado terminal remoto impide cancelar una operación local desactualizada", async () => {
+  const { store, cfg, markets } = setup();
+  store.createOperation({ uuid: "remote-completed", offerType: "sell", coin: "BANK_CUP",
+    amount: 10, receive: 9200, rate: 920, state: "applied", autoApplied: true,
+    cancelAt: null, createdAt: Date.now() });
+  let cancels = 0;
+  const trading = new TradingEngine(store, {
+    getOffer: async () => ({ ...rejectedOffer, status: "completed" }),
+    cancel: async () => { cancels++; },
+  } as never, cfg as never, markets, async () => undefined);
+  await assert.rejects(trading.cancel("remote-completed"), /estado completed/);
+  assert.equal(cancels, 0);
+  store.close();
+});
+
+test("marcar pago envía el ID a QvaPay solo si la operación remota sigue activa", async () => {
+  const { store, cfg, markets } = setup();
+  store.createOperation({ uuid: "payable", offerType: "sell", coin: "BANK_CUP",
+    amount: 10, receive: 9200, rate: 920, state: "applied", autoApplied: true,
+    cancelAt: null, createdAt: Date.now() });
+  const sent: string[] = [];
+  let remoteStatus = "completed";
+  const trading = new TradingEngine(store, {
+    getOffer: async () => ({ ...rejectedOffer, status: remoteStatus }),
+    markPaid: async (_uuid: string, reference: string) => { sent.push(reference); },
+  } as never, cfg as never, markets, async () => undefined);
+  await assert.rejects(trading.markPaid("payable", "TX-1"), /estado completed/);
+  assert.deepEqual(sent, []);
+  remoteStatus = "processing";
+  await trading.markPaid("payable", "TX-1");
+  assert.deepEqual(sent, ["TX-1"]);
+  assert.equal(store.getOperation("payable")?.state, "paid");
+  store.close();
+});
+
+test("un pago incierto no vuelve a enviarse al escribir otro ID", async () => {
+  const { store, cfg, markets } = setup();
+  store.createOperation({ uuid: "pending-payment", offerType: "sell", coin: "BANK_CUP",
+    amount: 10, receive: 9200, rate: 920, state: "applied", autoApplied: true,
+    cancelAt: null, createdAt: Date.now() });
+  store.createMutationIntent({ intentId: "uncertain-paid", operationUuid: "pending-payment",
+    kind: "paid", request: { reference: "TX-1" } });
+  store.updateMutationIntent("uncertain-paid", "uncertain");
+  let sent = 0;
+  const trading = new TradingEngine(store, {
+    getOffer: async () => ({ ...rejectedOffer, status: "processing" }),
+    markPaid: async () => { sent++; }, cancel: async () => { sent++; },
+  } as never, cfg as never, markets, async () => undefined);
+  await assert.rejects(trading.markPaid("pending-payment", "TX-2"), /pendiente de conciliación/);
+  await assert.rejects(trading.cancel("pending-payment"), /pendiente de conciliación/);
+  assert.equal(sent, 0);
+  store.close();
+});
+
 test("manual cancel exclusion also blocks the fast automatic sale lane", async () => {
   const { store, cfg, markets } = setup();
   const cancelledBuyOffer: P2pOffer = {
@@ -105,7 +177,7 @@ test("manual cancel exclusion also blocks the fast automatic sale lane", async (
   });
   let applications = 0;
   const trading = new TradingEngine(store, {
-    getOffer: async () => cancelledBuyOffer,
+    getOffer: async () => ({ ...cancelledBuyOffer, status: "processing" }),
     cancel: async () => undefined,
     qusdBalance: async () => 100,
     apply: async () => { applications += 1; },

@@ -7,6 +7,7 @@ import { TradingEngine } from "./trading.js";
 import { MarketConfigService } from "./market-config.js";
 import type { FiatMarket } from "./types.js";
 import { answerCallbackSafely, isMessageNotModified, splitCallbackData, TelegramRenderGuard } from "./telegram-runtime.js";
+import { canCancelOperation, canMarkPaid, operationNotificationText, parseTransactionId, PaymentReferenceSessions } from "./telegram-operation.js";
 import { Vault } from "./vault.js";
 import { DashboardReadModel } from "./dashboard.js";
 import { startDashboard } from "./http-dashboard.js";
@@ -57,15 +58,23 @@ const qva = new QvaPayClient(() => session.token(), {
 const bot = new Bot(config.telegramToken);
 const huntingRates = new HuntingRateSessions();
 const cooperativeContributions = new CooperativeContributionSessions();
+const paymentReferences = new PaymentReferenceSessions();
 const telegramRenderGuard = new TelegramRenderGuard();
 const webPush = new WebPushService(store);
 const notifications = new NotificationDispatcher(store, {
   telegram: async (notification) => {
-    const keyboard = notification.operationUuid && notification.kind === "operation-applied"
+    const operation = notification.operationUuid ? store.getOperation(notification.operationUuid) : undefined;
+    const cooperative = notification.message.startsWith("<b>🤝 Cacería conjunta");
+    const keyboard = notification.operationUuid && notification.kind === "operation-applied" && !cooperative && canMarkPaid(operation) &&
+      !store.hasUnresolvedMutationForOffer(notification.operationUuid)
       ? new InlineKeyboard()
-          .text("✖ Cancelar", `cancel:${notification.operationUuid}`)
+          .text("💸 Registrar pago", `pay:${notification.operationUuid}`)
       : undefined;
-    await bot.api.sendMessage(String(config.adminChatId), notification.message, {
+    await bot.api.sendMessage(String(config.adminChatId), operationNotificationText(
+      notification, operation, coin => trading.isMarket(coin) ? trading.marketLabel(coin) : coin,
+      coin => trading.isMarket(coin) ? trading.marketCurrency(coin) : coin,
+    ), {
+      parse_mode: "HTML",
       ...(keyboard ? { reply_markup: keyboard } : {}),
     });
   },
@@ -189,6 +198,7 @@ bot.use(async (ctx, next) => {
   if (text?.startsWith("/") && !text.startsWith("/cancel")) {
     huntingRates.cancel(chatKey(ctx));
     cooperativeContributions.cancel(chatKey(ctx));
+    paymentReferences.cancel(chatKey(ctx));
   }
   await next();
 });
@@ -199,26 +209,26 @@ bot.command("balance", (ctx) =>
   execute(
     ctx,
     async () =>
-      `💰 <b>Saldo QUSD</b>\n${money(await trading.qusdBalance())} QUSD`,
+      `<b>💰 Saldo disponible</b>\n\n<b>${money(await trading.qusdBalance())} QUSD</b> en QvaPay.`,
   ),
 );
 bot.command("activate", (ctx) =>
   execute(ctx, async () => {
     await trading.activate();
-    return "▶️ <b>Automatización activada</b>";
+    return "<b>▶️ Automatización activada</b>\n\nLas cacerías habilitadas vuelven a buscar ofertas.";
   }),
 );
 bot.command("pause", (ctx) => {
   trading.setPaused(true);
   return ctx.reply(
-    "⏸ <b>Automatización pausada</b>\nNo se iniciarán nuevas acciones.",
+    "<b>⏸ Automatización pausada</b>\n\nNo se iniciarán nuevas operaciones hasta que la actives.",
     { parse_mode: "HTML" },
   );
 });
 bot.command("resume", (ctx) =>
   execute(ctx, async () => {
     await trading.activate();
-    return "▶️ <b>Automatización activada</b>";
+    return "<b>▶️ Automatización activada</b>\n\nLas cacerías habilitadas vuelven a buscar ofertas.";
   }),
 );
 bot.command("scan", (ctx) =>
@@ -233,7 +243,7 @@ bot.command("fiat", (ctx) =>
     if (!coin || !Number.isFinite(amount) || amount < 0)
       throw new Error(`Uso: /fiat ${marketHint()} IMPORTE`);
     trading.setFiatBalance(coin, amount);
-    return `💳 <b>Saldo ${trading.marketLabel(coin)} actualizado</b>\n${money(amount)} ${trading.marketCurrency(coin)} disponibles para comprar QUSD.`;
+    return `<b>💳 Saldo actualizado · ${escapeHtml(trading.marketLabel(coin))}</b>\n\nDisponible para comprar: <b>${money(amount)} ${escapeHtml(trading.marketCurrency(coin))}</b>.`;
   }),
 );
 bot.command("refresh", (ctx) =>
@@ -242,7 +252,7 @@ bot.command("refresh", (ctx) =>
     if (value !== "on" && value !== "off")
       throw new Error("Uso: /refresh on|off");
     trading.setRefresh(value === "on");
-    return `🔄 Refresco automático ${value === "on" ? "<b>activado</b>" : "desactivado"}.`;
+    return `<b>🔄 Refresco de ofertas ${value === "on" ? "activado" : "desactivado"}</b>\n\n${value === "on" ? "Las ofertas propias se actualizarán automáticamente." : "Las ofertas propias dejarán de actualizarse automáticamente."}`;
   }),
 );
 bot.command("offers", (ctx) => void showOwnOffers(ctx));
@@ -264,7 +274,7 @@ bot.command("apply", (ctx) =>
 bot.command("ack", (ctx) =>
   execute(ctx, async () => {
     await trading.acknowledge(argument(ctx.msg?.text));
-    return "✅ Plazo de autocancelación detenido. Usa /paid UUID REFERENCIA después de transferir.";
+    return "<b>✅ Operación reconocida</b>\n\nDespués de transferir, registra el ID con <code>/paid UUID ID</code>.";
   }),
 );
 bot.command("paid", (ctx) =>
@@ -272,41 +282,48 @@ bot.command("paid", (ctx) =>
     const [uuid, ...reference] = argumentsOf(ctx.msg?.text);
     if (!uuid || !reference.length)
       throw new Error("Uso: /paid UUID REFERENCIA");
-    await trading.markPaid(uuid, reference.join(" "));
-    return "✅ <b>Pago marcado en QvaPay</b>\nEspera la confirmación de la contraparte.";
+    await trading.markPaid(uuid, parseTransactionId(reference.join(" ")));
+    return `<b>✅ Pago registrado en QvaPay</b>\n\n🆔 Operación: <code>${escapeHtml(uuid)}</code>\n⏳ Espera la confirmación de la contraparte.`;
   }),
 );
 bot.command("received", (ctx) =>
   execute(ctx, async () => {
-    await trading.confirmReceived(argument(ctx.msg?.text));
-    return "✅ <b>Recepción confirmada</b>\nQUSD liberado.";
+    const uuid = argument(ctx.msg?.text);
+    await trading.confirmReceived(uuid);
+    return `<b>✅ Recepción confirmada</b>\n\nLos QUSD de <code>${escapeHtml(uuid)}</code> quedaron liberados.`;
   }),
 );
 bot.command("cancel", (ctx) => {
+  if (!argument(ctx.msg?.text) && paymentReferences.current(chatKey(ctx))) {
+    paymentReferences.cancel(chatKey(ctx));
+    return void ctx.reply("<b>✖ Registro de pago cancelado</b>\n\nLa operación sigue activa.", { parse_mode: "HTML" });
+  }
   if (!argument(ctx.msg?.text) && cooperativeContributions.cancel(chatKey(ctx)))
     return void showCooperativeNetwork(ctx, "Edición del aporte cancelada.");
   if (!argument(ctx.msg?.text) && huntingRates.cancel(chatKey(ctx)))
     return void showHunting(ctx, "Edición de tasa cancelada.");
   return execute(ctx, async () => {
-    await trading.cancel(argument(ctx.msg?.text));
-    return "✖ Operación cancelada.";
+    const uuid = argument(ctx.msg?.text);
+    await trading.cancel(uuid);
+    return `<b>✖ Operación cancelada</b>\n\n🆔 <code>${escapeHtml(uuid)}</code>`;
   });
 });
 bot.command("editoffer", (ctx) =>
   execute(ctx, async () => {
-    const [uuid, amountText, rateText] = argumentsOf(ctx.msg?.text);
+    const [uuid, amountText, rateInput] = argumentsOf(ctx.msg?.text);
     const amount = Number(amountText),
-      fiatRate = Number(rateText);
+      fiatRate = Number(rateInput);
     if (!uuid || !Number.isFinite(amount) || !Number.isFinite(fiatRate))
       throw new Error("Uso: /editoffer UUID QUSD TASA_FIAT");
     await trading.editOwnOffer(uuid, amount, fiatRate);
-    return "✅ Oferta propia actualizada.";
+    return `<b>✅ Oferta actualizada</b>\n\n🆔 <code>${escapeHtml(uuid)}</code>\n💰 Importe: <b>${money(amount)} QUSD</b>\n💱 Tasa: <b>${rateText(fiatRate)}</b>`;
   }),
 );
 bot.command("canceloffer", (ctx) =>
   execute(ctx, async () => {
-    await trading.cancelOwnOffer(argument(ctx.msg?.text));
-    return "✖ Oferta propia cancelada.";
+    const uuid = argument(ctx.msg?.text);
+    await trading.cancelOwnOffer(uuid);
+    return `<b>✖ Oferta propia cancelada</b>\n\n🆔 <code>${escapeHtml(uuid)}</code>`;
   }),
 );
 bot.command("createbuy", (ctx) => createOffer(ctx, "buy"));
@@ -314,13 +331,34 @@ bot.command("createsell", (ctx) => createOffer(ctx, "sell"));
 
 bot.on("message:text", async (ctx) => {
   if (ctx.msg.text.startsWith("/")) return;
+  const payment = paymentReferences.current(chatKey(ctx));
+  if (payment) {
+    try {
+      const reference = parseTransactionId(ctx.msg.text);
+      await trading.markPaid(payment.uuid, reference);
+      paymentReferences.cancel(chatKey(ctx));
+      if (payment.messageId) {
+        try { await bot.api.editMessageReplyMarkup(ctx.chat.id, payment.messageId); }
+        catch (error) { store.audit("telegram_button_refresh_warning", errorMessage(error), payment.uuid); }
+      }
+      await ctx.reply(`<b>✅ Pago registrado en QvaPay</b>\n\n🧾 ID de transacción: <code>${escapeHtml(reference)}</code>\n🆔 Operación: <code>${escapeHtml(payment.uuid)}</code>\n\n⏳ Espera la confirmación de la contraparte.`, { parse_mode: "HTML" });
+    } catch (error) {
+      const uncertain = store.hasUnresolvedMutationForOffer(payment.uuid);
+      if (uncertain) paymentReferences.cancel(chatKey(ctx));
+      await ctx.reply(`<b>⚠️ Pago sin confirmar</b>\n\n${escapeHtml(errorMessage(error))}\n\n${uncertain ? "La operación se está conciliando con QvaPay. No vuelvas a enviar el ID." : "Corrige el ID de transacción o usa /cancel para salir."}`, {
+        parse_mode: "HTML",
+        ...(!uncertain ? { reply_markup: { force_reply: true as const, input_field_placeholder: "ID de transacción" } } : {}),
+      });
+    }
+    return;
+  }
   const cooperative = cooperativeContributions.current(chatKey(ctx));
   if (cooperative) {
     try {
       await continueCooperativeContribution(ctx, ctx.msg.text);
     } catch (error) {
       await ctx.reply(
-        `⚠️ ${escapeHtml(errorMessage(error))}\n\nEscribe un número positivo o usa /cancel.`,
+        `<b>⚠️ Aporte no válido</b>\n\n${escapeHtml(errorMessage(error))}\n\nEscribe un número positivo o usa /cancel.`,
         {
           parse_mode: "HTML",
           reply_markup: {
@@ -339,7 +377,7 @@ bot.on("message:text", async (ctx) => {
     await showRateConfirmation(ctx, confirmation);
   } catch (error) {
     await ctx.reply(
-      `⚠️ ${escapeHtml(errorMessage(error))}\n\nEscribe la tasa exacta o usa /cancel.`,
+      `<b>⚠️ Tasa no válida</b>\n\n${escapeHtml(errorMessage(error))}\n\nEscribe la tasa exacta o usa /cancel.`,
       {
         parse_mode: "HTML",
         reply_markup: {
@@ -355,6 +393,7 @@ bot.on("callback_query:data", async (ctx) => {
   const [action, uuid] = splitCallbackData(ctx.callbackQuery.data);
   if (action !== "hunt") huntingRates.cancel(chatKey(ctx));
   if (action !== "coop") cooperativeContributions.cancel(chatKey(ctx));
+  if (action !== "pay") paymentReferences.cancel(chatKey(ctx));
   // Telegram expira estos callbacks rápidamente; se responde antes de consultar QvaPay.
   await answerCallbackSafely(() => ctx.answerCallbackQuery());
   try {
@@ -375,8 +414,20 @@ bot.on("callback_query:data", async (ctx) => {
           "✅ Confirmaste que pagarás. Registra la referencia con /paid UUID REFERENCIA.",
         );
       case "cancel":
+        return confirmOperationCancel(ctx, requiredUuid(uuid));
+      case "confirmopcancel":
         await trading.cancel(requiredUuid(uuid));
-        return showDashboard(ctx, "✖ Operación cancelada.");
+        return showOperations(ctx, "✖ Operación cancelada.");
+      case "pay": {
+        const id = requiredUuid(uuid);
+        const operation = store.getOperation(id);
+        if (!canMarkPaid(operation)) throw new Error("Esta operación ya no permite registrar un pago.");
+        if (store.hasUnresolvedMutationForOffer(id)) throw new Error("Esta operación está pendiente de conciliación.");
+        paymentReferences.start(chatKey(ctx), id, ctx.callbackQuery.message?.message_id);
+        return ctx.reply(`<b>💸 Registrar pago</b>\n\nEnvía solo el ID de la transacción para la oferta <code>${escapeHtml(id)}</code>.\n\nUsa /cancel para salir.`, {
+          parse_mode: "HTML", reply_markup: { force_reply: true, input_field_placeholder: "ID de transacción" },
+        });
+      }
       case "received":
         await trading.confirmReceived(requiredUuid(uuid));
         return showOperations(ctx, "✅ Recepción confirmada y QUSD liberado.");
@@ -439,7 +490,7 @@ scheduler.register("recovery_alerts", 10_000, async () => {
   for (const intent of store.unresolvedMutationIntents()) {
     if (intent.state !== "uncertain") continue;
     await notifications.publish({
-      message: `🚨 QvaApply detuvo nuevas operaciones por una intención incierta (${intent.kind}). Oferta: ${intent.operationUuid ?? "sin UUID"}. Revisa Auditoría → Recuperación de intenciones. No repitas el pago ni la aplicación sin comprobar QvaPay. https://qvapply.honux.tech/?view=auditoria`,
+      message: `⚠️ QvaApply está conciliando una intención incierta (${intent.kind}). Oferta: ${intent.operationUuid ?? "sin UUID"}. Las demás cacerías continúan. No repitas esta operación hasta confirmar su estado en QvaPay. https://qvapply.honux.tech/?view=auditoria`,
       ...(intent.operationUuid ? { operationUuid: intent.operationUuid } : {}),
       event: { kind: "recovery-blocked", intentId: intent.intentId, ...(intent.operationUuid ? { uuid: intent.operationUuid } : {}) },
     });
@@ -558,13 +609,10 @@ async function showHunting(ctx: Context, notice?: string): Promise<void> {
       dashboardReadModel.marketSideObservations(market.code),
     ]),
   );
-  const text = [
-    "<b>🎯 Cacería automática</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    `Compra global: <b>${current.hunting.buyRunning ? "ACTIVA" : "DETENIDA"}</b>`,
-    `Venta global: <b>${current.hunting.sellRunning ? "ACTIVA" : "DETENIDA"}</b>`,
-    "",
-    ...current.markets.map(
+  const text = blocks(
+    "<b>🎯 Cacerías automáticas</b>",
+    `🌐 Compra: <b>${current.hunting.buyRunning ? "activa" : "detenida"}</b>\n🌐 Venta: <b>${current.hunting.sellRunning ? "activa" : "detenida"}</b>`,
+    current.markets.map(
       (market) =>
         (() => {
           const sides = observations[market.code];
@@ -574,13 +622,11 @@ async function showHunting(ctx: Context, notice?: string): Promise<void> {
               ? `${value.data.median === undefined ? "sin mediana" : `${money(value.data.median)} (${value.data.samples} ofertas de ${side === "buy" ? "compra" : "venta"})`} · ${relativeTime(value.updatedAt)}`
               : "sin observación";
           };
-          return `${market.active ? "🟢" : "⚪"} <b>${escapeHtml(market.label)}</b> · compra ${market.huntBuyEnabled ? "ON" : "OFF"} · venta ${market.huntSellEnabled ? "ON" : "OFF"}\n   Mediana compra: <b>${observed("buy")}</b>\n   Mediana venta: <b>${observed("sell")}</b>`;
+          return `${market.active ? "🟢" : "⚪"} <b>${escapeHtml(market.label)}</b>\n• Compra: ${market.huntBuyEnabled ? "activa" : "detenida"} · mediana ${observed("buy")}\n• Venta: ${market.huntSellEnabled ? "activa" : "detenida"} · mediana ${observed("sell")}`;
         })(),
-    ),
-    notice ? `\n${escapeHtml(notice)}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    ).join("\n\n"),
+    notice ? `📌 ${escapeHtml(notice)}` : "",
+  );
   const keyboard = new InlineKeyboard()
     .text(
       current.hunting.buyRunning ? "⏸ Detener compra" : "▶️ Iniciar compra",
@@ -614,19 +660,13 @@ async function showHuntingMarket(
     market.active && current.hunting.buyRunning && market.huntBuyEnabled;
   const sellEffective =
     market.active && current.hunting.sellRunning && market.huntSellEnabled;
-  const text = [
+  const text = blocks(
     `<b>🎯 Cacería · ${escapeHtml(market.label)}</b>`,
-    "━━━━━━━━━━━━━━━━━━━━",
-    `Mercado: <b>${market.active ? "ACTIVO" : "INACTIVO"}</b>`,
-    `Compra: <b>${market.huntBuyEnabled ? "ON" : "OFF"}</b> · ${buyEffective ? "buscando" : "detenida"}`,
-    `Máximo de compra: <b>${rateText(market.buyMaxRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
-    "",
-    `Venta: <b>${market.huntSellEnabled ? "ON" : "OFF"}</b> · ${sellEffective ? "buscando" : "detenida"}`,
-    `Mínimo de venta: <b>${rateText(market.sellMinRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
-    notice ? `\n${escapeHtml(notice)}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `💱 Mercado: <b>${market.active ? "activo" : "inactivo"}</b>`,
+    `<b>🔵 Compra</b> · ${buyEffective ? "buscando" : "detenida"}\nMáximo: <b>${rateText(market.buyMaxRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+    `<b>🟢 Venta</b> · ${sellEffective ? "buscando" : "detenida"}\nMínimo: <b>${rateText(market.sellMinRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+    notice ? `📌 ${escapeHtml(notice)}` : "",
+  );
   const keyboard = new InlineKeyboard()
     .text(
       market.huntBuyEnabled ? "⏸ Compra" : "▶️ Compra",
@@ -757,16 +797,12 @@ async function showRateConfirmation(
   const market = requiredHuntingMarket(pending.coin);
   return render(
     ctx,
-    [
-      "<b>Confirmar nueva tasa de caza</b>",
-      "━━━━━━━━━━━━━━━━━━━━",
-      `Mercado: <b>${escapeHtml(market.label)}</b>`,
-      `Lado: <b>${sideLabel(pending.side)}</b>`,
-      `Anterior: <b>${rateText(pending.previousRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
-      `Nueva: <b>${rateText(pending.proposedRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
-      "",
-      "La estrategia no cambiará hasta que confirmes.",
-    ].join("\n"),
+    blocks(
+      "<b>✏️ Confirmar tasa de cacería</b>",
+      `🪙 Mercado: <b>${escapeHtml(market.label)}</b>\n🎯 Lado: <b>${sideLabel(pending.side)}</b>`,
+      `Tasa actual: <b>${rateText(pending.previousRate)} ${escapeHtml(market.currency)}/QUSD</b>\nNueva tasa: <b>${rateText(pending.proposedRate)} ${escapeHtml(market.currency)}/QUSD</b>`,
+      "La nueva tasa se aplicará al confirmar.",
+    ),
     new InlineKeyboard()
       .text(
         "✅ Guardar tasa",
@@ -784,16 +820,14 @@ async function showRateConfirmation(
 
 async function showMarkets(ctx: Context): Promise<void> {
   const markets = trading.markets();
-  const text = [
+  const text = blocks(
     "<b>🔎 Mercados P2P</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    ...markets.map(
+    markets.map(
       (market) =>
-        `${market.active ? "🟢" : "⚪"} ${escapeHtml(market.label)} · ${escapeHtml(market.currency)}`,
-    ),
-    "",
+        `${market.active ? "🟢" : "⚪"} <b>${escapeHtml(market.label)}</b> · ${escapeHtml(market.currency)}`,
+    ).join("\n"),
     "Elige un mercado para consultar sus ofertas.",
-  ].join("\n");
+  );
   const keyboard = new InlineKeyboard();
   for (const market of markets)
     keyboard
@@ -808,27 +842,27 @@ async function showMarkets(ctx: Context): Promise<void> {
 
 async function showOperations(ctx: Context, notice?: string): Promise<void> {
   const operations = dashboardReadModel.localSnapshot().operations.slice(0, 8);
-  const text = [
+  const text = blocks(
     "<b>📦 Operaciones activas</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
     operations.length
       ? operations
           .map(
-            (operation) =>
-              `${operation.offerType === "sell" ? "🟢 COMPRA" : "🔵 VENTA"} · <b>${money(operation.amount)} QUSD</b> · ${escapeHtml(trading.marketLabel(operation.coin))}\nEstado: <b>${escapeHtml(operation.state)}</b> · Tasa: ${rateText(operation.rate)}\n<code>${operation.uuid}</code>`,
+            (operation, index) =>
+              `<b>${index + 1}. ${operation.offerType === "sell" ? "💸 Compra de QUSD" : "🪙 Venta de QUSD"} · ${escapeHtml(trading.marketLabel(operation.coin))}</b>\n` +
+              `💰 <b>${money(operation.amount)} QUSD</b>\n💸 Fiat: <b>${money(operation.receive)} ${escapeHtml(trading.marketCurrency(operation.coin))}</b>\n📍 Estado: <b>${operationStateLabel(operation.state)}</b>\n🆔 <code>${escapeHtml(operation.uuid)}</code>`,
           )
           .join("\n\n")
       : "No hay operaciones activas.",
-    notice ?? "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    notice ? `📌 ${escapeHtml(notice)}` : "",
+  );
   const keyboard = new InlineKeyboard();
-  for (const operation of operations) {
-    if (operation.state === "paid")
-      keyboard.text("✅ Confirmar recepción", `received:${operation.uuid}`);
-    if (operation.state === "applied" || operation.state === "acknowledged")
-      keyboard.text("✖ Cancelar", `cancel:${operation.uuid}`);
+  for (const [index, operation] of operations.entries()) {
+    if (operation.offerType === "buy" && operation.state === "paid")
+      keyboard.text(`✅ Recibido #${index + 1}`, `received:${operation.uuid}`);
+    if (!store.hasUnresolvedMutationForOffer(operation.uuid)) {
+      if (canMarkPaid(operation)) keyboard.text(`💸 Pagar #${index + 1}`, `pay:${operation.uuid}`);
+      if (canCancelOperation(operation)) keyboard.text(`✖ Cancelar #${index + 1}…`, `cancel:${operation.uuid}`);
+    }
     keyboard.row();
   }
   keyboard.text("‹ Volver al panel", "panel:home");
@@ -837,15 +871,11 @@ async function showOperations(ctx: Context, notice?: string): Promise<void> {
 
 async function showAutomation(ctx: Context, notice?: string): Promise<void> {
   const state = trading.operationalState();
-  const text = [
+  const text = blocks(
     "<b>🤖 Automatización</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    `Motor: <b>${state.paused ? "PAUSADO" : "ACTIVO"}</b>`,
-    `Refresco de ofertas propias: <b>${state.refresh ? "ON" : "OFF"}</b>`,
-    notice ? `\n${escapeHtml(notice)}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    `🎯 Cacerías: <b>${state.paused ? "pausadas" : "activas"}</b>\n🔄 Refresco de ofertas propias: <b>${state.refresh ? "activo" : "apagado"}</b>`,
+    notice ? `📌 ${escapeHtml(notice)}` : "",
+  );
   return render(
     ctx,
     text,
@@ -903,9 +933,9 @@ function dashboardText(
   const unresolved = snapshot.unresolvedMutations.slice(0, 3);
   const mutationWarning = snapshot.risk.usage.unresolvedMutation
     ? [
-        "⚠️ <b>BLOQUEO DE MUTACIÓN</b>",
+        "<b>⚠️ Operaciones en conciliación</b>",
         ...unresolved.map((intent) =>
-          `${escapeHtml(intent.kind)} · ${escapeHtml(intent.state)} desde ${relativeTime(intent.createdAt)}${intent.error ? " · " + escapeHtml(intent.error) : " · requiere conciliación"}`,
+          `• ${escapeHtml(intent.kind)} · ${escapeHtml(intent.state)} · ${relativeTime(intent.createdAt)}${intent.error ? "\n  " + escapeHtml(intent.error) : ""}`,
         ),
       ].join("\n")
     : "";
@@ -915,34 +945,28 @@ function dashboardText(
     feed.lastWebhookReceivedAt ?? 0,
     feed.lastWebhookProcessedAt ?? 0,
   );
-  const feedStatus = `📡 Feed P2P (${feed.mode}): ${feedAt ? "evento " + relativeTime(feedAt) : "sin eventos recibidos"}${feed.lastEventOutcome ? " · " + escapeHtml(feed.lastEventOutcome) : ""}${feed.lastWebhookError || feed.lastStreamError ? " · ⚠️ " + escapeHtml(feed.lastWebhookError ?? feed.lastStreamError ?? "") : ""}`;
+  const feedStatus = `📡 Feed P2P: <b>${escapeHtml(feed.mode)}</b> · ${feedAt ? "último evento " + relativeTime(feedAt) : "sin eventos recibidos"}${feed.lastEventOutcome ? "\nResultado: " + escapeHtml(feed.lastEventOutcome) : ""}${feed.lastWebhookError || feed.lastStreamError ? "\n⚠️ " + escapeHtml(feed.lastWebhookError ?? feed.lastStreamError ?? "") : ""}`;
   const fiat = trading
     .markets()
     .map(
       (market) =>
-        `${market.label}: <b>${money(state.fiat[market.code] ?? 0)} ${market.currency}</b>`,
+        `• ${escapeHtml(market.label)}: <b>${money(state.fiat[market.code] ?? 0)} ${escapeHtml(market.currency)}</b>`,
     )
-    .join(" · ");
+    .join("\n");
   const movements = trading
     .markets()
     .map((market) => `📒 ${market.label}: ${ledgerText(market.code)}`)
     .join("\n");
-  const text = [
-    "<b>QvaApply · Centro de operaciones</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    `${state.paused ? "⏸ <b>INACTIVO</b>" : "▶️ <b>ACTIVO</b>"}`,
-    `💰 QvaPay: <b>${balance}</b>${balanceError ? `\n   ⚠️ No se pudo actualizar: ${escapeHtml(balanceError)}` : ""}`,
-    `💳 ${fiat}`,
-    movements,
-    `📦 Operaciones activas: <b>${state.active}</b> · Refresco: <b>${state.refresh ? "ON" : "OFF"}</b>`,
-    "",
-    `<b>Último escaneo</b>\n${last}`,
+  const text = blocks(
+    `<b>🏠 QvaApply · Panel</b>\n${state.paused ? "⏸ Cacerías pausadas" : "▶️ Cacerías activas"}`,
+    `💰 Saldo QvaPay: <b>${balance}</b>${balanceError ? `\n⚠️ No se pudo actualizar: ${escapeHtml(balanceError)}` : ""}\n📦 Operaciones activas: <b>${state.active}</b>\n🔄 Refresco: <b>${state.refresh ? "activo" : "apagado"}</b>`,
+    `<b>💳 Saldos fiat</b>\n${fiat}`,
+    `<b>📒 Últimos movimientos</b>\n${movements}`,
+    `<b>🔎 Último escaneo</b>\n${last}`,
     feedStatus,
     mutationWarning,
-    notice ? `\n${notice}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    notice ? `📌 ${notice}` : "",
+  );
   return text;
 }
 
@@ -951,30 +975,26 @@ async function showCooperativeNetwork(ctx: Context, notice?: string): Promise<vo
   const aggregates = Object.values(network.snapshot).sort((a, b) =>
     a.coin.localeCompare(b.coin),
   );
-  const text = [
-    "<b>📡 Red cooperativa</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    `HTTP: <b>${network.httpConnected ? "CONECTADO" : "SIN CONEXIÓN"}</b> · NATS: <b>${network.natsConnected ? "CONECTADO" : "SIN CONEXIÓN"}</b>`,
+  const text = blocks(
+    "<b>🤝 Red cooperativa</b>",
+    `🌐 HTTP: <b>${network.httpConnected ? "conectado" : "sin conexión"}</b>\n📡 NATS: <b>${network.natsConnected ? "conectado" : "sin conexión"}</b>`,
     network.lastNatsAt || network.lastHttpAt
       ? `Última sincronización: ${relativeTime(network.lastNatsAt ?? network.lastHttpAt ?? undefined)}`
       : "Aún no se ha recibido un snapshot.",
-    "",
     aggregates.length
       ? aggregates
           .map((item) => {
             const market = trading.market(item.coin);
             const marketName = market?.label ?? item.coin;
             const currency = market?.currency ?? item.coin;
-            return `💱 <b>${escapeHtml(marketName)}</b>: ${money(item.fiat)} ${escapeHtml(currency)} · ${item.offersCount} bot(s)\n   Precio medio: ${money(item.price)} · Mínimo medio: ${money(item.minimal)}`;
+            return `💱 <b>${escapeHtml(marketName)}</b>\n• Aporte: <b>${money(item.fiat)} ${escapeHtml(currency)}</b> · ${item.offersCount} bots\n• Precio medio: ${money(item.price)} · mínimo: ${money(item.minimal)}`;
           })
           .join("\n\n")
       : "No hay liquidez cooperativa publicada.",
-    network.lastError ? `\n⚠️ ${escapeHtml(network.lastError)}` : "",
-    notice ? `\n${escapeHtml(notice)}` : "",
-    "\n🛡 Este panel solo gestiona aportes; no ejecuta ni liquida cacerías.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    network.lastError ? `⚠️ ${escapeHtml(network.lastError)}` : "",
+    notice ? `📌 ${escapeHtml(notice)}` : "",
+    "🛡 Este panel gestiona aportes para las cacerías conjuntas.",
+  );
   const keyboard = new InlineKeyboard()
     .text("🔄 Actualizar", encodeCooperativeAction({ type: "refresh" }))
     .row();
@@ -1010,7 +1030,7 @@ async function handleCooperativeAction(ctx: Context, data: string): Promise<void
       if (!market) throw new Error("Ese mercado no está configurado en QvaApply.");
       cooperativeContributions.begin(chatKey(ctx), market.code);
       await ctx.reply(
-        `<b>${networkContributionLabel(action.coin)}</b>\n\nEscribe el precio objetivo.`,
+        `<b>➕ Aporte cooperativo · ${networkContributionLabel(action.coin)}</b>\n\n💱 Escribe el precio objetivo por QUSD.\n\nUsa /cancel para salir.`,
         {
           parse_mode: "HTML",
           reply_markup: {
@@ -1052,7 +1072,7 @@ async function handleCooperativeAction(ctx: Context, data: string): Promise<void
 async function continueCooperativeContribution(ctx: Context, input: string): Promise<void> {
   const session = cooperativeContributions.accept(chatKey(ctx), input);
   if (session.stage === "minimal") {
-    await cooperativePrompt(ctx, "Escribe el importe mínimo que debe tener una operación.", "Importe mínimo");
+    await cooperativePrompt(ctx, "<b>💰 Aporte cooperativo</b>\n\nEscribe el importe fiat mínimo para participar en una operación.\n\nUsa /cancel para salir.", "Importe mínimo");
     return;
   }
   if (session.stage !== "confirm") return;
@@ -1071,6 +1091,7 @@ async function continueCooperativeContribution(ctx: Context, input: string): Pro
 
 async function cooperativePrompt(ctx: Context, text: string, placeholder: string): Promise<void> {
   await ctx.reply(text, {
+    parse_mode: "HTML",
     reply_markup: { force_reply: true, input_field_placeholder: placeholder },
   });
 }
@@ -1078,14 +1099,11 @@ async function cooperativePrompt(ctx: Context, text: string, placeholder: string
 function cooperativeConfirmationText(contribution: CooperativeDraft): string {
   const market = trading.market(contribution.coin);
   const currency = market?.currency ?? contribution.coin;
-  return [
-    "<b>Confirmar aporte cooperativo</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    `Mercado: <b>${networkContributionLabel(contribution.coin)}</b>`,
-    `Precio objetivo: <b>${money(contribution.price)}</b>`,
-    `Mínimo: <b>${money(contribution.minimal)} ${escapeHtml(currency)}</b>`,
-    `Fiat disponible: <b>${money(trading.fiatBalance(contribution.coin))} ${escapeHtml(currency)}</b>`,
-  ].join("\n");
+  return blocks(
+    "<b>✅ Confirmar aporte cooperativo</b>",
+    `🪙 Mercado: <b>${networkContributionLabel(contribution.coin)}</b>\n💱 Precio objetivo: <b>${money(contribution.price)}</b>\n💰 Mínimo: <b>${money(contribution.minimal)} ${escapeHtml(currency)}</b>\n💳 Fiat disponible: <b>${money(trading.fiatBalance(contribution.coin))} ${escapeHtml(currency)}</b>`,
+    "El aporte se publicará al confirmar.",
+  );
 }
 
 function networkContributionLabel(coin: string): string {
@@ -1115,30 +1133,27 @@ function ownOffersText(
   notice?: string,
   refreshError?: string,
 ): string {
-  return [
+  return blocks(
     "<b>💼 Mis ofertas abiertas</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
     offers.length
-      ? offers.slice(0, 8).map((offer) => ownOfferCard({
+      ? offers.slice(0, 8).map((offer, index) => ownOfferCard({
           ...offer,
           ...(offer.updatedAt === undefined ? {} : { updated_at: offer.updatedAt }),
-        })).join("\n\n")
+        }, index + 1)).join("\n\n")
       : "Sin ofertas locales guardadas.",
     refreshError ? "⚠️ No se pudo actualizar: " + escapeHtml(refreshError) : "",
-    notice ?? "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    notice ? `📌 ${escapeHtml(notice)}` : "",
+  );
 }
 
 function ownOffersKeyboard(
   offers: ReturnType<DashboardReadModel["localSnapshot"]>["ownOffers"],
 ): InlineKeyboard {
   const keyboard = new InlineKeyboard();
-  for (const offer of offers.slice(0, 6))
+  for (const [index, offer] of offers.slice(0, 6).entries())
     keyboard
-      .text("🔄", `refresh:${offer.uuid}`)
-      .text("✖", `cancelown:${offer.uuid}`)
+      .text(`🔄 Refrescar #${index + 1}`, `refresh:${offer.uuid}`)
+      .text(`✖ Cancelar #${index + 1}`, `cancelown:${offer.uuid}`)
       .row();
   keyboard.text("‹ Volver", "panel:home");
   return keyboard;
@@ -1187,27 +1202,26 @@ function marketText(
   const sideText = (side: "buy" | "sell") => {
     const label = side === "buy" ? "Compra" : "Venta";
     const observation = observations[side];
-    if (errors[side]) return label + ": error al actualizar (" + escapeHtml(errors[side]!) + ")";
-    if (!observation) return label + ": sin observación local · actualizando";
+    if (errors[side]) return `• ${label}: ⚠️ ${escapeHtml(errors[side]!)}`;
+    if (!observation) return `• ${label}: actualizando…`;
     const median = observation.data.median === undefined
       ? "sin mediana"
       : money(observation.data.median) + " (" + observation.data.samples + " ofertas de " + (side === "buy" ? "compra" : "venta") + ")";
-    return label + ": " + median + " · " + relativeTime(observation.updatedAt);
+    return `• ${label}: ${median} · ${relativeTime(observation.updatedAt)}`;
   };
   const shown = market.offers.slice(0, 8);
-  return [
-    "<b>🔎 Mercado P2P · " + trading.marketLabel(coin) + "</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    "Medianas observadas · " + sideText("buy") + "\n" + sideText("sell"),
-    "Mostrando " + shown.length + " de " + market.total + " ofertas abiertas.",
-    "",
-    shown.length ? shown.map((item) => marketViewCard(item, coin)).join("\n\n") : "Sin ofertas locales guardadas.",
-  ].join("\n");
+  return blocks(
+    `<b>🔎 Mercado P2P · ${escapeHtml(trading.marketLabel(coin))}</b>`,
+    `<b>📊 Medianas observadas</b>\n${sideText("buy")}\n${sideText("sell")}`,
+    `Mostrando <b>${shown.length} de ${market.total}</b> ofertas abiertas.`,
+    shown.length ? shown.map((item, index) => marketViewCard(item, coin, index + 1)).join("\n\n") : "Sin ofertas locales guardadas.",
+  );
 }
 
 function marketViewCard(
   item: ReturnType<DashboardReadModel["localSnapshot"]>["market"][FiatMarket]["offers"][number],
   coin: FiatMarket,
+  index: number,
 ): string {
   const title = item.type === "sell" ? "🟢 COMPRAR QUSD" : "🔵 VENDER QUSD";
   const tag = item.decision === "auto_buy"
@@ -1215,15 +1229,17 @@ function marketViewCard(
     : item.decision === "manual_sell"
       ? "👆 Acción manual"
       : "— Descartada";
-  return title + " · <b>" + money(item.amount) + " QUSD</b>\nTasa: <b>" + money(item.rate) + " " + trading.marketCurrency(coin) + "/QUSD</b> · Total: " + money(item.receive) + " " + trading.marketCurrency(coin) + "\n" + tag + ": " + escapeHtml(item.reason) + "\n<code>" + item.uuid + "</code>";
+  const currency = escapeHtml(trading.marketCurrency(coin));
+  return `<b>${index}. ${title}</b>\n💰 Importe: <b>${money(item.amount)} QUSD</b>\n💱 Tasa: <b>${money(item.rate)} ${currency}/QUSD</b>\n💸 Total: <b>${money(item.receive)} ${currency}</b>\n${tag}: ${escapeHtml(item.reason)}\n🆔 <code>${escapeHtml(item.uuid)}</code>`;
 }
 
 function marketKeyboard(
   offers: ReturnType<DashboardReadModel["localSnapshot"]>["market"][FiatMarket]["offers"],
 ): InlineKeyboard {
   const keyboard = new InlineKeyboard();
-  for (const item of offers.filter((offer) => offer.decision === "manual_sell").slice(0, 4))
-    keyboard.text("Aplicar venta manual", "apply:" + item.uuid).row();
+  for (const [index, item] of offers.entries())
+    if (item.decision === "manual_sell" && index < 8)
+      keyboard.text(`👆 Aplicar #${index + 1}`, "apply:" + item.uuid).row();
   for (const configured of trading.markets())
     keyboard.text(configured.label, "panel:market:" + configured.code);
   return keyboard.row().text("🔄 Escanear", "panel:scan").text("‹ Volver", "panel:home");
@@ -1235,33 +1251,39 @@ async function showStrategy(ctx: Context): Promise<void> {
     .markets()
     .map(
       (market) =>
-        `🟢 ${market.label}: comprar hasta <b>${money(market.buyMaxRate)} ${market.currency}/QUSD</b> · vender desde <b>${money(market.sellMinRate)} ${market.currency}/QUSD</b>\n   Saldo: <b>${money(state.fiat[market.code] ?? 0)} ${market.currency}</b>`,
+        `🪙 <b>${escapeHtml(market.label)}</b>\n• Comprar hasta: <b>${money(market.buyMaxRate)} ${escapeHtml(market.currency)}/QUSD</b>\n• Vender desde: <b>${money(market.sellMinRate)} ${escapeHtml(market.currency)}/QUSD</b>\n• Saldo fiat: <b>${money(state.fiat[market.code] ?? 0)} ${escapeHtml(market.currency)}</b>`,
     );
-  const text = [
+  const text = blocks(
     "<b>⚙️ Estrategia activa</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    ...markets,
-    `🛡 Reserva QUSD: <b>${money(trading.strategy().reserve)} QUSD</b>`,
-    "⏱ Cierre automático por falta de respuesta: <b>desactivado</b>",
-    `🔄 Refresco de propias: <b>${state.refresh ? "activo" : "apagado"}</b>`,
-    `\nUsa /fiat ${marketHint()} IMPORTE y /refresh para modificar la estrategia.`,
-  ].join("\n");
+    markets.join("\n\n"),
+    `🛡 Reserva: <b>${money(trading.strategy().reserve)} QUSD</b>\n🔄 Refresco: <b>${state.refresh ? "activo" : "apagado"}</b>`,
+    `Para ajustar: <code>/fiat ${marketHint()} IMPORTE</code> · <code>/refresh on|off</code>`,
+  );
   return render(ctx, text, backKeyboard());
 }
 
 async function confirmOwnCancel(ctx: Context, uuid: string): Promise<void> {
   return render(
     ctx,
-    `<b>¿Cancelar esta oferta propia?</b>\n\n<code>${uuid}</code>\n\nLos fondos en custodia se gestionarán según el estado de QvaPay.`,
+    blocks("<b>⚠️ Cancelar oferta propia</b>", `🆔 <code>${escapeHtml(uuid)}</code>`, "La oferta dejará de estar disponible. QvaPay gestionará los fondos según su estado.", "Confirma solo si deseas cancelarla."),
     new InlineKeyboard()
       .text("✖ Sí, cancelar", `confirmcancel:${uuid}`)
       .text("‹ Volver", "panel:mine"),
   );
 }
+async function confirmOperationCancel(ctx: Context, uuid: string): Promise<void> {
+  const operation = store.getOperation(uuid);
+  if (!canCancelOperation(operation)) throw new Error("Esta operación ya no se puede cancelar.");
+  if (store.hasUnresolvedMutationForOffer(uuid)) throw new Error("Esta operación está pendiente de conciliación.");
+  return render(ctx,
+    blocks("<b>⚠️ Cancelar operación</b>", `💰 <b>${money(operation!.amount)} QUSD</b> · ${escapeHtml(trading.marketLabel(operation!.coin))}\n🆔 <code>${escapeHtml(uuid)}</code>`, "QvaPay comprobará el estado antes de cancelar. Confirma solo si deseas continuar."),
+    new InlineKeyboard().text("✖ Sí, cancelar", `confirmopcancel:${uuid}`).text("‹ Volver", "panel:operations"),
+  );
+}
 async function confirmApply(ctx: Context, uuid: string): Promise<void> {
   return render(
     ctx,
-    `<b>¿Aplicar manualmente a esta oferta?</b>\n\n<code>${uuid}</code>\n\nAplicar a una oferta de compra compromete QUSD. Confirma solo si deseas continuar.`,
+    blocks("<b>👆 Aplicar manualmente</b>", `🆔 Oferta: <code>${escapeHtml(uuid)}</code>`, "Aplicar a una oferta de compra compromete QUSD. Confirma solo si deseas continuar."),
     new InlineKeyboard()
       .text("✅ Confirmar aplicación", `confirmapply:${uuid}`)
       .text("‹ Volver", "panel:market"),
@@ -1356,34 +1378,33 @@ function ownOfferCard(offer: {
   receive: number;
   status: string;
   updated_at?: string;
-}): string {
+}, index: number): string {
   const label = offer.type === "buy" ? "🔵 COMPRA" : "🟢 VENTA";
   const coin = trading.isMarket(offer.coin) ? offer.coin : defaultMarket();
   const currency = trading.marketCurrency(coin);
   const refreshed = trading.lastRefresh(offer.uuid);
-  return `${label} · <b>${money(offer.amount)} QUSD</b> · ${trading.marketLabel(coin)}\nTasa: <b>${money(offer.receive / offer.amount)} ${currency}/QUSD</b> · Total: ${money(offer.receive)} ${currency}\nEstado: ${escapeHtml(offer.status)} · ${relativeTime(offer.updated_at)}\nRefresco local: ${refreshed ? relativeTime(refreshed) : "pendiente"}`;
+  return `<b>${index}. ${label} · ${escapeHtml(trading.marketLabel(coin))}</b>\n💰 Importe: <b>${money(offer.amount)} QUSD</b>\n💱 Tasa: <b>${money(offer.receive / offer.amount)} ${escapeHtml(currency)}/QUSD</b>\n💸 Total: <b>${money(offer.receive)} ${escapeHtml(currency)}</b>\n📍 ${escapeHtml(offer.status)} · ${relativeTime(offer.updated_at)}\n🔄 Refresco: ${refreshed ? relativeTime(refreshed) : "pendiente"}\n🆔 <code>${escapeHtml(offer.uuid)}</code>`;
 }
 function logsText(): string {
   const logs = trading.logs();
-  return [
+  return blocks(
     "<b>📜 Eventos recientes</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
     logs.length
       ? logs
           .map(
             (log) =>
               `• <b>${escapeHtml(log.action)}</b> · ${relativeTime(log.createdAt)}\n  ${escapeHtml(log.detail)}`,
           )
-          .join("\n")
+          .join("\n\n")
       : "No hay eventos registrados.",
-  ].join("\n");
+  );
 }
 function scanSummary(result: {
   inspected: number;
   candidates: number;
   action?: string;
 }): string {
-  return `🔎 <b>Escaneo terminado</b>\n${result.inspected} ofertas revisadas · ${result.candidates} candidatas${result.action ? `\n${escapeHtml(result.action)}` : ""}`;
+  return blocks("<b>🔎 Escaneo terminado</b>", `📊 Ofertas revisadas: <b>${result.inspected}</b>\n🎯 Candidatas: <b>${result.candidates}</b>`, result.action ? `✅ ${escapeHtml(result.action)}` : "");
 }
 async function execute(
   ctx: Context,
@@ -1393,21 +1414,21 @@ async function execute(
     await ctx.reply(await action(), { parse_mode: "HTML" });
   } catch (error) {
     await ctx.reply(
-      `⚠️ <b>No ejecutado</b>\n${escapeHtml(errorMessage(error))}`,
+      `<b>⚠️ Acción no completada</b>\n\n${escapeHtml(errorMessage(error))}`,
       { parse_mode: "HTML" },
     );
   }
 }
 async function createOffer(ctx: Context, type: "buy" | "sell"): Promise<void> {
   await execute(ctx, async () => {
-    const [marketText, amountText, rateText] = argumentsOf(ctx.msg?.text);
+    const [marketText, amountText, rateInput] = argumentsOf(ctx.msg?.text);
     const coin = parseMarket(marketText);
     const amount = Number(amountText),
-      fiatRate = Number(rateText);
+      fiatRate = Number(rateInput);
     if (!coin || !Number.isFinite(amount) || !Number.isFinite(fiatRate))
       throw new Error(`Uso: /create${type} ${marketHint()} QUSD TASA_FIAT`);
     const offer = await trading.createOwnOffer(coin, type, amount, fiatRate);
-    return `✅ Oferta ${type} en ${trading.marketLabel(coin)} creada\n<code>${offer.uuid}</code>`;
+    return blocks(`<b>✅ Oferta de ${type === "buy" ? "compra" : "venta"} creada</b>`, `🪙 Mercado: <b>${escapeHtml(trading.marketLabel(coin))}</b>\n💰 Importe: <b>${money(amount)} QUSD</b>\n💱 Tasa: <b>${rateText(fiatRate)} ${escapeHtml(trading.marketCurrency(coin))}/QUSD</b>`, `🆔 <code>${escapeHtml(offer.uuid)}</code>`);
   });
 }
 function argumentsOf(text?: string): string[] {
@@ -1433,6 +1454,14 @@ function sideLabel(side: HuntingSide): string {
 }
 function sideRateLabel(side: HuntingSide): string {
   return side === "buy" ? "Máximo de compra" : "Mínimo de venta";
+}
+function operationStateLabel(state: string): string {
+  const labels: Record<string, string> = {
+    applied: "pendiente de pago", acknowledged: "pendiente de pago",
+    paid: "pago registrado", revision: "en revisión",
+    cancelled: "cancelada", completed: "completada", failed: "fallida",
+  };
+  return labels[state] ?? escapeHtml(state);
 }
 function money(value: number): string {
   return new Intl.NumberFormat("es-CU", {
@@ -1467,6 +1496,9 @@ function escapeHtml(value: string): string {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[character] ??
       character,
   );
+}
+function blocks(...parts: string[]): string {
+  return parts.filter(Boolean).join("\n\n");
 }
 function ledgerText(coin: FiatMarket): string {
   const movements = trading.fiatMovements(coin, 2);
@@ -1509,7 +1541,14 @@ function marketHint(): string {
 }
 function helpText(): string {
   const markets = marketHint();
-  return `<b>QvaApply · ayuda rápida</b>\n\nUsa el botón <b>Menú</b> de Telegram para acceder a todas las áreas sin memorizar comandos.\n\n<b>Comandos avanzados</b>\n/network — consultar la red cooperativa\n/coop — gestionar el aporte de QvaApply\n/fiat ${markets} IMPORTE — declarar saldo\n/market ${markets} — abrir un mercado concreto\n/createbuy ${markets} QUSD TASA — crear compra\n/createsell ${markets} QUSD TASA — crear venta\n/editoffer UUID QUSD TASA — editar una oferta\n/canceloffer UUID — cancelar una oferta\n/paid UUID REFERENCIA — registrar un pago\n/received UUID — confirmar recepción`;
+  return blocks(
+    "<b>❓ Ayuda de QvaApply</b>",
+    "Abre <b>Menú</b> para gestionar cacerías, mercados, ofertas y operaciones con botones.",
+    `<b>🎯 Cacerías y mercados</b>\n<code>/hunting</code> · estado y tasas\n<code>/network</code> · red cooperativa\n<code>/market ${markets}</code> · ofertas de un mercado`,
+    `<b>💼 Ofertas propias</b>\n<code>/createbuy ${markets} QUSD TASA</code>\n<code>/createsell ${markets} QUSD TASA</code>\n<code>/editoffer UUID QUSD TASA</code>\n<code>/canceloffer UUID</code>`,
+    "<b>💸 Operaciones</b>\n<code>/paid UUID ID</code> · registrar pago\n<code>/received UUID</code> · confirmar recepción\n<code>/cancel UUID</code> · cancelar operación",
+    `<b>⚙️ Ajustes</b>\n<code>/fiat ${markets} IMPORTE</code> · declarar saldo\n<code>/refresh on|off</code> · refresco de ofertas\n<code>/pause</code> · pausar cacerías\n<code>/resume</code> · reanudarlas`,
+  );
 }
 
 let stopping = false;

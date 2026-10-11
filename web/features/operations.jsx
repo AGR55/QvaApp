@@ -84,7 +84,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
       {data.risk.usage.unresolvedMutation ? (
         <div className="alert" role="alert">
           <AlertTriangle aria-hidden="true" />
-          Hay una mutación remota sin confirmar. El motor no abrirá otra operación.
+          Hay una mutación remota sin confirmar. Se verifica esa oferta mientras continúan las demás cacerías.
         </div>
       ) : null}
       <div className="dashboard-grid operations-layout">

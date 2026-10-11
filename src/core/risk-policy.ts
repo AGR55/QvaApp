@@ -168,7 +168,7 @@ export function evaluateRisk(context: RiskContext): RiskDecision {
       limits.maxSlippagePercent,
       "El precio se aleja demasiado de la referencia.",
     ),
-    maximumCheck(
+    advisoryMaximumCheck(
       "consecutive_errors",
       "Errores consecutivos",
       context.consecutiveErrors,

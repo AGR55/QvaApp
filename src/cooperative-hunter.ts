@@ -2,6 +2,7 @@ import type { Store } from "./store.js";
 import { QvaApiError, type QvaPayClient } from "./qvapay.js";
 import type { HuntingSyncCoordinator, CooperativeReservation } from "./hunting-sync.js";
 import type { P2pOffer, P2pFeedEvent } from "./types.js";
+import { cooperativeNotificationText } from "./telegram-operation.js";
 
 export interface CooperativeExecution {
   offer: P2pOffer; createdAt: number; updatedAt: number;
@@ -87,8 +88,6 @@ export class CooperativeHunter {
         const [uuid, candidate] = this.queue.entries().next().value!;
         this.queue.delete(uuid);
         if (!this.eligible(candidate.offer, candidate.receivedAt) || this.runtime.ownBusy() || !this.qva.secondaryApplyAvailable()) continue;
-        // One unresolved cooperative mutation quarantines this lane, not primary trading.
-        if ([...this.jobs.values()].some(job => ["uncertain", "reserving", "applying", "commit_pending", "release_pending"].includes(job.phase))) continue;
         await this.take(candidate.offer, candidate.receivedAt);
       }
     } catch (error) {
@@ -138,7 +137,9 @@ export class CooperativeHunter {
       this.save(job, "applied");
       await this.projectOperation(job);
       await this.commit(job);
-      void this.runtime.notify(`🤝 Cacería conjunta: ${offer.amount} QUSD por ${offer.receive} ${offer.coin}. Tu parte: ${job.reservation.ownerFiat}. Cada participante paga directamente al vendedor. Confirma el pago total cuando hayan pagado todos. Después debes repartir ${job.reservation.contributions.reduce((sum,row) => sum + row.qusd,0).toFixed(2)} QUSD al grupo.`, offer.uuid);
+      void this.runtime.notify(cooperativeNotificationText({ uuid: offer.uuid, amount: offer.amount,
+        receive: offer.receive, coin: offer.coin, ownerFiat: job.reservation.ownerFiat,
+        owedQusd: job.reservation.contributions.reduce((sum,row) => sum + row.qusd,0) }), offer.uuid);
     } catch (error) {
       const definitiveReservationRejection = job.phase === "reserving" && error instanceof Error && "status" in error &&
         typeof error.status === "number" && error.status >= 400 && error.status < 500;
