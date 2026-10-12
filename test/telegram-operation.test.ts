@@ -22,7 +22,7 @@ test("el aviso de operación separa importe, siguiente paso y referencia con HTM
   assert.match(text, /Debes enviar: <b>44\.13 USD<\/b>/);
   assert.match(text, /Contraparte: <code>&lt;amigo&amp;1&gt;<\/code>/);
   assert.match(text, /<b>👉 Siguiente paso<\/b>/);
-  assert.match(text, /Operación: <code>offer-1<\/code>/);
+  assert.match(text, /Oferta: <code>offer-1<\/code>/);
   assert.doesNotMatch(text, /Cancelar/);
 });
 

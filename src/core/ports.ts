@@ -35,6 +35,8 @@ export type TradingRepository = Pick<
   | "get"
   | "getOperation"
   | "getMutationIntent"
+  | "dailyAppliedQusd"
+  | "unresolvedMutationIntents"
   | "hasUnresolvedMutation"
   | "hasUnresolvedMutationForOffer"
   | "hasFiatMovement"

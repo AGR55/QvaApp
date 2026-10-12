@@ -2,6 +2,8 @@ import type { MutationIntent, Operation, Store } from "./store.js";
 import type { TradingService } from "./trading.js";
 import { ReconciliationScheduler } from "./reconciliation-scheduler.js";
 
+export type RecoveryActor = "admin_web" | "admin_telegram";
+
 export type ManualRecoveryOutcome = "not_applied" | "cancelled" | "terminal_reviewed";
 
 interface RecoveryFeedEvidence {
@@ -35,6 +37,8 @@ export interface RecoveryItem {
   operation?: Pick<Operation, "uuid" | "state" | "coin" | "offerType" | "amount" | "receive">;
   feed?: RecoveryFeedEvidence;
   retry: RecoveryRetryView;
+  acknowledged: boolean;
+  evidence: Array<{ text: string; actor: RecoveryActor; at: number }>;
   manualEligible: boolean;
   manualOutcomes: ManualRecoveryOutcome[];
   manualBlockedReason?: string;
@@ -61,7 +65,7 @@ export interface RecoveryResolveReport {
   outcome: ManualRecoveryOutcome;
   state: MutationIntent["state"];
   updatedAt: number;
-  actor: "admin_web";
+  actor: RecoveryActor;
   verifiedAt: number;
 }
 
@@ -93,6 +97,7 @@ export class SelfServiceRecovery {
     private readonly store: RecoveryStore,
     private readonly trading: Pick<TradingService, "reconcilePendingStandaloneMutations"> & Partial<Pick<TradingService, "isReconciliationInFlight">>,
     private readonly now: () => number = Date.now,
+    private readonly actor: RecoveryActor = "admin_web",
   ) {
     this.retry = new ReconciliationScheduler(store);
   }
@@ -103,6 +108,29 @@ export class SelfServiceRecovery {
     return { items, blocked: this.store.hasUnresolvedMutation() };
   }
 
+  recordEvidence(intentId: string, text: string): RecoveryItem {
+    const intent = this.requireIntent(intentId);
+    text = text.trim();
+    if (text.length < 12 || text.length > 1000) throw new RecoveryInputError("La evidencia debe tener entre 12 y 1.000 caracteres.");
+    const entries = [...this.evidence(intentId), { text, actor: this.actor, at: this.now() }];
+    this.store.set(`recovery_evidence:${intentId}`, JSON.stringify(entries));
+    this.store.audit("recovery_evidence_recorded", `${this.actor}: ${text}`, intent.operationUuid);
+    return this.item(intent);
+  }
+
+  acknowledge(intentId: string): RecoveryItem {
+    const intent = this.requireIntent(intentId);
+    this.store.set(`recovery_ack:${intentId}`, String(intent.updatedAt));
+    this.store.acknowledgeNotification(`recovery-blocked:${intentId}`);
+    this.store.audit("recovery_notice_acknowledged", `${this.actor} reconoció el aviso ${intentId}; la comprobación continúa.`, intent.operationUuid);
+    return this.item(intent);
+  }
+
+  private evidence(intentId: string): Array<{ text: string; actor: RecoveryActor; at: number }> {
+    try { return JSON.parse(this.store.get(`recovery_evidence:${intentId}`) ?? "[]"); }
+    catch { return []; }
+  }
+
   async check(intentId: string): Promise<RecoveryCheckReport> {
     const intent = this.requireIntent(intentId);
     const checkedAt = this.now();
@@ -110,7 +138,7 @@ export class SelfServiceRecovery {
       const workflow = this.store.getTradeWorkflow(intent.workflowId);
       this.store.audit(
         "self_service_recovery_checked",
-        `admin_web consultó intención ${intentId}; workflow ${workflow?.id ?? intent.workflowId} requiere revisión; no se ejecutaron compensaciones.`,
+        `${this.actor} consultó intención ${intentId}; workflow ${workflow?.id ?? intent.workflowId} requiere revisión; no se ejecutaron compensaciones.`,
         intent.operationUuid,
       );
       return {
@@ -128,7 +156,7 @@ export class SelfServiceRecovery {
     if (intent.state !== "submitted" && intent.state !== "uncertain") {
       this.store.audit(
         "self_service_recovery_checked",
-        `admin_web consultó intención ${intentId}, que ya estaba en estado ${intent.state}.`,
+        `${this.actor} consultó intención ${intentId}, que ya estaba en estado ${intent.state}.`,
         intent.operationUuid,
       );
       return {
@@ -154,7 +182,7 @@ export class SelfServiceRecovery {
     const lastCheck = this.lastCheck(intentId);
     this.store.audit(
       "self_service_recovery_checked",
-      `admin_web comprobó la intención ${intentId}: ${reconciled ? "reconciliada" : "pendiente"}. No se repitió la mutación.`,
+      `${this.actor} comprobó la intención ${intentId}: ${reconciled ? "reconciliada" : "pendiente"}. No se repitió la mutación.`,
       current.operationUuid,
     );
     return {
@@ -207,7 +235,7 @@ export class SelfServiceRecovery {
     const verifiedAt = this.now();
     const response = {
       source: "operator_attestation",
-      actor: "admin_web",
+      actor: this.actor,
       outcome: input.outcome,
       reason,
       evidence,
@@ -226,7 +254,7 @@ export class SelfServiceRecovery {
       outcome: input.outcome,
       state: current.state,
       updatedAt: current.updatedAt,
-      actor: "admin_web",
+      actor: this.actor,
       verifiedAt,
     };
   }
@@ -234,7 +262,7 @@ export class SelfServiceRecovery {
   private item(intent: MutationIntent): RecoveryItem {
     const uuid = intent.operationUuid;
     const operation = uuid ? this.store.getOperation(uuid) : undefined;
-    const feed = uuid ? this.store.latestMarketFeedState(uuid) : undefined;
+    const feed = uuid && !(intent.request && typeof intent.request === "object" && "offerKind" in intent.request && intent.request.offerKind === "flexible") ? this.store.latestMarketFeedState(uuid) : undefined;
     const lastCheck = this.lastCheck(intent.intentId);
     const manualBlockedReason = this.manualBlockedReason(intent, operation, feed);
     return {
@@ -250,6 +278,8 @@ export class SelfServiceRecovery {
       ...(operation ? { operation: safeOperation(operation) } : {}),
       ...(feed ? { feed } : {}),
       retry: this.retryView(intent.intentId, this.now()),
+      acknowledged: this.store.get(`recovery_ack:${intent.intentId}`) === String(intent.updatedAt),
+      evidence: this.evidence(intent.intentId),
       manualEligible: !manualBlockedReason,
       manualOutcomes: feed?.status === "completed" ? ["terminal_reviewed"] : feed?.status === "open" ? ["not_applied"] : ["not_applied", "cancelled"],
       ...(manualBlockedReason ? { manualBlockedReason } : {}),
@@ -265,6 +295,8 @@ export class SelfServiceRecovery {
       return "Hay una comprobación remota en curso; espera su resultado antes de revisar manualmente.";
     if (intent.state !== "uncertain") return "Solo se puede declarar una intención incierta.";
     if (intent.kind !== "apply") return "La resolución manual solo admite una aplicación independiente.";
+    if (intent.request && typeof intent.request === "object" && "offerKind" in intent.request && intent.request.offerKind === "flexible")
+      return "La orden flexible requiere comprobar su estado en QvaPay. Puedes registrar evidencia y reconocer el aviso mientras se verifica.";
     if (!intent.operationUuid) return "La intención no tiene UUID de oferta para verificar.";
     if (intent.workflowId || this.store.findWorkflowByTarget(intent.operationUuid))
       return "La intención pertenece a un workflow compensable; requiere conciliación del workflow.";

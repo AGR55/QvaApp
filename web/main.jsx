@@ -446,12 +446,12 @@ function App() {
           </div>
         </header>
         <div className="content">
-          {data.risk?.usage?.unresolvedMutation ? (
+          {(data.recoveryNoticeCount ?? Number(data.risk?.usage?.unresolvedMutation)) > 0 ? (
             <aside className="recovery-block-banner" role="alert">
               <ShieldCheck aria-hidden="true" />
               <div>
                 <strong>Operación en conciliación</strong>
-                <p>Hay {data.unresolvedMutations?.length || "una o más"} intención(es) pendientes. Las demás cacerías continúan; esta oferta no se repetirá mientras se verifica.</p>
+                <p>Hay {data.recoveryNoticeCount ?? (data.unresolvedMutations?.length || "una o más")} intención(es) pendientes. Las demás cacerías continúan; esta oferta no se repetirá mientras se verifica.</p>
               </div>
               <Button variant="primary" size="sm" onClick={() => navigate("auditoria")}>Ver conciliación</Button>
             </aside>

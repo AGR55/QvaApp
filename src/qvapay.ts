@@ -293,12 +293,18 @@ export class QvaPayClient {
     return { transactions: rows.map(parseTransaction), ...(Number.isSafeInteger(total) && total >= 0 ? { total } : {}) };
   }
 
-  async apply(uuid: string, options: { beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean> } = {}): Promise<void> {
-    await this.request(`/p2p/${uuid}/apply`, {
+  async apply(uuid: string, options: { amount?: number; beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean> } = {}): Promise<{ order: string; amount: number; receive: number } | void> {
+    const data = await this.request(`/p2p/${uuid}/apply`, {
       method: "POST",
       policy: "apply",
+      ...(options.amount === undefined ? {} : { body: { amount: options.amount } }),
       ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}),
     });
+    if (options.amount !== undefined) {
+      if (typeof data.order !== "string" || !data.order)
+        throw new QvaMutationUncertainError("aplicar orden flexible", new Error("Respuesta sin ID de orden"));
+      return { order: data.order, amount: positiveNumber(data.amount, "orden, amount"), receive: positiveNumber(data.receive, "orden, receive") };
+    }
   }
 
   secondaryApplyAvailable(): boolean {
@@ -311,27 +317,28 @@ export class QvaPayClient {
   async applySecondary(uuid: string, beforeDispatch: () => boolean | Promise<boolean>): Promise<void> {
     await this.request(`/p2p/${uuid}/apply`, { method: "POST", policy: "apply", secondary: true, beforeDispatch });
   }
-  async cancel(uuid: string): Promise<void> {
-    await this.request(`/p2p/${uuid}/cancel`, {
+  async cancel(uuid: string, order?: string): Promise<{ status?: string } | void> {
+    const result = await this.request(orderPath(uuid, "cancel", order), {
       method: "POST",
       policy: "cancel",
     });
+    if (order) return { ...(typeof result.status === "string" ? { status: result.status } : {}) };
   }
-  async markPaid(uuid: string, txId: string): Promise<void> {
-    await this.request(`/p2p/${uuid}/paid`, {
+  async markPaid(uuid: string, txId: string, order?: string): Promise<void> {
+    await this.request(orderPath(uuid, "paid", order), {
       method: "POST",
       body: { tx_id: txId },
       policy: "paid",
     });
   }
-  async confirmReceived(uuid: string): Promise<void> {
-    await this.request(`/p2p/${uuid}/received`, {
+  async confirmReceived(uuid: string, order?: string): Promise<void> {
+    await this.request(orderPath(uuid, "received", order), {
       method: "POST",
       policy: "received",
     });
   }
-  async sendChat(uuid: string, message: string): Promise<{ id?: string; createdAt?: number }> {
-    const data = await this.request(`/p2p/${uuid}/chat`, {
+  async sendChat(uuid: string, message: string, order?: string): Promise<{ id?: string; createdAt?: number }> {
+    const data = await this.request(orderPath(uuid, "chat", order), {
       method: "POST",
       body: { message },
       policy: "chat",
@@ -344,8 +351,8 @@ export class QvaPayClient {
     };
   }
 
-  async listChat(uuid: string): Promise<QvaChatMessage[]> {
-    const data = await this.request(`/p2p/${uuid}/chat`, { policy: "read", retryRead: true });
+  async listChat(uuid: string, order?: string): Promise<QvaChatMessage[]> {
+    const data = await this.request(orderPath(uuid, "chat", order), { policy: "read", retryRead: true });
     const source = Array.isArray(data)
       ? data
       : Array.isArray(data.chat)
@@ -753,7 +760,17 @@ function parseOffer(value: unknown, context: string, analyticsOnly = false): P2p
   if (raw.tags !== undefined && (!Array.isArray(raw.tags) || !raw.tags.every((tag) => typeof tag === "string")))
     throw new Error(`Respuesta inválida de QvaPay (${context}): etiquetas inválidas.`);
   const details = analyticsOnly ? undefined : normalizePaymentDetails(raw.details, context);
-  return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status, Peer: peer, details } as P2pOffer;
+  const orders = Array.isArray(raw.Orders) ? raw.Orders.map((item: unknown) => {
+    if (!isObject(item) || typeof item.uuid !== "string" || typeof item.status !== "string")
+      throw new Error("QvaPay devolvió una orden inválida.");
+    return { ...item, amount: positiveNumber(item.amount, "orden, amount"), receive: positiveNumber(item.receive, "orden, receive") };
+  }) : undefined;
+  return { ...raw, uuid: raw.uuid, type: raw.type, coin: raw.coin, amount, receive, status: raw.status, Peer: peer, details,
+    ...(orders ? { Orders: orders } : {}) } as P2pOffer;
+}
+
+function orderPath(uuid: string, action: string, order?: string): string {
+  return `/p2p/${encodeURIComponent(uuid)}/${action}${order ? `?order=${encodeURIComponent(order)}` : ""}`;
 }
 
 function normalizePaymentDetails(

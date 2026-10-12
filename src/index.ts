@@ -1,4 +1,6 @@
 import { Bot, Context, InlineKeyboard } from "grammy";
+import { installTelegramRecovery } from "./telegram-recovery.js";
+import { SelfServiceRecovery } from "./self-service-recovery.js";
 import { config } from "./config.js";
 import { QvaPayClient } from "./qvapay.js";
 import { Session } from "./session.js";
@@ -195,6 +197,9 @@ bot.use(async (ctx, next) => {
 });
 bot.use(async (ctx, next) => {
   const text = ctx.msg?.text;
+  if (ctx.callbackQuery?.data?.startsWith("recovery:")) {
+    huntingRates.cancel(chatKey(ctx)); cooperativeContributions.cancel(chatKey(ctx)); paymentReferences.cancel(chatKey(ctx));
+  }
   if (text?.startsWith("/") && !text.startsWith("/cancel")) {
     huntingRates.cancel(chatKey(ctx));
     cooperativeContributions.cancel(chatKey(ctx));
@@ -202,6 +207,8 @@ bot.use(async (ctx, next) => {
   }
   await next();
 });
+
+installTelegramRecovery(bot, new SelfServiceRecovery(store, trading, Date.now, "admin_telegram"));
 
 bot.command(["start", "panel", "status"], (ctx) => void showDashboard(ctx));
 bot.command("help", (ctx) => ctx.reply(helpText(), { parse_mode: "HTML" }));
@@ -305,7 +312,7 @@ bot.command("cancel", (ctx) => {
   return execute(ctx, async () => {
     const uuid = argument(ctx.msg?.text);
     await trading.cancel(uuid);
-    return `<b>✖ Operación cancelada</b>\n\n🆔 <code>${escapeHtml(uuid)}</code>`;
+    return `<b>${store.getOperation(uuid)?.state === "revision" ? "⚖️ Orden en disputa" : "✖ Operación cancelada"}</b>\n\n🆔 <code>${escapeHtml(uuid)}</code>`;
   });
 });
 bot.command("editoffer", (ctx) =>
@@ -417,7 +424,7 @@ bot.on("callback_query:data", async (ctx) => {
         return confirmOperationCancel(ctx, requiredUuid(uuid));
       case "confirmopcancel":
         await trading.cancel(requiredUuid(uuid));
-        return showOperations(ctx, "✖ Operación cancelada.");
+        return showOperations(ctx, store.getOperation(requiredUuid(uuid))?.state === "revision" ? "⚖️ La orden quedó en disputa; QvaPay revisará el caso." : "✖ Operación cancelada.");
       case "pay": {
         const id = requiredUuid(uuid);
         const operation = store.getOperation(id);
@@ -488,9 +495,9 @@ scheduler.register("fiat_sync", 30_000, () =>
 scheduler.register("notifications", 15_000, () => notifications.deliverDue());
 scheduler.register("recovery_alerts", 10_000, async () => {
   for (const intent of store.unresolvedMutationIntents()) {
-    if (intent.state !== "uncertain") continue;
+    if (intent.state !== "uncertain" || store.get(`recovery_ack:${intent.intentId}`) === String(intent.updatedAt)) continue;
     await notifications.publish({
-      message: `⚠️ QvaApply está conciliando una intención incierta (${intent.kind}). Oferta: ${intent.operationUuid ?? "sin UUID"}. Las demás cacerías continúan. No repitas esta operación hasta confirmar su estado en QvaPay. https://qvapply.honux.tech/?view=auditoria`,
+      message: `⚠️ Operación pendiente de conciliación\n\nAcción: ${intent.kind}\n🆔 Oferta: ${intent.operationUuid ?? "sin UUID"}\n\nLas demás cacerías continúan. No repitas esta operación hasta comprobar su estado.\n\n🔎 Usa /recovery para comprobar, registrar evidencia o reconocer el aviso.\n🌐 https://qvapply.honux.tech/?view=auditoria`,
       ...(intent.operationUuid ? { operationUuid: intent.operationUuid } : {}),
       event: { kind: "recovery-blocked", intentId: intent.intentId, ...(intent.operationUuid ? { uuid: intent.operationUuid } : {}) },
     });
@@ -930,8 +937,8 @@ function dashboardText(
   const last = state.lastScan
     ? `${relativeTime(state.lastScan.at)} · ${state.lastScan.inspected} revisadas · ${state.lastScan.candidates} candidatas`
     : "Aún no se ha ejecutado ningún escaneo";
-  const unresolved = snapshot.unresolvedMutations.slice(0, 3);
-  const mutationWarning = snapshot.risk.usage.unresolvedMutation
+  const unresolved = snapshot.unresolvedMutations.filter(intent => store.get(`recovery_ack:${intent.intentId}`) !== String(intent.updatedAt)).slice(0, 3);
+  const mutationWarning = unresolved.length > 0
     ? [
         "<b>⚠️ Operaciones en conciliación</b>",
         ...unresolved.map((intent) =>
@@ -1276,7 +1283,7 @@ async function confirmOperationCancel(ctx: Context, uuid: string): Promise<void>
   if (!canCancelOperation(operation)) throw new Error("Esta operación ya no se puede cancelar.");
   if (store.hasUnresolvedMutationForOffer(uuid)) throw new Error("Esta operación está pendiente de conciliación.");
   return render(ctx,
-    blocks("<b>⚠️ Cancelar operación</b>", `💰 <b>${money(operation!.amount)} QUSD</b> · ${escapeHtml(trading.marketLabel(operation!.coin))}\n🆔 <code>${escapeHtml(uuid)}</code>`, "QvaPay comprobará el estado antes de cancelar. Confirma solo si deseas continuar."),
+    blocks("<b>⚠️ Cancelar operación</b>", `💰 <b>${money(operation!.amount)} QUSD</b> · ${escapeHtml(trading.marketLabel(operation!.coin))}\n🆔 <code>${escapeHtml(uuid)}</code>`, operation!.orderUuid && operation!.offerType === "buy" ? "Cancelar esta orden abre una disputa en QvaPay. Los fondos siguen comprometidos hasta su resolución." : "QvaPay comprobará el estado antes de cancelar. Confirma solo si deseas continuar."),
     new InlineKeyboard().text("✖ Sí, cancelar", `confirmopcancel:${uuid}`).text("‹ Volver", "panel:operations"),
   );
 }
@@ -1354,7 +1361,8 @@ function mainKeyboard(paused: boolean): InlineKeyboard {
     .text("📦 Operaciones", "panel:operations")
     .text("🔎 Mercados", "panel:markets")
     .row()
-    .text("⚙️ Estrategia", "panel:strategy");
+    .text("⚙️ Estrategia", "panel:strategy")
+    .text("🔎 Conciliaciones", "recovery:list");
   return keyboard
     .row()
     .text("🤖 Automatización", "panel:automation")
@@ -1546,7 +1554,7 @@ function helpText(): string {
     "Abre <b>Menú</b> para gestionar cacerías, mercados, ofertas y operaciones con botones.",
     `<b>🎯 Cacerías y mercados</b>\n<code>/hunting</code> · estado y tasas\n<code>/network</code> · red cooperativa\n<code>/market ${markets}</code> · ofertas de un mercado`,
     `<b>💼 Ofertas propias</b>\n<code>/createbuy ${markets} QUSD TASA</code>\n<code>/createsell ${markets} QUSD TASA</code>\n<code>/editoffer UUID QUSD TASA</code>\n<code>/canceloffer UUID</code>`,
-    "<b>💸 Operaciones</b>\n<code>/paid UUID ID</code> · registrar pago\n<code>/received UUID</code> · confirmar recepción\n<code>/cancel UUID</code> · cancelar operación",
+    "<b>💸 Operaciones</b>\n<code>/recovery</code> · conciliaciones y evidencia\n<code>/paid UUID ID</code> · registrar pago\n<code>/received UUID</code> · confirmar recepción\n<code>/cancel UUID</code> · cancelar operación",
     `<b>⚙️ Ajustes</b>\n<code>/fiat ${markets} IMPORTE</code> · declarar saldo\n<code>/refresh on|off</code> · refresco de ofertas\n<code>/pause</code> · pausar cacerías\n<code>/resume</code> · reanudarlas`,
   );
 }

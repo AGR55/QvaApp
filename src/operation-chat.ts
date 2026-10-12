@@ -47,7 +47,7 @@ export class OperationChatService {
   async refresh(uuid: string): Promise<OperationChatView> {
     this.requireOperation(uuid);
     try {
-      const remote = await this.qva.listChat(uuid);
+      const remote = await this.qva.listChat(uuid, this.requireOperation(uuid).orderUuid);
       const previous = this.store.loadRemoteResource<QvaChatMessage[]>(CACHE_KEY(uuid))?.data ?? [];
       const byId = new Map([...previous, ...remote].map(message => [message.id, message]));
       const messages = [...byId.values()]
@@ -69,7 +69,7 @@ export class OperationChatService {
     if (!message) throw new OperationChatError(400, "El mensaje no puede estar vacío.");
     if (message.length > 599) throw new OperationChatError(400, "El mensaje no puede superar 599 caracteres.");
     let result: Awaited<ReturnType<ChatGateway["sendChat"]>>;
-    try { result = await this.qva.sendChat(uuid, message); }
+    try { result = await this.qva.sendChat(uuid, message, this.requireOperation(uuid).orderUuid); }
     catch (error) {
       if (error instanceof QvaMutationUncertainError)
         throw new OperationChatError(409, "El envío quedó incierto. Comprueba el chat antes de intentar enviarlo de nuevo.");

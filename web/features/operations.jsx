@@ -81,7 +81,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
           </ol>
         ) : <Empty title="Sin avisos pendientes" icon={Bell}>Los avisos de tus operaciones aparecerán aquí.</Empty>}
       </Panel>
-      {data.risk.usage.unresolvedMutation ? (
+      {(data.recoveryNoticeCount ?? Number(data.risk.usage.unresolvedMutation)) > 0 ? (
         <div className="alert" role="alert">
           <AlertTriangle aria-hidden="true" />
           Hay una mutación remota sin confirmar. Se verifica esa oferta mientras continúan las demás cacerías.
@@ -97,7 +97,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
                 <TableBody>
                   {data.operations.map((operation) => (
                     <TableRow key={operation.uuid}>
-                      <TableCell className="whitespace-nowrap"><State value={operation.state} /></TableCell>
+                      <TableCell className="whitespace-nowrap"><State value={operation.state} />{operation.orderUuid ? <small title={operation.orderUuid}>Orden {operation.orderUuid.slice(0, 8)}</small> : null}</TableCell>
                       <TableCell className="whitespace-nowrap">{operation.offerType === "sell" ? "Comprar QUSD" : "Vender QUSD"}{operation.cooperativeOwnerFiat !== undefined ? <small>Cacería conjunta</small> : null}</TableCell>
                       <TableCell className="whitespace-nowrap">{label(operation.coin)}</TableCell>
                       <TableCell className="whitespace-nowrap">{money(operation.amount)} QUSD<small>{money(operation.receive)} {unit(operation.coin)}{operation.cooperativeOwnerFiat !== undefined ? ` · Tu parte: ${money(operation.cooperativeOwnerFiat)}` : ""}</small></TableCell>
@@ -139,7 +139,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
           <DialogContent className="review-dialog" showCloseButton={false}>
             <DialogHeader>
               <DialogTitle>{actionTitle(pending.action)}</DialogTitle>
-              <DialogDescription>{money(pending.operation.amount)} QUSD en {label(pending.operation.coin)}.{pending.operation.cooperativeOwnerFiat !== undefined && pending.action === "paid" ? " Confirma únicamente cuando todos los participantes hayan pagado al vendedor. Tu SMS solo demuestra tu parte." : ""}</DialogDescription>
+              <DialogDescription>{money(pending.operation.amount)} QUSD en {label(pending.operation.coin)}.{pending.action === "cancel" && pending.operation.orderUuid && pending.operation.offerType === "buy" ? " En esta orden flexible, cancelar abre una disputa en QvaPay. Los fondos siguen comprometidos hasta su resolución." : ""}{pending.operation.cooperativeOwnerFiat !== undefined && pending.action === "paid" ? " Confirma únicamente cuando todos los participantes hayan pagado al vendedor. Tu SMS solo demuestra tu parte." : ""}</DialogDescription>
             </DialogHeader>
             {pending.action === "paid" ? (
               <FieldGroup>

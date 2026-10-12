@@ -9,6 +9,7 @@ export const TELEGRAM_COMMANDS = [
   { command: "coop", description: "Gestionar mi aporte cooperativo" },
   { command: "markets", description: "Consultar mercados P2P" },
   { command: "offers", description: "Administrar mis ofertas" },
+  { command: "recovery", description: "Conciliar, registrar evidencia y reconocer avisos" },
   { command: "operations", description: "Operaciones activas" },
   { command: "strategy", description: "Estrategia y límites actuales" },
   { command: "automation", description: "Activar o pausar automatización" },
