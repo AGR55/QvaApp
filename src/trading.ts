@@ -31,6 +31,7 @@ import {
 import { planLiquidity } from "./core/liquidity-plan.js";
 import { ReconciliationScheduler } from "./reconciliation-scheduler.js";
 import { applyReadyAt } from "./core/apply-budget.js";
+import { sizeFlexibleOffer, orderForOperation, matchingRecoveryOrder } from "./flexible-order.js";
 
 type RuntimeConfig = typeof Config;
 interface BlockedOfferNotification {
@@ -470,7 +471,7 @@ export class TradingEngine {
             continue;
           }
           try {
-            const remote = await this.qva.getOffer(intent.operationUuid);
+            const remote = orderForOperation(await this.qva.getOffer(intent.operationUuid), operation.orderUuid);
             const next = reconciledOperationMutationState(
               intent.kind,
               operation.state,
@@ -479,6 +480,7 @@ export class TradingEngine {
             if (!next) continue;
             if (next !== operation.state)
               this.store.updateOperation(intent.operationUuid, next);
+            this.recordFlexibleFiat(operation, remote.status);
             this.store.updateMutationIntent(intent.intentId, "reconciled", {
               remoteStatus: remote.status,
               operationState: next,
@@ -519,6 +521,33 @@ export class TradingEngine {
         const uuid = intent.operationUuid!;
         try {
           const remote = await this.qva.getOffer(uuid);
+          const request = isRecord(intent.request) ? intent.request : {};
+          if (request.offerKind === "flexible" || remote.offer_kind === "flexible") {
+            const saved = isRecord(intent.response) ? intent.response : {};
+            const knownOrder = typeof saved.order === "string" ? saved.order : this.store.getOperation(uuid)?.orderUuid;
+            let account = this.store.get("analytics_account_uuid");
+            if (!knownOrder && !account) {
+              account = (await this.qva.profile()).uuid;
+              if (account) this.store.set("analytics_account_uuid", account);
+            }
+            const order = knownOrder ? remote.Orders?.find(item => item.uuid === knownOrder)
+              : matchingRecoveryOrder(remote, Number(request.amount), intent.createdAt, account);
+            if (!order) { recordCheck(intent.intentId, "No hay una orden propia inequívoca; registra evidencia o vuelve a comprobar."); continue; }
+            const state = operationStateFromRemote("applied", order.status);
+            this.store.createOperation({ uuid, orderUuid: order.uuid, offerType: remote.type, coin: remote.coin,
+              amount: order.amount, receive: order.receive, rate: order.receive / order.amount,
+              state, autoApplied: request.automatic === true, cancelAt: null, createdAt: intent.createdAt,
+              ...(remote.User?.uuid ? { counterpartyId: remote.User.uuid } : {}) });
+            const recovered = this.store.getOperation(uuid);
+            if (recovered?.orderUuid === order.uuid) {
+              this.store.updateOperation(uuid, state);
+              this.recordFlexibleFiat(recovered, order.status);
+            }
+            this.store.updateMutationIntent(intent.intentId, "reconciled", { order: order.uuid, remoteStatus: order.status });
+            this.store.audit("flexible_order_reconciled", `Orden propia ${order.uuid} confirmada en QvaPay.`, uuid);
+            reconciled++;
+            continue;
+          }
           const remoteStatus = remote.status.toLowerCase();
           if (
             [
@@ -570,6 +599,10 @@ export class TradingEngine {
             reconciled += 1;
           }
         } catch (error) {
+          if (isRecord(intent.request) && intent.request.offerKind === "flexible") {
+            recordCheck(intent.intentId, qvaPayFailureDetail("conciliar orden flexible", error));
+            continue;
+          }
           const checkedAt = Date.now();
           this.store.set(
             `reconciliation_last_check:${intent.intentId}`,
@@ -829,9 +862,96 @@ export class TradingEngine {
     if (Number.isFinite(publishedAt) && Date.now() - publishedAt > 5_000) {
       return { inspected: 1, candidates: 0, action: "Cotización del feed antigua (>5 s); pendiente de una observación fresca" };
     }
+    if (candidate.offer_kind === "flexible") return this.takeFlexibleOffer(candidate, true, observedAt);
     return candidate.type === "sell"
       ? this.ingestFastFiatFundedOffer(candidate, receivedAt, event, observedAt)
       : this.ingestFastQusdFundedOffer(candidate, receivedAt, event, observedAt);
+  }
+
+  private async takeFlexibleOffer(offer: P2pOffer, automatic: boolean, observedAt = Date.now()): Promise<{ inspected: number; candidates: number; action: string }> {
+    const skip = (action: string) => ({ inspected: 1, candidates: 0, action });
+    if (automatic && this.store.isSeen(offer.uuid)) return skip("Oferta ya evaluada");
+    if (!this.isMarket(offer.coin) || offer.status !== "open" || offer.can_take_flexible === false)
+      return skip("Oferta flexible no disponible para esta cuenta");
+    if (this.store.getOperation(offer.uuid) || this.store.hasUnresolvedMutationForOffer(offer.uuid) || this.isExcludedAfterManualCancel(offer.uuid))
+      return skip("Oferta con operación previa o conciliación pendiente");
+    const market = this.market(offer.coin)!;
+    const quote = rate(offer);
+    if (!Number.isFinite(quote) || quote <= 0 || (offer.type === "sell" ? quote > market.buyMaxRate : quote < market.sellMinRate))
+      return skip("La tasa flexible no cumple el objetivo");
+    const { sized, balance } = await this.sizeFlexibleTake(offer);
+    if (!sized) return skip("El saldo libre o los límites no alcanzan el mínimo de la orden");
+    if (offer.type === "sell" && outgoingFiatCost(sized.amount, quote, market.outgoingTransferFee).effectiveRate > market.buyMaxRate)
+      return skip("La tasa con comisión supera el máximo de compra");
+    if (automatic && !await this.automaticDispatchAllowed(sized, undefined, Date.now() - observedAt))
+      return skip("Las condiciones de la cacería cambiaron");
+    this.requireRealMode();
+    let result: { order: string; amount: number; receive: number };
+    try {
+      result = await this.monetaryIntents.execute({
+      kind: "apply", operationUuid: offer.uuid,
+      request: { uuid: offer.uuid, automatic, offerKind: "flexible", amount: sized.amount, receive: sized.receive, coin: offer.coin, offerType: offer.type },
+      action: async intentId => {
+        const response = await this.qva.apply(offer.uuid, { amount: sized.amount,
+          ...(automatic ? { beforeDispatch: (queued: number) => this.automaticDispatchAllowed(sized, intentId, Math.max(queued, Date.now() - observedAt)) } : {}) });
+        if (!response?.order || response.amount !== sized.amount || !Number.isFinite(response.receive) || response.receive <= 0)
+          throw new QvaMutationUncertainError("aplicar orden flexible", new Error("Respuesta de orden incompleta o importe distinto"));
+        return response;
+      },
+    });
+    } catch (error) {
+      if (!automatic || !isDefinitiveQvaApplyRejection(error)) throw error;
+      if (!error.code?.startsWith("LOCAL_")) this.store.markSeen(offer.uuid);
+      this.store.audit("flexible_order_rejected", error.message, offer.uuid);
+      return skip(error.message);
+    }
+    this.store.createOperation({ uuid: offer.uuid, orderUuid: result.order, offerType: offer.type, coin: offer.coin,
+      amount: result.amount, receive: result.receive, rate: result.receive / result.amount,
+      state: "applied", autoApplied: automatic, cancelAt: null, createdAt: Date.now(),
+      ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}) });
+    if (offer.type === "buy") this.qusdBalanceCache = { value: Math.max(0, balance + this.cooperativeQusdOwed() - result.amount), updatedAt: Date.now() };
+    this.store.markSeen(offer.uuid);
+    this.store.audit("flexible_order_applied", `Orden ${result.order}: ${result.amount} QUSD por ${result.receive} ${market.currency}.`, offer.uuid);
+    queueMicrotask(() => void Promise.all([this.sendChatBestEffort(offer.uuid), this.notify(
+      `Orden flexible aplicada: ${result.amount} QUSD.`, offer.uuid,
+      { kind: "operation-applied", uuid: offer.uuid, coin: offer.coin, amount: result.amount },
+    )]).catch(error => this.store.audit("notification_warning", String(error), offer.uuid)));
+    return { inspected: 1, candidates: 1, action: `${offer.type === "sell" ? "aplicada" : "venta aplicada"} ${offer.uuid}` };
+  }
+
+  private async sizeFlexibleTake(offer: P2pOffer) {
+    const market = this.market(offer.coin)!;
+    const quote = rate(offer);
+    const balance = offer.type === "buy" ? await this.fastLaneQusdBalance() : 0;
+    const risk = this.marketConfig.current().risk;
+    const reserve = Math.max(this.strategy().reserve, risk.minQusdReserve);
+    const capacity = offer.type === "sell"
+      ? (this.freeFiat(offer.coin) - market.outgoingTransferFee) / quote
+      : Math.max(0, balance - reserve - this.uncertainFlexibleCapital("buy"));
+    const active = this.store.activeOperations();
+    const limit = Math.min(risk.maxQusdPerOperation,
+      risk.maxConcurrentQusdExposure - active.reduce((sum, op) => sum + op.amount, 0),
+      risk.maxDailyAppliedQusd - this.store.dailyAppliedQusd(dayStart(Date.now())),
+      offer.type === "sell" && market.purchaseMaxQusd ? market.purchaseMaxQusd : Infinity);
+    const sized = sizeFlexibleOffer(offer, capacity, limit);
+    return { sized: active.length >= risk.maxConcurrentOperations ? undefined : sized, balance };
+  }
+
+  private uncertainFlexibleCapital(side: "buy" | "sell", coin?: string, ignoreIntent?: string): number {
+    return this.store.unresolvedMutationIntents().reduce((sum, intent) => {
+      const request = isRecord(intent.request) ? intent.request : {};
+      if (intent.intentId === ignoreIntent || intent.kind !== "apply" || request.offerKind !== "flexible" || request.offerType !== side ||
+        (coin && request.coin !== coin) || (intent.operationUuid && this.store.getOperation(intent.operationUuid))) return sum;
+      const value = Number(side === "buy" ? request.amount : request.receive);
+      return sum + (Number.isFinite(value) && value > 0 ? value : 0) +
+        (side === "sell" && coin ? this.market(coin)?.outgoingTransferFee ?? 0 : 0);
+    }, 0);
+  }
+
+  private freeFiat(coin: string, ignoreIntent?: string): number {
+    const committed = this.store.activeOperations().filter(op => op.offerType === "sell" && op.coin === coin && !this.store.hasFiatMovement(op.uuid))
+      .reduce((sum, op) => sum + this.operationFiatCost(op), 0);
+    return Math.max(0, this.fiatBalance(coin) - committed - Number(this.store.get(`cooperative_fiat_reserved:${coin}`) ?? 0) - this.uncertainFlexibleCapital("sell", coin, ignoreIntent));
   }
 
   private async ingestFastFiatFundedOffer(
@@ -1086,6 +1206,7 @@ export class TradingEngine {
       total?: number;
       offers?: Array<P2pOffer & { rate?: number; decision?: string; reason?: string }>;
     }>(`market:${offer.coin}`);
+    if (this.store.getOperation(offer.uuid)?.orderUuid) return;
     const ownOffer = event === "p2p.applied" && this.ownsOfferUuid(offer.uuid);
     if (cached) {
       const offers = (cached.data.offers ?? []).filter((candidate) => candidate.uuid !== offer.uuid);
@@ -1341,6 +1462,11 @@ export class TradingEngine {
         .sort((left, right) => this.opportunityScore(right) - this.opportunityScore(left));
       let blockedUuid: string | undefined;
       for (const best of rankedSells) {
+        if (best.offer_kind === "flexible") {
+          const result = await this.takeFlexibleOffer(best, true, snapshots.find(item => item.coin === best.coin && item.side === best.type)?.scannedAt);
+          if (result.candidates) return result;
+          continue;
+        }
         const bestCoin = this.offerMarket(best);
         if (!this.huntEnabled(bestCoin, "buy")) continue;
         if (this.mode() === "real") {
@@ -1450,6 +1576,11 @@ export class TradingEngine {
         .sort((left, right) => this.opportunityScore(right) - this.opportunityScore(left));
       for (const bestExternalBuy of rankedBuys) {
         if (this.mode() !== "real") break;
+        if (bestExternalBuy.offer_kind === "flexible") {
+          const result = await this.takeFlexibleOffer(bestExternalBuy, true, snapshots.find(item => item.coin === bestExternalBuy.coin && item.side === bestExternalBuy.type)?.scannedAt);
+          if (result.candidates) return result;
+          continue;
+        }
         const coin = this.offerMarket(bestExternalBuy);
         if (!this.huntEnabled(coin, "sell")) continue;
         const configured = this.market(coin)!;
@@ -1561,6 +1692,11 @@ export class TradingEngine {
       throw new Error(
         "La oferta ya no está abierta o no usa un mercado fiat compatible.",
       );
+    if (offer.offer_kind === "flexible") {
+      const result = await this.takeFlexibleOffer(offer, false);
+      if (!result.candidates) throw new Error(result.action);
+      return "✅ Orden flexible aplicada. Abre Operaciones para gestionar el pago.";
+    }
     if (offer.type === "sell") {
       const market = this.market(this.offerMarket(offer))!;
       const transfer = outgoingFiatCost(
@@ -1628,11 +1764,16 @@ export class TradingEngine {
     const alert = store.tradingAlert(uuid);
     if (!alert || alert.decision !== "blocked" || alert.resolvedAt !== null)
       throw new Error("La oferta bloqueada ya no está pendiente de revisión.");
-    const offer = await this.qva.getOffer(uuid);
+    let offer = await this.qva.getOffer(uuid);
     if (offer.status !== "open" || !this.isMarket(offer.coin)) {
       store.resolveTradingAlert(uuid, "expired");
       store.audit("blocked_offer_expired", "La oferta dejó de estar abierta durante la revisión.", uuid);
       throw new Error("La oferta ya no está abierta.");
+    }
+    if (offer.offer_kind === "flexible") {
+      const { sized } = await this.sizeFlexibleTake(offer);
+      if (!sized) throw new Error("El saldo libre o los límites no alcanzan el mínimo de la orden.");
+      offer = sized;
     }
     const referenceRate = alert.referenceRate ?? rate(offer);
     const deviationPercent = referenceRate
@@ -1647,7 +1788,7 @@ export class TradingEngine {
       restoreQusd: number;
     }> = [];
     let liquidityReason = "No requiere cancelar ofertas propias.";
-    if (offer.type === "buy") {
+    if (offer.type === "buy" && offer.offer_kind !== "flexible") {
       const [balance, ownOffers] = await Promise.all([
         this.qva.qusdBalance(),
         this.qva.listOffers({ my: true, take: 100, page: 1, status: "open" }),
@@ -1694,6 +1835,13 @@ export class TradingEngine {
     if (offer.status !== "open" || !this.isMarket(offer.coin)) {
       store.resolveTradingAlert(uuid, "expired");
       throw new Error("La oferta ya no está abierta o el mercado no es compatible.");
+    }
+    if (offer.offer_kind === "flexible") {
+      const result = await this.takeFlexibleOffer(offer, false);
+      if (!result.candidates) throw new Error(result.action);
+      store.resolveTradingAlert(uuid, "applied");
+      store.resolveDecisionEventsForOffer(uuid, "applied");
+      return "Orden flexible aplicada. Verifica los datos de la orden antes de gestionar su pago.";
     }
     const referenceRate = alert.referenceRate ?? rate(offer);
     store.audit(
@@ -1765,14 +1913,14 @@ export class TradingEngine {
       );
     if (!reference.trim())
       throw new Error("La referencia de transferencia es obligatoria.");
-    const remote = await this.qva.getOffer(uuid);
+    const remote = orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid);
     if (remote.status.toLowerCase() !== "processing")
       throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se marcó el pago.`);
     await this.monetaryIntents.execute({
       kind: "paid",
       operationUuid: uuid,
-      request: { uuid, reference: reference.trim() },
-      action: () => this.qva.markPaid(uuid, reference.trim()),
+      request: { uuid, orderUuid: operation.orderUuid, reference: reference.trim() },
+      action: () => this.qva.markPaid(uuid, reference.trim(), operation.orderUuid),
     });
     this.store.updateOperation(uuid, "paid");
     this.store.audit("marked_paid", "Pago fiat marcado por el usuario", uuid);
@@ -1787,14 +1935,15 @@ export class TradingEngine {
       throw new Error(
         "En una compra de QUSD debes marcar pago, no confirmar recepción.",
       );
-    await this.qva.getOffer(uuid);
+    orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid);
     await this.monetaryIntents.execute({
       kind: "received",
       operationUuid: uuid,
-      request: { uuid },
-      action: () => this.qva.confirmReceived(uuid),
+      request: { uuid, orderUuid: operation.orderUuid },
+      action: () => this.qva.confirmReceived(uuid, operation.orderUuid),
     });
     this.store.updateOperation(uuid, "completed");
+    this.recordFlexibleFiat(operation, "completed");
     this.store.audit("received", "Usuario confirmó recepción de fiat", uuid);
   }
 
@@ -1807,16 +1956,16 @@ export class TradingEngine {
     if (!["applied", "acknowledged"].includes(operation.state))
       throw new Error("Esta operación ya no se puede cancelar en su estado actual.");
     this.store.excludeAutomaticReapplyAfterManualCancel(uuid);
-    const remote = await this.qva.getOffer(uuid);
+    const remote = orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid);
     if (remote.status.toLowerCase() !== "processing")
       throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se canceló.`);
-    await this.monetaryIntents.execute({
+    const cancellation = await this.monetaryIntents.execute({
       kind: "cancel",
       operationUuid: uuid,
-      request: { uuid, automatic },
-      action: () => this.qva.cancel(uuid),
+      request: { uuid, automatic, orderUuid: operation.orderUuid },
+      action: () => this.qva.cancel(uuid, operation.orderUuid),
     });
-    this.store.updateOperation(uuid, "cancelled");
+    this.store.updateOperation(uuid, cancellation?.status === "revision" || (operation.orderUuid && operation.offerType === "buy" && cancellation?.status !== "cancelled") ? "revision" : "cancelled");
     this.store.audit(
       "cancel",
       "Cancelada por el usuario",
@@ -1835,11 +1984,20 @@ export class TradingEngine {
     }
   }
 
+  private recordFlexibleFiat(operation: import("./store.js").Operation, status: string): void {
+    if (!operation.orderUuid) return;
+    if (operation.offerType === "sell" && ["paid", "completed"].includes(status))
+      this.recordOutgoingFiat(operation, "Orden flexible confirmada por QvaPay");
+    if (operation.offerType === "buy" && status === "completed")
+      this.store.recordFiatMovement(operation.uuid, operation.coin, "credit", operation.receive, "Orden flexible confirmada por QvaPay");
+  }
+
   async syncRemoteOperations(): Promise<number> {
     let changed = 0;
     for (const operation of this.store.activeOperations()) {
       try {
-        const remote = await this.qva.getOffer(operation.uuid);
+        const remote = orderForOperation(await this.qva.getOffer(operation.uuid), operation.orderUuid);
+        this.recordFlexibleFiat(operation, remote.status);
         const next = operationStateFromRemote(operation.state, remote.status);
         this.store.set(`operation_sync_error:${operation.uuid}`, "");
         if (next === operation.state) continue;
@@ -1940,6 +2098,7 @@ export class TradingEngine {
       offers.set(offer.uuid, offer);
     let movements = 0;
     for (const offer of offers.values()) {
+      if (offer.offer_kind === "flexible") continue; // Order accounting uses authenticated order state.
       const updatedAt = offer.updated_at
         ? Date.parse(offer.updated_at)
         : Number.NaN;
@@ -2452,6 +2611,14 @@ export class TradingEngine {
       };
     const coin = this.offerMarket(offer);
     const configured = this.market(coin)!;
+    if (offer.offer_kind === "flexible") {
+      const sized = sizeFlexibleOffer(offer, offer.type === "sell"
+        ? (this.freeFiat(coin) - configured.outgoingTransferFee) / value
+        : Number(offer.available_amount),
+        Math.min(this.marketConfig.current().risk.maxQusdPerOperation, offer.type === "sell" && configured.purchaseMaxQusd ? configured.purchaseMaxQusd : Infinity));
+      if (!sized) return { offer, rate: value, decision: "ignored", reason: "Capital o rango insuficiente para una orden flexible" };
+      offer = sized;
+    }
     const vipFlag = explicitFlag(offer.only_vip);
     if (vipFlag === "true" || vipFlag === "unknown")
       return {
@@ -2573,22 +2740,8 @@ export class TradingEngine {
     };
   }
 
-  private canFund(offer: P2pOffer): boolean {
-    const committed = this.store
-      .activeOperations()
-      .filter(
-        (op) => op.offerType === "sell" && op.coin === this.offerMarket(offer) && !this.store.hasFiatMovement(op.uuid),
-      )
-      .reduce(
-        (sum, op) =>
-          sum + this.operationFiatCost(op),
-        0,
-      );
-    return (
-      this.fiatBalance(this.offerMarket(offer)) - committed - Number(this.store.get(`cooperative_fiat_reserved:${offer.coin}`) ?? 0) >=
-      offer.receive +
-        (this.market(this.offerMarket(offer))?.outgoingTransferFee ?? 0)
-    );
+  private canFund(offer: P2pOffer, ignoreIntent?: string): boolean {
+    return this.freeFiat(this.offerMarket(offer), ignoreIntent) >= offer.receive + (this.market(this.offerMarket(offer))?.outgoingTransferFee ?? 0);
   }
 
   private isExcludedAfterManualCancel(uuid: string): boolean {
@@ -2624,7 +2777,7 @@ export class TradingEngine {
     if (!Number.isFinite(quotedRate) || quotedRate <= 0) return false;
     const transfer = outgoingFiatCost(offer.amount, quotedRate, market.outgoingTransferFee);
     return this.huntEnabled(coin, "buy") && Number.isFinite(transfer.effectiveRate) && transfer.effectiveRate <= market.buyMaxRate &&
-      !this.suspiciousBuyPriceReason(offer) && this.canFund(offer);
+      !this.suspiciousBuyPriceReason(offer) && this.canFund(offer, ownIntentId);
   }
 
   private suspiciousBuyPriceReason(offer: P2pOffer, requireFreshMedian = true): string | undefined {
@@ -2652,6 +2805,10 @@ export class TradingEngine {
       (candidate.type === "sell" ? this.isAutomaticBuyStillEligible(candidate, ownIntentId) :
         this.isAutomaticSellStillEligible(candidate, ownIntentId));
     if (!eligible(offer)) return false;
+    if (offer.offer_kind === "flexible" && offer.type === "buy") {
+      const reserve = Math.max(this.strategy().reserve, this.marketConfig.current().risk.minQusdReserve);
+      if (await this.fastLaneQusdBalance() - reserve - this.uncertainFlexibleCapital("buy", undefined, ownIntentId) < offer.amount) return false;
+    }
     if (offer.type === "buy" && this.cooperativeQusdOwed() > 0 && await this.fastLaneQusdBalance() < offer.amount) return false;
     if (queuedForMs <= 5_000) return true;
     return false;
@@ -3024,7 +3181,7 @@ export class TradingEngine {
   private async sendChatBestEffort(uuid: string): Promise<void> {
     try {
       const sentAt = Date.now();
-      const sent = await this.qva.sendChat(uuid, this.automationConfig().welcomeMessage);
+      const sent = await this.qva.sendChat(uuid, this.automationConfig().welcomeMessage, this.store.getOperation(uuid)?.orderUuid);
       this.store.set(`chat:auto_message:${uuid}`, JSON.stringify({ id: sent.id ?? null, sentAt: sent.createdAt ?? sentAt }));
     } catch (error) {
       this.store.audit(
@@ -3039,7 +3196,7 @@ export class TradingEngine {
   }
 
   private async acknowledgeFromOwnChat(uuid: string, appliedAt: number): Promise<boolean> {
-    const [profile, messages] = await Promise.all([this.qva.profile(), this.qva.listChat(uuid)]);
+    const [profile, messages] = await Promise.all([this.qva.profile(), this.qva.listChat(uuid, this.store.getOperation(uuid)?.orderUuid)]);
     let automatic: { id?: string | null; sentAt?: number } = {};
     try { automatic = JSON.parse(this.store.get(`chat:auto_message:${uuid}`) ?? "{}"); } catch { /* ignora metadatos dañados */ }
     const own = messages.find((message) =>

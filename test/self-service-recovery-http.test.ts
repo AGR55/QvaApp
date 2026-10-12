@@ -10,6 +10,8 @@ test("API recovery exige sesión y CSRF, y valida los dos contratos de acción",
   const calls: unknown[] = [];
   const readModel = {
     recoveryItems: () => ({ items: [], blocked: true }),
+    recordRecoveryEvidence: (id: string, evidence: string) => { calls.push({ id, evidence }); return { saved: true }; },
+    acknowledgeRecoveryIntent: (id: string) => { calls.push({ acknowledged: id }); return { acknowledged: true }; },
     checkRecoveryIntent: async (intentId: string) => {
       calls.push({ check: intentId });
       return { intentId, outcome: "pending", state: "uncertain", checkedAt: 1, updatedAt: 1 };
@@ -63,6 +65,14 @@ test("API recovery exige sesión y CSRF, y valida los dos contratos de acción",
     reason: "Revisé la actividad en QvaPay.",
     evidence: "No aparece aplicación ni operación para ese UUID.", confirmed: true,
   });
+  for (const action of ["evidence", "acknowledge"]) {
+    assert.equal((await app.inject({ method: "POST", url: `/api/recovery/i-1/${action}`, payload: { evidence: "Estado comprobado en QvaPay" } })).statusCode, 401);
+    assert.equal((await app.inject({ method: "POST", url: `/api/recovery/i-1/${action}`, headers: { origin, cookie }, payload: { evidence: "Estado comprobado en QvaPay" } })).statusCode, 403);
+  }
+  assert.equal((await app.inject({ method: "POST", url: "/api/recovery/i-1/evidence", headers, payload: { evidence: "short" } })).statusCode, 400);
+  assert.equal((await app.inject({ method: "POST", url: "/api/recovery/i-1/evidence", headers, payload: { evidence: "Estado comprobado en QvaPay" } })).statusCode, 200);
+  assert.equal((await app.inject({ method: "POST", url: "/api/recovery/i-1/acknowledge", headers, payload: {} })).statusCode, 200);
+  assert.deepEqual(calls.slice(2), [{ id: "i-1", evidence: "Estado comprobado en QvaPay" }, { acknowledged: "i-1" }]);
   await app.close();
 });
 

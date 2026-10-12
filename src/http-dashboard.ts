@@ -799,6 +799,10 @@ export function buildDashboard(
       return reply.status(503).send({ error: "La recuperación local no está disponible." });
     return { data: readModel.recoveryItems() };
   });
+  app.post<{ Params: { intentId: string }; Body: { evidence: string } }>("/api/recovery/:intentId/evidence", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["evidence"], properties: { evidence: { type: "string", minLength: 12, maxLength: 1000 } } } },
+  }, async request => ({ data: readModel.recordRecoveryEvidence(request.params.intentId, request.body.evidence) }));
+  app.post<{ Params: { intentId: string } }>("/api/recovery/:intentId/acknowledge", async request => ({ data: readModel.acknowledgeRecoveryIntent(request.params.intentId) }));
   app.post<{ Params: { intentId: string }; Body: Record<string, never> }>("/api/recovery/:intentId/check", {
     schema: {
       params: {

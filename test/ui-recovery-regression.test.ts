@@ -11,7 +11,7 @@ const main = readFileSync(new URL("../web/main.jsx", import.meta.url), "utf8");
 test("la conciliación y resolución manual usan solo el contrato de recuperación y gates manualEligible", () => {
   assert.match(recovery, /requestJson\("\/api\/recovery"\)/);
   assert.match(recovery, /\/api\/recovery\/\$\{encodeURIComponent\(item\.intentId\)\}\/check/);
-  assert.match(recovery, /\/api\/recovery\/\$\{encodeURIComponent\(selected\.intentId\)\}\/resolve/);
+  assert.match(recovery, /evidenceOnly \? "evidence" : "resolve"/);
   assert.match(recovery, /expectedUpdatedAt:\s*selected\.updatedAt/);
   assert.match(recovery, /confirmed:\s*true/);
   assert.match(recovery, /item\.manualEligible\s*===\s*true\s*\?/);

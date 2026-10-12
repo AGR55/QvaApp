@@ -17,6 +17,15 @@ type P2pStatus =
   | "revision"
   | string;
 
+export interface P2pOrder {
+  uuid: string;
+  amount: number;
+  receive: number;
+  status: string;
+  created_at?: string;
+  Taker?: { uuid: string };
+}
+
 export interface P2pOffer {
   uuid: string;
   type: P2pType;
@@ -33,6 +42,8 @@ export interface P2pOffer {
   available_amount?: number | string | null;
   order_min?: number | string | null;
   order_max?: number | string | null;
+  Orders?: P2pOrder[];
+  can_take_flexible?: boolean;
   private?: boolean | number;
   webhook?: string | null;
   updated_at?: string;

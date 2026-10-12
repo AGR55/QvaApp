@@ -245,3 +245,33 @@ test("p2p.completed anterior a la intención no habilita resolución terminal", 
   }), false);
   store.close();
 });
+
+test("Telegram registra evidencia y reconoce un aviso sin resolver ni desbloquear su oferta", () => {
+  const { store, createIntent } = setup();
+  createIntent("telegram-note", "offer-note", { kind: "paid" });
+  const recovery = new SelfServiceRecovery(store, {} as never, Date.now, "admin_telegram");
+  assert.equal(recovery.list().items[0]?.manualEligible, false);
+  recovery.recordEvidence("telegram-note", "Pago TX-123 visible en QvaPay; esperando verificación.");
+  recovery.acknowledge("telegram-note");
+  const item = recovery.list().items[0]!;
+  assert.equal(item.acknowledged, true);
+  assert.equal(item.evidence[0]?.actor, "admin_telegram");
+  assert.equal(store.hasUnresolvedMutationForOffer("offer-note"), true);
+  assert.equal(store.hasUnresolvedMutationForOffer("other-offer"), false);
+  assert.equal(store.getMutationIntent("telegram-note")?.state, "uncertain");
+  store.close();
+});
+
+test("la resolución manual desde Telegram conserva actor, evidencia y control de versión", () => {
+  const { store, createIntent } = setup();
+  const intent = createIntent("telegram-resolve", "offer-resolve");
+  const recovery = new SelfServiceRecovery(store, {} as never, Date.now, "admin_telegram");
+  const result = recovery.resolveManual({ intentId: intent.intentId, expectedUpdatedAt: intent.updatedAt,
+    outcome: "not_applied", reason: "Comprobé mi cuenta y no hay aplicación.", evidence: "Oferta offer-resolve sigue abierta sin operación propia.", confirmed: true });
+  assert.equal(result.actor, "admin_telegram");
+  assert.equal(result.state, "reconciled");
+  assert.equal(store.hasUnresolvedMutationForOffer("offer-resolve"), false);
+  assert.throws(() => recovery.resolveManual({ intentId: intent.intentId, expectedUpdatedAt: intent.updatedAt,
+    outcome: "not_applied", reason: "Comprobé mi cuenta y no hay aplicación.", evidence: "Oferta sin operación propia confirmada.", confirmed: true }));
+  store.close();
+});

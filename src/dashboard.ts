@@ -174,6 +174,8 @@ export class DashboardReadModel {
   recoveryItems() {
     return this.recovery.list();
   }
+  recordRecoveryEvidence(intentId: string, evidence: string) { return this.recovery.recordEvidence(intentId, evidence); }
+  acknowledgeRecoveryIntent(intentId: string) { return this.recovery.acknowledge(intentId); }
 
   setCooperativeHunting(enabled: boolean): void {
     if (!this.cooperativeHunter) throw new Error("Cacería cooperativa no disponible.");
@@ -752,6 +754,7 @@ export class DashboardReadModel {
         executions: this.cooperativeHunter?.executions() ?? [], qusdOwed: Number(this.store.get("cooperative_qusd_owed") ?? 0) },
       mutationIntents: this.store.recentMutationIntents(100),
       unresolvedMutations: this.store.unresolvedMutationIntents(),
+      recoveryNoticeCount: this.store.unresolvedMutationIntents().filter(intent => this.store.get(`recovery_ack:${intent.intentId}`) !== String(intent.updatedAt)).length,
       operations: this.store.visibleOperations().map(operation => {
         const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
         return { ...operation, ...(raw === undefined || raw === "" ? {} : { cooperativeOwnerFiat: Number(raw) }) };

@@ -28,6 +28,7 @@ export function RecoveryPanel({ onChanged }) {
   const [actionMessage, setActionMessage] = useState("");
   const [actionFailed, setActionFailed] = useState(false);
   const [selected, setSelected] = useState(null);
+  const [evidenceOnly, setEvidenceOnly] = useState(false);
   const [outcome, setOutcome] = useState("not_applied");
   const [reason, setReason] = useState("");
   const [evidence, setEvidence] = useState("");
@@ -72,7 +73,8 @@ export function RecoveryPanel({ onChanged }) {
     }
   };
 
-  const beginResolve = (item) => {
+  const beginResolve = (item, onlyEvidence = false) => {
+    setEvidenceOnly(onlyEvidence);
     setSelected(item);
     setOutcome(item.manualOutcomes?.[0] ?? "not_applied");
     setReason("");
@@ -82,13 +84,13 @@ export function RecoveryPanel({ onChanged }) {
   };
 
   const resolve = async () => {
-    if (!selected || !confirmed || !reason.trim() || !evidence.trim()) return;
+    if (!selected || (!evidenceOnly && (!confirmed || !reason.trim())) || !evidence.trim()) return;
     setBusyId(selected.intentId);
     setResolveError("");
     try {
       await requestJson(
-        `/api/recovery/${encodeURIComponent(selected.intentId)}/resolve`,
-        jsonPost({
+        `/api/recovery/${encodeURIComponent(selected.intentId)}/${evidenceOnly ? "evidence" : "resolve"}`,
+        jsonPost(evidenceOnly ? { evidence: evidence.trim() } : {
           expectedUpdatedAt: selected.updatedAt,
           outcome,
           reason: reason.trim(),
@@ -106,6 +108,15 @@ export function RecoveryPanel({ onChanged }) {
     }
   };
 
+  const acknowledge = async (item) => {
+    setBusyId(item.intentId);
+    try {
+      await requestJson(`/api/recovery/${encodeURIComponent(item.intentId)}/acknowledge`, jsonPost());
+      await load(); await onChanged?.();
+      setActionMessage("Aviso reconocido. La comprobación continúa y la evidencia queda disponible aquí.");
+    } catch (error) { setActionFailed(true); setActionMessage(error.message); }
+    finally { setBusyId(""); }
+  };
   const items = report?.items ?? [];
   return <>
     <Panel
@@ -132,6 +143,8 @@ export function RecoveryPanel({ onChanged }) {
             currentBusy={busyId === item.intentId}
             onCheck={() => void check(item)}
             onResolve={() => beginResolve(item)}
+            onEvidence={() => beginResolve(item, true)}
+            onAcknowledge={() => void acknowledge(item)}
           />)}
         </ol> : null}
       </div>
@@ -140,12 +153,12 @@ export function RecoveryPanel({ onChanged }) {
     <Dialog open={Boolean(selected)} onOpenChange={(open) => !open && !busyId && setSelected(null)}>
       <DialogContent className="decision-dialog recovery-dialog" showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Registrar comprobación manual</DialogTitle>
-          <DialogDescription>Esto registra tu declaración como operador; no es una confirmación de QvaPay ni vuelve a enviar la aplicación. Las demás ofertas siguen disponibles para la cacería. Verifica antes que no quede dinero comprometido.</DialogDescription>
+          <DialogTitle>{evidenceOnly ? "Registrar evidencia" : "Registrar comprobación manual"}</DialogTitle>
+          <DialogDescription>{evidenceOnly ? "Guarda lo que comprobaste en QvaPay en el historial. La conciliación sigue pendiente y las demás cacerías continúan." : "Esto registra tu declaración como operador; no es una confirmación de QvaPay ni vuelve a enviar la aplicación. Las demás ofertas siguen disponibles para la cacería. Verifica antes que no quede dinero comprometido."}</DialogDescription>
         </DialogHeader>
         {selected ? <div className="recovery-resolution">
           <p className="recovery-intent-id">Intención <code>{selected.intentId}</code></p>
-          <Field label="Resultado de tu comprobación" htmlFor="recovery-outcome">
+          {!evidenceOnly ? <><Field label="Resultado de tu comprobación" htmlFor="recovery-outcome">
             <Select
               id="recovery-outcome"
               value={outcome}
@@ -160,20 +173,21 @@ export function RecoveryPanel({ onChanged }) {
           <Field label="Motivo" htmlFor="recovery-reason" description="Resume qué comprobaste y por qué corresponde este resultado.">
             <Textarea id="recovery-reason" value={reason} onChange={(event) => setReason(event.target.value)} rows={3} maxLength={500} />
           </Field>
+          </> : null}
           <Field label="Evidencia revisada en QvaPay" htmlFor="recovery-evidence" description={outcome === "terminal_reviewed" ? "Indica qué comprobaste en Mis operaciones y pagos de tu cuenta, además del UUID de la oferta. Mínimo 12 caracteres." : "Anota el dato observable que verificaste, por ejemplo estado e identificador de la oferta. Mínimo 12 caracteres."}>
             <Textarea id="recovery-evidence" value={evidence} onChange={(event) => setEvidence(event.target.value)} rows={3} maxLength={1000} />
           </Field>
-          <label className="recovery-confirmation">
+          {!evidenceOnly ? <label className="recovery-confirmation">
             <Checkbox checked={confirmed} onCheckedChange={(value) => setConfirmed(value === true)} />
             <span>{outcome === "terminal_reviewed" ? "Confirmo que revisé en QvaPay mis operaciones y pagos de esta oferta, y que no tengo ninguna obligación o dinero pendiente." : "Confirmo que revisé QvaPay y que esta declaración describe lo que observé."}</span>
-          </label>
+          </label> : <p>La evidencia se guarda sin cambiar el resultado de la operación.</p>}
           {resolveError ? <div className="resource-error" role="alert"><p><AlertTriangle aria-hidden="true" />{resolveError}</p></div> : null}
-          <p className="recovery-warning">{outcome === "terminal_reviewed" ? "El evento p2p.completed solo indica que la oferta terminó; no demuestra quién la tomó. Si figura en tus operaciones, tienes un pago sin cerrar o no puedes comprobarlo, no desbloquees aquí." : "No uses esta acción para marcar pagos o recepciones. La resolución manual no prueba por sí sola el resultado remoto."}</p>
+          {!evidenceOnly ? <p className="recovery-warning">{outcome === "terminal_reviewed" ? "El evento p2p.completed solo indica que la oferta terminó; no demuestra quién la tomó. Si figura en tus operaciones, tienes un pago sin cerrar o no puedes comprobarlo, no desbloquees aquí." : "No uses esta acción para marcar pagos o recepciones. La resolución manual no prueba por sí sola el resultado remoto."}</p> : null}
         </div> : null}
         <DialogFooter>
           <Button variant="secondary" disabled={Boolean(busyId)} onClick={() => setSelected(null)}>Cancelar</Button>
-          <Button variant="primary" disabled={Boolean(busyId) || !confirmed || reason.trim().length < 12 || reason.trim().length > 500 || evidence.trim().length < 12 || evidence.trim().length > 1_000} onClick={() => void resolve()}>
-            {busyId ? "Registrando…" : "Registrar declaración"}
+          <Button variant="primary" disabled={Boolean(busyId) || (!evidenceOnly && (!confirmed || reason.trim().length < 12 || reason.trim().length > 500)) || evidence.trim().length < 12 || evidence.trim().length > 1_000} onClick={() => void resolve()}>
+            {busyId ? "Registrando…" : evidenceOnly ? "Guardar evidencia" : "Registrar declaración"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -181,7 +195,7 @@ export function RecoveryPanel({ onChanged }) {
   </>;
 }
 
-function RecoveryCard({ item, busy, currentBusy, onCheck, onResolve }) {
+function RecoveryCard({ item, busy, currentBusy, onCheck, onResolve, onEvidence, onAcknowledge }) {
   return <li className="recovery-item">
     <header className="recovery-item-head">
       <div><strong>{labelKind(item.kind)}</strong><Badge variant={item.state === "uncertain" ? "destructive" : "secondary"}>{item.state}</Badge></div>
@@ -205,7 +219,10 @@ function RecoveryCard({ item, busy, currentBusy, onCheck, onResolve }) {
         ["attempts", "Intentos"], ["nextAttemptAt", "Próximo intento"], ["eligible", "Habilitado"],
       ]} /> : null}
     </dl>
+    {item.evidence?.length ? <details><summary>Evidencia registrada ({item.evidence.length})</summary>{item.evidence.map((entry, index) => <p key={index}>{entry.text}<br /><small>{entry.actor} · {formatDate(entry.at)}</small></p>)}</details> : null}
     <footer className="recovery-actions">
+      <Button variant="outline" size="sm" disabled={busy} onClick={onEvidence}>Registrar evidencia</Button>
+      <Button variant="outline" size="sm" disabled={busy || item.acknowledged} onClick={onAcknowledge}>{item.acknowledged ? "Aviso reconocido" : "Reconocer aviso"}</Button>
       <Button variant="outline" size="sm" disabled={busy} onClick={onCheck}>
         <RotateCw data-icon="inline-start" />{currentBusy ? "Comprobando…" : "Comprobar ahora"}
       </Button>

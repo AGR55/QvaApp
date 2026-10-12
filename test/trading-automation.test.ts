@@ -1356,3 +1356,92 @@ test("registra errores consecutivos sin detener la cacería", async () => {
   assert.equal(trading.isPaused(), false);
   store.close();
 });
+
+test("compra flexible usa saldo parcial sin lecturas adicionales y reserva la orden", async () => {
+  const { store, cfg, markets } = setup();
+  store.set("fiat_balance:BANK_CUP", "9500");
+  const calls: unknown[] = [];
+  const qva = {
+    apply: async (_uuid: string, options: { amount: number; beforeDispatch: (ms: number) => Promise<boolean> }) => {
+      assert.equal(await options.beforeDispatch(0), true);
+      calls.push(options.amount);
+      return { order: "order-one", amount: options.amount, receive: options.amount * 920 };
+    },
+    getOffer: async () => { assert.fail("la decisión no consulta detalle"); },
+    qusdBalance: async () => { assert.fail("comprar QUSD no consulta saldo QUSD"); },
+    sendChat: async () => ({}),
+  };
+  const engine = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  const result = await engine.ingestMarketOffer({ uuid: "flex-partial", type: "sell", coin: "BANK_CUP",
+    amount: 100, receive: 92000, status: "open", offer_kind: "flexible", available_amount: 80, order_min: 5, order_max: 40 });
+  assert.equal(result.candidates, 1);
+  const operation = store.getOperation("flex-partial")!;
+  assert.equal(operation.orderUuid, "order-one");
+  assert.ok(operation.amount >= 5 && operation.amount < 11);
+  assert.ok(operation.receive + markets.current().markets[0]!.outgoingTransferFee <= 9500);
+  assert.equal(calls.length, 1);
+  await new Promise(resolve => setImmediate(resolve));
+  store.close();
+});
+
+test("sin mínimo financiable no aplica una flexible ni consulta QvaPay", async () => {
+  const { store, cfg, markets } = setup();
+  store.set("fiat_balance:BANK_CUP", "1000");
+  const engine = new TradingEngine(store, { apply: async () => assert.fail("no debe aplicar") } as never, cfg as never, markets, async () => undefined);
+  const result = await engine.ingestMarketOffer({ uuid: "flex-small", type: "sell", coin: "BANK_CUP", amount: 100,
+    receive: 92000, status: "open", offer_kind: "flexible", available_amount: 50, order_min: 5, order_max: 20 });
+  assert.equal(result.candidates, 0);
+  assert.equal(store.activeOperations().length, 0);
+  store.close();
+});
+
+test("venta flexible mantiene reserva QUSD y usa orden para pago, disputa y sincronización", async () => {
+  const { store, cfg, markets } = setup();
+  const current = markets.current(); current.risk.minQusdReserve = 10; markets.save(current);
+  const actions: unknown[] = [];
+  let orderStatus = "processing";
+  const parent: P2pOffer = { uuid: "flex-sell", type: "buy", coin: "BANK_CUP", amount: 100, receive: 100000,
+    status: "open", offer_kind: "flexible", available_amount: 100, order_min: 5, order_max: 40 };
+  const qva = {
+    qusdBalance: async () => 22.5,
+    apply: async (_uuid: string, options: { amount: number; beforeDispatch: (ms: number) => Promise<boolean> }) => {
+      assert.equal(await options.beforeDispatch(0), true);
+      return { order: "sell-child", amount: options.amount, receive: options.amount * 1000 };
+    },
+    getOffer: async () => ({ ...parent, Orders: [{ uuid: "sell-child", amount: 12.5, receive: 12500, status: orderStatus }] }),
+    cancel: async (uuid: string, order: string) => { actions.push([uuid, order]); orderStatus = "revision"; return { status: "revision" }; },
+    sendChat: async () => ({}),
+  };
+  const engine = new TradingEngine(store, qva as never, cfg as never, markets, async () => undefined);
+  assert.equal((await engine.ingestMarketOffer(parent)).candidates, 1);
+  assert.equal(store.getOperation(parent.uuid)?.amount, 12.5);
+  await engine.cancel(parent.uuid);
+  assert.deepEqual(actions, [["flex-sell", "sell-child"]]);
+  assert.equal(store.getOperation(parent.uuid)?.state, "revision");
+  orderStatus = "completed";
+  await engine.syncRemoteOperations();
+  assert.equal(store.getOperation(parent.uuid)?.state, "completed");
+  assert.equal(store.hasFiatMovement(parent.uuid), true);
+  await new Promise(resolve => setImmediate(resolve)); store.close();
+});
+
+test("una aplicación flexible incierta se recupera por orden propia y no por estado del padre", async () => {
+  const { store, cfg, markets } = setup();
+  store.set("analytics_account_uuid", "me");
+  const createdAt = Date.now();
+  store.createMutationIntent({ intentId: "flex-uncertain", operationUuid: "parent-uncertain", kind: "apply",
+    request: { offerKind: "flexible", amount: 10, receive: 9200, automatic: true, coin: "BANK_CUP", offerType: "sell" } });
+  store.updateMutationIntent("flex-uncertain", "uncertain", undefined, "timeout");
+  const remote: P2pOffer = { uuid: "parent-uncertain", type: "sell", coin: "BANK_CUP", amount: 100, receive: 92000,
+    status: "open", offer_kind: "flexible", Orders: [] };
+  const engine = new TradingEngine(store, { getOffer: async () => remote } as never, cfg as never, markets, async () => undefined);
+  await engine.reconcilePendingStandaloneMutations({ intentId: "flex-uncertain", force: true });
+  assert.equal(store.getMutationIntent("flex-uncertain")?.state, "uncertain");
+  remote.Orders = [{ uuid: "found-order", amount: 10, receive: 9200, status: "paid", created_at: new Date(createdAt).toISOString(), Taker: { uuid: "me" } }];
+  await engine.reconcilePendingStandaloneMutations({ intentId: "flex-uncertain", force: true });
+  assert.equal(store.getMutationIntent("flex-uncertain")?.state, "reconciled");
+  assert.equal(store.getOperation(remote.uuid)?.orderUuid, "found-order");
+  assert.equal(store.getOperation(remote.uuid)?.state, "paid");
+  assert.equal(store.getOperation(remote.uuid)?.amount, 10);
+  store.close();
+});

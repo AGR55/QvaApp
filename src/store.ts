@@ -129,6 +129,7 @@ export interface ConfigRevision {
 
 export interface Operation {
   uuid: string;
+  orderUuid?: string;
   offerType: P2pType;
   coin: FiatMarket;
   amount: number;
@@ -876,6 +877,10 @@ export class Store {
         this.ensureColumn("portfolio_snapshots", "liability_qusd", "REAL NOT NULL DEFAULT 0");
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (25, ?)").run(Date.now());
       }
+      if (this.currentSchemaVersion() < 26) {
+        this.ensureColumn("operations", "order_uuid", "TEXT");
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (26, ?)").run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -1288,7 +1293,7 @@ export class Store {
       if (latest?.status === "completed" && (latest.event !== "p2p.completed" || latest.sentAt < intent.createdAt || latest.receivedAt < intent.createdAt || response.outcome !== "terminal_reviewed")) return false;
       if (latest?.status !== "completed" && response.outcome === "terminal_reviewed") return false;
       if (latest?.status === "open" && response.outcome === "cancelled") return false;
-      if (response.source !== "operator_attestation" || response.actor !== "admin_web" ||
+      if (response.source !== "operator_attestation" || !["admin_web", "admin_telegram"].includes(String(response.actor)) ||
         response.operatorConfirmed !== true || !Number.isSafeInteger(response.verifiedAt) ||
         Number(response.verifiedAt) < intent.createdAt || Number(response.verifiedAt) > Date.now() ||
         !["not_applied", "cancelled", "terminal_reviewed"].includes(String(response.outcome)) ||
@@ -2102,13 +2107,13 @@ export class Store {
   createOperation(operation: Operation, allowCancelledManualReapply = false): void {
     this.db
       .prepare(
-        `INSERT INTO operations(uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, updated_at, counterparty_id, reference_rate)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO operations(uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, updated_at, counterparty_id, reference_rate, order_uuid)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(uuid) DO UPDATE SET offer_type=excluded.offer_type, coin=excluded.coin,
         amount=excluded.amount, receive=excluded.receive, rate=excluded.rate,
         state=excluded.state, auto_applied=excluded.auto_applied, cancel_at=excluded.cancel_at,
         created_at=excluded.created_at, updated_at=excluded.updated_at,
-        counterparty_id=excluded.counterparty_id, reference_rate=excluded.reference_rate
+        counterparty_id=excluded.counterparty_id, reference_rate=excluded.reference_rate, order_uuid=excluded.order_uuid
       WHERE ? = 1 AND operations.state='cancelled' AND excluded.auto_applied=0
         AND NOT EXISTS (SELECT 1 FROM fiat_ledger WHERE operation_uuid=operations.uuid)`,
       )
@@ -2126,6 +2131,7 @@ export class Store {
         operation.createdAt,
         operation.counterpartyId ?? null,
         operation.referenceRate ?? null,
+        operation.orderUuid ?? null,
         Number(allowCancelledManualReapply),
       );
   }
@@ -2133,7 +2139,7 @@ export class Store {
   getOperation(uuid: string): Operation | undefined {
     const row = this.db
       .prepare(
-        "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE uuid = ?",
+        "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate, order_uuid FROM operations WHERE uuid = ?",
       )
       .get(uuid) as Record<string, unknown> | undefined;
     return row ? this.operationFromRow(row) : undefined;
@@ -2143,7 +2149,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE state = 'applied' AND cancel_at <= ?",
+          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate, order_uuid FROM operations WHERE state = 'applied' AND cancel_at <= ?",
         )
         .all(now) as Record<string, unknown>[]
     ).map((row) => this.operationFromRow(row));
@@ -2159,7 +2165,7 @@ export class Store {
     return (
       this.db
         .prepare(
-          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate FROM operations WHERE state IN ('applied','acknowledged','paid','revision') ORDER BY created_at DESC",
+          "SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, counterparty_id, reference_rate, order_uuid FROM operations WHERE state IN ('applied','acknowledged','paid','revision') ORDER BY created_at DESC",
         )
         .all() as Record<string, unknown>[]
     ).map((row) => this.operationFromRow(row));
@@ -2170,7 +2176,7 @@ export class Store {
       this.db
         .prepare(
           `SELECT uuid, offer_type, coin, amount, receive, rate, state,
-                  auto_applied, cancel_at, created_at, counterparty_id, reference_rate
+                  auto_applied, cancel_at, created_at, counterparty_id, reference_rate, order_uuid
            FROM operations ORDER BY created_at DESC LIMIT ?`,
         )
         .all(limit) as Record<string, unknown>[]
@@ -2182,7 +2188,7 @@ export class Store {
       this.db
         .prepare(
           `SELECT uuid, offer_type, coin, amount, receive, rate, state,
-                  auto_applied, cancel_at, created_at, counterparty_id, reference_rate
+                  auto_applied, cancel_at, created_at, counterparty_id, reference_rate, order_uuid
            FROM operations WHERE state IN ('applied','acknowledged','paid','revision')
            ORDER BY created_at DESC LIMIT ?`,
         )
@@ -2998,6 +3004,7 @@ export class Store {
         ? {}
         : { counterpartyId: String(row.counterparty_id) }),
       ...optionalNumber("referenceRate", row.reference_rate),
+      ...(row.order_uuid ? { orderUuid: String(row.order_uuid) } : {}),
     };
   }
 }
