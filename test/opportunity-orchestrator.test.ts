@@ -65,6 +65,92 @@ const input = {
   priceReason: "Supera el mínimo de venta.",
 };
 
+test("una venta por rango toma el máximo financiable con QUSD congelado", async t => {
+  const { store, markets } = setup(); t.after(() => store.close());
+  const config = markets.current(); config.risk.minQusdReserve = 0; markets.save(config);
+  const flexible = { ...target, amount: 100, receive: 102000, offer_kind: "flexible" as const,
+    available_amount: 100, order_min: 5, order_max: 20 };
+  const smallerOwn = { ...own, amount: 12, receive: 11880 };
+  let balance = 0;
+  const orchestrator = new OpportunityOrchestrator(store, {
+    qusdBalance: async () => balance, listOffers: async () => [smallerOwn], getOffer: async (uuid: string) => uuid === smallerOwn.uuid ? smallerOwn : flexible,
+    cancel: async () => { balance = 12; },
+    apply: async (_uuid: string, options: { amount: number }) => {
+      assert.equal(options.amount, 12); return { order: "partial-child", amount: 12, receive: 12240 };
+    },
+    createOffer: async () => assert.fail("no queda excedente"),
+  } as never, markets, { now: () => now });
+  const result = await orchestrator.execute({ ...input, target: flexible });
+  assert.equal(result.applicationConfirmed, true);
+  assert.equal(store.getOperation(target.uuid)?.amount, 12);
+  assert.equal(store.getOperation(target.uuid)?.orderUuid, "partial-child");
+});
+
+test("un rechazo de orden repone toda la venta propia y libera la reserva", async t => {
+  const { store, markets } = setup(); t.after(() => store.close());
+  const config = markets.current(); config.risk.minQusdReserve = 0; markets.save(config);
+  let balance = 0, restored = 0;
+  const flexible = { ...target, offer_kind: "flexible" as const, available_amount: 20, order_min: 5, order_max: 20 };
+  const orchestrator = new OpportunityOrchestrator(store, {
+    qusdBalance: async () => balance, listOffers: async () => [own], getOffer: async (uuid: string) => uuid === own.uuid ? own : flexible,
+    cancel: async () => { balance = 20; },
+    apply: async () => { throw new QvaApiError(409, "Orden no disponible"); },
+    createOffer: async (body: { amount: number }) => { restored = body.amount; return { uuid: "restored" }; },
+  } as never, markets, { now: () => now });
+  const result = await orchestrator.execute({ ...input, target: flexible });
+  assert.equal(result.applicationConfirmed, false);
+  assert.equal(restored, 20);
+  assert.equal(store.activeReservedQusd(), 0);
+  assert.equal(store.getOperation(target.uuid), undefined);
+});
+
+for (const scenario of ["saldo no liberado", "tasa cambiada"] as const) {
+  test(`no aplica y repone la venta propia ante ${scenario}`, async t => {
+    const { store, markets } = setup(); t.after(() => store.close());
+    const config = markets.current(); config.risk.minQusdReserve = 0; markets.save(config);
+    const flexible = { ...target, offer_kind: "flexible" as const, available_amount: 20, order_min: 5, order_max: 20 };
+    let balance = 0, restored = 0;
+    const orchestrator = new OpportunityOrchestrator(store, {
+      qusdBalance: async () => balance, listOffers: async () => [own],
+      getOffer: async (uuid: string) => uuid === own.uuid ? own : { ...flexible, receive: 20500 },
+      cancel: async () => { balance = scenario === "saldo no liberado" ? 0 : 20; },
+      apply: async () => assert.fail("no debe aplicar sin saldo y cotización confirmados"),
+      createOffer: async (body: { amount: number }) => { restored = body.amount; return { uuid: "restored" }; },
+    } as never, markets, { now: () => now });
+    const result = await orchestrator.execute({ ...input, target: flexible });
+    assert.equal(result.applicationConfirmed, false);
+    assert.equal(restored, 20, JSON.stringify(result));
+    assert.equal(store.activeReservedQusd(), 0);
+  });
+}
+
+test("concilia la orden propia incierta sin confundirla con el padre ni repetir apply", async t => {
+  const { store, markets } = setup(); t.after(() => store.close());
+  const config = markets.current(); config.risk.minQusdReserve = 0; markets.save(config);
+  store.set("analytics_account_uuid", "me");
+  const flexible = { ...target, offer_kind: "flexible" as const, available_amount: 20, order_min: 5, order_max: 20 };
+  let balance = 0, applied = 0;
+  let remote: P2pOffer = { ...flexible, status: "open", Orders: [] };
+  const orchestrator = new OpportunityOrchestrator(store, {
+    qusdBalance: async () => balance, listOffers: async () => [own],
+    getOffer: async (uuid: string) => uuid === own.uuid ? own : remote,
+    cancel: async () => { balance = 20; },
+    apply: async () => { applied++; throw new QvaMutationUncertainError("apply", new Error("timeout")); },
+  } as never, markets, { now: () => now });
+  const result = await orchestrator.execute({ ...input, target: flexible });
+  assert.equal(result.workflow?.state, "apply_uncertain");
+  remote = { ...remote, status: "processing" };
+  assert.equal((await orchestrator.reconcile(result.workflow!.id)).outcome, "unresolved");
+  assert.equal(store.getOperation(target.uuid), undefined);
+  assert.equal(store.activeReservedQusd(), 20);
+  remote = { ...remote, status: "open", Orders: [{ uuid: "recovered-child", amount: 20, receive: 20400,
+    status: "processing", created_at: new Date().toISOString(), Taker: { uuid: "me" } }] };
+  assert.equal((await orchestrator.reconcile(result.workflow!.id)).outcome, "applied");
+  assert.equal(store.getOperation(target.uuid)?.orderUuid, "recovered-child");
+  assert.equal(store.activeReservedQusd(), 0);
+  assert.equal(applied, 1);
+});
+
 test("con QUSD libre suficiente aplica sin listar ofertas propias", async t => {
   const { store, markets } = setup();
   t.after(() => store.close());

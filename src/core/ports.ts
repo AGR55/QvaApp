@@ -28,6 +28,7 @@ export type QvaPayGateway = Pick<
 export type TradingRepository = Pick<
   Store,
   | "activeOperations"
+  | "activeReservedQusd"
   | "audit"
   | "excludeAutomaticReapplyAfterManualCancel"
   | "createMutationIntent"

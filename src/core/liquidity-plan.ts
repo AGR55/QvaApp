@@ -117,6 +117,7 @@ export function planLiquidity(input: LiquidityPlanInput): LiquidityPlan {
     .filter(
       (offer) =>
         offer.type === "sell" &&
+        offer.offer_kind !== "flexible" &&
         offer.status === "open" &&
         offer.amount > 0 &&
         offer.receive > 0 &&

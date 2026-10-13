@@ -11,7 +11,8 @@ import {
 } from "../core/risk-policy.js";
 import type { QvaPayGateway } from "../core/ports.js";
 import type { MarketConfigService } from "../market-config.js";
-import { QvaApiError } from "../qvapay.js";
+import { QvaApiError, QvaMutationUncertainError } from "../qvapay.js";
+import { matchingRecoveryOrder, sizeFlexibleOffer } from "../flexible-order.js";
 import type { Store, TradeWorkflow } from "../store.js";
 import type { P2pOffer } from "../types.js";
 import { ownOfferFiatTotal } from "../market-math.js";
@@ -26,6 +27,9 @@ export interface OpportunityInput {
   expectedMarginPercent: number;
   priceDecision: "eligible" | "manual_review" | "blocked" | "ignored";
   priceReason: string;
+  unavailableQusd?: number;
+  onTargetRefreshed?: () => void;
+  automatic?: boolean;
   canApply?: (ownIntentId?: string, queuedForMs?: number) => boolean | Promise<boolean>;
 }
 
@@ -102,8 +106,31 @@ export class OpportunityOrchestrator {
     this.store.updateWorkflowState(workflowId, "reconciling");
     try {
       const remoteTarget = await this.qva.getOffer(workflow.targetOffer.uuid);
-      if (applicationIsConfirmed(remoteTarget.status)) {
-        this.ensureAppliedOperation(workflow);
+      let confirmedOrder: string | undefined;
+      let flexibleApplicationAbsent = false;
+      if (workflow.targetOffer.offer_kind === "flexible") {
+        const operation = this.store.getOperation(workflow.targetOffer.uuid);
+        const intent = this.store.latestWorkflowApplyIntent(workflowId);
+        flexibleApplicationAbsent = !operation && !intent;
+        if (!flexibleApplicationAbsent) {
+          const response = intent?.response as { order?: string } | undefined;
+          const knownOrder = operation?.orderUuid ?? response?.order;
+          let account = this.store.get("analytics_account_uuid");
+          if (!knownOrder && !account) {
+            account = (await this.qva.profile()).uuid;
+            if (account) this.store.set("analytics_account_uuid", account);
+          }
+          const order = knownOrder ? remoteTarget.Orders?.find(item => item.uuid === knownOrder)
+            : matchingRecoveryOrder(remoteTarget, workflow.targetOffer.amount, intent?.createdAt ?? workflow.createdAt, account);
+          if (!order || order.amount !== workflow.targetOffer.amount)
+            return this.keepUnresolved(workflow, "No hay una orden propia confirmada; se conserva la reserva y no se reponen fondos que podrían estar comprometidos.");
+          if (applicationIsConfirmed(order.status)) confirmedOrder = order.uuid;
+          else if (order.status === "cancelled") flexibleApplicationAbsent = true;
+          else return this.keepUnresolved(workflow, `Estado de orden no concluyente: ${order.status}.`);
+        }
+      }
+      if (confirmedOrder || (workflow.targetOffer.offer_kind !== "flexible" && applicationIsConfirmed(remoteTarget.status))) {
+        this.ensureAppliedOperation(workflow, confirmedOrder);
         this.store.releaseCapitalReservation(workflowId);
         this.store.reconcileWorkflowMutationIntents(workflowId);
         try {
@@ -134,7 +161,7 @@ export class OpportunityOrchestrator {
           detail: `Aplicación confirmada en estado ${remoteTarget.status}.`,
         };
       }
-      if (!applicationIsAbsent(remoteTarget.status))
+      if (!flexibleApplicationAbsent && !applicationIsAbsent(remoteTarget.status))
         return this.keepUnresolved(
           workflow,
           `Estado remoto no concluyente: ${remoteTarget.status}.`,
@@ -215,13 +242,14 @@ export class OpportunityOrchestrator {
     const qusdBalance = await this.qva.qusdBalance();
     // Own offers matter only when we must release escrow. Avoid putting an
     // already funded application behind another throttled network read.
-    const available = Math.max(0, qusdBalance - Number(this.store.get("cooperative_qusd_owed") ?? 0));
+    const unavailable = Number(this.store.get("cooperative_qusd_owed") ?? 0) + (input.unavailableQusd ?? 0);
+    const available = Math.max(0, qusdBalance - unavailable);
     const ownOffers = available >= input.target.amount + this.config.current().risk.minQusdReserve
       ? []
       : await this.qva.listOffers({ my: true, take: 100, page: 1, status: "open" });
     const current = this.config.current();
-    const ownQusdBalance = Math.max(0, qusdBalance - Number(this.store.get("cooperative_qusd_owed") ?? 0));
-    const liquidity = planLiquidity({
+    const ownQusdBalance = available;
+    const planInput = {
       target: input.target,
       availableQusd: ownQusdBalance,
       reserveQusd: current.risk.minQusdReserve,
@@ -236,7 +264,15 @@ export class OpportunityOrchestrator {
           },
         ]),
       ),
-    });
+    };
+    let liquidity = planLiquidity(planInput);
+    if (input.target.offer_kind === "flexible" && !liquidity.feasible) {
+      const sized = sizeFlexibleOffer(input.target,
+        Math.max(0, available + liquidity.potentialReleaseQusd - current.risk.minQusdReserve), input.target.amount);
+      if (!sized) return { decision: this.nonExecutableDecision(input, "blocked", liquidity.reason) };
+      input = { ...input, target: sized };
+      liquidity = planLiquidity({ ...planInput, target: sized });
+    }
     const priceDecision =
       current.risk.reviewedAt === null && input.priceDecision === "eligible"
         ? "manual_review"
@@ -346,27 +382,51 @@ export class OpportunityOrchestrator {
         throw new Error("La cacería de venta fue detenida antes de aplicar.");
       await this.cancelOwnOffers(workflowId);
       this.store.updateWorkflowState(workflowId, "own_offers_cancelled");
+      if (input.target.offer_kind === "flexible" && cancellationPlan.length &&
+        await this.qva.qusdBalance() - unavailable < input.target.amount + current.risk.minQusdReserve)
+        throw new Error("QvaPay todavía no confirmó el saldo liberado; se repondrán las ventas propias.");
+      if (input.target.offer_kind === "flexible" && cancellationPlan.length) {
+        const fresh = await this.qva.getOffer(input.target.uuid);
+        const sized = sizeFlexibleOffer(fresh, input.target.amount, input.target.amount);
+        const onlyVip = String(fresh.only_vip ?? false).toLowerCase();
+        if (fresh.uuid !== input.target.uuid || fresh.status !== "open" || fresh.offer_kind !== "flexible" || fresh.can_take_flexible === false ||
+          !sized || sized.amount !== input.target.amount || fresh.coin !== input.target.coin || fresh.type !== "buy" ||
+          Math.abs(sized.receive - input.target.receive) > 0.0000001 ||
+          !["false", "0"].includes(onlyVip))
+          throw new Error("La oferta por rango cambió durante la liberación; se repondrán las ventas propias.");
+        input.onTargetRefreshed?.();
+      }
       this.store.updateWorkflowState(workflowId, "applying_external");
       if (input.canApply && !await input.canApply())
         throw new Error("La cacería de venta fue detenida antes de aplicar.");
-      await this.monetaryIntents.execute({
+      const applied = await this.monetaryIntents.execute({
         kind: "apply",
         operationUuid: input.target.uuid,
         workflowId,
-        request: { workflowId },
-        action: (intentId) => this.qva.apply(input.target.uuid, input.canApply ? {
-          beforeDispatch: (queuedForMs) => input.canApply!(intentId, queuedForMs),
-        } : {}),
+        request: { workflowId, automatic: input.automatic ?? true,
+          ...(input.target.offer_kind === "flexible" ? { offerKind: "flexible", amount: input.target.amount,
+            coin: input.target.coin, offerType: input.target.type } : {}) },
+        action: async (intentId) => {
+          const response = await this.qva.apply(input.target.uuid, {
+            ...(input.target.offer_kind === "flexible" ? { amount: input.target.amount } : {}),
+            ...(input.canApply ? { beforeDispatch: (queuedForMs: number) => input.canApply!(intentId, queuedForMs) } : {}),
+          });
+          if (input.target.offer_kind === "flexible" && (!response?.order || response.amount !== input.target.amount ||
+            !Number.isFinite(response.receive) || response.receive <= 0))
+            throw new QvaMutationUncertainError("aplicar orden flexible", new Error("Respuesta de orden incompleta o importe distinto"));
+          return response;
+        },
       });
       this.store.createOperation({
         uuid: input.target.uuid,
+        ...(applied?.order ? { orderUuid: applied.order } : {}),
         offerType: "buy",
         coin: input.target.coin,
         amount: input.target.amount,
-        receive: input.target.receive,
-        rate: input.target.receive / input.target.amount,
+        receive: applied?.receive ?? input.target.receive,
+        rate: (applied?.receive ?? input.target.receive) / input.target.amount,
         state: "applied",
-        autoApplied: true,
+        autoApplied: input.automatic ?? true,
         cancelAt: null,
         createdAt: this.now(),
         ...(input.target.User?.uuid
@@ -402,7 +462,9 @@ export class OpportunityOrchestrator {
       );
     } catch (error) {
       const message = errorMessage(error);
-      if (isMutationUncertain(error)) {
+      const failedBeforeApply = !this.store.latestWorkflowApplyIntent(workflowId) &&
+        !this.store.workflowOwnOffers(workflowId).some(own => ["uncertain", "cancel_requested"].includes(own.state));
+      if (isMutationUncertain(error) && !failedBeforeApply) {
         outcomeDecision = this.blockDecision(
           decision,
           `QvaPay no confirmó la aplicación: ${message}`,
@@ -577,10 +639,11 @@ export class OpportunityOrchestrator {
     }
   }
 
-  private ensureAppliedOperation(workflow: TradeWorkflow): void {
+  private ensureAppliedOperation(workflow: TradeWorkflow, orderUuid?: string): void {
     const offer = workflow.targetOffer;
     this.store.createOperation({
       uuid: offer.uuid,
+      ...(orderUuid ? { orderUuid } : {}),
       offerType: "buy",
       coin: offer.coin,
       amount: offer.amount,

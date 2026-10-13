@@ -1284,6 +1284,12 @@ export class Store {
     return row ? mutationIntentFromRow(row) : undefined;
   }
 
+  latestWorkflowApplyIntent(workflowId: string): MutationIntent | undefined {
+    const row = this.db.prepare("SELECT * FROM mutation_intents WHERE workflow_id = ? AND kind = 'apply' ORDER BY created_at DESC LIMIT 1")
+      .get(workflowId) as Record<string, unknown> | undefined;
+    return row ? mutationIntentFromRow(row) : undefined;
+  }
+
   hasFiatMovement(uuid: string): boolean {
     return Boolean(this.db.prepare("SELECT 1 FROM fiat_ledger WHERE operation_uuid = ? LIMIT 1").get(uuid));
   }

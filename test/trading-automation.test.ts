@@ -1433,6 +1433,7 @@ test("venta flexible mantiene reserva QUSD y usa orden para pago, disputa y sinc
     status: "open", offer_kind: "flexible", available_amount: 100, order_min: 5, order_max: 40 };
   const qva = {
     qusdBalance: async () => 22.5,
+    listOffers: async () => [],
     apply: async (_uuid: string, options: { amount: number; beforeDispatch: (ms: number) => Promise<boolean> }) => {
       assert.equal(await options.beforeDispatch(0), true);
       return { order: "sell-child", amount: options.amount, receive: options.amount * 1000 };
@@ -1452,6 +1453,55 @@ test("venta flexible mantiene reserva QUSD y usa orden para pago, disputa y sinc
   assert.equal(store.getOperation(parent.uuid)?.state, "completed");
   assert.equal(store.hasFiatMovement(parent.uuid), true);
   await new Promise(resolve => setImmediate(resolve)); store.close();
+});
+
+test("venta flexible libera QUSD congelado, aplica por orden y repone el sobrante", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  const config = markets.current(); config.risk.minQusdReserve = 5; markets.save(config);
+  const parent: P2pOffer = { uuid: "flex-escrow", type: "buy", coin: "BANK_CUP", amount: 100,
+    receive: 102000, status: "open", offer_kind: "flexible", available_amount: 100, order_min: 5, order_max: 20 };
+  const own: P2pOffer = { uuid: "escrow-sale", type: "sell", coin: "BANK_CUP", amount: 30,
+    receive: 30000, status: "open", details: { cuenta: "123" } };
+  let balance = 5;
+  const actions: string[] = [];
+  const engine = new TradingEngine(store, {
+    qusdBalance: async () => balance,
+    listOffers: async () => [own], getOffer: async (uuid: string) => uuid === own.uuid ? own : parent,
+    cancel: async () => { actions.push("cancel"); balance += 30; },
+    apply: async (_uuid: string, options: { amount: number; beforeDispatch?: (ms: number) => Promise<boolean> }) => {
+      assert.equal(options.amount, 20);
+      if (options.beforeDispatch) assert.equal(await options.beforeDispatch(0), true);
+      assert.ok(balance >= options.amount + 5);
+      actions.push("apply"); balance -= options.amount;
+      return { order: "escrow-child", amount: options.amount, receive: options.amount * 1020 };
+    },
+    createOffer: async (body: { amount: number }) => { assert.equal(body.amount, 10); actions.push("restore"); return { uuid: "restored-sale" }; },
+    sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  assert.equal((await engine.ingestMarketOffer(parent)).candidates, 1);
+  assert.deepEqual(actions, ["cancel", "apply", "restore"]);
+  assert.equal(store.getOperation(parent.uuid)?.orderUuid, "escrow-child");
+  assert.equal(store.getOperation(parent.uuid)?.amount, 20);
+  await new Promise(resolve => setImmediate(resolve));
+});
+
+test("venta flexible ya financiada conserva la ruta rápida sin listar ni cancelar ventas propias", async t => {
+  const { store, cfg, markets } = setup(); t.after(() => store.close());
+  let balanceReads = 0;
+  const offer: P2pOffer = { uuid: "funded-flex", type: "buy", coin: "BANK_CUP", amount: 100,
+    receive: 102000, status: "open", offer_kind: "flexible", available_amount: 100, order_min: 5, order_max: 20 };
+  const engine = new TradingEngine(store, {
+    qusdBalance: async () => { balanceReads++; return 100; },
+    listOffers: async () => assert.fail("no debe listar ofertas propias"),
+    cancel: async () => assert.fail("no debe cancelar ofertas propias"),
+    apply: async (_uuid: string, options: { amount: number }) => ({ order: "funded-child", amount: options.amount, receive: options.amount * 1020 }),
+    sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  assert.equal((await engine.ingestMarketOffer(offer)).candidates, 1);
+  assert.equal(store.getOperation(offer.uuid)?.amount, 20);
+  assert.equal(balanceReads, 1);
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 test("una aplicación flexible incierta se recupera por orden propia y no por estado del padre", async () => {

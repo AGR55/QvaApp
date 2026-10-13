@@ -42,6 +42,15 @@ test("no cancela si el saldo libre ya cubre la oferta externa", () => {
   assert.deepEqual(plan.cancel, []);
 });
 
+test("no cuenta el monto padre de una venta propia por rango como capital liberable", () => {
+  const plan = planLiquidity({ target, availableQusd: 0, reserveQusd: 0,
+    ownOffers: [own("range-own", 100, 1000, { offer_kind: "flexible", available_amount: 2,
+      order_min: 5, order_max: 30 }), own("fixed-own", 5, 1000)] });
+  assert.equal(plan.feasible, false);
+  assert.equal(plan.potentialReleaseQusd, 5);
+  assert.deepEqual(plan.cancel, []);
+});
+
 test("elige primero las ventas propias con peor tasa y guarda snapshot", () => {
   const plan = planLiquidity({
     target,
