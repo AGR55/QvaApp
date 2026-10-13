@@ -703,6 +703,35 @@ test("conserva la selección y los precios de cacería por mercado", () => {
   store.close();
 });
 
+test("guarda las tasas con un déficit contable en otro mercado y las conserva tras sincronizar y reiniciar", async t => {
+  const { store, cfg, markets, dataDir } = setup();
+  t.after(() => store.close());
+  store.set("fiat_balance:CLASICA", "-219");
+  let applied = 0;
+  const trading = new TradingEngine(store, {
+    p2pAverages: async () => ({ BANK_CUP: { median_sell: 930 } }),
+    apply: async () => { applied++; }, sendChat: async () => ({}),
+  } as never, cfg as never, markets, async () => undefined);
+  trading.updateHunting({ market: { code: "BANK_CUP", buyMaxRate: 925, sellMinRate: 1025 } });
+  markets.updateBalance("CLASICA", -219);
+  markets.updateBalance("BANK_CUP", 99999);
+  assert.equal(trading.market("BANK_CUP")?.buyMaxRate, 925);
+  assert.equal(trading.market("BANK_CUP")?.sellMinRate, 1025);
+  assert.equal(trading.fiatBalance("CLASICA"), -219);
+  const reopened = new MarketConfigService(dataDir, cfg as never, store);
+  assert.equal(reopened.find("BANK_CUP")?.buyMaxRate, 925);
+  assert.equal(reopened.find("BANK_CUP")?.sellMinRate, 1025);
+  assert.equal(reopened.current().markets.find(m => m.code === "CLASICA")?.fiatBalance, -219);
+  const invalid = markets.current();
+  invalid.markets.find(m => m.code === "CLASICA")!.fiatBalance = -300;
+  assert.throws(() => markets.save(invalid), /Saldo de CLASICA/);
+  await trading.ingestMarketUpdate({ coin: "BANK_CUP", side: "sell",
+    page: { offers: [{ uuid: "old-rate-only", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9270, status: "open" }], total: 1, currentPage: 1, perPage: 100 },
+    scannedAt: Date.now(), sourceAccountId: "primary" });
+  assert.equal(applied, 0, "el motor rechaza una oferta que solo cumple la tasa antigua");
+  assert.equal(store.getOperation("old-rate-only"), undefined);
+});
+
 test("revalida la cacería de compra después de evaluar el riesgo", async () => {
   const { store, cfg, markets } = setup();
   const target: P2pOffer = { uuid: "stopped-before-apply", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9_200, status: "open", User: { uuid: "peer" } };

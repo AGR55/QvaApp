@@ -167,7 +167,11 @@ export class MarketConfigService {
   }
 
   save(next: TradingConfig, source = "system", reason?: string): TradingConfig {
-    validate(next);
+    // Reconciled ledger deficits must not prevent unrelated configuration edits.
+    // Only preserve an existing deficit; new declared balances remain nonnegative.
+    validate(next, market => market.fiatBalance < 0 &&
+      this.store.get(`fiat_balance:${market.code}`) !== undefined &&
+      Number(this.store.get(`fiat_balance:${market.code}`)) === market.fiatBalance);
     const normalized = harmonize(next);
     this.store.saveTradingConfig(normalized, source, reason);
     this.value = structuredClone(normalized);
@@ -271,7 +275,10 @@ function numberOr(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
-function validate(value: unknown): asserts value is TradingConfig {
+function validate(
+  value: unknown,
+  preserveLedgerDeficit: (market: MarketConfig) => boolean = () => false,
+): asserts value is TradingConfig {
   if (!value || typeof value !== "object")
     throw new Error("La configuración debe ser un objeto.");
   const config = value as Partial<TradingConfig>;
@@ -309,7 +316,8 @@ function validate(value: unknown): asserts value is TradingConfig {
       typeof market.huntSellEnabled !== "boolean"
     )
       throw new Error(`Control de cacería inválido para ${market.code}.`);
-    finite(market.fiatBalance, `Saldo de ${market.code}`);
+    finite(market.fiatBalance, `Saldo de ${market.code}`,
+      preserveLedgerDeficit(market) ? Number.NEGATIVE_INFINITY : 0);
     finite(market.buyMaxRate, `Máximo de compra de ${market.code}`, 0.0000001);
     finite(market.sellMinRate, `Mínimo de venta de ${market.code}`, 0.0000001);
     if (market.priceGuardPercent !== undefined) {
