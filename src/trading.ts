@@ -879,7 +879,28 @@ export class TradingEngine {
     const quote = rate(offer);
     if (!Number.isFinite(quote) || quote <= 0 || (offer.type === "sell" ? quote > market.buyMaxRate : quote < market.sellMinRate))
       return skip("La tasa flexible no cumple el objetivo");
-    const { sized, balance } = await this.sizeFlexibleTake(offer);
+    const { sized, desired, balance } = await this.sizeFlexibleTake(offer);
+    if (offer.type === "buy" && desired && (!sized || sized.amount < desired.amount)) {
+      this.requireRealMode();
+      let freshAt = observedAt;
+      const result = await this.opportunityOrchestrator.execute({
+        target: desired, referenceRate: quote,
+        expectedMarginPercent: (quote * (1 - market.sellFeePercent / 100) / market.buyMaxRate - 1) * 100,
+        priceDecision: "eligible", priceReason: "La tasa flexible cumple el mínimo de venta.",
+        unavailableQusd: this.uncertainFlexibleCapital("buy"),
+        automatic,
+        onTargetRefreshed: () => { freshAt = Date.now(); },
+        ...(automatic ? { canApply: (intentId?: string, queued = 0) =>
+          this.automaticDispatchAllowed(desired, intentId, Math.max(queued, Date.now() - freshAt), false) } : {}),
+      });
+      // Cancellation, application and restoration all change the remote balance.
+      delete this.qusdBalanceCache;
+      if (!result.applicationConfirmed) return skip(result.decision.reasons.join(" · "));
+      this.store.markSeen(offer.uuid);
+      queueMicrotask(() => void this.sendChatBestEffort(offer.uuid).catch(error =>
+        this.store.audit("notification_warning", String(error), offer.uuid)));
+      return { inspected: 1, candidates: 1, action: `venta aplicada ${offer.uuid}` };
+    }
     if (!sized) return skip("El saldo libre o los límites no alcanzan el mínimo de la orden");
     if (offer.type === "sell" && outgoingFiatCost(sized.amount, quote, market.outgoingTransferFee).effectiveRate > market.buyMaxRate)
       return skip("La tasa con comisión supera el máximo de compra");
@@ -930,11 +951,13 @@ export class TradingEngine {
       : Math.max(0, balance - reserve - this.uncertainFlexibleCapital("buy"));
     const active = this.store.activeOperations();
     const limit = Math.min(risk.maxQusdPerOperation,
-      risk.maxConcurrentQusdExposure - active.reduce((sum, op) => sum + op.amount, 0),
+      risk.maxConcurrentQusdExposure - active.reduce((sum, op) => sum + op.amount, 0) - this.store.activeReservedQusd(),
       risk.maxDailyAppliedQusd - this.store.dailyAppliedQusd(dayStart(Date.now())),
       offer.type === "sell" && market.purchaseMaxQusd ? market.purchaseMaxQusd : Infinity);
     const sized = sizeFlexibleOffer(offer, capacity, limit);
-    return { sized: active.length >= risk.maxConcurrentOperations ? undefined : sized, balance };
+    const desired = sizeFlexibleOffer(offer, Number.MAX_SAFE_INTEGER, limit);
+    return { sized: active.length >= risk.maxConcurrentOperations ? undefined : sized,
+      desired: active.length >= risk.maxConcurrentOperations ? undefined : desired, balance };
   }
 
   private uncertainFlexibleCapital(side: "buy" | "sell", coin?: string, ignoreIntent?: string): number {
@@ -2800,16 +2823,16 @@ export class TradingEngine {
       (!Number.isFinite(version) || latest.sentAt >= version));
   }
 
-  private async automaticDispatchAllowed(offer: P2pOffer, ownIntentId?: string, queuedForMs = 0): Promise<boolean> {
+  private async automaticDispatchAllowed(offer: P2pOffer, ownIntentId?: string, queuedForMs = 0, checkFlexibleCapital = true): Promise<boolean> {
     const eligible = (candidate: P2pOffer) => explicitFlag(candidate.only_vip) === "false" &&
       (candidate.type === "sell" ? this.isAutomaticBuyStillEligible(candidate, ownIntentId) :
         this.isAutomaticSellStillEligible(candidate, ownIntentId));
     if (!eligible(offer)) return false;
-    if (offer.offer_kind === "flexible" && offer.type === "buy") {
+    if (checkFlexibleCapital && offer.offer_kind === "flexible" && offer.type === "buy") {
       const reserve = Math.max(this.strategy().reserve, this.marketConfig.current().risk.minQusdReserve);
       if (await this.fastLaneQusdBalance() - reserve - this.uncertainFlexibleCapital("buy", undefined, ownIntentId) < offer.amount) return false;
     }
-    if (offer.type === "buy" && this.cooperativeQusdOwed() > 0 && await this.fastLaneQusdBalance() < offer.amount) return false;
+    if (checkFlexibleCapital && offer.type === "buy" && this.cooperativeQusdOwed() > 0 && await this.fastLaneQusdBalance() < offer.amount) return false;
     if (queuedForMs <= 5_000) return true;
     return false;
   }
