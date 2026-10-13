@@ -668,6 +668,8 @@ export class DashboardReadModel {
     );
     const activeOperations = this.store.activeOperations();
     const workflows = this.store.tradeWorkflows();
+    const integrity = this.store.configRevisionIntegrity();
+    const unresolvedMutations = this.store.unresolvedMutationIntents();
     return {
       generatedAt,
       freshness: {
@@ -753,15 +755,18 @@ export class DashboardReadModel {
       cooperativeHunting: { enabled: this.cooperativeHunter?.enabled() ?? false,
         executions: this.cooperativeHunter?.executions() ?? [], qusdOwed: Number(this.store.get("cooperative_qusd_owed") ?? 0) },
       mutationIntents: this.store.recentMutationIntents(100),
-      unresolvedMutations: this.store.unresolvedMutationIntents(),
-      recoveryNoticeCount: this.store.unresolvedMutationIntents().filter(intent => this.store.get(`recovery_ack:${intent.intentId}`) !== String(intent.updatedAt)).length,
+      unresolvedMutations,
+      recoveryNoticeCount: unresolvedMutations.filter(intent => this.store.get(`recovery_ack:${intent.intentId}`) !== String(intent.updatedAt)).length,
       operations: this.store.visibleOperations().map(operation => {
         const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
         return { ...operation, ...(raw === undefined || raw === "" ? {} : { cooperativeOwnerFiat: Number(raw) }) };
       }),
       integrity: {
         schemaVersion: this.store.schemaVersion(),
-        configRevisionChainValid: this.store.verifyConfigRevisionChain(),
+        configRevisionChainValid: integrity.valid,
+        configRevisionChainChecking: integrity.checking,
+        configRevisionChainCheckedAt: integrity.checkedAt,
+        ...(integrity.error ? { configRevisionChainError: integrity.error } : {}),
       },
     };
   }

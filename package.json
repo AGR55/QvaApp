@@ -10,7 +10,7 @@
   "scripts": {
     "build": "pnpm typecheck && pnpm build:server && pnpm build:web",
     "build:server": "tsc -p tsconfig.build.json",
-    "build:web": "vite build",
+    "build:web": "vite build && node scripts/compress-dashboard.mjs",
     "dev": "tsx watch src/index.ts",
     "dev:web": "vite build --watch",
     "dev:all": "pnpm dev & pnpm dev:web & wait",

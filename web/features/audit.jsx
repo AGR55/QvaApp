@@ -155,7 +155,7 @@ export function Audit({ data, onChanged }) {
       <div className="audit-main">
         <div className="dashboard-grid audit-health-grid">
           <Panel title="Salud e integridad"><dl className="health-list">
-            <Health label="Cadena de configuración" ok={integrity} value={integrity ? "Íntegra" : "Alterada"} />
+            <Health label="Cadena de configuración" ok={integrity} value={data.integrity?.configRevisionChainChecking ? "Comprobando…" : integrity === null || integrity === undefined ? "Pendiente de comprobación" : integrity ? "Íntegra" : "Alterada"} />
             <Health label="Esquema de datos" ok value={`v${data.integrity?.schemaVersion}`} />
             <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "En conciliación" : "Ninguna"} />
             <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
@@ -248,5 +248,5 @@ function optionalMoney(value) {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(2) : "no disponible";
 }
 
-function Health({ label, ok, value }) { return <div><dt>{ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}{label}</dt><dd className={ok ? "" : "danger"}>{value}</dd></div>; }
+function Health({ label, ok, value }) { return <div><dt>{ok === null || ok === undefined ? <Clock3 aria-hidden="true" /> : ok ? <CheckCircle2 aria-hidden="true" /> : <XCircle aria-hidden="true" />}{label}</dt><dd className={ok === false ? "danger" : ""}>{value}</dd></div>; }
 function relativeTime(timestamp) { const minutes = Math.max(0, Math.round((Date.now() - timestamp) / 60_000)); return minutes < 1 ? "ahora" : minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h`; }

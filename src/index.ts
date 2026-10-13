@@ -45,6 +45,7 @@ const store = new Store(config.dataDir);
 const clearedAckDeadlines = store.clearAutomaticCancellationDeadlines();
 if (clearedAckDeadlines) store.audit("ack_timeout_disabled", `Plazos de cancelación por falta de ACK retirados: ${clearedAckDeadlines}.`);
 const marketConfig = new MarketConfigService(config.dataDir, config, store);
+void store.refreshConfigIntegrity();
 const vault = new Vault(config.encryptionKey);
 const session = new Session(store, vault);
 const marketAccounts = new MarketAccountService(store, vault);
