@@ -1,3 +1,5 @@
+import { checkConfigRevisions, configRevisionHash, type RevisionCheckpoint } from "./config-integrity.js";
+import { ConfigIntegrityMonitor } from "./config-integrity-monitor.js";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -17,7 +19,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 25;
+const LATEST_SCHEMA_VERSION = 27;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -345,6 +347,8 @@ export interface CapitalReservation {
 export class Store {
   private readonly db: DatabaseSync;
   private readonly dbPath: string;
+  private integrityMonitor: ConfigIntegrityMonitor | undefined;
+  private integrityCheckpoint: RevisionCheckpoint | undefined;
 
   constructor(dataDir: string) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
@@ -881,6 +885,20 @@ export class Store {
         this.ensureColumn("operations", "order_uuid", "TEXT");
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (26, ?)").run(Date.now());
       }
+      if (this.currentSchemaVersion() < 27) {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS config_integrity_epoch (id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL);
+          INSERT OR IGNORE INTO config_integrity_epoch(id,version) VALUES(1,0);
+          CREATE TRIGGER IF NOT EXISTS config_integrity_update AFTER UPDATE ON config_revisions
+            BEGIN UPDATE config_integrity_epoch SET version=version+1 WHERE id=1; END;
+          CREATE TRIGGER IF NOT EXISTS config_integrity_delete AFTER DELETE ON config_revisions
+            BEGIN UPDATE config_integrity_epoch SET version=version+1 WHERE id=1; END;
+          CREATE TRIGGER IF NOT EXISTS config_integrity_insert BEFORE INSERT ON config_revisions
+            WHEN NEW.id > 0 AND NEW.id <= (SELECT MAX(id) FROM config_revisions)
+            BEGIN UPDATE config_integrity_epoch SET version=version+1 WHERE id=1; END;
+        `);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (27, ?)").run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -915,6 +933,7 @@ export class Store {
   }
 
   close(): void {
+    this.integrityMonitor?.close();
     this.db.close();
   }
 
@@ -1161,25 +1180,19 @@ export class Store {
   }
 
   verifyConfigRevisionChain(): boolean {
-    const revisions = this.db
-      .prepare(
-        "SELECT created_at, source, reason, config_json, previous_hash, hash FROM config_revisions ORDER BY id ASC",
-      )
-      .all() as Record<string, unknown>[];
-    let previousHash: string | null = null;
-    for (const revision of revisions) {
-      if (revision.previous_hash !== previousHash) return false;
-      const hash = configRevisionHash(
-        previousHash,
-        Number(revision.created_at),
-        String(revision.source),
-        revision.reason === null ? null : String(revision.reason),
-        String(revision.config_json),
-      );
-      if (hash !== revision.hash) return false;
-      previousHash = hash;
-    }
-    return true;
+    const result = checkConfigRevisions(this.db, this.integrityCheckpoint);
+    this.integrityCheckpoint = result;
+    return result.valid;
+  }
+
+  configRevisionIntegrity() {
+    this.integrityMonitor ??= new ConfigIntegrityMonitor(this.dbPath);
+    return this.integrityMonitor.state();
+  }
+
+  refreshConfigIntegrity() {
+    this.integrityMonitor ??= new ConfigIntegrityMonitor(this.dbPath);
+    return this.integrityMonitor.refresh();
   }
 
   private recordConfigRevision(
@@ -3063,20 +3076,6 @@ function marketFeedEventFromRow(row: Record<string, unknown>): MarketFeedEvent {
     processedAt:
       row.processed_at === null ? null : Number(row.processed_at),
   };
-}
-
-function configRevisionHash(
-  previousHash: string | null,
-  createdAt: number,
-  source: string,
-  reason: string | null,
-  configJson: string,
-): string {
-  return createHash("sha256")
-    .update(
-      JSON.stringify({ previousHash, createdAt, source, reason, configJson }),
-    )
-    .digest("hex");
 }
 
 function workflowFromRow(row: Record<string, unknown>): TradeWorkflow {

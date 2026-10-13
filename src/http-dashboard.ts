@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { sendStaticAsset } from "./static-assets.js";
 import { resolve } from "node:path";
 import Fastify, {
   type FastifyInstance,
@@ -153,9 +152,9 @@ export function buildDashboard(
     const name = request.params.name;
     if (name !== "login.js" && name !== "login.css")
       return reply.status(404).send("Recurso no encontrado.");
-    return reply.type(name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
-      .header("cache-control", "public, no-cache, must-revalidate")
-      .send(readFileSync(resolve(authRoot, name)));
+    return sendStaticAsset(request, reply, resolve(authRoot, name),
+      name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
+      "public, no-cache, must-revalidate");
   });
   app.get("/service-worker.js", async (_request, reply) =>
     reply.type("text/javascript; charset=utf-8")
@@ -167,22 +166,19 @@ export function buildDashboard(
     if (!/^[a-zA-Z0-9._-]+\.(?:svg|png)$/.test(name))
       return reply.status(404).type("text/plain").send("Icono no encontrado.");
     const file = resolve(iconsRoot, name);
-    if (!file.startsWith(`${iconsRoot}/`) || !existsSync(file))
+    if (!file.startsWith(`${iconsRoot}/`))
       return reply.status(404).type("text/plain").send("Icono no encontrado.");
-    return reply.type(name.endsWith(".svg") ? "image/svg+xml" : "image/png")
-      .header("cache-control", "public, max-age=86400, stale-while-revalidate=604800")
-      .send(readFileSync(file));
+    return sendStaticAsset(request, reply, file, name.endsWith(".svg") ? "image/svg+xml" : "image/png",
+      "public, max-age=86400, stale-while-revalidate=604800");
   });
   app.get<{ Params: { name: string } }>("/logo/:name", async (request, reply) => {
     const name = request.params.name;
     if (!/^[a-zA-Z0-9._-]+\.webp$/.test(name))
       return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
     const file = resolve(logoRoot, name);
-    if (!file.startsWith(`${logoRoot}/`) || !existsSync(file))
+    if (!file.startsWith(`${logoRoot}/`))
       return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
-    return reply.type("image/webp")
-      .header("cache-control", "public, max-age=86400, stale-while-revalidate=604800")
-      .send(readFileSync(file));
+    return sendStaticAsset(request, reply, file, "image/webp", "public, max-age=86400, stale-while-revalidate=604800");
   });
   app.get<{ Params: { name: string } }>("/market-icons/:name", async (request, reply) => {
     const icon = typeof readModel.marketIcon === "function"
@@ -190,26 +186,17 @@ export function buildDashboard(
       : undefined;
     if (!icon)
       return reply.status(404).type("text/plain").send("Icono no encontrado.");
-    return reply.type(icon.mimeType)
-      .header("cache-control", "public, max-age=31536000, immutable")
-      .send(readFileSync(icon.path));
+    return sendStaticAsset(request, reply, icon.path, icon.mimeType, "public, max-age=31536000, immutable");
   });
   app.get<{ Params: { "*": string } }>("/dashboard/*", async (request, reply) => {
     const relative = request.params["*"];
     const file = resolve(publicRoot, relative);
-    if (!file.startsWith(`${publicRoot}/`) || !existsSync(file))
+    if (!file.startsWith(`${publicRoot}/`))
       return reply.status(404).type("text/plain").send("Panel no compilado. Ejecuta pnpm build.");
-    const body = readFileSync(file);
-    const fingerprinted = /-[A-Za-z0-9_-]{8,}\.js$/.test(relative);
-    const etag = `"${createHash("sha256").update(body).digest("base64url")}"`;
-    reply.header("etag", etag)
-      .header("cache-control", fingerprinted
-        ? "public, max-age=31536000, immutable"
-        : "public, no-cache, must-revalidate");
-    if (request.headers["if-none-match"] === etag) return reply.status(304).send();
-    return reply
-      .type(relative.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8")
-      .send(body);
+    const fingerprinted = /-[A-Za-z0-9_-]{8,}\.(?:js|css)$/.test(relative);
+    return sendStaticAsset(request, reply, file,
+      relative.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
+      fingerprinted ? "public, max-age=31536000, immutable" : "public, no-cache, must-revalidate", true);
   });
 
   app.get("/api/session", async (request) => {

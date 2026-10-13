@@ -183,7 +183,8 @@ export class MarketConfigService {
     const market = next.markets.find((candidate) => candidate.code === code);
     if (!market) throw new Error(`Mercado no configurado: ${code}`);
     market.fiatBalance = fiatBalance;
-    this.save(next);
+    // current() overlays ledger balances; compare to the last persisted value.
+    if (JSON.stringify(next) !== JSON.stringify(this.value)) this.save(next);
   }
 
   private read(): TradingConfig {
