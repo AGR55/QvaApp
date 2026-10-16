@@ -220,14 +220,17 @@ test("la declaración manual de fiat se distingue de un movimiento automático",
   const { store, cfg, markets } = setup();
   const trading = new TradingEngine(store, {} as never, cfg as never, markets, async () => undefined);
   trading.setFiatBalance("BANK_CUP", 90_000);
-  assert.equal(store.get("cooperative_balance_declared:BANK_CUP"), "true");
+  assert.ok(store.get("cooperative_balance_declared:BANK_CUP"));
+  const firstDeclaration = store.get("cooperative_balance_declared:BANK_CUP");
+  trading.setFiatBalance("BANK_CUP", 90_000);
+  assert.notEqual(store.get("cooperative_balance_declared:BANK_CUP"), firstDeclaration);
   store.set("cooperative_balance_declared:BANK_CUP", "");
   store.recordFiatMovement("movement-1", "BANK_CUP", "debit", 1_000, "test");
   assert.equal(store.get("cooperative_balance_declared:BANK_CUP"), "");
   const config = markets.current();
   config.markets.find((market) => market.code === "BANK_CUP")!.fiatBalance = 85_000;
   trading.saveConfig(config, "panel");
-  assert.equal(store.get("cooperative_balance_declared:BANK_CUP"), "true");
+  assert.ok(store.get("cooperative_balance_declared:BANK_CUP"));
   store.close();
 });
 

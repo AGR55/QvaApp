@@ -181,10 +181,12 @@ export class TradingEngine {
     const changed = this.store.recordFiatMovement(operation.uuid, operation.coin, "debit", cost, source);
     const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
     if (changed && raw !== undefined && raw !== "") {
-      const fee = Number(raw) > 0 ? this.market(operation.coin)?.outgoingTransferFee ?? 0 : 0;
-      // The synchronized allocation was already debited when reserved. Only
-      // the owner's transfer fee is a new capacity delta.
-      this.store.set(`cooperative_local_balance:${operation.coin}`, String(this.fiatBalance(operation.coin) + fee));
+      const key = `cooperative_local_balance:${operation.coin}`;
+      const previous = this.store.get(key);
+      // Only this share was already debited by Sync Core. Preserve any personal
+      // movement still waiting to be synchronized instead of resetting its base.
+      if (previous !== undefined && previous !== "" && Number.isFinite(Number(previous)))
+        this.store.set(key, String(Number(previous) - Number(raw)));
     }
     return changed;
   }
@@ -233,7 +235,7 @@ export class TradingEngine {
     for (const market of saved.markets) {
       this.store.set(`fiat_balance:${market.code}`, String(market.fiatBalance));
       if (source === "panel" && previousBalances.get(market.code) !== market.fiatBalance)
-        this.store.set(`cooperative_balance_declared:${market.code}`, "true");
+        this.store.set(`cooperative_balance_declared:${market.code}`, randomUUID());
     }
     this.store.audit(
       "config",
@@ -308,7 +310,7 @@ export class TradingEngine {
     if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
     this.store.set(`fiat_balance:${coin}`, String(amount));
     this.marketConfig.updateBalance(coin, amount);
-    this.store.set(`cooperative_balance_declared:${coin}`, "true");
+    this.store.set(`cooperative_balance_declared:${coin}`, randomUUID());
     this.store.audit(
       "fiat_balance",
       `Saldo fiat declarado: ${amount} ${this.marketCurrency(coin)} (${coin})`,
@@ -1245,7 +1247,12 @@ export class TradingEngine {
       offer.uuid,
       event === "p2p.applied" && operation ? "applied" : "expired",
     );
-    if (operation) {
+    // A fixed offer can reopen and trade with another peer after cancellation.
+    // Its public feed UUID is not evidence of another payment by this account.
+    const account = operation ? this.store.get("analytics_account_uuid") : undefined;
+    const differentPeer = Boolean(account && offer.Peer?.uuid && offer.Peer.uuid !== account &&
+      offer.User?.uuid !== account && offer.owner_uuid !== account && !this.ownsOfferUuid(offer.uuid));
+    if (operation && operation.state !== "cancelled" && !differentPeer) {
       const next = operationStateFromFeed(operation.state, event);
       if (next !== operation.state) this.store.updateOperation(offer.uuid, next);
       if (
@@ -1263,7 +1270,7 @@ export class TradingEngine {
     }
     this.store.audit(
       "market_feed_state_applied",
-      `${event} proyectado en ${Math.max(0, Date.now() - receivedAt)} ms${operation ? " y Operación sincronizada" : ""}.`,
+      `${event} proyectado en ${Math.max(0, Date.now() - receivedAt)} ms${operation ? operation.state === "cancelled" || differentPeer ? " sin contabilizar: operación cancelada o peer distinto" : " y Operación sincronizada" : ""}.`,
       offer.uuid,
     );
     if (ownOffer) {
