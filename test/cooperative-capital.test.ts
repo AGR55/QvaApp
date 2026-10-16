@@ -56,3 +56,37 @@ test("cooperative hunting cannot bypass simulation mode",t=>{
  const s=setup();t.after(()=>s.store.close());s.store.set("mode","simulation");
  assert.match(s.engine.cooperativeSafetyReason({uuid:"group",coin:"BANK_CUP",type:"sell",amount:10,receive:1000,status:"open"})??"",/detenido/);
 });
+
+for (const type of ["buy", "sell"] as const) {
+ test(`una oferta ${type} cancelada no mueve fiat cuando otra persona la paga o completa`,async t=>{
+  const s=setup();t.after(()=>s.store.close());
+  s.store.set("analytics_account_uuid","me");
+  s.store.createOperation({uuid:"old-cancelled",offerType:type,coin:"BANK_CUP",amount:10,receive:1000,rate:100,state:"cancelled",autoApplied:true,cancelAt:null,createdAt:Date.now()-10000});
+  for(const event of ["p2p.paid","p2p.completed"] as const) await s.engine.ingestMarketStateEvent(event,{uuid:"old-cancelled",type,coin:"BANK_CUP",amount:10,receive:1000,status:event==="p2p.paid"?"paid":"completed",User:{uuid:"seller"},Peer:{uuid:"someone-else"}});
+  assert.equal(s.store.get("fiat_balance:BANK_CUP"),"1000");
+  assert.equal(s.store.hasFiatMovement("old-cancelled"),false);
+  assert.equal(s.store.getOperation("old-cancelled")?.state,"cancelled");
+ });
+}
+
+test("un peer diferente no completa ni contabiliza una operación local activa",async t=>{
+ const s=setup();t.after(()=>s.store.close());s.store.set("analytics_account_uuid","me");
+ s.store.createOperation({uuid:"changed-peer",offerType:"sell",coin:"BANK_CUP",amount:10,receive:1000,rate:100,state:"acknowledged",autoApplied:true,cancelAt:null,createdAt:Date.now()});
+ await s.engine.ingestMarketStateEvent("p2p.completed",{uuid:"changed-peer",type:"sell",coin:"BANK_CUP",amount:10,receive:1000,status:"completed",User:{uuid:"seller"},Peer:{uuid:"someone-else"}});
+ assert.equal(s.store.get("fiat_balance:BANK_CUP"),"1000");
+ assert.equal(s.store.getOperation("changed-peer")?.state,"acknowledged");
+});
+
+for (const personalDirection of ["debit","credit"] as const) {
+ test(`el pago conjunto conserva un ${personalDirection} personal aún no sincronizado`,async t=>{
+  const s=setup();t.after(()=>s.store.close());
+  s.store.set("cooperative_owner_fiat:group","300");
+  s.store.set("cooperative_local_balance:BANK_CUP","1000");
+  s.store.createOperation({uuid:"group",offerType:"sell",coin:"BANK_CUP",amount:20,receive:2000,rate:100,state:"acknowledged",autoApplied:true,cancelAt:null,createdAt:Date.now()});
+  s.store.recordFiatMovement("personal","BANK_CUP",personalDirection,100,"Operación personal");
+  for(const event of ["p2p.paid","p2p.completed"] as const) await s.engine.ingestMarketStateEvent(event,{uuid:"group",type:"sell",coin:"BANK_CUP",amount:20,receive:2000,status:event==="p2p.paid"?"paid":"completed"});
+  assert.equal(s.store.get("cooperative_local_balance:BANK_CUP"),"700","la base solo descuenta los 300 ya reservados, sin absorber movimientos personales");
+  assert.equal(s.store.get("fiat_balance:BANK_CUP"),personalDirection==="debit"?"600":"800");
+  assert.equal(s.store.recentFiat("BANK_CUP",10).filter(row=>row.uuid==="group").length,1);
+ });
+}

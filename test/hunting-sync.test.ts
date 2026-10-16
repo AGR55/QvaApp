@@ -286,3 +286,45 @@ test("el alta manual toma el saldo fiat local y no permite publicar menos de cin
     assert.equal(bodies.length, 1);
   } finally { await coordinator.stop(); store.close(); }
 });
+
+for (const change of ["pago-conjunto", "saldo-declarado", "saldo-redeclarado"] as const) {
+ test(`una respuesta de capacidad no borra un ${change} ocurrido mientras esperaba`,async t=>{
+  const store=new Store(mkdtempSync(join(tmpdir(),"qva-sync-flight-")));
+  store.set("fiat_balance:BANK_CUP","1100");
+  store.set("cooperative_local_balance:BANK_CUP","1000");
+  if(change==="saldo-redeclarado")store.set("cooperative_balance_declared:BANK_CUP","older-declaration");
+  const contribution={coin:"BANK_CUP",fiat:1000,minimal:0,price:100,state:"confirmed",updatedAt:Date.now()};
+  store.saveRemoteResource("cooperative-network",{enabled:true,httpConnected:true,natsConnected:false,snapshot:{},contributions:{BANK_CUP:contribution},lastHttpAt:Date.now(),lastNatsAt:null,lastError:null});
+  let remote=1000;
+  const bodies:number[]=[];
+  const coordinator=new HuntingSyncCoordinator({enabled:true,baseUrl:"http://127.0.0.1:8080",natsUrl:"nats://127.0.0.1:4222",email:"test@example.com",password:"secret"},store,new Vault("a".repeat(64)),async(input,init)=>{
+   const url=String(input);
+   if(url.endsWith("/auth/login"))return Response.json({api_key:"csk_test"});
+   if(url.includes("/hunts?"))return Response.json({data:[{...contribution,fiat:remote}]});
+   if(url.endsWith("/hunts") && init?.method==="POST"){
+    const body=JSON.parse(String(init.body));bodies.push(body.fiat);remote=body.fiat;
+    if(bodies.length===1){
+     // The remote write succeeds before its HTTP response arrives. Another
+     // action updates local accounting while that response is in flight.
+     if(change==="pago-conjunto"){
+      store.set("fiat_balance:BANK_CUP","800");
+      store.set("cooperative_local_balance:BANK_CUP","700");
+      remote-=300;
+     }else{
+      store.set("fiat_balance:BANK_CUP","2000");
+      store.set("cooperative_balance_declared:BANK_CUP","new-declaration");
+      remote-=400; // Another participant reserved capacity after the write.
+     }
+    }
+    return Response.json({});
+   }
+   throw new Error(`Unexpected ${url}`);
+  });
+  t.after(async()=>{await coordinator.stop();store.close();});
+  await coordinator.syncCapacity();
+  if(change==="pago-conjunto")assert.equal(store.get("cooperative_local_balance:BANK_CUP"),"800");
+  else assert.ok(store.get("cooperative_balance_declared:BANK_CUP"));
+  await coordinator.syncCapacity();
+  assert.deepEqual(bodies,change==="pago-conjunto"?[1100]:[1100,2000]);
+ });
+}

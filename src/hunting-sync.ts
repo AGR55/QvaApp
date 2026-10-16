@@ -348,9 +348,10 @@ export class HuntingSyncCoordinator {
       if (fiat < COOPERATIVE_MIN_QUSD * input.price)
         throw new Error("El saldo de ese mercado equivale a menos de 5 QUSD al precio indicado.");
       const contribution = { coin, fiat, minimal: input.minimal, price: input.price };
+      const previousBase = this.store.get(balanceKey(coin));
+      const declaration = this.store.get(declaredKey(coin));
       await this.authorized((token) => this.requiredClient().publish(token, contribution));
-      this.store.set(balanceKey(coin), String(fiat));
-      this.store.set(declaredKey(coin), "");
+      this.acknowledgeCapacity(coin, fiat, previousBase, declaration);
       this.updateContribution({ ...contribution, state: "pending", updatedAt: Date.now() });
       this.patchState({ httpConnected: true, lastError: null });
       this.store.audit("cooperative_contribution_published", `${coin}: ${fiat} fiat aportado al precio ${input.price}.`);
@@ -429,7 +430,7 @@ export class HuntingSyncCoordinator {
     const changed = coins.some((coin) => {
       const local = this.localFiat(coin), previous = Number(this.store.get(balanceKey(coin)));
       return !Number.isFinite(previous) || Math.abs(local - previous) > CAPACITY_EPSILON ||
-        this.store.get(declaredKey(coin)) === "true" ||
+        Boolean(this.store.get(declaredKey(coin))) ||
         Math.min(local, cached[coin]!.fiat) < COOPERATIVE_MIN_QUSD * cached[coin]!.price;
     });
     if (!changed) return;
@@ -446,9 +447,10 @@ export class HuntingSyncCoordinator {
       const rawPrevious = this.store.get(balanceKey(coin));
       const previous = rawPrevious === undefined || rawPrevious === "" ? local : Number(rawPrevious);
       const delta = local - previous;
+      const declaration = this.store.get(declaredKey(coin));
       // Sync Core may already have spent fiat that QvaApply has not recorded.
       // Apply only the local change to its remaining capacity, capped by local fiat.
-      const available = roundDownFiat(this.store.get(declaredKey(coin)) === "true"
+      const available = roundDownFiat(declaration
         ? local : Math.max(0, Math.min(local, current.fiat + delta)));
       if (available < COOPERATIVE_MIN_QUSD * current.price) {
         await this.authorized((token) => this.requiredClient().withdraw(token, coin));
@@ -461,16 +463,27 @@ export class HuntingSyncCoordinator {
           minimal: current.minimal, price: current.price, ...(current.revision ? { revision: current.revision } : {}) };
         await this.authorized((token) => this.requiredClient().publish(token, updated));
         state.contributions[coin] = { ...updated, state: "pending", updatedAt: Date.now() };
-        this.store.set(balanceKey(coin), String(local));
-        this.store.set(declaredKey(coin), "");
+        this.acknowledgeCapacity(coin, local, rawPrevious, declaration);
         this.store.audit("cooperative_capacity_updated", `${coin}: capacidad actualizada a ${updated.fiat} fiat.`);
       } else {
         state.contributions[coin] = current;
-        this.store.set(balanceKey(coin), String(local));
-        this.store.set(declaredKey(coin), "");
+        this.acknowledgeCapacity(coin, local, rawPrevious, declaration);
       }
     }
     this.saveState({ ...state, httpConnected: true, lastError: null });
+  }
+
+  private acknowledgeCapacity(coin: string, local: number, previousBase: string | undefined, declaration: string | undefined): void {
+    const latestBase = this.store.get(balanceKey(coin));
+    // Cooperative payments can shift the base during HTTP. Acknowledge only the
+    // local delta we sent, retaining that concurrent adjustment for the next tick.
+    const shift = previousBase !== undefined && previousBase !== "" && latestBase !== undefined && latestBase !== "" &&
+      Number.isFinite(Number(previousBase)) && Number.isFinite(Number(latestBase))
+      ? Number(latestBase) - Number(previousBase) : 0;
+    this.store.set(balanceKey(coin), String(local + shift));
+    // A fresh manual declaration belongs to the next synchronization, even when
+    // it arrived while this request was awaiting its response.
+    if (this.store.get(declaredKey(coin)) === declaration) this.store.set(declaredKey(coin), "");
   }
 
   private async ensureToken(force = false): Promise<string> {
