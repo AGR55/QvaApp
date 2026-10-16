@@ -2670,7 +2670,7 @@ export class Store {
     return (
       this.db.prepare(
         `SELECT * FROM notification_events
-         WHERE (kind <> 'recovery-blocked' OR acknowledged_at IS NULL)
+         WHERE (kind NOT IN ('recovery-blocked', 'reconciliation-required') OR acknowledged_at IS NULL)
            AND ((telegram_delivered_at IS NULL AND telegram_next_attempt_at <= ?)
              OR (push_delivered_at IS NULL AND push_next_attempt_at <= ?))
          ORDER BY CASE WHEN kind IN ('offer-taken','offer-rejected') THEN 1 ELSE 0 END, created_at ASC LIMIT ?`,
@@ -2723,6 +2723,13 @@ export class Store {
       `UPDATE notification_events SET acknowledged_at = ?, updated_at = ?
        WHERE id = ? AND acknowledged_at IS NULL`,
     ).run(now, now, id).changes > 0;
+  }
+
+  acknowledgeRecoveryNotifications(intentId: string, operationUuid?: string): void {
+    const now = Date.now();
+    this.db.prepare(`UPDATE notification_events SET acknowledged_at = ?, updated_at = ?
+      WHERE acknowledged_at IS NULL AND (id = ? OR (kind = 'reconciliation-required' AND operation_uuid = ?))`)
+      .run(now, now, `recovery-blocked:${intentId}`, operationUuid ?? null);
   }
 
   createRebalanceJob(

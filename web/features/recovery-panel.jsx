@@ -33,6 +33,7 @@ export function RecoveryPanel({ onChanged }) {
   const [reason, setReason] = useState("");
   const [evidence, setEvidence] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [showAcknowledged, setShowAcknowledged] = useState(false);
   const [resolveError, setResolveError] = useState("");
 
   const load = useCallback(async () => {
@@ -117,7 +118,9 @@ export function RecoveryPanel({ onChanged }) {
     } catch (error) { setActionFailed(true); setActionMessage(error.message); }
     finally { setBusyId(""); }
   };
-  const items = report?.items ?? [];
+  const allItems = report?.items ?? [];
+  const acknowledgedCount = allItems.filter(item => item.acknowledged).length;
+  const items = allItems.filter(item => showAcknowledged ? item.acknowledged : !item.acknowledged);
   return <>
     <Panel
       title="Recuperación de intenciones"
@@ -126,7 +129,10 @@ export function RecoveryPanel({ onChanged }) {
     >
       <div className="recovery-panel">
         <div className="recovery-summary">
-          <span><ShieldAlert aria-hidden="true" /> {blockedCount(report)} intención(es) pendiente(s)</span>
+          <span><ShieldAlert aria-hidden="true" /> {allItems.filter(item => !item.acknowledged).length} aviso(s) pendiente(s)</span>
+          <Button variant="outline" size="sm" onClick={() => setShowAcknowledged(value => !value)}>
+            {showAcknowledged ? "Ver pendientes" : `Ver reconocidos (${acknowledgedCount})`}
+          </Button>
           <Button variant="outline" size="sm" disabled={loading || Boolean(busyId)} onClick={() => void load()}>
             <RotateCw data-icon="inline-start" /> Actualizar
           </Button>
@@ -134,7 +140,7 @@ export function RecoveryPanel({ onChanged }) {
         {loadError ? <div className="resource-error" role="alert"><p><AlertTriangle aria-hidden="true" />{loadError}</p><Button variant="outline" size="sm" onClick={() => void load()}>Reintentar</Button></div> : null}
         {actionMessage ? <p className={actionFailed ? "recovery-message danger" : "recovery-message"} role={actionFailed ? "alert" : "status"}>{actionMessage}</p> : null}
         {loading && !report ? <Skeleton rows={2} label="Cargando intenciones remotas" /> : null}
-        {!loading && !loadError && items.length === 0 ? <Empty title="Todo al día" icon={CircleCheck}>No hay intenciones remotas que requieran atención.</Empty> : null}
+        {!loading && !loadError && items.length === 0 ? <Empty title={showAcknowledged ? "Sin avisos reconocidos" : "Sin avisos pendientes"} icon={CircleCheck}>Los avisos reconocidos se conservan para consulta; las comprobaciones continúan.</Empty> : null}
         {items.length ? <ol className="recovery-list">
           {items.map((item) => <RecoveryCard
             key={item.intentId}
@@ -254,12 +260,6 @@ function labelKind(kind) {
   return ({ apply: "Aplicación", paid: "Pago", received: "Recepción", cancel: "Cancelación", edit: "Edición" })[kind] ?? kind;
 }
 
-function blockedCount(report) {
-  if (typeof report?.blocked === "number") return report.blocked;
-  if (Array.isArray(report?.blocked)) return report.blocked.length;
-  if (typeof report?.blocked === "boolean") return Number(report.blocked);
-  return report?.items?.length ?? 0;
-}
 
 function formatDate(value) {
   if (value === undefined || value === null || value === "") return "Sin fecha";

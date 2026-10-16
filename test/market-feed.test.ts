@@ -247,6 +247,37 @@ test("integra los seis eventos del feed por stream o webhook", async () => {
   state.store.close();
 });
 
+test("una consulta lenta de estado no retiene una nueva oportunidad del feed", async () => {
+  const state = setup();
+  let active = false;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const opportunities: string[] = [];
+  const coordinator = new MarketSourceCoordinator(state.store, new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl, async offer => { opportunities.push(offer.uuid); }, () => active,
+    () => Date.parse("2026-09-24T12:00:10Z"),
+    { fetch: async () => new Response("retry: 60000\n\n", { status: 200 }), wait: async () => new Promise<void>(() => undefined) },
+    async () => { await blocked; });
+  try {
+    enableRealtime(coordinator);
+    await new Promise(resolve => setImmediate(resolve));
+    for (const body of [payload("state-slow", "p2p.paid"), payload("fresh-opportunity")]) {
+      if (body.event === "p2p.paid") body.data.status = "paid";
+      state.store.enqueueMarketFeedEvent({ key: body.data.uuid, event: body.event, payload: body,
+        receivedAt: Date.parse("2026-09-24T12:00:10Z") });
+    }
+    active = true;
+    void coordinator.processNext();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(opportunities, ["fresh-opportunity"]);
+  } finally {
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    coordinator.stop(); state.store.close();
+  }
+});
+
 test("un evento aplicado en cola invalida la oportunidad antes de consumir apply", async () => {
   const state = setup();
   const opportunities: string[] = [];

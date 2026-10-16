@@ -259,6 +259,8 @@ test("Telegram registra evidencia y reconoce un aviso sin resolver ni desbloquea
   assert.equal(store.hasUnresolvedMutationForOffer("offer-note"), true);
   assert.equal(store.hasUnresolvedMutationForOffer("other-offer"), false);
   assert.equal(store.getMutationIntent("telegram-note")?.state, "uncertain");
+  store.updateMutationIntent("telegram-note", "uncertain", undefined, "Nueva comprobación sin cambios financieros");
+  assert.equal(recovery.list().items[0]?.acknowledged, true, "una comprobación posterior no debe reactivar el aviso reconocido");
   store.close();
 });
 
@@ -273,5 +275,22 @@ test("la resolución manual desde Telegram conserva actor, evidencia y control d
   assert.equal(store.hasUnresolvedMutationForOffer("offer-resolve"), false);
   assert.throws(() => recovery.resolveManual({ intentId: intent.intentId, expectedUpdatedAt: intent.updatedAt,
     outcome: "not_applied", reason: "Comprobé mi cuenta y no hay aplicación.", evidence: "Oferta sin operación propia confirmada.", confirmed: true }));
+  store.close();
+});
+
+
+test("reconocer retira avisos duplicados y sus reintentos sin ocultar otras operaciones", () => {
+  const { store, createIntent } = setup();
+  createIntent("ack-intent", "ack-offer");
+  for (const [id, kind, operationUuid] of [
+    ["recovery-blocked:ack-intent", "recovery-blocked", "ack-offer"],
+    ["workflow-notice", "reconciliation-required", "ack-offer"],
+    ["other-notice", "reconciliation-required", "other-offer"],
+    ["payment-notice", "operation-applied", "ack-offer"],
+  ] as const) store.enqueueNotification({ id, kind, operationUuid, message: id, payload: {} });
+  const recovery = new SelfServiceRecovery(store, {} as never);
+  recovery.acknowledge("ack-intent");
+  assert.deepEqual(store.pendingNotificationDeliveries().map(item => item.id).sort(), ["other-notice", "payment-notice"]);
+  assert.equal(store.hasUnresolvedMutationForOffer("ack-offer"), true);
   store.close();
 });

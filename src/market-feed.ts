@@ -192,10 +192,12 @@ export class MarketSourceCoordinator implements MarketDataSource {
 
   async processNext(): Promise<boolean> {
     if (this.mode() !== "hybrid" || !this.canProcess()) return false;
-    const stateProcessed = await this.processStateEvents();
-    if (this.processing) return stateProcessed;
+    // State reconciliation may need remote reads. Its queue must not hold fresh
+    // opportunities; pending invalidations are checked directly in SQLite.
+    const stateWork = this.processStateEvents();
+    if (this.processing) return stateWork;
     this.processing = true;
-    let processed = stateProcessed;
+    let processed = false;
     try {
       while (this.mode() === "hybrid" && this.canProcess()) {
         const event = this.store.nextMarketFeedEvent(this.now(), "opportunity");
@@ -203,10 +205,10 @@ export class MarketSourceCoordinator implements MarketDataSource {
         processed = true;
         await this.processEvent(event);
       }
-      return processed;
     } finally {
       this.processing = false;
     }
+    return (await stateWork) || processed;
   }
 
   private async processStateEvents(): Promise<boolean> {

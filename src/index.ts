@@ -496,7 +496,11 @@ scheduler.register("fiat_sync", 30_000, () =>
 scheduler.register("notifications", 15_000, () => notifications.deliverDue());
 scheduler.register("recovery_alerts", 10_000, async () => {
   for (const intent of store.unresolvedMutationIntents()) {
-    if (intent.state !== "uncertain" || store.get(`recovery_ack:${intent.intentId}`) === String(intent.updatedAt)) continue;
+    if (store.get(`recovery_ack:${intent.intentId}`)) {
+      store.acknowledgeRecoveryNotifications(intent.intentId, intent.operationUuid);
+      continue;
+    }
+    if (intent.state !== "uncertain") continue;
     await notifications.publish({
       message: `⚠️ Operación pendiente de conciliación\n\nAcción: ${intent.kind}\n🆔 Oferta: ${intent.operationUuid ?? "sin UUID"}\n\nLas demás cacerías continúan. No repitas esta operación hasta comprobar su estado.\n\n🔎 Usa /recovery para comprobar, registrar evidencia o reconocer el aviso.\n🌐 https://qvapply.honux.tech/?view=auditoria`,
       ...(intent.operationUuid ? { operationUuid: intent.operationUuid } : {}),
@@ -507,7 +511,7 @@ scheduler.register("recovery_alerts", 10_000, async () => {
 scheduler.register("sms_receipts", 15_000, () => dashboardReadModel.processPendingPaymentReceipts());
 scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudgetRebalances());
 scheduler.register("dashboard_cache", 30_000, () =>
-  dashboardReadModel.refreshCache(),
+  dashboardReadModel.refreshCache({ refreshMarkets: false }),
 );
 scheduler.register("portfolio_commitments", 60_000, () =>
   dashboardReadModel.refreshPortfolioCommitments().then(() => undefined),
@@ -938,7 +942,7 @@ function dashboardText(
   const last = state.lastScan
     ? `${relativeTime(state.lastScan.at)} · ${state.lastScan.inspected} revisadas · ${state.lastScan.candidates} candidatas`
     : "Aún no se ha ejecutado ningún escaneo";
-  const unresolved = snapshot.unresolvedMutations.filter(intent => store.get(`recovery_ack:${intent.intentId}`) !== String(intent.updatedAt)).slice(0, 3);
+  const unresolved = snapshot.unresolvedMutations.filter(intent => !store.get(`recovery_ack:${intent.intentId}`)).slice(0, 3);
   const mutationWarning = unresolved.length > 0
     ? [
         "<b>⚠️ Operaciones en conciliación</b>",

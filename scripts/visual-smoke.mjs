@@ -449,6 +449,13 @@ try {
   const checkIntent = await find("xpath", "//button[normalize-space(.)='Comprobar ahora']");
   await command("POST", `/session/${sessionId}/element/${checkIntent}/click`, {});
   await waitFor(() => execute("return document.body.innerText.includes('No se obtuvo evidencia concluyente')"));
+  const acknowledgeNotice = await find("xpath", "//button[normalize-space(.)='Reconocer aviso']");
+  await command("POST", `/session/${sessionId}/element/${acknowledgeNotice}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('Sin avisos pendientes') && document.querySelector('.recovery-item') === null"));
+  const recognized = await find("xpath", "//button[normalize-space(.)='Ver reconocidos (1)']");
+  await command("POST", `/session/${sessionId}/element/${recognized}/click`, {});
+  await waitFor(() => execute("return document.querySelector('.recovery-item') !== null && [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Aviso reconocido' && b.disabled)"));
+  await screenshot("/tmp/qvaapply-recovery-recognized-desktop.png");
   const manualReview = await find("xpath", "//button[normalize-space(.)='Registrar comprobación manual']");
   await command("POST", `/session/${sessionId}/element/${manualReview}/click`, {});
   await waitFor(() => execute("return document.querySelector('#recovery-reason') !== null"));
@@ -464,7 +471,7 @@ try {
   await screenshot("/tmp/qvaapply-recovery-manual-desktop.png");
   const registerDeclaration = await find("xpath", "//button[normalize-space(.)='Registrar declaración']");
   await command("POST", `/session/${sessionId}/element/${registerDeclaration}/click`, {});
-  await waitFor(() => execute("return document.body.innerText.includes('No hay intenciones remotas que requieran atención')"));
+  await waitFor(() => execute("return document.body.innerText.includes('Sin avisos reconocidos')"));
   const bulkDismiss = await find("xpath", "//button[normalize-space(.)='Descartar todas']");
   await command("POST", `/session/${sessionId}/element/${bulkDismiss}/click`, {});
   await waitFor(() => execute("return document.querySelector('[role=alertdialog]') !== null"));
