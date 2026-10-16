@@ -40,3 +40,21 @@ test("el panel delega controles de cacería al motor", () => {
     market: { code: "CLASICA", huntBuyEnabled: true, buyMaxRate: 1.04 },
   }]);
 });
+
+
+test("el refresco periódico reutiliza mercados y el manual permite actualizarlos", async () => {
+  const calls: string[] = [];
+  const dashboard = new DashboardReadModel(
+    { activeMarkets: () => [{ code: "CUP" }, { code: "CLASICA" }] } as never,
+    {} as never, {} as never, {} as never, {} as never,
+  );
+  dashboard.refreshBalance = async () => { calls.push("balance"); return undefined as never; };
+  dashboard.refreshOwnOffers = async () => { calls.push("own"); return undefined as never; };
+  dashboard.refreshTransactions = async () => { calls.push("transactions"); return undefined as never; };
+  dashboard.refreshMarket = async (code) => { calls.push(code); return undefined as never; };
+  await dashboard.refreshCache({ refreshMarkets: false });
+  assert.deepEqual(calls, ["balance", "own", "transactions"]);
+  calls.length = 0;
+  await dashboard.refreshCache();
+  assert.deepEqual(calls, ["balance", "own", "transactions", "CUP", "CLASICA"]);
+});

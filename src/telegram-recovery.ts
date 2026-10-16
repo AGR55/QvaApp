@@ -20,16 +20,19 @@ export function installTelegramRecovery(bot: Bot, recovery: SelfServiceRecovery)
     }
     await ctx.reply(text, { parse_mode: "HTML", reply_markup: keyboard });
   };
-  const list = async (ctx: Context, page = 0) => {
-    const all = recovery.list().items;
+  const list = async (ctx: Context, page = 0, acknowledged = false) => {
+    const report = recovery.list().items;
+    const all = report.filter(item => Boolean(item.acknowledged) === acknowledged);
+    const listAction = acknowledged ? "archived" : "list";
     const items = all.slice(page * 6, page * 6 + 6);
     const keyboard = new InlineKeyboard();
     for (const [index, item] of items.entries()) keyboard.text(`🔎 Ver #${page * 6 + index + 1}`, `recovery:view:${item.intentId}`).row();
-    if (page > 0) keyboard.text("‹ Anterior", `recovery:list:${page - 1}`);
-    if (all.length > (page + 1) * 6) keyboard.text("Siguiente ›", `recovery:list:${page + 1}`);
+    if (page > 0) keyboard.text("‹ Anterior", `recovery:${listAction}:${page - 1}`);
+    if (all.length > (page + 1) * 6) keyboard.text("Siguiente ›", `recovery:${listAction}:${page + 1}`);
+    keyboard.row().text(acknowledged ? "‹ Pendientes" : "📁 Avisos reconocidos", acknowledged ? "recovery:list" : "recovery:archived");
     keyboard.row().text("‹ Panel", "panel:home");
     await render(ctx, ["<b>🔎 Conciliaciones</b>", "Las demás cacerías continúan mientras se comprueban estas operaciones.",
-      items.length ? items.map((item, i) => `<b>${page * 6 + i + 1}. ${escape(item.kind)}</b> · ${item.acknowledged ? "aviso reconocido" : "pendiente"}\n🆔 <code>${escape(item.operationUuid ?? item.intentId)}</code>`).join("\n\n") : "✅ No hay conciliaciones pendientes."].join("\n\n"), keyboard);
+      items.length ? items.map((item, i) => `<b>${page * 6 + i + 1}. ${escape(item.kind)}</b> · ${item.acknowledged ? "aviso reconocido" : "pendiente"}\n🆔 <code>${escape(item.operationUuid ?? item.intentId)}</code>`).join("\n\n") : acknowledged ? "📁 No hay avisos reconocidos." : "✅ No hay conciliaciones pendientes."].join("\n\n"), keyboard);
   };
   const view = async (ctx: Context, id: string, notice = "") => {
     const item = recovery.list().items.find(entry => entry.intentId === id);
@@ -80,10 +83,10 @@ export function installTelegramRecovery(bot: Bot, recovery: SelfServiceRecovery)
     await answerCallbackSafely(() => ctx.answerCallbackQuery());
     const [, action, id = ""] = ctx.callbackQuery.data.split(":");
     try {
-      if (action === "list") { drafts.delete(ctx.chat!.id); return await list(ctx, Math.max(0, Number(id) || 0)); }
+      if (action === "list" || action === "archived") { drafts.delete(ctx.chat!.id); return await list(ctx, Math.max(0, Number(id) || 0), action === "archived"); }
       if (action === "view") return await view(ctx, id);
       if (action === "check") { const result = await recovery.check(id); return await view(ctx, id, result.message); }
-      if (action === "ack") { recovery.acknowledge(id); return await view(ctx, id, "Aviso reconocido; la conciliación continúa."); }
+      if (action === "ack") { recovery.acknowledge(id); return await view(ctx, id, "Aviso archivado en Reconocidos; la conciliación continúa."); }
       if (action === "evidence" || action === "resolve") {
         const item = recovery.list().items.find(entry => entry.intentId === id);
         if (!item) return await list(ctx);

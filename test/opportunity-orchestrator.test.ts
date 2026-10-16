@@ -73,7 +73,12 @@ test("una venta por rango toma el máximo financiable con QUSD congelado", async
   const smallerOwn = { ...own, amount: 12, receive: 11880 };
   let balance = 0;
   const orchestrator = new OpportunityOrchestrator(store, {
-    qusdBalance: async () => balance, listOffers: async () => [smallerOwn], getOffer: async (uuid: string) => uuid === smallerOwn.uuid ? smallerOwn : flexible,
+    qusdBalance: async (options: { priority?: boolean }) => { assert.equal(options?.priority, true); return balance; },
+    listOffers: async () => [smallerOwn],
+    getOffer: async (uuid: string, options: { priority?: boolean }) => {
+      assert.equal(options?.priority, true);
+      return uuid === smallerOwn.uuid ? smallerOwn : flexible;
+    },
     cancel: async () => { balance = 12; },
     apply: async (_uuid: string, options: { amount: number }) => {
       assert.equal(options.amount, 12); return { order: "partial-child", amount: 12, receive: 12240 };

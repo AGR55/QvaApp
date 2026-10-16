@@ -756,7 +756,7 @@ export class DashboardReadModel {
         executions: this.cooperativeHunter?.executions() ?? [], qusdOwed: Number(this.store.get("cooperative_qusd_owed") ?? 0) },
       mutationIntents: this.store.recentMutationIntents(100),
       unresolvedMutations,
-      recoveryNoticeCount: unresolvedMutations.filter(intent => this.store.get(`recovery_ack:${intent.intentId}`) !== String(intent.updatedAt)).length,
+      recoveryNoticeCount: unresolvedMutations.filter(intent => !this.store.get(`recovery_ack:${intent.intentId}`)).length,
       operations: this.store.visibleOperations().map(operation => {
         const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
         return { ...operation, ...(raw === undefined || raw === "" ? {} : { cooperativeOwnerFiat: Number(raw) }) };
@@ -1006,12 +1006,12 @@ export class DashboardReadModel {
     return request;
   }
 
-  async refreshCache(): Promise<void> {
+  async refreshCache(options: { refreshMarkets?: boolean } = {}): Promise<void> {
     const results = await Promise.allSettled([
       this.refreshBalance(),
       this.refreshOwnOffers(),
       this.refreshTransactions(),
-      ...this.trading.activeMarkets().map((market) =>
+      ...(options.refreshMarkets === false ? [] : this.trading.activeMarkets()).map((market) =>
         this.refreshMarket(market.code),
       ),
     ]);

@@ -239,7 +239,7 @@ export class OpportunityOrchestrator {
         decision: this.nonExecutableDecision(input, "blocked", "El mercado no está activo o configurado."),
       };
 
-    const qusdBalance = await this.qva.qusdBalance();
+    const qusdBalance = await this.qva.qusdBalance({ priority: true });
     // Own offers matter only when we must release escrow. Avoid putting an
     // already funded application behind another throttled network read.
     const unavailable = Number(this.store.get("cooperative_qusd_owed") ?? 0) + (input.unavailableQusd ?? 0);
@@ -332,7 +332,7 @@ export class OpportunityOrchestrator {
     if (cancellationPlan.length) {
       try {
         const details = await Promise.all(
-          cancellationPlan.map((offer) => this.qva.getOffer(offer.uuid)),
+          cancellationPlan.map((offer) => this.qva.getOffer(offer.uuid, { priority: true })),
         );
         cancellationPlan = cancellationPlan.map((offer, index) =>
           hydratePlannedOwnOffer(offer, details[index]!),
@@ -383,10 +383,10 @@ export class OpportunityOrchestrator {
       await this.cancelOwnOffers(workflowId);
       this.store.updateWorkflowState(workflowId, "own_offers_cancelled");
       if (input.target.offer_kind === "flexible" && cancellationPlan.length &&
-        await this.qva.qusdBalance() - unavailable < input.target.amount + current.risk.minQusdReserve)
+        await this.qva.qusdBalance({ priority: true }) - unavailable < input.target.amount + current.risk.minQusdReserve)
         throw new Error("QvaPay todavía no confirmó el saldo liberado; se repondrán las ventas propias.");
       if (input.target.offer_kind === "flexible" && cancellationPlan.length) {
-        const fresh = await this.qva.getOffer(input.target.uuid);
+        const fresh = await this.qva.getOffer(input.target.uuid, { priority: true });
         const sized = sizeFlexibleOffer(fresh, input.target.amount, input.target.amount);
         const onlyVip = String(fresh.only_vip ?? false).toLowerCase();
         if (fresh.uuid !== input.target.uuid || fresh.status !== "open" || fresh.offer_kind !== "flexible" || fresh.can_take_flexible === false ||

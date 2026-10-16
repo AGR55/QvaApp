@@ -25,7 +25,7 @@ test("el navegador solo lee el snapshot preparado por la VPS", () => {
 test("la VPS refresca el snapshot al arrancar y periódicamente", () => {
   assert.match(
     serverSource,
-    /scheduler\.register\("dashboard_cache",\s*30_000,[^]*refreshCache\(\)/,
+    /scheduler\.register\("dashboard_cache",\s*30_000,[^]*refreshCache\(\{ refreshMarkets: false \}\)/,
   );
   assert.match(serverSource, /scheduler\.run\("dashboard_cache"\)/);
 });

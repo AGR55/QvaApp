@@ -121,7 +121,7 @@ export class SelfServiceRecovery {
   acknowledge(intentId: string): RecoveryItem {
     const intent = this.requireIntent(intentId);
     this.store.set(`recovery_ack:${intentId}`, String(intent.updatedAt));
-    this.store.acknowledgeNotification(`recovery-blocked:${intentId}`);
+    this.store.acknowledgeRecoveryNotifications(intentId, intent.operationUuid);
     this.store.audit("recovery_notice_acknowledged", `${this.actor} reconoció el aviso ${intentId}; la comprobación continúa.`, intent.operationUuid);
     return this.item(intent);
   }
@@ -278,7 +278,7 @@ export class SelfServiceRecovery {
       ...(operation ? { operation: safeOperation(operation) } : {}),
       ...(feed ? { feed } : {}),
       retry: this.retryView(intent.intentId, this.now()),
-      acknowledged: this.store.get(`recovery_ack:${intent.intentId}`) === String(intent.updatedAt),
+      acknowledged: Boolean(this.store.get(`recovery_ack:${intent.intentId}`)),
       evidence: this.evidence(intent.intentId),
       manualEligible: !manualBlockedReason,
       manualOutcomes: feed?.status === "completed" ? ["terminal_reviewed"] : feed?.status === "open" ? ["not_applied"] : ["not_applied", "cancelled"],

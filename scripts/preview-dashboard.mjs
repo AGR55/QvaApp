@@ -171,6 +171,11 @@ const model = {
     sync: { accountKnown: true, complete: true, limited: false, pages: 18, updatedAt: now },
   }),
   recoveryItems: () => ({ items: previewRecovery, blocked: previewRecovery.length > 0 }),
+  acknowledgeRecoveryIntent: (intentId) => {
+    const item = previewRecovery.find(item => item.intentId === intentId);
+    if (item) item.acknowledged = true;
+    return item;
+  },
   checkRecoveryIntent: async (intentId) => ({ intentId, outcome: "pending", state: "uncertain", message: "No se obtuvo evidencia concluyente. Verifica el resultado en QvaPay.", updatedAt: now - 590000 }),
   resolveRecoveryIntent: ({ intentId }) => {
     previewRecovery = previewRecovery.filter(item => item.intentId !== intentId);

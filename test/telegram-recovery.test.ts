@@ -17,7 +17,7 @@ test("Telegram registra evidencia, reconoce avisos y exige la confirmación de l
   installTelegramRecovery(bot, {
     list: () => ({ items: [item] }),
     recordEvidence: (id: string, evidence: string) => calls.push({ id, evidence }),
-    acknowledge: (id: string) => calls.push({ acknowledge: id }),
+    acknowledge: (id: string) => { item.acknowledged = true; calls.push({ acknowledge: id }); },
     resolveManual: (input: unknown) => calls.push(input),
   } as never);
   let update = 0;
@@ -30,6 +30,11 @@ test("Telegram registra evidencia, reconoce avisos y exige la confirmación de l
   await message("Comprobé la orden en QvaPay.");
   await callback("recovery:ack:intent");
   assert.deepEqual(calls, [{ id: "intent", evidence: "Comprobé la orden en QvaPay." }, { acknowledge: "intent" }]);
+  await callback("recovery:list");
+  assert.match(sent.at(-1)!, /No hay conciliaciones pendientes/);
+  assert.doesNotMatch(sent.at(-1)!, /recovery:view:intent/);
+  await callback("recovery:archived");
+  assert.match(sent.at(-1)!, /recovery:view:intent/);
   await callback("recovery:resolve:intent");
   await callback("recovery:outcome:0");
   await message("Revisé las operaciones de mi cuenta.");
