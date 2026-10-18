@@ -513,6 +513,7 @@ scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudge
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache({ refreshMarkets: false }),
 );
+scheduler.register("hunting_liquidity", 10_000, () => trading.prepareHuntingLiquidity());
 scheduler.register("portfolio_commitments", 60_000, () =>
   dashboardReadModel.refreshPortfolioCommitments().then(() => undefined),
 );

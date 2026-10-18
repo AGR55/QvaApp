@@ -29,6 +29,7 @@ export type TradingRepository = Pick<
   Store,
   | "activeOperations"
   | "activeReservedQusd"
+  | "applicationReservedCapital"
   | "audit"
   | "excludeAutomaticReapplyAfterManualCancel"
   | "createMutationIntent"

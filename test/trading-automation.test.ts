@@ -1527,3 +1527,62 @@ test("una aplicación flexible incierta se recupera por orden propia y no por es
   assert.equal(store.getOperation(remote.uuid)?.amount, 10);
   store.close();
 });
+
+for (const balance of [100_000,10_000]) {
+ test(`las compras fiat independientes avanzan con una respuesta retenida y saldo ${balance}`,async()=>{
+  const {store,cfg,markets}=setup();store.set('fiat_balance:BANK_CUP',String(balance));
+  let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});const sent:string[]=[];
+  const trading=new TradingEngine(store,{apply:async(uuid:string,options:{beforeDispatch?:(ms:number)=>Promise<boolean>})=>{
+   if(options.beforeDispatch && !await options.beforeDispatch(0))throw new QvaApiError(409,'capital cambiado',undefined,'LOCAL_CONDITIONS_CHANGED');
+   sent.push(uuid);if(uuid==='parallel-first')await held;
+  },sendChat:async()=>({})} as never,cfg as never,markets,async()=>undefined);
+  const offer={type:'sell' as const,coin:'BANK_CUP',amount:10,receive:9200,status:'open'};
+  const first=trading.ingestMarketOffer({...offer,uuid:'parallel-first'});
+  const second=trading.ingestMarketOffer({...offer,uuid:'parallel-second'});
+  try{
+   const finished=await Promise.race([second.then(()=>true),new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),100))]);
+   assert.equal(finished,true,'el segundo candidato se evalúa antes de recibir la primera respuesta');
+   assert.equal(sent.length,balance===100_000?2:1);
+   assert.equal(store.applicationReservedCapital('BANK_CUP').fiat,9200);
+  }finally{release();await Promise.allSettled([first,second]);await new Promise(resolve=>setImmediate(resolve));store.close();}
+ });
+}
+
+test('prepara QUSD en segundo plano reduciendo una venta fija sin alterar su tasa',async()=>{
+ const {store,cfg,markets}=setup();const next=markets.current();next.risk.maxQusdPerOperation=25;next.risk.minQusdReserve=0;next.qusdReserve=0;markets.save(next);
+ store.set('analytics_account_uuid','me');let balance=0;const edits:unknown[]=[];
+ const trading=new TradingEngine(store,{qusdBalance:async()=>balance,listOffers:async()=>[{uuid:'own-ready',type:'sell',coin:'BANK_CUP',amount:50,receive:50000,status:'open',User:{uuid:'me'}}],
+ editOffer:async(uuid:string,body:unknown)=>{edits.push({uuid,body});balance=25;},apply:async()=>assert.fail('preparar liquidez no aplica ofertas')} as never,cfg as never,markets,async()=>undefined);
+ await trading.prepareHuntingLiquidity();
+ assert.deepEqual(edits,[{uuid:'own-ready',body:{amount:25,receive:25000}}]);
+ await trading.prepareHuntingLiquidity();assert.equal(edits.length,1);store.close();
+});
+
+test('una edición lenta de preparación no bloquea una compra con fiat',async()=>{
+ const {store,cfg,markets}=setup();const next=markets.current();next.risk.maxQusdPerOperation=25;next.risk.minQusdReserve=0;markets.save(next);store.set('analytics_account_uuid','me');
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});let editing=false,applies=0;
+ const trading=new TradingEngine(store,{qusdBalance:async()=>0,listOffers:async()=>[{uuid:'own-ready',type:'sell',coin:'BANK_CUP',amount:50,receive:50000,status:'open',User:{uuid:'me'}}],
+ editOffer:async()=>{editing=true;await held;},apply:async()=>{applies++;},sendChat:async()=>({})} as never,cfg as never,markets,async()=>undefined);
+ const prepare=trading.prepareHuntingLiquidity();
+ try{
+  for(let i=0;i<20&&!editing;i++)await new Promise(resolve=>setImmediate(resolve));assert.equal(editing,true);
+  await trading.ingestMarketOffer({uuid:'buy-during-preparation',type:'sell',coin:'BANK_CUP',amount:10,receive:9200,status:'open'});
+  assert.equal(applies,1);
+ }finally{release();await prepare;await new Promise(resolve=>setImmediate(resolve));store.close();}
+});
+
+test('revalida el disponible de una oferta por rango antes del envío y permite una actualización posterior',async()=>{
+ const {store,cfg,markets}=setup();let calls=0,sent=0;
+ const trading=new TradingEngine(store,{apply:async(_uuid:string,options:{amount:number;beforeDispatch:(ms:number)=>Promise<boolean>})=>{
+  calls++;
+  if(calls===1)store.enqueueMarketFeedEvent({key:'range-shrank',event:'p2p.range_updated',receivedAt:Date.now(),payload:{event:'p2p.range_updated',sent_at:new Date(Date.now()+1).toISOString(),data:{uuid:'range-changing',status:'open',amount:20,receive:18400,available_amount:5,order_min:5,order_max:20}}});
+  if(!await options.beforeDispatch(0))throw new QvaApiError(409,'Disponible cambió',undefined,'LOCAL_CONDITIONS_CHANGED');
+  sent++;return {order:'range-order',amount:options.amount,receive:options.amount*920};
+ },sendChat:async()=>({})} as never,cfg as never,markets,async()=>undefined);
+ const offer:P2pOffer={uuid:'range-changing',type:'sell',coin:'BANK_CUP',amount:20,receive:18400,status:'open',offer_kind:'flexible',available_amount:20,order_min:5,order_max:20};
+ await trading.ingestMarketOffer(offer,Date.now(),'p2p.range_created');
+ assert.equal(sent,0);assert.equal(store.applicationReservedCapital().count,0);
+ await trading.ingestMarketOffer({...offer,available_amount:5},Date.now(),'p2p.range_updated');
+ assert.equal(sent,1);assert.equal(store.getOperation(offer.uuid)?.amount,5);
+ await new Promise(resolve=>setImmediate(resolve));store.close();
+});

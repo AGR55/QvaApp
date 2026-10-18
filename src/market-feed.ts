@@ -39,14 +39,14 @@ export class MarketSourceCoordinator implements MarketDataSource {
     private readonly ingest: (
       offer: P2pOffer,
       receivedAt: number,
-      event: "p2p.created" | "p2p.reopened",
+      event: "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated",
       sentAt: string,
     ) => Promise<unknown>,
     private readonly canProcess: () => boolean = () => true,
     private readonly now: () => number = Date.now,
     streamRuntime: QvaPayStreamRuntime = {},
     private readonly ingestState: (
-      event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened">,
+      event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated">,
       offer: P2pOffer,
       receivedAt: number,
       sentAt: string,
@@ -198,14 +198,27 @@ export class MarketSourceCoordinator implements MarketDataSource {
     if (this.processing) return stateWork;
     this.processing = true;
     let processed = false;
+    const active = new Map<string, { type: "buy" | "sell"; uuid: string; work: Promise<void> }>();
     try {
       while (this.mode() === "hybrid" && this.canProcess()) {
-        const event = this.store.nextMarketFeedEvent(this.now(), "opportunity");
-        if (!event) break;
-        processed = true;
-        await this.processEvent(event);
+        while (active.size < 3) {
+          const blocked: Array<"buy" | "sell"> = [];
+          const jobs = [...active.values()];
+          if (jobs.some(job => job.type === "buy")) blocked.push("buy");
+          if (jobs.filter(job => job.type === "sell").length >= 2) blocked.push("sell");
+          const event = this.store.nextMarketFeedEvent(this.now(), "opportunity", [...active.keys()], blocked, jobs.map(job => job.uuid));
+          if (!event) break;
+          processed = true;
+          const payload = event.payload as { data?: { type?: string; uuid?: string } };
+          const type = payload?.data?.type === "sell" ? "sell" : "buy";
+          const work = this.processEvent(event).finally(() => { active.delete(event.key); });
+          active.set(event.key, { type, uuid: payload.data?.uuid ?? "", work });
+        }
+        if (!active.size) break;
+        await Promise.race([...active.values()].map(job => job.work));
       }
     } finally {
+      await Promise.allSettled([...active.values()].map(job => job.work));
       this.processing = false;
     }
     return (await stateWork) || processed;
@@ -282,7 +295,9 @@ export class MarketSourceCoordinator implements MarketDataSource {
     const version = typeof payload.data.updated_at === "string" && payload.data.updated_at
       ? payload.data.updated_at
       : payload.sent_at;
-    const key = `${payload.event}:${payload.data.uuid}:${version}`;
+    const key = payload.event.startsWith("p2p.range_")
+      ? `${payload.event}:${payload.data.uuid}:${version}:${payload.sent_at}:${payload.data.available_amount ?? ""}`
+      : `${payload.event}:${payload.data.uuid}:${version}`;
     const queued = this.mode() === "hybrid" && isMarketFeedEvent(payload.event);
     const inserted = this.store.enqueueMarketFeedEvent({
       key,
@@ -350,8 +365,8 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 }
 
-function isOpportunityEvent(event: string): event is "p2p.created" | "p2p.reopened" {
-  return event === "p2p.created" || event === "p2p.reopened";
+function isOpportunityEvent(event: string): event is "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated" {
+  return event === "p2p.created" || event === "p2p.reopened" || event === "p2p.range_created" || event === "p2p.range_updated";
 }
 
 function isMarketFeedEvent(event: string): event is P2pFeedEvent {
@@ -359,7 +374,7 @@ function isMarketFeedEvent(event: string): event is P2pFeedEvent {
     event === "p2p.applied" ||
     event === "p2p.paid" ||
     event === "p2p.completed" ||
-    event === "p2p.cancelled";
+    event === "p2p.cancelled" || event === "p2p.range_closed";
 }
 
 interface FeedPayload {

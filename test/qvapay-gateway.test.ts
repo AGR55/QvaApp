@@ -414,3 +414,25 @@ test("trata un 2xx malformado de creación o edición como resultado incierto", 
     (error: unknown) => error instanceof QvaMutationUncertainError,
   );
 });
+
+test("la segunda aplicación se envía sin esperar la primera respuesta y la tercera no consume cupo",async()=>{
+ let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});const sent:string[]=[];
+ const client=new QvaPayClient(()=>"token",{fetch:async input=>{sent.push(String(input));if(String(input).includes('/first/'))await held;return Response.json({});}});
+ const first=client.apply('first',{beforeDispatch:()=>true});
+ const second=client.apply('second',{beforeDispatch:()=>true});
+ try{
+  const result=await Promise.race([second.then(()=>true),new Promise<boolean>(resolve=>setTimeout(()=>resolve(false),100))]);
+  assert.equal(result,true,'la espera HTTP no retiene el permiso de envío');
+  await assert.rejects(client.apply('third',{beforeDispatch:()=>true}),error=>error instanceof QvaApiError && error.code==='LOCAL_APPLY_QUOTA');
+  assert.equal(sent.length,2);
+ }finally{release();await Promise.allSettled([first,second]);}
+});
+
+test('la preparación de liquidez se revalida al salir de la cola general',async()=>{
+ let release!:()=>void;let active=true;const held=new Promise<void>(resolve=>{release=resolve;});const sent:string[]=[];
+ const client=new QvaPayClient(()=>"token",{fetch:async input=>{const url=String(input);sent.push(url);if(url.endsWith('/user')){await held;return Response.json({uuid:'me'});}return Response.json({});}});
+ const read=client.profile();const edit=client.editOffer('own',{amount:1,receive:100},{beforeDispatch:()=>active});
+ active=false;release();await read;
+ await assert.rejects(edit,error=>error instanceof QvaApiError && error.code==='LOCAL_CONDITIONS_CHANGED');
+ assert.equal(sent.some(url=>url.endsWith('/edit')),false);
+});

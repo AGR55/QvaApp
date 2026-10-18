@@ -1,3 +1,4 @@
+import { recordHuntingEligibility, recordMissingRequirements } from "./hunting-requirements.js";
 import type {
   P2pAverage,
   P2pListPage,
@@ -201,6 +202,14 @@ export class QvaPayClient {
       : Array.isArray(data.offers)
         ? data.offers
         : [];
+    const account = this.throttleState?.get("analytics_account_uuid");
+    if (account) for (const raw of rawOffers) {
+      if (!raw || typeof raw !== "object") continue;
+      const entry = raw as Record<string, unknown>;
+      for (const party of [entry.User, entry.Peer])
+        if (party && typeof party === "object" && (party as Record<string,unknown>).uuid === account)
+          recordHuntingEligibility(this.throttleState, party, this.now());
+    }
     const offers = rawOffers.map((offer, index) =>
       parseOffer(offer, `lista P2P, posición ${index + 1}`, options.analyticsOnly),
     );
@@ -256,6 +265,7 @@ export class QvaPayClient {
     if (typeof data.uuid !== "string")
       throw new Error("QvaPay no devolvió el UUID del usuario.");
     this.throttleState?.set("analytics_account_uuid", data.uuid);
+    recordHuntingEligibility(this.throttleState, data, this.now());
     return {
       uuid: data.uuid,
       ...(typeof data.balance === "number" ? { balance: data.balance } : {}),
@@ -317,10 +327,11 @@ export class QvaPayClient {
   async applySecondary(uuid: string, beforeDispatch: () => boolean | Promise<boolean>): Promise<void> {
     await this.request(`/p2p/${uuid}/apply`, { method: "POST", policy: "apply", secondary: true, beforeDispatch });
   }
-  async cancel(uuid: string, order?: string): Promise<{ status?: string } | void> {
+  async cancel(uuid: string, order?: string, options: { beforeDispatch?: () => boolean } = {}): Promise<{ status?: string } | void> {
     const result = await this.request(orderPath(uuid, "cancel", order), {
       method: "POST",
       policy: "cancel",
+      ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}),
     });
     if (order) return { ...(typeof result.status === "string" ? { status: result.status } : {}) };
   }
@@ -426,11 +437,13 @@ export class QvaPayClient {
   async editOffer(
     uuid: string,
     body: Record<string, unknown>,
+    options: { beforeDispatch?: () => boolean } = {},
   ): Promise<P2pOffer> {
     const data = await this.request(`/p2p/${uuid}/edit`, {
       method: "POST",
       body,
       policy: "edit",
+      ...(options.beforeDispatch ? { beforeDispatch: options.beforeDispatch } : {}),
     });
     try {
       if (data.p2p === undefined)
@@ -553,6 +566,7 @@ export class QvaPayClient {
           : typeof data.message === "string"
             ? data.message
             : `Error de QvaPay (${response.status})`;
+      if (data.code === "PEER_REQUIREMENTS_NOT_MET") recordMissingRequirements(this.throttleState, data.missing, this.now());
       throw new QvaApiError(
         response.status,
         message,
@@ -590,6 +604,8 @@ export class QvaPayClient {
           : 0;
         const delay = Math.max(0, generalDelay, policyDelay);
         if (delay) await this.sleep(delay);
+        if (beforeDispatch && !await beforeDispatch(Math.max(0, this.now() - current)))
+          throw new QvaApiError(409, "Las condiciones cambiaron antes de la mutación; no se envió.", undefined, "LOCAL_CONDITIONS_CHANGED");
         const startedAt = this.now();
         this.lastRequestAt = startedAt;
         this.lastPolicyAt.set(policy, startedAt);
@@ -620,7 +636,7 @@ export class QvaPayClient {
       this.applyState.set(key, value);
       this.throttleState?.set(key, value);
     };
-    const run = this.applyQueue.catch(() => undefined).then(async () => {
+    const dispatch = this.applyQueue.catch(() => undefined).then(async () => {
       const delay = Math.max(0, applyReadyAt(state, this.now()) - this.now());
       if (delay && beforeDispatch)
         throw new QvaApiError(409, `Sin cupo de aplicación durante ${Math.ceil(delay / 1000)} s; la oferta no se envió ni mantiene ocupada la cola.`, delay, "LOCAL_APPLY_QUOTA");
@@ -638,6 +654,10 @@ export class QvaPayClient {
         if (!eligible)
           throw new QvaApiError(409, "Las condiciones de la oferta cambiaron antes del envío; no se aplicó.", undefined, "LOCAL_CONDITIONS_CHANGED");
       }
+      // An async guard can yield to a secondary request. Recheck before charging
+      // the durable account budget, without awaiting the HTTP response in this gate.
+      const remainingDelay = Math.max(0, applyReadyAt(state, this.now()) - this.now());
+      if (remainingDelay) throw new QvaApiError(409, "El cupo cambió antes del envío.", remainingDelay, "LOCAL_APPLY_QUOTA");
       const dispatchTime = this.now();
       dispatchedAt = dispatchTime;
       const attempts = applyAttempts(state).filter(at => at + APPLY_WINDOW_MS > dispatchTime);
@@ -645,17 +665,15 @@ export class QvaPayClient {
       save("qva_throttle:apply", String(dispatchedAt));
       save("qva_apply_last_queue_ms", String(Math.max(0, dispatchedAt - queuedAt)));
       save("qva_apply_last_budget_wait_ms", String(delay));
-      try {
-        return await task();
-      } catch (error) {
+      const response = task().catch(error => {
         if (error instanceof QvaApiError && error.status === 429)
           save("qva_throttle:apply_retry_at", String(this.now() + (error.retryAfterMs ?? APPLY_WINDOW_MS)));
         throw error;
-      } finally {
-        save("qva_apply_last_response_ms", String(Math.max(0, this.now() - dispatchedAt)));
-      }
+      }).finally(() => save("qva_apply_last_response_ms", String(Math.max(0, this.now() - dispatchTime))));
+      return { response };
     });
-    this.applyQueue = run.then(() => undefined, () => undefined);
+    this.applyQueue = dispatch.then(() => undefined, () => undefined);
+    const run = dispatch.then(({ response }) => response);
     return run.catch(error => {
       outcome = error instanceof QvaApiError ? error.code ?? `HTTP_${error.status}` : "uncertain";
       throw error;
