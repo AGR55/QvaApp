@@ -51,13 +51,13 @@ for (const type of ["sell", "buy"] as const) {
         throttleState: store,
         sleep: async ms => { now += ms; },
         fetch: async (input) => {
-          if (String(input).endsWith("/blocker/apply")) { ready(); await blocked; return new Response("{}"); }
+          if (String(input).endsWith("/blocker/apply")) return new Response("{}");
           if (String(input).endsWith("/apply")) applications++;
           return new Response(JSON.stringify({ balance: 100 }));
         },
       });
       const trading = new TradingEngine(store, qva, cfg as never, markets, async () => undefined);
-      const blocker = qva.apply("blocker");
+      const blocker = qva.apply("blocker", { beforeDispatch: async () => { ready(); await blocked; return true; } });
       await waiting;
       const uuid = `dispatch-${type}-${change}`;
       const offer: P2pOffer = { uuid, type, coin: "BANK_CUP", amount: 10, receive: type === "sell" ? 9200 : 10200, status: "open" };

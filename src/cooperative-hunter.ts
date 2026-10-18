@@ -51,6 +51,8 @@ export class CooperativeHunter {
     const snapshot: P2pOffer = { uuid: offer.uuid, type: offer.type, coin: offer.coin, amount: offer.amount, receive: offer.receive, status: offer.status,
       ...(offer.owner_uuid ? {owner_uuid:offer.owner_uuid}:{}), ...(offer.User?.uuid ? {User:{uuid:offer.User.uuid}}:{}),
       ...(offer.only_vip === undefined ? {} : {only_vip:offer.only_vip}),
+      ...(offer.requirements === undefined ? {} : {requirements:offer.requirements}),
+      ...(offer.requirements_met === undefined ? {} : {requirements_met:offer.requirements_met}),
       ...(offer.offer_kind ? {offer_kind:offer.offer_kind}:{}), ...(offer.updated_at ? {updated_at:offer.updated_at}:{}), };
     this.queue.set(offer.uuid, { offer: snapshot, receivedAt });
     if (this.queue.size > 100) this.queue.delete(this.queue.keys().next().value!);

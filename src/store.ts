@@ -19,7 +19,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 27;
+const LATEST_SCHEMA_VERSION = 28;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -359,6 +359,11 @@ export class Store {
     if (existed && this.currentSchemaVersion() < LATEST_SCHEMA_VERSION)
       this.backupBeforeMigration(dataDir);
     this.migrate();
+    // A crash after HTTP confirmation but before operation projection must enter
+    // normal recovery without ever releasing or resending its reserved capital.
+    this.db.prepare(`UPDATE mutation_intents SET state='uncertain', error='Aplicación confirmada pendiente de recuperar su operación', updated_at=?
+      WHERE state='confirmed' AND intent_id IN (SELECT intent_id FROM application_capital_reservations)`)
+      .run(Date.now());
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_market_feed_offer_uuid
       ON market_feed_events(json_extract(payload_json, '$.data.uuid'));`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_offer_action ON audit_log(offer_uuid, action, id DESC);`);
@@ -899,6 +904,18 @@ export class Store {
         `);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (27, ?)").run(Date.now());
       }
+      if (this.currentSchemaVersion() < 28) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS application_capital_reservations (
+          intent_id TEXT PRIMARY KEY REFERENCES mutation_intents(intent_id),
+          offer_uuid TEXT NOT NULL UNIQUE, coin TEXT NOT NULL,
+          fiat REAL NOT NULL CHECK(fiat>=0), qusd REAL NOT NULL CHECK(qusd>=0),
+          amount REAL NOT NULL CHECK(amount>0));
+          CREATE TRIGGER IF NOT EXISTS application_reservation_resolved AFTER UPDATE OF state ON mutation_intents
+            WHEN NEW.state IN ('rejected','reconciled') BEGIN
+              DELETE FROM application_capital_reservations WHERE intent_id=NEW.intent_id;
+            END;`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (28, ?)").run(Date.now());
+      }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
         this.get("fiat_balance:BANK_CUP") === undefined &&
@@ -1231,6 +1248,7 @@ export class Store {
   createMutationIntent(
     intent: Omit<MutationIntent, "state" | "createdAt" | "updatedAt">,
   ): void {
+    this.transaction(() => {
     const now = Date.now();
     this.db
       .prepare(
@@ -1246,6 +1264,17 @@ export class Store {
         now,
         now,
       );
+    const request = intent.request as { capitalReserve?: { coin?: unknown; fiat?: unknown; qusd?: unknown; amount?: unknown } } | undefined;
+    const reserve = request?.capitalReserve;
+    if (reserve && intent.kind === "apply") {
+      if (!intent.operationUuid || typeof reserve.coin !== "string" || !reserve.coin ||
+        ![reserve.fiat, reserve.qusd, reserve.amount].every(value => typeof value === "number" && Number.isFinite(value)) ||
+        Number(reserve.fiat) < 0 || Number(reserve.qusd) < 0 || Number(reserve.amount) <= 0)
+        throw new Error("Reserva de aplicación inválida.");
+      this.db.prepare("INSERT INTO application_capital_reservations(intent_id,offer_uuid,coin,fiat,qusd,amount) VALUES(?,?,?,?,?,?)")
+        .run(intent.intentId, intent.operationUuid, reserve.coin, Number(reserve.fiat), Number(reserve.qusd), Number(reserve.amount));
+    }
+    });
   }
 
   updateMutationIntent(
@@ -1254,6 +1283,7 @@ export class Store {
     response?: unknown,
     error?: string,
   ): void {
+    this.transaction(() => {
     this.db
       .prepare(
         "UPDATE mutation_intents SET state = ?, response_json = ?, error = ?, updated_at = ? WHERE intent_id = ?",
@@ -1265,8 +1295,22 @@ export class Store {
         Date.now(),
         intentId,
       );
+    if (state === "confirmed") {
+      const intent = this.getMutationIntent(intentId);
+      if (intent && ["create_offer", "edit_offer", "cancel_offer"].includes(intent.kind))
+        this.set("qusd_balance_epoch", String(Number(this.get("qusd_balance_epoch") ?? 0) + 1));
+    }
     if (state !== "submitted" && state !== "uncertain")
       this.acknowledgeNotification(`recovery-blocked:${intentId}`);
+    });
+  }
+
+  applicationReservedCapital(coin?: string, ignoreIntent?: string): { fiat: number; qusd: number; amount: number; count: number } {
+    const row = this.db.prepare(`SELECT COALESCE(SUM(fiat),0) fiat, COALESCE(SUM(qusd),0) qusd,
+      COALESCE(SUM(amount),0) amount, COUNT(*) count FROM application_capital_reservations
+      WHERE (? IS NULL OR coin=?) AND (? IS NULL OR intent_id<>?)`)
+      .get(coin ?? null, coin ?? null, ignoreIntent ?? null, ignoreIntent ?? null)!;
+    return { fiat:Number(row.fiat), qusd:Number(row.qusd), amount:Number(row.amount), count:Number(row.count) };
   }
 
   recentMutationIntents(limit = 20): MutationIntent[] {
@@ -1689,14 +1733,17 @@ export class Store {
     return inserted.changes > 0;
   }
 
-  nextMarketFeedEvent(now = Date.now(), lane?: "opportunity" | "state"): MarketFeedEvent | undefined {
+  nextMarketFeedEvent(now = Date.now(), lane?: "opportunity" | "state", excludeKeys: string[] = [], excludeTypes: Array<"buy" | "sell"> = [], excludeOffers: string[] = []): MarketFeedEvent | undefined {
     const row = this.db.prepare(
       `SELECT * FROM market_feed_events
        WHERE state = 'pending' AND next_attempt_at <= ?
-         ${lane === "opportunity" ? "AND event IN ('p2p.created', 'p2p.reopened')" :
-           lane === "state" ? "AND event NOT IN ('p2p.created', 'p2p.reopened')" : ""}
+         ${lane === "opportunity" ? "AND event IN ('p2p.created', 'p2p.reopened', 'p2p.range_created', 'p2p.range_updated')" :
+           lane === "state" ? "AND event NOT IN ('p2p.created', 'p2p.reopened', 'p2p.range_created', 'p2p.range_updated')" : ""}
+         ${excludeKeys.length ? `AND event_key NOT IN (${excludeKeys.map(() => "?").join(",")})` : ""}
+         ${excludeTypes.length ? `AND json_extract(payload_json,'$.data.type') NOT IN (${excludeTypes.map(() => "?").join(",")})` : ""}
+         ${excludeOffers.length ? `AND json_extract(payload_json,'$.data.uuid') NOT IN (${excludeOffers.map(() => "?").join(",")})` : ""}
        ORDER BY received_at ASC LIMIT 1`,
-    ).get(now) as Record<string, unknown> | undefined;
+    ).get(now, ...excludeKeys, ...excludeTypes, ...excludeOffers) as Record<string, unknown> | undefined;
     return row ? marketFeedEventFromRow(row) : undefined;
   }
 
@@ -1724,10 +1771,12 @@ export class Store {
     status: string;
     sentAt: number;
     receivedAt: number;
+    range?: { available: number; minimum: number; maximum: number; rate: number };
   } | undefined {
     const rows = this.db.prepare(
       `SELECT event, payload_json, received_at FROM market_feed_events
-       WHERE json_extract(payload_json, '$.data.uuid') = ?`,
+       WHERE json_extract(payload_json, '$.data.uuid') = ?
+       ORDER BY julianday(json_extract(payload_json, '$.sent_at')) DESC LIMIT 2`,
     ).all(uuid) as Array<{
       event: string;
       payload_json: string;
@@ -1738,27 +1787,31 @@ export class Store {
       status: string;
       sentAt: number;
       receivedAt: number;
+      range?: { available: number; minimum: number; maximum: number; rate: number };
     }> = [];
     for (const row of rows) {
       try {
         const payload = JSON.parse(row.payload_json) as {
           sent_at?: unknown;
-          data?: { status?: unknown };
+          data?: { status?: unknown; available_amount?: unknown; order_min?: unknown; order_max?: unknown; amount?: unknown; receive?: unknown };
         };
         const sentAt = typeof payload.sent_at === "string"
           ? Date.parse(payload.sent_at)
           : Number.NaN;
         if (!Number.isSafeInteger(sentAt)) continue;
         const event = String(row.event);
-        const rawStatus = payload.data?.status;
+        const rawStatus = event === "p2p.range_closed" ? "closed" : payload.data?.status;
         const status = typeof rawStatus === "string" && rawStatus.trim()
           ? rawStatus.trim().toLowerCase()
           : "unknown";
+        const range = { available: Number(payload.data?.available_amount), minimum: Number(payload.data?.order_min),
+          maximum: Number(payload.data?.order_max), rate: Number(payload.data?.receive) / Number(payload.data?.amount) };
         candidates.push({
           event,
           status,
           sentAt,
           receivedAt: Number(row.received_at),
+          ...(event.startsWith("p2p.range_") && Object.values(range).every(Number.isFinite) ? { range } : {}),
         });
       } catch {
         // Malformed historical feed payloads cannot establish lifecycle order.
@@ -1774,7 +1827,7 @@ export class Store {
   hasPendingMarketFeedInvalidation(uuid: string, since?: number): boolean {
     if (since !== undefined) {
       const rows = this.db.prepare(`SELECT payload_json FROM market_feed_events
-        WHERE event IN ('p2p.applied', 'p2p.paid', 'p2p.completed', 'p2p.cancelled')
+        WHERE event IN ('p2p.applied', 'p2p.paid', 'p2p.completed', 'p2p.cancelled', 'p2p.range_closed')
           AND json_extract(payload_json, '$.data.uuid') = ?`).all(uuid) as Array<{ payload_json: string }>;
       return rows.some(row => {
         try {
@@ -1786,7 +1839,7 @@ export class Store {
     return Boolean(this.db.prepare(
       `SELECT 1 FROM market_feed_events
        WHERE state = 'pending'
-         AND event IN ('p2p.applied', 'p2p.cancelled')
+         AND event IN ('p2p.applied', 'p2p.cancelled', 'p2p.range_closed')
          AND json_extract(payload_json, '$.data.uuid') = ?
        LIMIT 1`,
     ).get(uuid));
@@ -2124,6 +2177,7 @@ export class Store {
   }
 
   createOperation(operation: Operation, allowCancelledManualReapply = false): void {
+    this.transaction(() => {
     this.db
       .prepare(
         `INSERT INTO operations(uuid, offer_type, coin, amount, receive, rate, state, auto_applied, cancel_at, created_at, updated_at, counterparty_id, reference_rate, order_uuid)
@@ -2153,6 +2207,11 @@ export class Store {
         operation.orderUuid ?? null,
         Number(allowCancelledManualReapply),
       );
+    if (operation.offerType === "buy")
+      this.set("qusd_balance_epoch", String(Number(this.get("qusd_balance_epoch") ?? 0) + 1));
+    this.db.prepare("DELETE FROM application_capital_reservations WHERE offer_uuid=? AND EXISTS(SELECT 1 FROM operations WHERE uuid=?)")
+      .run(operation.uuid,operation.uuid);
+    });
   }
 
   getOperation(uuid: string): Operation | undefined {

@@ -195,7 +195,7 @@ test("drena una ráfaga del feed sin esperar un tick del scheduler por oferta", 
     coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
   }
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(calls, 1);
+  assert.equal(calls, 3, "las siguientes ofertas avanzan mientras la primera espera respuesta");
   releaseFirst?.();
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
@@ -474,4 +474,23 @@ test("la API autenticada guarda credenciales cifradas sin devolverlas", async ()
   assert.doesNotMatch(state.store.get("market_feed_app_secret") ?? "", /app-secret-private/);
   await app.close();
   state.store.close();
+});
+
+test("el feed de rangos evalúa cada cambio de disponible y el cierre invalida sin operar órdenes", async () => {
+  const s=setup();enableRealtime(s.coordinator);
+  const uuid="flexible-feed-offer";
+  const send=async(event:string,available:number,second:number)=>{
+    const body={...payload(uuid,event),sent_at:`2026-09-24T12:00:${second}Z`,data:{...payload(uuid,event).data,offer_kind:"flexible",available_amount:String(available),order_min:"5",order_max:"25"}};
+    const raw=Buffer.from(JSON.stringify(body));s.coordinator.acceptWebhook(raw,signed(raw,Date.parse(body.sent_at)));
+    await s.coordinator.processNext();await new Promise(resolve=>setImmediate(resolve));
+  };
+  try {
+    await send("p2p.range_created",25,10);
+    await send("p2p.range_updated",15,11);
+    assert.deepEqual(s.ingested.map(row=>Number(row.offer.available_amount)),[25,15]);
+    await send("p2p.range_closed",0,12);
+    assert.equal(s.ingested.length,2);
+    assert.equal(s.store.hasPendingMarketFeedInvalidation(uuid,Date.parse("2026-09-24T12:00:11Z")),true);
+    assert.notEqual(s.store.latestMarketFeedState(uuid)?.status,"open");
+  } finally {s.coordinator.stop();s.store.close();}
 });

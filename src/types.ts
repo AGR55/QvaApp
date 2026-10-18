@@ -5,7 +5,10 @@ export type P2pFeedEvent =
   | "p2p.applied"
   | "p2p.paid"
   | "p2p.completed"
-  | "p2p.cancelled";
+  | "p2p.cancelled"
+  | "p2p.range_created"
+  | "p2p.range_updated"
+  | "p2p.range_closed";
 /** Código de mercado fiat de QvaPay, configurable desde SQLite y el panel local. */
 export type FiatMarket = string;
 type P2pStatus =
@@ -44,6 +47,8 @@ export interface P2pOffer {
   order_max?: number | string | null;
   Orders?: P2pOrder[];
   can_take_flexible?: boolean;
+  requirements?: Partial<Record<"min_completed" | "min_rating" | "min_account_days" | "min_trustscore", number | string>> | null;
+  requirements_met?: boolean;
   private?: boolean | number;
   webhook?: string | null;
   updated_at?: string;
