@@ -110,6 +110,11 @@ const trading = new TradingEngine(
     store.audit("telegram_info_suppressed", message, uuid);
   },
 );
+huntingSync.setAccountingRefresh(async () => {
+  const after = Number(store.get("cooperative_participation_cursor") ?? 0);
+  const items = await huntingSync.participations(after);
+  store.recordCooperativeParticipations(items, coin => trading.markets().find(market => market.code === coin)?.outgoingTransferFee ?? 0);
+}, coin => trading.cooperativeSyncFiat(coin), coin => trading.cooperativePublishFiat(coin));
 const pollingMarketSource = new PollingMarketSource(
   store,
   marketAccounts,

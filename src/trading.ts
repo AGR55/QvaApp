@@ -171,7 +171,7 @@ export class TradingEngine {
     const open = this.store.loadRemoteResource<{ type: string; coin: string; status: string; receive: number }[]>("own-offers")?.data ?? [];
     const advertised = open.filter(offer => offer.type === "buy" && offer.coin === coin && offer.status === "open")
       .reduce((sum,offer) => sum + this.cooperativeOwnerCost(coin, offer.receive), 0);
-    return Number.isFinite(ownerFiat) && ownerFiat >= 0 && this.fiatBalance(coin) - committed - advertised >= reserved;
+    return Number.isFinite(ownerFiat) && ownerFiat >= 0 && this.fiatBalance(coin) - committed - advertised - this.store.applicationReservedCapital(coin).fiat - this.uncertainFlexibleCapital("sell", coin) - this.store.cooperativeParticipantReserved(coin) >= reserved;
   }
 
   cooperativeOwnerCost(coin: string, amount: number): number { return amount + (amount > 0 ? this.market(coin)?.outgoingTransferFee ?? 0 : 0); }
@@ -182,12 +182,13 @@ export class TradingEngine {
     return this.cooperativeOwnerCost(operation.coin, amount);
   }
 
-  private recordOutgoingFiat(operation: { uuid: string; coin: string; receive: number }, source: string): boolean {
+  private recordOutgoingFiat(operation: { uuid: string; coin: string; receive: number }, source: string, occurredAt?: number): boolean {
     const cost = this.operationFiatCost(operation);
     if (cost === 0) return false;
-    const changed = this.store.recordFiatMovement(operation.uuid, operation.coin, "debit", cost, source);
+    const before = this.fiatBalance(operation.coin);
+    const changed = this.store.recordFiatMovement(operation.uuid, operation.coin, "debit", cost, source, occurredAt);
     const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
-    if (changed && raw !== undefined && raw !== "") {
+    if (changed && this.fiatBalance(operation.coin) < before && raw !== undefined && raw !== "") {
       const key = `cooperative_local_balance:${operation.coin}`;
       const previous = this.store.get(key);
       // Only this share was already debited by Sync Core. Preserve any personal
@@ -243,8 +244,10 @@ export class TradingEngine {
     );
     for (const market of saved.markets) {
       this.store.set(`fiat_balance:${market.code}`, String(market.fiatBalance));
-      if (source === "panel" && previousBalances.get(market.code) !== market.fiatBalance)
+      if (source === "panel" && previousBalances.get(market.code) !== market.fiatBalance) {
         this.store.set(`cooperative_balance_declared:${market.code}`, randomUUID());
+        this.store.set(`fiat_balance_declared_at:${market.code}`, String(Date.now()));
+      }
     }
     this.store.audit(
       "config",
@@ -318,6 +321,7 @@ export class TradingEngine {
   setFiatBalance(coin: FiatMarket, amount: number): void {
     if (!this.isMarket(coin)) throw new Error("Mercado no configurado.");
     this.store.set(`fiat_balance:${coin}`, String(amount));
+    this.store.set(`fiat_balance_declared_at:${coin}`, String(Date.now()));
     this.marketConfig.updateBalance(coin, amount);
     this.store.set(`cooperative_balance_declared:${coin}`, randomUUID());
     this.store.audit(
@@ -491,7 +495,7 @@ export class TradingEngine {
             if (!next) continue;
             if (next !== operation.state)
               this.store.updateOperation(intent.operationUuid, next);
-            this.recordFlexibleFiat(operation, remote.status);
+            this.recordFlexibleFiat(operation, remote.status, remote.updated_at ? Date.parse(remote.updated_at) : undefined);
             this.store.updateMutationIntent(intent.intentId, "reconciled", {
               remoteStatus: remote.status,
               operationState: next,
@@ -552,7 +556,7 @@ export class TradingEngine {
             const recovered = this.store.getOperation(uuid);
             if (recovered?.orderUuid === order.uuid) {
               this.store.updateOperation(uuid, state);
-              this.recordFlexibleFiat(recovered, order.status);
+              this.recordFlexibleFiat(recovered, order.status, order.updated_at ? Date.parse(order.updated_at) : remote.updated_at ? Date.parse(remote.updated_at) : undefined);
             }
             this.store.updateMutationIntent(intent.intentId, "reconciled", { order: order.uuid, remoteStatus: order.status });
             this.store.audit("flexible_order_reconciled", `Orden propia ${order.uuid} confirmada en QvaPay.`, uuid);
@@ -1020,10 +1024,19 @@ export class TradingEngine {
     }, 0);
   }
 
+  cooperativeSyncFiat(coin: string): number {
+    const personal = this.store.activeOperations().filter(op => op.offerType === "sell" && op.coin === coin &&
+      this.store.get(`cooperative_owner_fiat:${op.uuid}`) === undefined && !this.store.hasFiatMovement(op.uuid))
+      .reduce((sum, op) => sum + this.operationFiatCost(op), 0);
+    return Math.max(0, this.fiatBalance(coin) - personal - this.uncertainFlexibleCapital("sell", coin) - this.store.applicationReservedCapital(coin).fiat);
+  }
+
+  cooperativePublishFiat(coin: string): number { return this.freeFiat(coin); }
+
   private freeFiat(coin: string, ignoreIntent?: string): number {
     const committed = this.store.activeOperations().filter(op => op.offerType === "sell" && op.coin === coin && !this.store.hasFiatMovement(op.uuid))
       .reduce((sum, op) => sum + this.operationFiatCost(op), 0);
-    return Math.max(0, this.fiatBalance(coin) - committed - Number(this.store.get(`cooperative_fiat_reserved:${coin}`) ?? 0) - this.uncertainFlexibleCapital("sell", coin, ignoreIntent) - this.store.applicationReservedCapital(coin, ignoreIntent).fiat);
+    return Math.max(0, this.fiatBalance(coin) - committed - this.store.cooperativeParticipantReserved(coin) - Number(this.store.get(`cooperative_fiat_reserved:${coin}`) ?? 0) - this.uncertainFlexibleCapital("sell", coin, ignoreIntent) - this.store.applicationReservedCapital(coin, ignoreIntent).fiat);
   }
 
   private async ingestFastFiatFundedOffer(
@@ -1358,7 +1371,7 @@ export class TradingEngine {
       if (
         (event === "p2p.paid" || event === "p2p.completed") &&
         operation.offerType === "sell"
-      ) this.recordOutgoingFiat(operation, "Feed QvaPay");
+      ) this.recordOutgoingFiat(operation, "Feed QvaPay", offer.updated_at ? Date.parse(offer.updated_at) : undefined);
       if (event === "p2p.completed" && operation.offerType === "buy")
         this.store.recordFiatMovement(
           operation.uuid,
@@ -1366,6 +1379,7 @@ export class TradingEngine {
           "credit",
           operation.receive,
           "Feed QvaPay",
+          offer.updated_at ? Date.parse(offer.updated_at) : undefined,
         );
     }
     this.store.audit(
@@ -2116,20 +2130,20 @@ export class TradingEngine {
     }
   }
 
-  private recordFlexibleFiat(operation: import("./store.js").Operation, status: string): void {
+  private recordFlexibleFiat(operation: import("./store.js").Operation, status: string, occurredAt?: number): void {
     if (!operation.orderUuid) return;
     if (operation.offerType === "sell" && ["paid", "completed"].includes(status))
-      this.recordOutgoingFiat(operation, "Orden flexible confirmada por QvaPay");
+      this.recordOutgoingFiat(operation, "Orden flexible confirmada por QvaPay", occurredAt);
     if (operation.offerType === "buy" && status === "completed")
-      this.store.recordFiatMovement(operation.uuid, operation.coin, "credit", operation.receive, "Orden flexible confirmada por QvaPay");
+      this.store.recordFiatMovement(operation.uuid, operation.coin, "credit", operation.receive, "Orden flexible confirmada por QvaPay", occurredAt);
   }
 
   async syncRemoteOperations(): Promise<number> {
     let changed = 0;
     for (const operation of this.store.activeOperations()) {
       try {
-        const remote = orderForOperation(await this.qva.getOffer(operation.uuid), operation.orderUuid);
-        this.recordFlexibleFiat(operation, remote.status);
+        const remote = orderForOperation(await this.qva.getOffer(operation.uuid, { analyticsOnly: true }), operation.orderUuid);
+        this.recordFlexibleFiat(operation, remote.status, remote.updated_at ? Date.parse(remote.updated_at) : undefined);
         const next = operationStateFromRemote(operation.state, remote.status);
         this.store.set(`operation_sync_error:${operation.uuid}`, "");
         if (next === operation.state) continue;
@@ -2216,14 +2230,14 @@ export class TradingEngine {
         page: 1,
         orderBy: "updated_at",
         orderType: "desc",
-      }),
+      }, { analyticsOnly: true }),
       this.qva.listOffersPage({
         peer: profile.uuid,
         take: 50,
         page: 1,
         orderBy: "updated_at",
         orderType: "desc",
-      }),
+      }, { analyticsOnly: true }),
     ]);
     const offers = new Map<string, P2pOffer>();
     for (const offer of [...created.offers, ...asPeer.offers])
@@ -2271,7 +2285,7 @@ export class TradingEngine {
       if (
         paysFiat &&
         ["paid", "completed"].includes(offer.status) &&
-        this.recordOutgoingFiat({ uuid: offer.uuid, coin, receive: fiatAmount }, "QvaPay reconciliado")
+        this.recordOutgoingFiat({ uuid: offer.uuid, coin, receive: fiatAmount }, "QvaPay reconciliado", updatedAt)
       )
         movements += 1;
       if (
@@ -2283,6 +2297,7 @@ export class TradingEngine {
           "credit",
           fiatAmount,
           "QvaPay reconciliado",
+          updatedAt,
         )
       )
         movements += 1;

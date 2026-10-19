@@ -19,7 +19,9 @@ export function orderForOperation(offer: P2pOffer, orderUuid?: string): P2pOffer
   }
   const order = offer.Orders?.find(item => item.uuid === orderUuid);
   if (!order) throw new Error("QvaPay no devolvió la orden de esta operación; se conserva el estado local.");
-  return { ...offer, amount: order.amount, receive: order.receive, status: order.status };
+  return { ...offer, amount: order.amount, receive: order.receive, status: order.status,
+    ...(order.updated_at ? { updated_at: order.updated_at } : {}),
+  };
 }
 
 export function matchingRecoveryOrder(offer: P2pOffer, amount: number, since: number, account?: string): P2pOrder | undefined {

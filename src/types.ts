@@ -26,6 +26,7 @@ export interface P2pOrder {
   receive: number;
   status: string;
   created_at?: string;
+  updated_at?: string;
   Taker?: { uuid: string };
 }
 

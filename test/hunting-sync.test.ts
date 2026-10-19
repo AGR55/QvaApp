@@ -328,3 +328,16 @@ for (const change of ["pago-conjunto", "saldo-declarado", "saldo-redeclarado"] a
   assert.deepEqual(bodies,change==="pago-conjunto"?[1100]:[1100,2000]);
  });
 }
+
+test("el historial personal pagina con cursores crecientes y rechaza importes inválidos",async()=>{
+ const calls:string[]=[];
+ const row={cursor:2,external_id:"order",coin:"CLASICA",fiat:50,state:"reserved",created_at:Date.now()};
+ const client=new SyncCoreClient("https://sync.test",async input=>{
+  calls.push(String(input));
+  return new Response(JSON.stringify(calls.length===1?{data:[row],next_cursor:2}:{data:[{...row,cursor:3,external_id:"other",state:"completed"}],next_cursor:null}));
+ });
+ const result=await client.participations("secret",0);
+ assert.equal(result.length,2);assert.match(calls[1]!,/after=2/);
+ const invalid=new SyncCoreClient("https://sync.test",async()=>new Response(JSON.stringify({data:[{...row,fiat:-50}],next_cursor:null})));
+ await assert.rejects(invalid.participations("secret",0),/no es válido/);
+});

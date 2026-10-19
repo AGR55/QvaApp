@@ -25,6 +25,11 @@ const balanceKey = (coin: string) => `cooperative_local_balance:${coin}`;
 const declaredKey = (coin: string) => `cooperative_balance_declared:${coin}`;
 const roundDownFiat = (amount: number) => Math.floor((amount + 1e-9) * 100) / 100;
 type ContributionDraft = Pick<CooperativeContribution, "coin" | "minimal" | "price">;
+export interface CooperativeParticipation {
+  cursor: number; external_id: string; coin: string; fiat: number;
+  state: "reserved" | "completed" | "released"; created_at: number;
+}
+
 export interface CooperativeReservation {
   externalId: string; ownerFiat: number; state: "reserved" | "completed" | "released";
   contributions: { userId: string; fiat: number; qusd: number }[];
@@ -113,6 +118,29 @@ export class SyncCoreClient {
     return parseCooperativeContributions(
       await this.request("/hunts?me=true&active=true&page_size=100", {}, token),
     );
+  }
+
+  async participations(token: string, after: number): Promise<CooperativeParticipation[]> {
+    const rows: CooperativeParticipation[] = [];
+    let cursor = after;
+    for (let page = 0; page < 100; page++) {
+      const response = await this.request(`/hunts/participations?after=${cursor}`, {}, token);
+      if (!Array.isArray(response.data)) throw new Error("Historial cooperativo inválido.");
+      for (const value of response.data) {
+        if (!record(value) || !Number.isSafeInteger(value.cursor) || Number(value.cursor) <= cursor ||
+          !["reserved", "completed", "released"].includes(String(value.state)))
+          throw new Error("Participación cooperativa inválida.");
+        const item: CooperativeParticipation = {
+          cursor: Number(value.cursor), external_id: stringField(value.external_id, "external_id"),
+          coin: normalizeCoin(stringField(value.coin, "coin")), fiat: finitePositive(value.fiat, "fiat"),
+          state: value.state as CooperativeParticipation["state"], created_at: finitePositive(value.created_at, "created_at"),
+        };
+        rows.push(item); cursor = item.cursor;
+      }
+      if (response.next_cursor === null) return rows;
+      if (!response.data.length || response.next_cursor !== cursor) throw new Error("Cursor cooperativo inválido.");
+    }
+    throw new Error("El historial cooperativo excede el límite de paginación.");
   }
 
   async publish(token: string, input: Omit<CooperativeContribution, "state" | "updatedAt">): Promise<void> {
@@ -262,6 +290,24 @@ export class HuntingSyncCoordinator {
   private stopped = false;
   private mutationTail: Promise<void> = Promise.resolve();
   private capacityRetryAt = 0;
+  private accountingRefresh?: () => Promise<void>;
+  private accountingRefreshedAt = 0;
+  private spendableFiat: ((coin: string) => number) | undefined;
+  private publishFiat: ((coin: string) => number) | undefined;
+
+  setAccountingRefresh(refresh: () => Promise<void>, spendable?: (coin: string) => number, publish?: (coin: string) => number): void {
+    this.accountingRefresh = refresh; this.spendableFiat = spendable; this.publishFiat = publish;
+  }
+
+  async participations(after: number): Promise<CooperativeParticipation[]> {
+    return this.authorized(token => this.requiredClient().participations(token, after));
+  }
+
+  private async refreshAccounting(force = false): Promise<void> {
+    if (!this.accountingRefresh || (!force && Date.now() - this.accountingRefreshedAt < 30_000)) return;
+    await this.accountingRefresh();
+    this.accountingRefreshedAt = Date.now();
+  }
 
   constructor(
     private readonly config: HuntingSyncConfig,
@@ -307,6 +353,7 @@ export class HuntingSyncCoordinator {
     if (!this.config.enabled || this.stopped) return;
     try {
       await this.reconcile();
+      await this.refreshAccounting();
     } catch (error) {
       this.recordFailure(error);
     }
@@ -342,16 +389,18 @@ export class HuntingSyncCoordinator {
   async publish(input: ContributionDraft): Promise<void> {
     return this.serializeMutation(async () => {
       if (!this.config.enabled) throw new Error("La red cooperativa no está habilitada.");
+      await this.refreshAccounting(true);
       validateContribution(input);
       const coin = normalizeCoin(input.coin);
-      const fiat = roundDownFiat(this.localFiat(coin));
+      const local = this.localFiat(coin);
+      const fiat = roundDownFiat(this.publishFiat ? this.publishFiat(coin) : local);
       if (fiat < COOPERATIVE_MIN_QUSD * input.price)
         throw new Error("El saldo de ese mercado equivale a menos de 5 QUSD al precio indicado.");
       const contribution = { coin, fiat, minimal: input.minimal, price: input.price };
       const previousBase = this.store.get(balanceKey(coin));
       const declaration = this.store.get(declaredKey(coin));
       await this.authorized((token) => this.requiredClient().publish(token, contribution));
-      this.acknowledgeCapacity(coin, fiat, previousBase, declaration);
+      this.acknowledgeCapacity(coin, local, previousBase, declaration);
       this.updateContribution({ ...contribution, state: "pending", updatedAt: Date.now() });
       this.patchState({ httpConnected: true, lastError: null });
       this.store.audit("cooperative_contribution_published", `${coin}: ${fiat} fiat aportado al precio ${input.price}.`);
@@ -417,6 +466,7 @@ export class HuntingSyncCoordinator {
   }
 
   private localFiat(coin: string): number {
+    if (this.spendableFiat) return this.spendableFiat(coin);
     const raw = this.store.get(`fiat_balance:${coin}`);
     const value = raw === undefined || raw === "" ? NaN : Number(raw);
     if (!Number.isFinite(value)) throw new Error(`No hay saldo fiat válido para ${coin}; decláralo en Capital.`);
@@ -424,6 +474,7 @@ export class HuntingSyncCoordinator {
   }
 
   private async syncCapacityInternal(): Promise<void> {
+    await this.refreshAccounting();
     const cached = this.state().contributions;
     const coins = Object.keys(cached);
     if (!coins.length) return;
