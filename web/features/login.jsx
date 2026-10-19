@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Brand } from "../components/brand.jsx";
 import { LockKeyhole } from "lucide-react";
 import { requestJson, setCsrfToken } from "../lib/http.js";
 import { Button, Field, Input } from "../components/ui.jsx";
@@ -34,12 +35,7 @@ export function Login({ onAuthenticated }) {
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-panel-inner">
           <div className="login-brand-lockup">
-            <img
-              src="/logo/logotipo.webp"
-              alt="QvaApply"
-              width="200"
-              height="47"
-            />
+            <Brand />
           </div>
           <div className="login-heading">
             <h1 id="login-title">Mesa de operaciones</h1>
