@@ -436,3 +436,21 @@ test('la preparación de liquidez se revalida al salir de la cola general',async
  await assert.rejects(edit,error=>error instanceof QvaApiError && error.code==='LOCAL_CONDITIONS_CHANGED');
  assert.equal(sent.some(url=>url.endsWith('/edit')),false);
 });
+
+test("una oferta flexible completada puede no tener Peer en el padre; la identidad está en la orden", async () => {
+  const client = new QvaPayClient(() => "token", { fetch: async () => Response.json({ p2p: {
+    uuid:"range",type:"sell",coin:"CLASICA",amount:"40",receive:"40",status:"completed",offer_kind:"flexible",Peer:{},
+    Orders:[{uuid:"child",amount:"40",receive:"40",status:"completed",Taker:{uuid:"me"}}],
+  } }) });
+  const offer=await client.getOffer("range");
+  assert.equal(offer.Peer,null);assert.equal(offer.Orders?.[0]?.status,"completed");
+});
+
+test("las lecturas contables validan capital e identidades sin depender del formato de los datos de pago",async()=>{
+  let now=1000;
+  const client=new QvaPayClient(()=>"token",{now:()=>now,sleep:async ms=>{now+=ms;},fetch:async()=>Response.json({p2p:{
+    uuid:"paid",type:"sell",coin:"CLASICA",amount:"10",receive:"10.9",status:"paid",Peer:{uuid:"me"},details:[{name:"Tarjeta",value:1234}],
+  }})});
+  await assert.rejects(client.getOffer("paid"),/datos de pago/);
+  const offer=await client.getOffer("paid",{analyticsOnly:true});assert.equal(offer.receive,10.9);
+});

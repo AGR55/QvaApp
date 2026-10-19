@@ -224,13 +224,13 @@ export class QvaPayClient {
     };
   }
 
-  async getOffer(uuid: string, options: { priority?: boolean } = {}): Promise<P2pOffer> {
+  async getOffer(uuid: string, options: { priority?: boolean; analyticsOnly?: boolean } = {}): Promise<P2pOffer> {
     const data = (await this.request(`/p2p/${uuid}`, {
       policy: options.priority ? "urgent_read" : "read",
       retryRead: true,
     })) as { p2p?: P2pOffer };
     if (!data.p2p) throw new Error("QvaPay no devolvió la oferta solicitada");
-    return parseOffer(data.p2p, "oferta solicitada");
+    return parseOffer(data.p2p, "oferta solicitada", options.analyticsOnly);
   }
 
   async qusdBalance(options: { priority?: boolean } = {}): Promise<number> {
@@ -773,7 +773,7 @@ function parseOffer(value: unknown, context: string, analyticsOnly = false): P2p
   if (typeof raw.status !== "string" || !raw.status)
     throw new Error(`Respuesta inválida de QvaPay (${context}): estado ausente.`);
   if (raw.User !== undefined && raw.User !== null) validateParty(raw.User, `${context}, User`);
-  const peer = raw.status === "open" && isEmptyParty(raw.Peer) ? null : raw.Peer;
+  const peer = (raw.status === "open" || raw.offer_kind === "flexible") && isEmptyParty(raw.Peer) ? null : raw.Peer;
   if (peer !== undefined && peer !== null) validateParty(peer, `${context}, Peer`);
   if (raw.tags !== undefined && (!Array.isArray(raw.tags) || !raw.tags.every((tag) => typeof tag === "string")))
     throw new Error(`Respuesta inválida de QvaPay (${context}): etiquetas inválidas.`);

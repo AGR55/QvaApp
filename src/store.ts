@@ -1,3 +1,4 @@
+import type { CooperativeParticipation } from "./hunting-sync.js";
 import { checkConfigRevisions, configRevisionHash, type RevisionCheckpoint } from "./config-integrity.js";
 import { ConfigIntegrityMonitor } from "./config-integrity-monitor.js";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
@@ -2056,33 +2057,90 @@ export class Store {
     direction: "debit" | "credit",
     amount: number,
     source: string,
+    occurredAt?: number,
   ): boolean {
     if (!Number.isFinite(amount) || amount <= 0)
       throw new Error("El movimiento fiat debe tener un importe positivo.");
-    return this.transaction(() => {
-      const inserted = this.db
-        .prepare(
-          "INSERT OR IGNORE INTO fiat_ledger(operation_uuid, direction, amount, source, created_at, coin) VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .run(uuid, direction, amount, source, Date.now(), coin);
-      if (!inserted.changes) return false;
-      const current = Number(this.get(`fiat_balance:${coin}`) ?? 0);
-      const next = direction === "credit" ? current + amount : current - amount;
-      this.set(`fiat_balance:${coin}`, String(next));
-      this.db
-        .prepare("UPDATE market_config SET fiat_balance = ? WHERE code = ?")
-        .run(next, coin);
-      this.db
-        .prepare(
-          "UPDATE fiat_accounts SET declared_balance = ?, updated_at = ? WHERE market_code = ?",
-        )
-        .run(next, Date.now(), coin);
-      this.audit(
-        "fiat_ledger",
-        `${direction === "credit" ? "+" : "-"}${amount} ${coin} (${source})`,
-        uuid,
-      );
+    return this.transaction(() => this.recordFiatMovementInternal(uuid, coin, direction, amount, source, occurredAt));
+  }
+
+  private recordFiatMovementInternal(uuid: string, coin: string, direction: "debit" | "credit", amount: number, source: string, occurredAt?: number): boolean {
+    const inserted = this.db
+      .prepare(
+        "INSERT OR IGNORE INTO fiat_ledger(operation_uuid, direction, amount, source, created_at, coin) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(uuid, direction, amount, source, Date.now(), coin);
+    if (!inserted.changes) return false;
+    const declared = Number(this.get(`fiat_balance_declared_at:${coin}`) ??
+      (this.db.prepare("SELECT created_at FROM audit_log WHERE action='fiat_balance' AND detail LIKE ? ORDER BY id DESC LIMIT 1")
+        .get(`%(${coin})`) as { created_at: number } | undefined)?.created_at ?? 0);
+    if (occurredAt !== undefined && Number.isFinite(occurredAt) && occurredAt > 0 && occurredAt <= declared) {
+      this.audit("fiat_ledger_backfilled", `${amount} ${coin}: movimiento histórico ya incluido en el saldo declarado (${source}).`, uuid);
       return true;
+    }
+    const current = Number(this.get(`fiat_balance:${coin}`) ?? 0);
+    const next = direction === "credit" ? current + amount : current - amount;
+    this.set(`fiat_balance:${coin}`, String(next));
+    this.db
+      .prepare("UPDATE market_config SET fiat_balance = ? WHERE code = ?")
+      .run(next, coin);
+    this.db
+      .prepare(
+        "UPDATE fiat_accounts SET declared_balance = ?, updated_at = ? WHERE market_code = ?",
+      )
+      .run(next, Date.now(), coin);
+    this.audit(
+      "fiat_ledger",
+      `${direction === "credit" ? "+" : "-"}${amount} ${coin} (${source})`,
+      uuid,
+    );
+    return true;
+  }
+
+  cooperativeParticipantReserved(coin: string): number {
+    return Number(this.get(`cooperative_participant_reserved:${coin}`) ?? 0);
+  }
+
+  recordCooperativeParticipations(items: CooperativeParticipation[], fee: (coin: string) => number): void {
+    this.transaction(() => {
+      let highest = Number(this.get("cooperative_participation_highest") ?? 0);
+      for (const item of items) {
+        const key = `cooperative_participation:${item.external_id}`;
+        const raw = this.get(key);
+        const previous = raw ? JSON.parse(raw) as CooperativeParticipation : undefined;
+        if (previous && (previous.coin !== item.coin || previous.fiat !== item.fiat || previous.cursor !== item.cursor))
+          throw new Error("El reparto cooperativo cambió de importe o identidad.");
+        if (previous && previous.state !== "reserved" && previous.state !== item.state)
+          throw new Error("El estado final de una participación cooperativa cambió.");
+        if (item.state === "completed") {
+          const before = Number(this.get(`fiat_balance:${item.coin}`) ?? 0);
+          const cost = item.fiat + fee(item.coin);
+          if (!Number.isFinite(cost) || cost <= 0) throw new Error("Coste cooperativo inválido.");
+          const changed = this.recordFiatMovementInternal(`cooperative:${item.external_id}`, item.coin, "debit", cost,
+            "Participación confirmada por Sync Core", previous?.state === "reserved" ? undefined : item.created_at);
+          const baseKey = `cooperative_local_balance:${item.coin}`;
+          const base = this.get(baseKey);
+          if (changed && Number(this.get(`fiat_balance:${item.coin}`)) < before && base !== undefined && base !== "")
+            this.set(baseKey, String(Number(base) - item.fiat));
+        }
+        this.set(key, JSON.stringify(item));
+        highest = Math.max(highest, item.cursor);
+      }
+      // Terminal rows need no further polling; revisit outstanding reservations.
+      const pending = this.db.prepare("SELECT value FROM settings WHERE key LIKE 'cooperative_participation:%' AND json_extract(value, '$.state') = 'reserved'")
+        .all() as { value: string }[];
+      const totals: Record<string, number> = {};
+      let cursor = highest;
+      for (const row of pending) {
+        const item = JSON.parse(row.value) as CooperativeParticipation;
+        if (item.state !== "reserved") continue;
+        cursor = Math.min(cursor, item.cursor - 1);
+        totals[item.coin] = (totals[item.coin] ?? 0) + item.fiat + fee(item.coin);
+      }
+      this.db.prepare("DELETE FROM settings WHERE key LIKE 'cooperative_participant_reserved:%'").run();
+      for (const [coin, amount] of Object.entries(totals)) this.set(`cooperative_participant_reserved:${coin}`, String(amount));
+      this.set("cooperative_participation_highest", String(highest));
+      this.set("cooperative_participation_cursor", String(cursor));
     });
   }
 
