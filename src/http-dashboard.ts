@@ -1,3 +1,4 @@
+import { brandAssets, brandMarkup } from "./brand.js";
 import { sendStaticAsset } from "./static-assets.js";
 import { resolve } from "node:path";
 import Fastify, {
@@ -150,7 +151,7 @@ export function buildDashboard(
   });
   app.get<{ Params: { name: string } }>("/auth/:name", async (request, reply) => {
     const name = request.params.name;
-    if (name !== "login.js" && name !== "login.css")
+    if (name !== "login.js" && name !== "login.css" && name !== "theme.js")
       return reply.status(404).send("Recurso no encontrado.");
     return sendStaticAsset(request, reply, resolve(authRoot, name),
       name.endsWith(".css") ? "text/css; charset=utf-8" : "text/javascript; charset=utf-8",
@@ -173,12 +174,12 @@ export function buildDashboard(
   });
   app.get<{ Params: { name: string } }>("/logo/:name", async (request, reply) => {
     const name = request.params.name;
-    if (!/^[a-zA-Z0-9._-]+\.webp$/.test(name))
+    if (!/^[a-zA-Z0-9._-]+\.(?:webp|svg|png)$/.test(name) && name !== "brand.css")
       return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
     const file = resolve(logoRoot, name);
     if (!file.startsWith(`${logoRoot}/`))
       return reply.status(404).type("text/plain").send("Logotipo no encontrado.");
-    return sendStaticAsset(request, reply, file, "image/webp", "public, max-age=86400, stale-while-revalidate=604800");
+    return sendStaticAsset(request, reply, file, name.endsWith(".svg") ? "image/svg+xml" : name.endsWith(".png") ? "image/png" : name.endsWith(".css") ? "text/css; charset=utf-8" : "image/webp", "public, max-age=86400, stale-while-revalidate=604800");
   });
   app.get<{ Params: { name: string } }>("/market-icons/:name", async (request, reply) => {
     const icon = typeof readModel.marketIcon === "function"
@@ -1139,8 +1140,8 @@ function serviceWorkerScript(): string {
         body,
         tag: payload.version || payload.type,
         data: { url },
-        icon: "/logo/isotipo.webp",
-        badge: "/logo/isotipo.webp",
+        icon: "${brandAssets.notification}",
+        badge: "${brandAssets.badge}",
         requireInteraction: payload.type === "operation-applied" || payload.type === "rebalance-attention"
       });
     }));
@@ -1202,11 +1203,11 @@ function reactPage(bootstrap: unknown): string {
     .replaceAll(">", "\\u003e")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="apple-touch-icon" href="/logo/isotipo.webp"><link rel="preload" as="image" href="/logo/logotipo.webp"><title>QvaApply · Mesa de trading</title><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"><main class="boot boot-first-paint" role="status" aria-label="Abriendo QvaApply"><img src="/logo/logotipo.webp" alt="QvaApply" width="200" height="47"><span class="skeleton-pulse" aria-hidden="true"></span></main></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><script src="/auth/theme.js"></script><link rel="icon" href="${brandAssets.favicon}" type="image/svg+xml"><link rel="apple-touch-icon" href="${brandAssets.apple}"><link rel="stylesheet" href="/logo/brand.css"><title>QvaApply · Mesa de trading</title><link rel="stylesheet" href="/dashboard/app.css"></head><body><template id="qvaapply-bootstrap">${encoded}</template><div id="root"><main class="boot boot-first-paint" role="status" aria-label="Abriendo QvaApply">${brandMarkup("boot-logo")}<span class="skeleton-pulse" aria-hidden="true"></span></main></div><script type="module" src="/dashboard/app.js"></script></body></html>`;
 }
 
 function publicLoginPage(): string {
-  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><link rel="icon" href="/logo/isotipo.webp" type="image/webp"><link rel="preload" as="image" href="/logo/logotipo.webp"><link rel="stylesheet" href="/auth/login.css"><title>QvaApply · Acceso</title></head><body><main class="login-shell"><section class="login-panel" aria-labelledby="login-title"><img class="login-logo" src="/logo/logotipo.webp" alt="QvaApply" width="200" height="47"><h1 id="login-title">Mesa de operaciones</h1><p>Todo el control de tus mercados, en un solo lugar.</p><form id="login-form"><label for="dashboard-password">Contraseña administrativa</label><input id="dashboard-password" name="password" type="password" autocomplete="current-password" minlength="14" required autofocus placeholder="Introduce tu contraseña"><button type="submit">Entrar de forma segura</button><p id="login-status" role="status" aria-live="polite"></p></form></section></main><script src="/auth/login.js" defer></script></body></html>`;
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="description" content="QvaApply · Mesa privada de operaciones P2P"><meta name="theme-color" content="#123b70"><script src="/auth/theme.js"></script><link rel="icon" href="${brandAssets.favicon}" type="image/svg+xml"><link rel="apple-touch-icon" href="${brandAssets.apple}"><link rel="stylesheet" href="/logo/brand.css"><link rel="stylesheet" href="/auth/login.css"><title>QvaApply · Acceso</title></head><body><main class="login-shell"><section class="login-panel" aria-labelledby="login-title">${brandMarkup("login-logo")}<h1 id="login-title">Mesa de operaciones</h1><p>Todo el control de tus mercados, en un solo lugar.</p><form id="login-form"><label for="dashboard-password">Contraseña administrativa</label><input id="dashboard-password" name="password" type="password" autocomplete="current-password" minlength="14" required autofocus placeholder="Introduce tu contraseña"><button type="submit">Entrar de forma segura</button><p id="login-status" role="status" aria-live="polite"></p></form></section></main><script src="/auth/login.js" defer></script></body></html>`;
 }
 
 function openApiDocument() {

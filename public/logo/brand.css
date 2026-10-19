@@ -1,0 +1,12 @@
+/* Natural proportions and identical theme rules for HTML and React surfaces. */
+.qva-brand{display:inline-block;vertical-align:middle;width:var(--brand-width,200px);max-width:100%;line-height:0;flex-shrink:0}
+.qva-brand>img{display:block;width:100%;height:auto;max-width:100%;border-radius:0;filter:none}
+.qva-brand>.qva-brand-inverse{display:none}
+.qva-brand-symbol{--brand-width:56px}
+[data-theme="dark"] .qva-brand>.qva-brand-light{display:none}
+[data-theme="dark"] .qva-brand>.qva-brand-inverse{display:block}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .qva-brand>.qva-brand-light{display:none}:root:not([data-theme]) .qva-brand>.qva-brand-inverse{display:block}}
+[data-theme="light"]{color-scheme:light}
+[data-theme="dark"]{color-scheme:dark}
+.boot-first-paint{min-height:100dvh}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .boot-first-paint{background:#191714}}

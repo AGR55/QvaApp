@@ -291,8 +291,8 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   try {
     const page = await app.inject({ method: "GET", url: "/" });
-    assert.match(page.body, /href=\"\/logo\/isotipo\.webp\"/);
-    assert.match(page.body, /src="\/logo\/logotipo\.webp"/);
+    assert.match(page.body, /href=\"\/logo\/encuentro-preciso-favicon\.svg\"/);
+    assert.match(page.body, /src="\/logo\/encuentro-preciso-horizontal\.svg"/);
     assert.match(page.body, /src="\/auth\/login\.js"/);
     assert.doesNotMatch(page.body, /src="\/dashboard\/app\.js"/);
     assert.doesNotMatch(page.body, /fonts\.(?:googleapis|gstatic)\.com/);
@@ -304,6 +304,18 @@ test("Fastify sirve identidad visual e iconos solo desde la carpeta pública", a
     assert.equal(logo.statusCode, 200);
     assert.match(String(logo.headers["content-type"]), /image\/webp/);
     assert.match(String(logo.headers["cache-control"]), /public, max-age=86400/);
+    for (const [asset, mime] of [
+      ["encuentro-preciso-horizontal.svg", "image/svg+xml"],
+      ["encuentro-preciso-horizontal-inverse.svg", "image/svg+xml"],
+      ["encuentro-preciso-icon-180.png", "image/png"],
+      ["brand.css", "text/css"],
+    ]) {
+      const response = await app.inject({ method: "GET", url: `/logo/${asset}` });
+      assert.equal(response.statusCode, 200);
+      assert.ok(String(response.headers["content-type"]).startsWith(mime!));
+    }
+    const invalidLogo = await app.inject({ method: "GET", url: "/logo/%2e%2e%2fpackage.json" });
+    assert.equal(invalidLogo.statusCode, 404);
     const signinImage = await app.inject({ method: "GET", url: "/images/signin-picture.webp" });
     assert.equal(signinImage.statusCode, 404);
     const appScript = await app.inject({ method: "GET", url: `/dashboard/${assetName}` });
@@ -834,7 +846,7 @@ test("el service worker usa la identidad de QvaApply en avisos persistentes", as
   const app = buildDashboard({} as never, { password, trustedOrigin: origin });
   const worker = await app.inject({ method: "GET", url: "/service-worker.js" });
   assert.equal(worker.statusCode, 200);
-  assert.match(worker.body, /icon:\s*"\/logo\/isotipo\.webp"/);
+  assert.match(worker.body, /icon:\s*"\/logo\/encuentro-preciso-icon-192\.png"/);
   assert.match(worker.body, /requireInteraction:\s*payload\.type === "operation-applied"/);
   await app.close();
 });

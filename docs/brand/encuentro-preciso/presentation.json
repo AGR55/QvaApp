@@ -1,0 +1,22 @@
+{
+  "brand":"QvaApply",
+  "tagline":"Encuentro · Preciso",
+  "brief":"Identidad para una mesa privada de operaciones P2P, coherente con un panel sobrio, preciso y ágil.",
+  "adjectives":["preciso","estable","ágil","sobrio"],
+  "industry":"developer-tools",
+  "brand_color":"#1D4E86",
+  "tile_color":"#1D4E86",
+  "greyscale":false,
+  "final":true,
+  "concepts":[{
+    "name":"Encuentro · Preciso",
+    "symbol":"../../../public/logo/encuentro-preciso-symbol.svg",
+    "lockup":"../../../public/logo/encuentro-preciso-horizontal.svg",
+    "stacked":"../../../public/logo/encuentro-preciso-stacked.svg",
+    "symbol_on_tile":"../../../public/logo/encuentro-preciso-symbol-inverse.svg",
+    "lockup_on_dark":"../../../public/logo/encuentro-preciso-horizontal-inverse.svg",
+    "idea":"Dos recorridos coinciden en una operación.",
+    "rationale":["Cortes de 45° repetidos en terminales y centro","Símbolo reconocible sin depender del color","Proporciones adaptadas a navegación, acceso y favicon"]
+  }],
+  "recommendation":"Dirección aprobada. Usar horizontal en cabeceras y símbolo en tamaños compactos."
+}

@@ -17,3 +17,7 @@ Un componente de marca reutilizable y estilos compartidos con las páginas servi
 3. Compilar y comprobar HTTP. Verificación visual con datos de ejemplo en escritorio/móvil, claro/oscuro, acceso, menú y carga. No se modifican rutas financieras ni el motor de cacerías.
 
 La skill writing-plans referenciada no está instalada; se registra el plan aquí. La revisión visual y la integración siguen logo-design y la aprobación explícita del usuario.
+
+## Verificación final
+
+Implementados archivos vectoriales y raster, componente compartido, HTML de acceso/carga, tema temprano, menú móvil y notificaciones. `pnpm check` aprobado; revisión visual general y específica de claro/oscuro, tema guardado y primer pintado aprobadas. Compilación y HTTP repetidos tras el ajuste de tema. Guía, licencia de fuente, exportador y capturas en `docs/brand/encuentro-preciso/`.

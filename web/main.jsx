@@ -41,9 +41,11 @@ import { money } from "./lib/format.js";
 import { useDashboard } from "./hooks/use-dashboard.js";
 import { Cockpit } from "./features/cockpit.jsx";
 import { Login } from "./features/login.jsx";
+import { Brand } from "./components/brand.jsx";
 import { requestJson, setCsrfToken } from "./lib/http.js";
 import "./globals.css";
 import "./ui-polish.css";
+import "../public/logo/brand.css";
 import "./identity.css";
 import "./mobile-sms.css";
 
@@ -143,7 +145,6 @@ function App() {
   );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme = theme;
     window.localStorage.setItem("qvaapply-theme", theme);
   }, [theme]);
   const showNotification = useCallback((incoming) => {
@@ -218,13 +219,7 @@ function App() {
   if (!session)
     return (
       <main className="boot">
-        <img
-          className="brand-logo boot-logo"
-          src="/logo/isotipo.webp"
-          alt="QvaApply"
-          width="56"
-          height="56"
-        />
+        <Brand symbol className="boot-logo" />
         <p>Verificando sesión…</p>
       </main>
     );
@@ -245,13 +240,7 @@ function App() {
   if (!data)
     return (
       <main className="boot">
-        <img
-          className="brand-logo boot-logo"
-          src="/logo/isotipo.webp"
-          alt="QvaApply"
-          width="56"
-          height="56"
-        />
+        <Brand symbol className="boot-logo" />
         <p>{status}</p>
         <Skeleton label="Leyendo la base de datos local" />
         <Button variant="primary" onClick={refresh}>
@@ -271,12 +260,7 @@ function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-lockup">
-            <img
-              src="/logo/logotipo.webp"
-              alt="QvaApply"
-              width="200"
-              height="34"
-            />
+            <Brand />
           </div>
         </div>
         <nav aria-label="Navegación principal">
@@ -336,7 +320,7 @@ function App() {
               aria-label="Navegación principal"
             >
               <SheetHeader className="mobile-nav-heading">
-                <SheetTitle>Secciones</SheetTitle>
+                <SheetTitle><Brand className="mobile-brand" /><span className="sr-only"> · Secciones</span></SheetTitle>
                 <SheetClose asChild>
                   <IconButton
                     variant="ghost"

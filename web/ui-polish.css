@@ -463,12 +463,8 @@ td,
   gap: 10px;
   min-width: 0;
 }
-.brand-lockup img {
-  display: block;
-  width: 146px;
-  height: 34px;
-  border-radius: 9px;
-  flex: none;
+.brand-lockup .qva-brand {
+  --brand-width: 176px;
 }
 .brand-word {
   display: grid;
@@ -492,22 +488,14 @@ td,
 .login-brand-lockup {
   display: flex;
   align-items: center;
-  gap: 12px;
-  width: fit-content;
-  padding: 11px 14px;
-  border-radius: 12px;
-  background: #292521;
+  width: 100%;
+  margin-bottom: 24px;
 }
-.login-brand-lockup img {
-  width: 200px;
-  height: auto;
-  border-radius: 0;
+.login-brand-lockup .qva-brand {
+  --brand-width: 224px;
 }
-.login-brand-lockup .brand-word strong {
-  font-size: 22px;
-}
-[data-theme="dark"] .brand-lockup img {
-  filter: brightness(1.12);
+.mobile-brand {
+  --brand-width: 160px;
 }
 .sidebar nav {
   display: grid;
@@ -3483,8 +3471,8 @@ tbody td small {
   min-height: 60dvh;
   color: var(--muted);
 }
-.boot-logo {
-  border-radius: 14px;
+.boot-first-paint .qva-brand {
+  --brand-width: 224px;
 }
 .login-shell {
   display: grid;
