@@ -67,3 +67,13 @@ test("la orden sobrevive al reinicio y aparece en todas las lecturas de operacio
   assert.equal(store.operations()[0]?.orderUuid, "child");
   store.close();
 });
+
+test("proyecta la fecha financiera de la hija y nunca una edición posterior del padre", () => {
+  const child = { uuid: "child", amount: 10, receive: 9000, status: "completed", created_at: "2026-10-18T10:00:00Z",
+    paid_at: "2026-10-19T10:00:00Z", released_at: "2026-10-19T10:05:00Z" };
+  const remote = { ...offer, updated_at: "2026-10-20T10:00:00Z", Orders: [child] };
+  assert.equal(orderForOperation(remote, "child").updated_at, child.paid_at);
+  assert.equal(orderForOperation({ ...remote, type: "buy" }, "child").updated_at, child.released_at);
+  assert.equal(orderForOperation({ ...remote, Orders: [{ ...child, paid_at: null }] }, "child").updated_at, child.released_at);
+  assert.equal(orderForOperation({ ...remote, Orders: [{ ...child, paid_at: null, released_at: null }] }, "child").updated_at, child.created_at);
+});

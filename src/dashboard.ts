@@ -3,7 +3,7 @@ import type { config as Config } from "./config.js";
 import { QvaApiError, QvaMutationUncertainError, QvaPayClient } from "./qvapay.js";
 import { rate, type TradingService } from "./trading.js";
 import { MarketConfigService, type TradingConfig } from "./market-config.js";
-import type { FiatMarket, P2pOffer } from "./types.js";
+import type { FiatMarket, P2pAverage, P2pOffer } from "./types.js";
 import type {
   RebalanceJob,
   RebalanceJobAdjustment,
@@ -20,7 +20,7 @@ import {
   SelfServiceRecovery,
   type ManualRecoveryOutcome,
 } from "./self-service-recovery.js";
-import { analyticsOffer, analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
+import { analyticsOffers, analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
 import { OperationChatService } from "./operation-chat.js";
 
 type RuntimeConfig = typeof Config;
@@ -135,6 +135,7 @@ function rebalanceIntentMatches(
 export class DashboardReadModel {
   private rebalanceExecution: Promise<void> | undefined;
   private readonly pendingReads = new Map<string, Promise<unknown>>();
+  private marketObservationCursor = 0;
   private readonly paymentSms: PaymentSmsService;
   private readonly mobileOperator: MobileOperatorService;
   private readonly recovery: SelfServiceRecovery;
@@ -807,15 +808,17 @@ export class DashboardReadModel {
     return this.coalesceRead("completed-offer-history", async () => {
       const account = this.store.get("analytics_account_uuid");
       if (!account) return;
-      const key = `analytics_offers_history:${account}`;
+      const key = `analytics_offers_history:v2:${account}`;
       const previous = this.store.loadRemoteResource<{ page: number; complete: boolean; limited?: boolean }>(key)?.data
         ?? { page: 1, complete: false };
       const pageNumber = previous.complete ? 1 : previous.page;
       const page = await this.qva.listOffersPage({ my: true, take: 100, page: pageNumber,
-        status: "completed", sortByStatus: false, orderBy: "updated_at", orderType: "desc" }, { analyticsOnly: true });
-      this.store.saveAnalyticsOffers(account, page.offers.flatMap((offer) => {
-        const row = analyticsOffer(offer, account); return row ? [row] : [];
-      }));
+        sortByStatus: false, orderBy: "updated_at", orderType: "desc" }, { analyticsOnly: true });
+      // Reuse the bounded accounting poll: the market listing omits child orders.
+      const offers = page.offers.map(offer => offer.offer_kind === "flexible"
+        ? this.store.loadRemoteResource<P2pOffer>(`fiat-flexible:${offer.uuid}`)?.data ?? offer : offer);
+      this.store.removeAnalyticsOffers(account, offers.filter(offer => offer.offer_kind === "flexible").map(offer => offer.uuid));
+      this.store.saveAnalyticsOffers(account, offers.flatMap(offer => analyticsOffers(offer, account)));
       const complete = page.offers.length < 100 || pageNumber * 100 >= page.total;
       this.store.saveRemoteResource(key, { page: complete ? pageNumber : pageNumber + 1, complete }, Date.now());
     });
@@ -882,7 +885,7 @@ export class DashboardReadModel {
       offers: account ? this.store.analyticsOffers(account, now - 365 * 86_400_000) : [],
       accountUuid: account, fiat: this.store.analyticsFiatMovements(), markets: this.marketConfig.publicMarkets(), days, now });
     const history = this.store.loadRemoteResource<{ complete: boolean; page: number; limited?: boolean }>(`analytics_history:${account}`);
-    const offersHistory = this.store.loadRemoteResource<{ complete: boolean; page: number }>(`analytics_offers_history:${account}`);
+    const offersHistory = this.store.loadRemoteResource<{ complete: boolean; page: number }>(`analytics_offers_history:v2:${account}`);
     return { ...report, balanceHistory: sampleHistory(this.store.dashboardHistory(now - days * 86_400_000), 120),
       portfolioHistory: account ? this.store.portfolioHistory(account, now - days * 86_400_000) : [],
       portfolioStatus: this.store.loadRemoteResource("portfolio-status")?.data ?? null,
@@ -965,6 +968,17 @@ export class DashboardReadModel {
     );
   }
 
+  async refreshNextMarketObservation(): Promise<void> {
+    const jobs = this.marketConfig.current().markets.filter(market => market.active)
+      .flatMap(market => (["sell", "buy"] as const).map(side => ({ coin: market.code, side })));
+    if (!jobs.length) return;
+    // One background read per turn; never share the hunting decision queue.
+    const job = jobs[this.marketObservationCursor++ % jobs.length]!;
+    const cached = this.store.loadRemoteResource(`market-side:${job.coin}:${job.side}`);
+    if (cached && Date.now() - cached.updatedAt < 60_000) return;
+    await this.refreshMarketSide(job.coin, job.side);
+  }
+
   private async refreshMarketSideOnce(coin: string, side: "buy" | "sell") {
     if (!this.marketConfig.find(coin)) throw new Error("Mercado inválido.");
     const current = await this.trading.inspectMarketSide(coin, side);
@@ -982,6 +996,30 @@ export class DashboardReadModel {
     };
     const updatedAt = current.scannedAt;
     this.store.saveRemoteResource(`market-side:${coin}:${side}`, data, updatedAt);
+
+    // The display cache and the trading reference have distinct requirements:
+    // only the validated median from the complete market inspection renews the
+    // safety reference. A single offer cannot serve as its own reference.
+    const medianKey = side === "buy" ? "median_buy" : "median_sell";
+    const averageKey = side === "buy" ? "average_buy" : "average_sell";
+    const previous = this.store.loadRemoteResource<Record<string, P2pAverage>>("averages")?.data ?? {};
+    const statistics = { ...previous[coin] };
+    delete statistics[medianKey];
+    delete statistics[averageKey];
+    const safeMedian = numeric(current.average?.[medianKey]);
+    const average = numeric(current.average?.[averageKey]);
+    if (safeMedian !== undefined) statistics[medianKey] = safeMedian;
+    if (average !== undefined) statistics[averageKey] = average;
+    this.store.saveRemoteResource("averages", { ...previous, [coin]: statistics }, updatedAt);
+    this.store.recordMarketObservation({
+      coin,
+      ...(side === "buy"
+        ? { ...maybeNumber("medianBuy", safeMedian), ...maybeNumber("averageBuy", average) }
+        : { ...maybeNumber("medianSell", safeMedian), ...maybeNumber("averageSell", average) }),
+      ...maybeNumber(side === "buy" ? "bestBuy" : "bestSell", bestRate(current.items, side)),
+      openOffers: current.total,
+      eligible: items.filter(item => item.decision === "auto_buy" || item.decision === "manual_sell").length,
+    });
 
     const otherSide = side === "buy" ? "sell" : "buy";
     const other = this.store.loadRemoteResource<MarketSideObservation>(`market-side:${coin}:${otherSide}`)?.data;

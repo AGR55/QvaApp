@@ -1336,7 +1336,8 @@ export class Store {
   }
 
   hasFiatMovement(uuid: string): boolean {
-    return Boolean(this.db.prepare("SELECT 1 FROM fiat_ledger WHERE operation_uuid = ? LIMIT 1").get(uuid));
+    return Boolean(this.db.prepare(`SELECT 1 FROM fiat_ledger WHERE operation_uuid = ?
+      OR operation_uuid = (SELECT order_uuid FROM operations WHERE uuid = ?) LIMIT 1`).get(uuid, uuid));
   }
 
   hasMarketFeedHistory(uuid: string): boolean {
@@ -2158,6 +2159,12 @@ export class Store {
     return (this.db.prepare(`SELECT payload_json FROM analytics_transactions
       WHERE account_uuid = ? AND created_at >= ? ORDER BY created_at ASC`).all(accountUuid, since) as { payload_json: string }[])
       .flatMap((row) => { try { return [JSON.parse(row.payload_json) as AnalyticsTransaction]; } catch { return []; } });
+  }
+
+  removeAnalyticsOffers(accountUuid: string, uuids: string[]): void {
+    if (!uuids.length) return;
+    const remove = this.db.prepare("DELETE FROM analytics_offers WHERE account_uuid=? AND uuid=?");
+    this.transaction(() => { for (const uuid of uuids) remove.run(accountUuid, uuid); });
   }
 
   saveAnalyticsOffers(accountUuid: string, offers: AnalyticsOffer[]): void {

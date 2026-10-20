@@ -21,6 +21,9 @@ type P2pStatus =
   | string;
 
 export interface P2pOrder {
+  paid_at?: string | null;
+  released_at?: string | null;
+  cancelled_at?: string | null;
   uuid: string;
   amount: number;
   receive: number;

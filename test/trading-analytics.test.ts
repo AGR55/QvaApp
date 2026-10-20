@@ -3,7 +3,7 @@ import test from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { analyticsDay, analyticsOffer, analyticsTransaction, buildTradingAnalytics, type AnalyticsTransaction } from "../src/trading-analytics.js";
+import { analyticsDay, analyticsOffer, analyticsOffers, analyticsTransaction, buildTradingAnalytics, type AnalyticsTransaction } from "../src/trading-analytics.js";
 import { analyticsBars } from "../web/lib/analytics-bars.js";
 import { Store } from "../src/store.js";
 import { QvaPayClient } from "../src/qvapay.js";
@@ -185,7 +185,7 @@ test("la importación P2P de fondo conserva el cursor y llena las gráficas sin 
   await readModel.refreshCompletedOfferHistory();
   assert.deepEqual(pages, [1, 2]);
   assert.equal(store.analyticsOffers("me", 0).length, 101);
-  assert.equal(store.loadRemoteResource<{ complete: boolean }>("analytics_offers_history:me")?.data.complete, true);
+  assert.equal(store.loadRemoteResource<{ complete: boolean }>("analytics_offers_history:v2:me")?.data.complete, true);
   store.close();
 });
 
@@ -234,5 +234,71 @@ test("el saldo conserva puntos horarios antiguos y detalle reciente sin retener 
   const points = store.dashboardHistory(0);
   assert.equal(points.length, 4);
   assert.equal(points[0]?.createdAt, oldHour + 2000);
+  store.close();
+});
+
+
+test("las órdenes completadas de rango cuentan por separado aunque el padre siga abierto", () => {
+  const offer = { uuid: "range", offer_kind: "flexible", type: "buy", coin: "CLASICA", amount: 500,
+    receive: 550, status: "open", User: { uuid: "me" }, updated_at: new Date(now).toISOString(), Orders: [
+      { uuid: "order-one", amount: 10, receive: 11, status: "completed", released_at: new Date(now - 1000).toISOString(), Taker: { uuid: "other" } },
+      { uuid: "order-two", amount: 20, receive: 22, status: "completed", updated_at: new Date(now - 500).toISOString(), Taker: { uuid: "another" } },
+      { uuid: "cancelled", amount: 30, receive: 33, status: "cancelled", updated_at: new Date(now).toISOString() },
+      { uuid: "paid", amount: 40, receive: 44, status: "paid", updated_at: new Date(now).toISOString() },
+    ] };
+  const rows = analyticsOffers(offer as never, "me");
+  assert.deepEqual(rows.map(row => [row.uuid, row.amount, row.receive, row.side, row.parentUuid]), [
+    ["order-one", 10, 11, "incoming", "range"], ["order-two", 20, 22, "incoming", "range"],
+  ]);
+  assert.equal(rows[0]?.completedAt, now - 1000);
+  assert.equal(analyticsOffer({ ...offer, status: "completed" } as never, "me"), undefined,
+    "el nominal del padre nunca representa un intercambio completado");
+  assert.deepEqual(analyticsOffers(offer as never, "outsider"), []);
+  assert.deepEqual(analyticsOffers({ ...offer, User: { uuid: "other" } } as never, "me"), []);
+  const asTaker = analyticsOffers({ ...offer, User: { uuid: "creator" }, Orders: [
+    { ...offer.Orders[0], Taker: { uuid: "me" } }, offer.Orders[1],
+  ] } as never, "me");
+  assert.equal(asTaker.length, 1);
+  assert.equal(asTaker[0]?.side, "outgoing");
+});
+
+test("las hijas de rango sustituyen al padre heredado y sus transacciones agregadas sin duplicar volumen", () => {
+  const rows = [{ uuid: "order", parentUuid: "range", coin: "CLASICA", amount: 10, receive: 11,
+    side: "incoming" as const, completedAt: now }];
+  const result = buildTradingAnalytics({ accountUuid: "me", markets, fiat: [], days: 7, now,
+    offers: [{ ...rows[0]!, uuid: "range", amount: 500, receive: 550 }, ...rows],
+    transactions: [{ uuid: "escrow", amount: 10, createdAt: now, updatedAt: now, recipientUuid: "me",
+      p2p: { uuid: "range", coin: "CLASICA", amount: 500, receive: 550, status: "completed" } }],
+  });
+  assert.equal(result.completed, 1);
+  assert.equal(result.volume, 10);
+  assert.equal(result.markets[0]?.fiatSpent, 11);
+});
+
+test("el histórico lee padres abiertos y reutiliza sus órdenes contables sin pedir detalles remotos", async () => {
+  const path = mkdtempSync(join(tmpdir(), "qva-range-history-"));
+  const store = new Store(path);
+  store.set("analytics_account_uuid", "me");
+  store.saveRemoteResource("analytics_offers_history:me", { page: 99, complete: false });
+  store.saveAnalyticsOffers("me", [{ uuid: "range", coin: "CLASICA", amount: 500, receive: 550,
+    side: "incoming", completedAt: now }]);
+  const parent = { uuid: "range", offer_kind: "flexible", type: "sell", coin: "CLASICA", amount: 500,
+    receive: 550, status: "open", User: { uuid: "me" } };
+  store.saveRemoteResource("fiat-flexible:range", { ...parent, Orders: [
+    { uuid: "child", amount: 10, receive: 11, status: "completed", released_at: new Date(now).toISOString(), Taker: { uuid: "other" } },
+  ] });
+  let calls = 0;
+  const qva = { listOffersPage: async (params: { status?: string; page?: number }) => {
+    calls++;
+    assert.equal(params.status, undefined, "un padre abierto también puede contener intercambios completados");
+    assert.equal(params.page, 1, "la consulta nueva no hereda el cursor del filtro antiguo");
+    return { offers: [parent], total: 1 };
+  } };
+  const readModel = new DashboardReadModel({} as never, qva as never, {} as never, store, {} as never);
+  await readModel.refreshCompletedOfferHistory();
+  await readModel.refreshCompletedOfferHistory();
+  assert.equal(calls, 2);
+  assert.deepEqual(store.analyticsOffers("me", 0).map(row => [row.uuid, row.parentUuid, row.amount, row.side]),
+    [["child", "range", 10, "outgoing"]]);
   store.close();
 });
