@@ -4,15 +4,34 @@ import type { P2pOffer } from "./types.js";
 export interface AnalyticsOffer {
   uuid: string; coin: string; amount: number; receive: number; side: "incoming" | "outgoing";
   completedAt: number;
+  parentUuid?: string;
 }
 
 export function analyticsOffer(offer: P2pOffer, account: string): AnalyticsOffer | undefined {
   const completedAt = Date.parse(offer.updated_at ?? "");
   const owner = offer.User?.uuid === account, peer = offer.Peer?.uuid === account;
-  if (offer.status !== "completed" || !Number.isFinite(completedAt) || !Number.isFinite(offer.amount) || offer.amount <= 0 ||
+  if (offer.offer_kind === "flexible" || offer.status !== "completed" || !Number.isFinite(completedAt) || !Number.isFinite(offer.amount) || offer.amount <= 0 ||
     !Number.isFinite(offer.receive) || offer.receive <= 0 || owner === peer) return undefined;
   return { uuid: offer.uuid, coin: offer.coin, amount: offer.amount, receive: offer.receive,
     side: (owner && offer.type === "buy") || (peer && offer.type === "sell") ? "incoming" : "outgoing", completedAt };
+}
+
+/** A flexible parent is inventory; each completed child is one trade. */
+export function analyticsOffers(offer: P2pOffer, account: string): AnalyticsOffer[] {
+  if (offer.offer_kind !== "flexible") {
+    const row = analyticsOffer(offer, account);
+    return row ? [row] : [];
+  }
+  const owner = offer.User?.uuid === account || offer.owner_uuid === account;
+  return (offer.Orders ?? []).flatMap(order => {
+    const taker = order.Taker?.uuid === account;
+    const completedAt = Date.parse(order.released_at ?? order.updated_at ?? "");
+    if (order.status !== "completed" || owner === taker || !Number.isFinite(completedAt) ||
+      !Number.isFinite(order.amount) || order.amount <= 0 || !Number.isFinite(order.receive) || order.receive <= 0) return [];
+    return [{ uuid: order.uuid, parentUuid: offer.uuid, coin: offer.coin, amount: order.amount, receive: order.receive,
+      side: (owner && offer.type === "buy") || (taker && offer.type === "sell") ? "incoming" as const : "outgoing" as const,
+      completedAt }];
+  });
 }
 
 export interface AnalyticsTransaction {
@@ -81,9 +100,10 @@ export function buildTradingAnalytics(input: {
     row[direction(tx, input.accountUuid)] += tx.amount;
     row.count++;
   }
+  const rangeParents = new Set((input.offers ?? []).flatMap(offer => offer.parentUuid ? [offer.parentUuid] : []));
   // A completed offer can have several escrow/accounting transactions. Count it once.
   const groups = new Map<string, AnalyticsTransaction[]>();
-  for (const tx of transactions) if (tx.p2p?.status === "completed") {
+  for (const tx of transactions) if (tx.p2p?.status === "completed" && !rangeParents.has(tx.p2p.uuid)) {
     const rows = groups.get(tx.p2p.uuid) ?? [];
     rows.push(tx); groups.set(tx.p2p.uuid, rows);
   }
@@ -96,7 +116,7 @@ export function buildTradingAnalytics(input: {
     const side: Direction = fiat ? fiat.direction === "debit" ? "incoming" : "outgoing" : sides.size === 1 ? [...sides][0]! : "unknown";
     return { uuid: p.uuid, coin: p.coin, qusd: p.amount, fiat: fiat?.amount ?? p.receive, side, at: tx.updatedAt };
   });
-  const offerTrades = (input.offers ?? []).map((offer) => ({ uuid: offer.uuid, coin: offer.coin, qusd: offer.amount,
+  const offerTrades = (input.offers ?? []).filter(offer => !rangeParents.has(offer.uuid)).map((offer) => ({ uuid: offer.uuid, coin: offer.coin, qusd: offer.amount,
     fiat: fiatByUuid.get(offer.uuid)?.amount ?? offer.receive, side: offer.side, at: offer.completedAt }));
   const trades = [...new Map([...transactionTrades, ...offerTrades].map((trade) => [trade.uuid, trade])).values()]
     .sort((a, b) => a.at - b.at || a.uuid.localeCompare(b.uuid));

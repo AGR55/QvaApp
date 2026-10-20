@@ -182,11 +182,13 @@ export class TradingEngine {
     return this.cooperativeOwnerCost(operation.coin, amount);
   }
 
-  private recordOutgoingFiat(operation: { uuid: string; coin: string; receive: number }, source: string, occurredAt?: number): boolean {
+  private recordOutgoingFiat(operation: { uuid: string; orderUuid?: string; coin: string; receive: number }, source: string, occurredAt?: number): boolean {
+    // Older releases keyed flexible payments by parent; retain that evidence.
+    if (operation.orderUuid && this.store.hasFiatMovement(operation.uuid)) return false;
     const cost = this.operationFiatCost(operation);
     if (cost === 0) return false;
     const before = this.fiatBalance(operation.coin);
-    const changed = this.store.recordFiatMovement(operation.uuid, operation.coin, "debit", cost, source, occurredAt);
+    const changed = this.store.recordFiatMovement(operation.orderUuid ?? operation.uuid, operation.coin, "debit", cost, source, occurredAt);
     const raw = this.store.get(`cooperative_owner_fiat:${operation.uuid}`);
     if (changed && this.fiatBalance(operation.coin) < before && raw !== undefined && raw !== "") {
       const key = `cooperative_local_balance:${operation.coin}`;
@@ -737,7 +739,7 @@ export class TradingEngine {
       status: "open",
       orderBy: "best_rate",
       orderType: "desc",
-    });
+    }, { analyticsOnly: true });
     return this.marketSnapshotFromPage(coin, type, page, Date.now());
   }
 
@@ -2131,11 +2133,11 @@ export class TradingEngine {
   }
 
   private recordFlexibleFiat(operation: import("./store.js").Operation, status: string, occurredAt?: number): void {
-    if (!operation.orderUuid) return;
+    if (!operation.orderUuid || this.store.hasFiatMovement(operation.uuid)) return;
     if (operation.offerType === "sell" && ["paid", "completed"].includes(status))
       this.recordOutgoingFiat(operation, "Orden flexible confirmada por QvaPay", occurredAt);
     if (operation.offerType === "buy" && status === "completed")
-      this.store.recordFiatMovement(operation.uuid, operation.coin, "credit", operation.receive, "Orden flexible confirmada por QvaPay", occurredAt);
+      this.store.recordFiatMovement(operation.orderUuid, operation.coin, "credit", operation.receive, "Orden flexible confirmada por QvaPay", occurredAt);
   }
 
   async syncRemoteOperations(): Promise<number> {
@@ -2208,6 +2210,79 @@ export class TradingEngine {
     return true;
   }
 
+  /** Bounded background reads: public listings omit authenticated child orders. */
+  private async hydrateFlexibleFiatOffers(offers: Map<string, P2pOffer>): Promise<void> {
+    const candidates = [...offers.values()].filter(offer => offer.offer_kind === "flexible" && !offer.Orders);
+    const pollAt = (offer: P2pOffer) => Number(this.store.get(`fiat_flexible_polled_at:${offer.uuid}`) ?? 0);
+    candidates.sort((a, b) => pollAt(a) - pollAt(b));
+    let reads = 0;
+    for (const offer of candidates) {
+      const key = `fiat-flexible:${offer.uuid}`;
+      const cached = this.store.loadRemoteResource<P2pOffer>(key);
+      const fresh = cached && cached.data.updated_at === offer.updated_at && Date.now() - cached.updatedAt < 60_000;
+      if (!fresh && reads < 3 && Date.now() - pollAt(offer) >= 30_000) {
+        reads += 1;
+        this.store.set(`fiat_flexible_polled_at:${offer.uuid}`, String(Date.now()));
+        try {
+          const detail = await this.qva.getOffer(offer.uuid, { analyticsOnly: true });
+          if (detail.uuid !== offer.uuid || detail.offer_kind !== "flexible") throw new Error("El detalle no corresponde a la oferta flexible solicitada.");
+          if (!Array.isArray(detail.Orders)) throw new Error("QvaPay no devolvió las órdenes de la oferta flexible.");
+          offers.set(offer.uuid, detail);
+          this.store.saveRemoteResource(key, detail);
+          this.store.set(`fiat_flexible_sync_error:${offer.uuid}`, "");
+          continue;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          if (this.store.get(`fiat_flexible_sync_error:${offer.uuid}`) !== message) {
+            this.store.set(`fiat_flexible_sync_error:${offer.uuid}`, message);
+            this.store.audit("fiat_sync_warning", message, offer.uuid);
+          }
+        }
+      }
+      if (cached) offers.set(offer.uuid, cached.data);
+    }
+  }
+
+  private recordFlexibleOfferFiat(offer: P2pOffer, account: string, startedAt: Map<FiatMarket, number>): number {
+    if (!this.isMarket(offer.coin)) return 0;
+    const started = startedAt.get(offer.coin);
+    if (!started) return 0;
+    const creator = offer.User?.uuid === account || offer.owner_uuid === account;
+    const operation = this.store.getOperation(offer.uuid);
+    let movements = 0;
+    for (const order of offer.Orders ?? []) {
+      const taker = order.Taker?.uuid === account;
+      if (!creator && !taker) continue;
+      const stateKey = `fiat_order_state:${order.uuid}`;
+      const previous = this.store.get(stateKey);
+      if (previous !== order.status) this.store.set(stateKey, order.status);
+      const paysFiat = creator ? offer.type === "buy" : offer.type === "sell";
+      const receivesFiat = creator ? offer.type === "sell" : offer.type === "buy";
+      const financialDate = paysFiat ? order.paid_at ?? order.released_at : order.released_at;
+      // Financial timestamps belong to the child, never its parent. If an older
+      // API omits them, an observed transition is new; unseen history uses its
+      // creation date to protect a later manually declared balance.
+      const occurredAt = financialDate ? Date.parse(financialDate)
+        : order.updated_at ? Date.parse(order.updated_at)
+          : previous && previous !== order.status && !["completed", "cancelled"].includes(previous)
+            ? Date.now() : Date.parse(order.created_at ?? "");
+      if (!Number.isFinite(occurredAt) || occurredAt < started) continue;
+      const fiatAmount = numeric(order.receive);
+      if (!fiatAmount) continue;
+      // A historical local operation may already have a parent-keyed debit.
+      const local = operation?.orderUuid === order.uuid ? operation : undefined;
+      if (local && this.store.hasFiatMovement(local.uuid)) continue;
+      if (paysFiat && ["paid", "completed"].includes(order.status) && this.recordOutgoingFiat(
+        local ?? { uuid: order.uuid, coin: offer.coin, receive: fiatAmount },
+        "Orden flexible reconciliada con QvaPay", occurredAt,
+      )) movements += 1;
+      if (receivesFiat && order.status === "completed" && this.store.recordFiatMovement(
+        order.uuid, offer.coin, "credit", fiatAmount, "Orden flexible reconciliada con QvaPay", occurredAt,
+      )) movements += 1;
+    }
+    return movements;
+  }
+
   async syncFiatFromQva(): Promise<number> {
     const startedAt = new Map<FiatMarket, number>();
     for (const { code: coin } of this.markets()) {
@@ -2242,9 +2317,13 @@ export class TradingEngine {
     const offers = new Map<string, P2pOffer>();
     for (const offer of [...created.offers, ...asPeer.offers])
       offers.set(offer.uuid, offer);
+    await this.hydrateFlexibleFiatOffers(offers);
     let movements = 0;
     for (const offer of offers.values()) {
-      if (offer.offer_kind === "flexible") continue; // Order accounting uses authenticated order state.
+      if (offer.offer_kind === "flexible") {
+        movements += this.recordFlexibleOfferFiat(offer, profile.uuid, startedAt);
+        continue;
+      }
       const updatedAt = offer.updated_at
         ? Date.parse(offer.updated_at)
         : Number.NaN;

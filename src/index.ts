@@ -515,6 +515,9 @@ scheduler.register("recovery_alerts", 10_000, async () => {
 });
 scheduler.register("sms_receipts", 15_000, () => dashboardReadModel.processPendingPaymentReceipts());
 scheduler.register("capital_rebalance", 5_000, () => dashboardReadModel.runBudgetRebalances());
+scheduler.register("market_observation", 15_000, () =>
+  dashboardReadModel.refreshNextMarketObservation(),
+);
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache({ refreshMarkets: false }),
 );

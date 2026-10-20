@@ -19,8 +19,10 @@ export function orderForOperation(offer: P2pOffer, orderUuid?: string): P2pOffer
   }
   const order = offer.Orders?.find(item => item.uuid === orderUuid);
   if (!order) throw new Error("QvaPay no devolvió la orden de esta operación; se conserva el estado local.");
-  return { ...offer, amount: order.amount, receive: order.receive, status: order.status,
-    ...(order.updated_at ? { updated_at: order.updated_at } : {}),
+  const { updated_at: _parentUpdatedAt, ...parent } = offer;
+  const updatedAt = (offer.type === "sell" ? order.paid_at ?? order.released_at : order.released_at) ?? order.updated_at ?? order.created_at;
+  return { ...parent, amount: order.amount, receive: order.receive, status: order.status,
+    ...(updatedAt ? { updated_at: updatedAt } : {}),
   };
 }
 
