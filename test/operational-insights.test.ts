@@ -41,7 +41,7 @@ test('backfill informa su importe sin alterar el saldo declarado',t=>{
 test('migración v28 preserva operaciones antiguas sin inventar sus saldos',t=>{
  const dir=temporary();const first=new Store(dir);first.close();
  const db=new DatabaseSync(join(dir,'qvaapply.sqlite'));
- db.exec('DROP TRIGGER fiat_history_insert; DROP TRIGGER fiat_history_update; DROP TABLE fiat_balance_history; DELETE FROM schema_migrations WHERE version=29;');
+ db.exec('DROP TRIGGER fiat_history_insert; DROP TRIGGER fiat_history_update; DROP TABLE fiat_balance_history; DELETE FROM schema_migrations WHERE version>=29;');
  db.prepare('INSERT INTO settings(key,value) VALUES(?,?)').run('fiat_balance:CLASICA','50');
  db.prepare('INSERT INTO fiat_ledger(operation_uuid,direction,amount,source,created_at,coin) VALUES(?,?,?,?,?,?)').run('legacy','debit',10,'Anterior',Date.now()-1000,'CLASICA');db.close();
  const store=new Store(dir);t.after(()=>store.close());

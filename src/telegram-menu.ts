@@ -18,6 +18,8 @@ export const TELEGRAM_COMMANDS = [
   { command: "diagnostico", description: "Por qué se toman o descartan ofertas" },
   { command: "historial", description: "Movimientos y saldos del fiat" },
   { command: "salud", description: "Estado del feed, medianas y latencia" },
+  { command: "rentabilidad", description: "Resultado documentado y estimado por moneda" },
+  { command: "simular", description: "Comparar precios sin cambiar las cacerías" },
   { command: "help", description: "Ayuda y comandos avanzados" },
 ] as const;
 

@@ -49,6 +49,9 @@ export interface AnalyticsFiatMovement {
   direction: string;
   amount: number;
 }
+export interface AnalyticsFeeEvidence {
+  uuid:string;grossQusd:number;feeQusd:number;evidence:string;version:number;updatedAt:number;
+}
 
 export function analyticsTransaction(tx: QvaTransaction): AnalyticsTransaction | undefined {
   const createdAt = Date.parse(tx.created_at ?? ""), updatedAt = Date.parse(tx.updated_at ?? tx.created_at ?? "");
@@ -81,6 +84,7 @@ export function buildTradingAnalytics(input: {
   offers?: AnalyticsOffer[];
   accountUuid: string;
   fiat: AnalyticsFiatMovement[];
+  fees?: AnalyticsFeeEvidence[];
   markets: { code: string; label: string; currency: string }[];
   days: number;
   now: number;
@@ -108,32 +112,36 @@ export function buildTradingAnalytics(input: {
     rows.push(tx); groups.set(tx.p2p.uuid, rows);
   }
   const fiatByUuid = new Map(input.fiat.map((movement) => [movement.uuid, movement]));
+  const feesByUuid = new Map((input.fees??[]).map(fee=>[fee.uuid,fee]));
   const transactionTrades = [...groups.values()].map((rows) => {
     const tx = rows.reduce((latest, row) => row.updatedAt > latest.updatedAt ? row : latest);
     const p = tx.p2p!;
     const fiat = fiatByUuid.get(p.uuid);
     const sides = new Set(rows.map((row) => direction(row, input.accountUuid)).filter((side) => side !== "unknown"));
     const side: Direction = fiat ? fiat.direction === "debit" ? "incoming" : "outgoing" : sides.size === 1 ? [...sides][0]! : "unknown";
-    return { uuid: p.uuid, coin: p.coin, qusd: p.amount, fiat: fiat?.amount ?? p.receive, side, at: tx.updatedAt };
+    return { uuid: p.uuid, coin: p.coin, qusd: p.amount, nominalFiat:p.receive, fiat: fiat?.amount ?? p.receive, side, at: tx.updatedAt };
   });
   const offerTrades = (input.offers ?? []).filter(offer => !rangeParents.has(offer.uuid)).map((offer) => ({ uuid: offer.uuid, coin: offer.coin, qusd: offer.amount,
-    fiat: fiatByUuid.get(offer.uuid)?.amount ?? offer.receive, side: offer.side, at: offer.completedAt }));
+    nominalFiat:offer.receive,fiat: fiatByUuid.get(offer.uuid)?.amount ?? offer.receive, side: offer.side, at: offer.completedAt }));
   const trades = [...new Map([...transactionTrades, ...offerTrades].map((trade) => [trade.uuid, trade])).values()]
     .sort((a, b) => a.at - b.at || a.uuid.localeCompare(b.uuid));
   const markets = new Map<string, {
     code: string; label: string; currency: string; volume: number; count: number; bought: number; sold: number; unknown: number;
     fiatSpent: number; fiatReceived: number; estimatedProfit: number; matchedQusd: number; unmatchedSoldQusd: number; matchedCost: number;
+    documentedProfit:number;documentedMatchedQusd:number;recordedFeesQusd:number;
   }>();
   const marketRow = (coin: string) => {
     if (!markets.has(coin)) {
       const info = input.markets.find((market) => market.code === coin);
       markets.set(coin, { code: coin, label: info?.label ?? coin, currency: info?.currency ?? coin,
         volume: 0, count: 0, bought: 0, sold: 0, unknown: 0, fiatSpent: 0, fiatReceived: 0,
-        estimatedProfit: 0, matchedQusd: 0, unmatchedSoldQusd: 0, matchedCost: 0 });
+        estimatedProfit: 0, matchedQusd: 0, unmatchedSoldQusd: 0, matchedCost: 0,
+        documentedProfit:0,documentedMatchedQusd:0,recordedFeesQusd:0 });
     }
     return markets.get(coin)!;
   };
-  const inventory = new Map<string, { amount: number; unitCost: number }[]>();
+  const inventory = new Map<string, { amount: number; unitCost: number; documented:boolean }[]>();
+  let partialPurchaseQusd=0;
   const profits = new Map<string, { date: string; currency: string; profit: number }>();
   for (const trade of trades) {
     const row = marketRow(trade.coin), selected = inPeriod(trade.at);
@@ -145,18 +153,34 @@ export function buildTradingAnalytics(input: {
       else if (trade.side === "outgoing") { row.sold += trade.qusd; row.fiatReceived += trade.fiat; daily.get(analyticsDay(trade.at))!.sold += trade.qusd; }
       else row.unknown += trade.qusd;
     }
-    if (trade.side === "incoming") lots.push({ amount: trade.qusd, unitCost: trade.fiat / trade.qusd });
+    const fee=feesByUuid.get(trade.uuid);
+    const validFee=fee&&fee.grossQusd===trade.qusd&&Number.isFinite(fee.feeQusd)&&fee.feeQusd>=0&&fee.feeQusd<trade.qusd;
+    const ledger=fiatByUuid.get(trade.uuid);
+    if (trade.side === "incoming") {
+      // A cooperative contribution does not establish the cost or ownership of
+      // the entire credited trade. Do not turn its partial fiat into cheap lots.
+      if(ledger?.direction==='debit'&&ledger.amount+1e-8<trade.nominalFiat){
+        if(selected)partialPurchaseQusd+=trade.qusd;
+        continue;
+      }
+      const net=trade.qusd-(validFee?fee.feeQusd:0);
+      lots.push({amount:net,unitCost:trade.fiat/net,documented:Boolean(validFee&&ledger?.direction==='debit'&&ledger.amount>=trade.nominalFiat)});
+      if(selected&&validFee)row.recordedFeesQusd+=fee.feeQusd;
+    }
     if (trade.side !== "outgoing") continue;
-    let remaining = trade.qusd, cost = 0, matched = 0;
+    let remaining = trade.qusd, cost = 0, matched = 0,documentedCost=0,documentedMatched=0;
     while (remaining > 1e-8 && lots.length) {
       const lot = lots[0]!;
       const used = Math.min(remaining, lot.amount);
       cost += used * lot.unitCost; matched += used; remaining -= used; lot.amount -= used;
+      if(lot.documented&&ledger?.direction==='credit'){documentedCost+=used*lot.unitCost;documentedMatched+=used;}
       if (lot.amount < 1e-8) lots.shift();
     }
     if (selected) {
       const profit = matched * trade.fiat / trade.qusd - cost;
       row.matchedQusd += matched; row.unmatchedSoldQusd += remaining; row.matchedCost += cost; row.estimatedProfit += profit;
+      row.documentedMatchedQusd+=documentedMatched;
+      row.documentedProfit+=documentedMatched*trade.fiat/trade.qusd-documentedCost;
       const date = analyticsDay(trade.at), key = `${date}:${row.currency}`;
       const point = profits.get(key) ?? { date, currency: row.currency, profit: 0 };
       point.profit += profit; profits.set(key, point);
@@ -166,7 +190,8 @@ export function buildTradingAnalytics(input: {
   const totals = [...daily.values()].reduce((sum, row) => ({ count: sum.count + row.count, incoming: sum.incoming + row.incoming, outgoing: sum.outgoing + row.outgoing, unknown: sum.unknown + row.unknown }), { count: 0, incoming: 0, outgoing: 0, unknown: 0 });
   const currencies = [...new Set(selectedMarkets.map((row) => row.currency))].map((currency) => {
     const rows = selectedMarkets.filter((row) => row.currency === currency);
-    return { currency, profit: rows.reduce((sum, row) => sum + row.estimatedProfit, 0), matchedQusd: rows.reduce((sum, row) => sum + row.matchedQusd, 0) };
+    return { currency, profit: rows.reduce((sum, row) => sum + row.estimatedProfit, 0), matchedQusd: rows.reduce((sum, row) => sum + row.matchedQusd, 0),
+      documentedProfit:rows.reduce((sum,row)=>sum+row.documentedProfit,0),documentedMatchedQusd:rows.reduce((sum,row)=>sum+row.documentedMatchedQusd,0) };
   });
   return { days: input.days, start, end, generatedAt: input.now, daily: [...daily.values()], markets: selectedMarkets,
     profits: [...profits.values()], currencies, totals,
@@ -174,6 +199,6 @@ export function buildTradingAnalytics(input: {
     completed: selectedMarkets.reduce((sum, row) => sum + row.count, 0),
     coverage: { transactions: transactions.length, oldestAt: transactions.length ? Math.min(...transactions.map((tx) => tx.createdAt)) : null,
       unknownDirection: transactions.filter((tx) => inPeriod(tx.createdAt) && direction(tx, input.accountUuid) === "unknown").length,
-      unmatchedSoldQusd: selectedMarkets.reduce((sum, row) => sum + row.unmatchedSoldQusd, 0) },
+      unmatchedSoldQusd: selectedMarkets.reduce((sum, row) => sum + row.unmatchedSoldQusd, 0),partialPurchaseQusd },
   };
 }

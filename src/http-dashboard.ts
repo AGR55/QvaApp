@@ -14,6 +14,7 @@ import type { FiatMarket } from "./types.js";
 import type { StoredPushSubscription, WebPushService } from "./web-push.js";
 import type { MarketAccountService } from "./market-accounts.js";
 import type { MarketDataSource } from "./market-source.js";
+import type { PriceSimulationInput } from "./price-simulation.js";
 import { MarketFeedRequestError, type MarketSourceCoordinator, type MarketSourceMode } from "./market-feed.js";
 import { PaymentSmsError, validPaymentReceipt } from "./payment-sms.js";
 import { RecoveryConflictError, RecoveryInputError } from "./self-service-recovery.js";
@@ -679,6 +680,20 @@ export function buildDashboard(
   app.get<{ Querystring: { days?: number } }>("/api/trading-analytics", {
     schema: { querystring: { type: "object", additionalProperties: false, properties: { days: { type: "integer", enum: [7, 30, 90], default: 30 } } } },
   }, async (request) => ({ data: readModel.tradingAnalytics(request.query.days ?? 30), source: "sqlite" }));
+  app.get<{Querystring:{page?:number}}>("/api/analytics/fees",{
+    schema:{querystring:{type:'object',additionalProperties:false,properties:{page:{type:'integer',minimum:1,maximum:1000}}}},
+  },async request=>({data:readModel.analyticsFeePurchases(request.query.page??1)}));
+  app.post<{Body:{uuid:string;feeQusd:number;evidence:string;expectedVersion:number}}>("/api/analytics/fees",{
+    schema:{body:{type:'object',additionalProperties:false,required:['uuid','feeQusd','evidence','expectedVersion'],properties:{
+      uuid:{type:'string',minLength:1,maxLength:100},feeQusd:{type:'number',minimum:0,maximum:1e9},evidence:{type:'string',minLength:10,maxLength:500},expectedVersion:{type:'integer',minimum:0},
+    }}},
+  },async request=>({data:await clientAction(()=>readModel.recordAnalyticsFee(request.body.uuid,request.body.feeQusd,request.body.evidence,request.body.expectedVersion))}));
+  app.post<{Body:PriceSimulationInput}>("/api/hunting/simulate",{
+    schema:{body:{type:'object',additionalProperties:false,required:['coin','buyMaxRate','sellMinRate','maxQusd','hours'],properties:{
+      coin:{type:'string',minLength:1,maxLength:50},hours:{type:'integer',enum:[1,24,168]},
+      buyMaxRate:{type:'number',exclusiveMinimum:0,maximum:1e9},sellMinRate:{type:'number',exclusiveMinimum:0,maximum:1e9},maxQusd:{type:'number',exclusiveMinimum:0,maximum:1e9},
+    }}},
+  },async request=>({data:await clientAction(()=>readModel.simulatePrices(request.body))}));
   app.post<{ Body: { refresh?: boolean } }>("/api/offers/rebalance/preview", {
     schema: {
       body: {
@@ -1135,7 +1150,7 @@ function serviceWorkerScript(): string {
     let payload = {};
     try { payload = event.data ? event.data.json() : {}; } catch {}
     const alert = payload.alert || {};
-    const title = payload.type === "system-health" ? payload.title || "Salud de QvaApply" : payload.type === "blocked-offer"
+    const title = payload.type === "system-health" || payload.type === "informational-summary" ? payload.title || "Actividad de QvaApply" : payload.type === "blocked-offer"
       ? "Oferta requiere revisión"
       : payload.type === "operation-applied"
         ? "Aplicación confirmada"
@@ -1144,7 +1159,7 @@ function serviceWorkerScript(): string {
           : payload.type === "rebalance-attention"
             ? "Reajuste requiere atención"
         : "Actividad de QvaApply";
-    const body = payload.type === "system-health" ? payload.body || "Consulta el estado del bot." : [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
+    const body = payload.type === "system-health" || payload.type === "informational-summary" ? payload.body || "Consulta el estado del bot." : [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
     const url = payload.url || "/?view=auditoria";
     event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       const visible = clients.find((client) => client.visibilityState === "visible");
@@ -1235,6 +1250,8 @@ function openApiDocument() {
       "/api/live/own-offers": { get: { summary: "Actualizar ofertas propias" } },
       "/api/live/transactions": { get: { summary: "Actualizar transacciones" } },
       "/api/trading-analytics": { get: { summary: "Consultar actividad, volumen y beneficio estimado del histórico local" } },
+      "/api/analytics/fees": { get:{summary:"Compras completadas y evidencia de comisión"},post:{summary:"Registrar comisión analítica con evidencia y control de versión"} },
+      "/api/hunting/simulate": { post:{summary:"Comparar precios localmente sin modificar cacerías"} },
       "/api/live/operations": { get: { summary: "Conciliar operaciones activas con QvaPay" } },
       "/api/operations/chats/unread": { get: { summary: "Contadores locales de chat por operación" } },
       "/api/operations/{uuid}/chat": {

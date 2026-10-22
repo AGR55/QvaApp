@@ -23,3 +23,11 @@ Consultar QvaPay para cada informe añadiría carga remota. Inferir comisiones h
 La skill auxiliar writing-plans no está instalada; este documento contiene el plan para el diseño ya aprobado.
 
 Fuente del contrato de importes: https://www.qvapay.com/docs/p2p/received (importe bruto, neto y comisión). La implementación no supone que una transacción agregada sea evidencia inequívoca del neto recibido.
+
+## Verificación y alcance entregado
+
+- FIFO mantiene resultados documentados y estimados por moneda; solo el coste registrado, los netos respaldados y el cobro registrado habilitan la parte documentada. Los aportes parciales no crean inventario ficticio barato. La evidencia manual tiene control de versión y auditoría; no modifica saldos ni operaciones.
+- Reajustes completados se agrupan por ventanas de 30 segundos en la cola durable. Se conservan las referencias y no se reenvían avisos ya entregados. Las operaciones mantienen avisos individuales y disponen de entrega independiente de resúmenes bloqueados. Telegram conserva los avisos informativos que ya estaban silenciados.
+- Cola visual acotada a 32 avisos y 512 identidades; una operación urgente puede sustituir en pantalla a un aviso informativo, que conserva su lugar o permanece pendiente en el servidor.
+- Simulación en Cacería y `/simular MONEDA MAX_COMPRA MIN_VENTA MAX_QUSD [1|24|168]`; informe de rentabilidad en Gráficas y `/rentabilidad [7|30|90]`. Registros locales, máximo 5.000 observaciones y lotes de 250 con cesión del turno; cobertura limitada visible.
+- 539 pruebas aprobadas, verificación de tipos, código, secretos y construcción. Prueba visual y WCAG en escritorio/móvil aprobadas, incluyendo registro de evidencia y comparación de precios. Sin nuevas dependencias ni peticiones a QvaPay.

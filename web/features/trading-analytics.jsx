@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
 import { analyticsBars } from "../lib/analytics-bars.js";
+import { Profitability } from "./practical-tools.jsx";
 
 const COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 const FLOW_CONFIG = {
@@ -79,6 +80,7 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
       <Metric label="Salidas de la cuenta" value={report ? `${money(report.totals.outgoing)} QUSD` : null} detail="Transacciones enviadas" icon={ArrowUpRight} />
       <Metric label="Capital total estimado" value={report ? latestCapital ? `${money(latestCapital.totalQusd)} QUSD` : "Esperando cotizaciones" : null} detail={latestCapital ? `${money(latestCapital.qusdFree)} libre · ${money(latestCapital.qusdCommitted)} comprometido · ${money(latestCapital.fiatQusd)} en fiat${latestCapital.liabilityQusd ? ` · −${money(latestCapital.liabilityQusd)} por repartir` : ""}` : report?.portfolioStatus?.reason ?? "QUSD y fiat convertidos"} icon={Activity} />
     </div>
+    <Profitability report={report} markets={markets} onChanged={()=>setRetry(value=>value+1)} />
     <AnalyticsCard title="Actividad de transacciones" description="Entradas y salidas en QUSD; incluye movimientos fuera del P2P." wide
       action={<Tabs value={activityMetric} onChange={setActivityMetric} items={[{ value: "amount", label: "Importe" }, { value: "count", label: "Cantidad" }]} />}
       footer={<><span>{report?.totals.count ?? 0} transacciones en el periodo{unknown > 0 ? ` · ${money(unknown)} QUSD sin dirección identificada` : ""}</span><Field label="Barras visibles" htmlFor="analytics-density"><Select id="analytics-density" value={density} onValueChange={setDensity} options={[10, 20, 40, 90].map((value) => ({ value: String(value), label: `Hasta ${value} barras` }))} /></Field></>}>

@@ -119,6 +119,11 @@ try {
   await waitFor(() => execute("return document.body.innerText.includes('120 observaciones')"));
   await assertPageQuality("Diagnóstico y salud");
   await screenshot("/tmp/qvaapply-operational-insights-desktop.png");
+  const simulate = await find("xpath", "//button[normalize-space(.)='Comparar precios']");
+  await command("POST", `/session/${sessionId}/element/${simulate}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('40 ofertas distintas del mercado')"));
+  await assertPageQuality("Simulación de precios");
+  await screenshot("/tmp/qvaapply-price-simulation-desktop.png");
   await screenshot("/tmp/qvaapply-hunting-desktop.png");
   await execute(
     "window.scrollTo(0, document.documentElement.scrollHeight); return true",
@@ -350,6 +355,21 @@ try {
     );
   await screenshot("/tmp/qvaapply-charts-desktop.png");
   const chartsDesktop = await assertPageQuality("Gráficas");
+  const feeDisclosure=await find('css selector','summary');
+  await execute("document.querySelector('summary')?.scrollIntoView({block:'center'}); return true");
+  await command('POST',`/session/${sessionId}/element/${feeDisclosure}/click`,{});
+  await waitFor(()=>execute("return document.body.innerText.includes('preview-fee-purchase')"));
+  const registerFee=await find('xpath',"//button[normalize-space(.)='Registrar comisión']");
+  await command('POST',`/session/${sessionId}/element/${registerFee}/click`,{});
+  const feeInput=await find('css selector','#fee-qusd');
+  await command('POST',`/session/${sessionId}/element/${feeInput}/value`,{text:'0.025'});
+  const feeEvidence=await find('css selector','#fee-evidence');
+  await command('POST',`/session/${sessionId}/element/${feeEvidence}/value`,{text:'Comprobante de prueba: bruto 10, neto 9.975 QUSD.'});
+  await assertPageQuality('Registro de evidencia de comisión');
+  await screenshot('/tmp/qvaapply-profitability-evidence-desktop.png');
+  const saveEvidence=await find('xpath',"//button[normalize-space(.)='Guardar evidencia']");
+  await command('POST',`/session/${sessionId}/element/${saveEvidence}/click`,{});
+  await waitFor(()=>execute("return document.body.innerText.includes('Evidencia guardada.')"));
   await execute("window.scrollTo(0, 0); return true");
   await screenshot("/tmp/qvaapply-analytics-desktop.png");
   await execute("document.documentElement.dataset.theme = 'dark'; return true");

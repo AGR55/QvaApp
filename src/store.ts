@@ -12,7 +12,7 @@ import type {
   RestorableOwnOffer,
 } from "./core/liquidity-plan.js";
 import type { TradingConfig } from "./market-config.js";
-import type { AnalyticsTransaction, AnalyticsFiatMovement, AnalyticsOffer } from "./trading-analytics.js";
+import type { AnalyticsTransaction, AnalyticsFiatMovement, AnalyticsOffer, AnalyticsFeeEvidence } from "./trading-analytics.js";
 import type {
   FiatMarket,
   OperationState,
@@ -20,7 +20,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 29;
+const LATEST_SCHEMA_VERSION = 30;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -200,6 +200,7 @@ export type NotificationKind =
   | "recovery-blocked"
   | "rebalance-completed"
   | "system-health"
+  | "informational-summary"
   | "rebalance-attention";
 
 export interface DurableNotification {
@@ -943,6 +944,16 @@ export class Store {
                 CAST(NEW.value AS REAL)-CAST(OLD.value AS REAL),'Saldo declarado o actualizado','declaration',unixepoch('subsec')*1000);
           END;`);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (29, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 30) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS analytics_fee_evidence (
+          account_uuid TEXT NOT NULL,offer_uuid TEXT NOT NULL,gross_qusd REAL NOT NULL,fee_qusd REAL NOT NULL,
+          evidence TEXT NOT NULL,version INTEGER NOT NULL,updated_at INTEGER NOT NULL,PRIMARY KEY(account_uuid,offer_uuid));
+          CREATE INDEX IF NOT EXISTS idx_notification_information ON notification_events(created_at)
+            WHERE kind='rebalance-completed' AND push_delivered_at IS NULL;
+          CREATE INDEX IF NOT EXISTS idx_feed_simulation ON market_feed_events(received_at DESC,event_key DESC)
+            WHERE event IN ('p2p.created','p2p.reopened','p2p.range_created','p2p.range_updated');`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (30, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -2194,6 +2205,52 @@ export class Store {
       .flatMap((row) => { try { return [JSON.parse(row.payload_json) as AnalyticsTransaction]; } catch { return []; } });
   }
 
+  analyticsFees(account: string): AnalyticsFeeEvidence[] {
+    return (this.db.prepare('SELECT * FROM analytics_fee_evidence WHERE account_uuid=? ORDER BY updated_at DESC LIMIT 5000').all(account) as Record<string,unknown>[])
+      .map(row=>({uuid:String(row.offer_uuid),grossQusd:Number(row.gross_qusd),feeQusd:Number(row.fee_qusd),evidence:String(row.evidence),version:Number(row.version),updatedAt:Number(row.updated_at)}));
+  }
+
+  analyticsFeePurchases(account: string, page=1) {
+    const rows=this.db.prepare(`SELECT a.payload_json,f.fee_qusd,f.gross_qusd,f.evidence,f.version FROM analytics_offers a
+      LEFT JOIN analytics_fee_evidence f ON f.account_uuid=a.account_uuid AND f.offer_uuid=a.uuid
+      WHERE a.account_uuid=? AND json_extract(a.payload_json,'$.side')='incoming'
+      ORDER BY a.completed_at DESC,a.uuid DESC LIMIT 21 OFFSET ?`).all(account,(Math.max(1,Math.min(1000,page))-1)*20) as Record<string,unknown>[];
+    return {page,hasMore:rows.length>20,items:rows.slice(0,20).flatMap(row=>{
+      try{const offer=JSON.parse(String(row.payload_json)) as AnalyticsOffer;
+        return [{uuid:offer.uuid,coin:offer.coin,amount:offer.amount,receive:offer.receive,completedAt:offer.completedAt,
+          feeQusd:row.fee_qusd===null?null:Number(row.fee_qusd),evidence:row.evidence===null?'':String(row.evidence),version:Number(row.version??0),stale:row.gross_qusd!==null&&Number(row.gross_qusd)!==offer.amount}];
+      }catch{return [];}
+    })};
+  }
+
+  recordAnalyticsFee(account: string,uuid: string,feeQusd: number,evidence: string,expectedVersion: number) {
+    return this.transaction(()=>{
+      const row=this.db.prepare('SELECT payload_json FROM analytics_offers WHERE account_uuid=? AND uuid=?').get(account,uuid) as {payload_json:string}|undefined;
+      if(!row)throw new Error('La compra completada no está en el historial de esta cuenta.');
+      const offer=JSON.parse(row.payload_json) as AnalyticsOffer;
+      if(offer.side!=='incoming'||!Number.isFinite(feeQusd)||feeQusd<0||feeQusd>=offer.amount)throw new Error('La comisión debe ser menor que el importe de una compra completada.');
+      if(evidence.trim().length<10||evidence.length>500)throw new Error('Añade evidencia de entre 10 y 500 caracteres.');
+      const prior=this.db.prepare('SELECT version FROM analytics_fee_evidence WHERE account_uuid=? AND offer_uuid=?').get(account,uuid) as {version:number}|undefined;
+      if((prior?.version??0)!==expectedVersion)throw new Error('El registro cambió; actualiza la lista antes de guardar.');
+      this.db.prepare(`INSERT INTO analytics_fee_evidence(account_uuid,offer_uuid,gross_qusd,fee_qusd,evidence,version,updated_at)
+        VALUES(?,?,?,?,?,?,?) ON CONFLICT(account_uuid,offer_uuid) DO UPDATE SET gross_qusd=excluded.gross_qusd,
+          fee_qusd=excluded.fee_qusd,evidence=excluded.evidence,version=excluded.version,updated_at=excluded.updated_at`)
+        .run(account,uuid,offer.amount,feeQusd,evidence.trim(),expectedVersion+1,Date.now());
+      this.audit('analytics_fee_evidence',JSON.stringify({account,uuid,grossQusd:offer.amount,feeQusd,evidence:evidence.trim(),version:expectedVersion+1}),uuid);
+      return {version:expectedVersion+1};
+    });
+  }
+
+  simulationObservations(since: number, cursor?:{at:number;key:string},limit=250) {
+    const where=cursor?' AND (received_at<? OR (received_at=? AND event_key<?))':'';
+    const parameters: Array<string|number>=[since];if(cursor)parameters.push(cursor.at,cursor.at,cursor.key);
+    parameters.push(Math.min(250,limit));
+    return (this.db.prepare(`SELECT event_key,received_at,payload_json FROM market_feed_events WHERE received_at>=?
+      AND event IN ('p2p.created','p2p.reopened','p2p.range_created','p2p.range_updated')${where}
+      ORDER BY received_at DESC,event_key DESC LIMIT ?`).all(...parameters) as Record<string,unknown>[])
+      .map(row=>({key:String(row.event_key),at:Number(row.received_at),payload:String(row.payload_json)}));
+  }
+
   removeAnalyticsOffers(accountUuid: string, uuids: string[]): void {
     if (!uuids.length) return;
     const remove = this.db.prepare("DELETE FROM analytics_offers WHERE account_uuid=? AND uuid=?");
@@ -2832,10 +2889,11 @@ export class Store {
     createdAt?: number;
   }): DurableNotification {
     const now = input.createdAt ?? Date.now();
+    const eligibleAt=input.kind==='rebalance-completed'?(Math.floor(now/30_000)+1)*30_000:0;
     this.db.prepare(
       `INSERT INTO notification_events(
-        id, kind, message, operation_uuid, payload_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, kind, message, operation_uuid, payload_json, created_at, updated_at,telegram_next_attempt_at,push_next_attempt_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?,?,?)
       ON CONFLICT(id) DO NOTHING`,
     ).run(
       input.id,
@@ -2845,6 +2903,8 @@ export class Store {
       JSON.stringify(input.payload),
       now,
       now,
+      eligibleAt,
+      eligibleAt,
     );
     const row = this.db.prepare(
       "SELECT * FROM notification_events WHERE id = ?",
@@ -2859,12 +2919,35 @@ export class Store {
     return (
       this.db.prepare(
         `SELECT * FROM notification_events
-         WHERE (kind NOT IN ('recovery-blocked', 'reconciliation-required') OR acknowledged_at IS NULL)
+         WHERE kind<>'rebalance-completed' AND (kind NOT IN ('recovery-blocked', 'reconciliation-required') OR acknowledged_at IS NULL)
            AND ((telegram_delivered_at IS NULL AND telegram_next_attempt_at <= ?)
              OR (push_delivered_at IS NULL AND push_next_attempt_at <= ?))
-         ORDER BY CASE WHEN kind IN ('offer-taken','offer-rejected') THEN 1 ELSE 0 END, created_at ASC LIMIT ?`,
+         ORDER BY CASE WHEN kind IN ('operation-applied','own-offer-applied','recovery-blocked','reconciliation-required','rebalance-attention') THEN 0
+           WHEN kind IN ('offer-taken','offer-rejected','rebalance-completed','informational-summary') THEN 2 ELSE 1 END, created_at ASC LIMIT ?`,
       ).all(now, now, limit) as Record<string, unknown>[]
     ).map(notificationFromRow);
+  }
+
+  prepareNotificationSummaries(now: number): void {
+    this.transaction(()=>{
+      const cutoff=Math.floor(now/30_000)*30_000;
+      const rows=this.db.prepare(`SELECT * FROM notification_events WHERE kind='rebalance-completed'
+        AND push_delivered_at IS NULL AND acknowledged_at IS NULL AND created_at<?
+        ORDER BY created_at ASC,id ASC LIMIT 100`).all(cutoff) as Record<string,unknown>[];
+      const groups=new Map<number,Record<string,unknown>[]>();
+      for(const row of rows){const bucket=Math.floor(Number(row.created_at)/30_000);const group=groups.get(bucket)??[];group.push(row);groups.set(bucket,group);}
+      for(const [bucket,group] of groups){
+        const ids=group.map(row=>String(row.id));
+        const id=`information:${bucket}:${createHash('sha256').update(JSON.stringify(ids)).digest('hex').slice(0,16)}`;
+        const message=`ℹ️ Reajustes completados\n\n${group.length} aviso(s) informativo(s):\n${group.slice(0,5).map(row=>`• ${String(row.message).slice(0,180)}\n  Ref: ${String(row.operation_uuid??row.id)}`).join('\n')}\n${group.length>5?'\nEl resto de referencias se conserva en la auditoría.':''}`;
+        this.enqueueNotification({id,kind:'informational-summary',message,payload:{kind:'informational-summary',sourceIds:ids},createdAt:now});
+        for(const row of group){
+          this.db.prepare(`UPDATE notification_events SET acknowledged_at=?,telegram_delivered_at=coalesce(telegram_delivered_at,?),
+            push_delivered_at=coalesce(push_delivered_at,?),updated_at=? WHERE id=?`).run(now,now,now,now,String(row.id));
+        }
+        this.audit('notification_summary',JSON.stringify({id,sourceIds:ids}));
+      }
+    });
   }
 
   markNotificationDelivered(
@@ -2900,8 +2983,9 @@ export class Store {
       this.db.prepare(
         `SELECT * FROM notification_events
          WHERE acknowledged_at IS NULL
-           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'recovery-blocked', 'rebalance-completed', 'rebalance-attention', 'system-health')
-         ORDER BY created_at DESC LIMIT ?`,
+           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'recovery-blocked', 'rebalance-completed', 'rebalance-attention', 'system-health','informational-summary')
+           AND (kind<>'rebalance-completed' OR push_delivered_at IS NOT NULL)
+         ORDER BY CASE WHEN kind IN ('operation-applied','own-offer-applied','recovery-blocked','reconciliation-required','rebalance-attention') THEN 0 WHEN kind='informational-summary' THEN 2 ELSE 1 END, created_at DESC LIMIT ?`,
       ).all(limit) as Record<string, unknown>[]
     ).map(notificationFromRow);
   }

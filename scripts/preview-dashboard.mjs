@@ -5,6 +5,7 @@ const port = Number(process.env.QVAAPPLY_PREVIEW_PORT || 3100);
 if (!Number.isInteger(port) || port < 1024 || port > 65535)
   throw new Error("QVAAPPLY_PREVIEW_PORT debe ser un puerto válido.");
 const now = Date.now();
+let previewFeeEvidence;
 const risk = {
   maxQusdPerOperation: 25,
   maxConcurrentQusdExposure: 50,
@@ -171,6 +172,12 @@ const model = {
     sync: { accountKnown: true, complete: true, limited: false, pages: 18, updatedAt: now },
   }),
   recoveryItems: () => ({ items: previewRecovery, blocked: previewRecovery.length > 0 }),
+  simulatePrices: async input => ({...input,generatedAt:now,uniqueOffers:40,counts:{own:3,stale:2,rangeOrAmount:4},baseline:{buy:2,sell:3},proposed:{buy:4,sell:5},assumptions:{outgoingTransferFee:.08},note:'Comparación local de precios; no garantiza capturas ni modifica tus límites.',truncated:false}),
+  analyticsFeePurchases: () => ({page:1,hasMore:false,items:[{uuid:'preview-fee-purchase',coin:'CLASICA',amount:10,receive:10.5,completedAt:now-3600000,feeQusd:previewFeeEvidence?.feeQusd??null,evidence:previewFeeEvidence?.evidence??'',version:previewFeeEvidence?.version??0,stale:false}]}),
+  recordAnalyticsFee: (uuid,feeQusd,evidence,expectedVersion) => {
+    if(expectedVersion!==(previewFeeEvidence?.version??0))throw new Error('El registro cambió.');
+    previewFeeEvidence={uuid,feeQusd,evidence,version:expectedVersion+1};return {version:expectedVersion+1};
+  },
   operationalHealth: () => ({checkedAt:now,checks:[{key:"feed",label:"Datos del mercado",status:"ok",detail:"Se reciben datos del mercado."},{key:"median:CLASICA",label:"Medianas · Tarjeta Clásica",status:"warning",detail:"La última observación tiene más de dos horas."},{key:"latency",label:"Respuesta de QvaPay",status:"ok",detail:"Última solicitud: 1235 ms. No es un promedio."}]}),
   opportunityDiagnostics: async (hours,coin) => ({hours,coin,generatedAt:now,since:now-hours*3600000,coverageSince:now-hours*3600000,truncated:false,observations:120,uniqueOffers:80,acceptedObservations:3,reasons:[{code:"price",label:"Precio o comisión fuera del objetivo",count:90},{code:"capital",label:"Saldo o límites insuficientes",count:27}],applications:{sent:4,confirmed:3,rejected:1,uncertain:0,notSent:0,unknownMarket:0},note:"Se cuentan observaciones y solicitudes registradas; no demuestra ofertas perdidas frente a otros bots."}),
   fiatHistory: (coin,page) => ({page,hasMore:page===1,items:[{id:"preview-movement",coin,before:50,after:39.92,amount:-10.08,uuid:"562353df-4dd5-4b26-878c-eb03dfcce770",source:"Pago confirmado con comisión",kind:"movement",createdAt:now},{id:"preview-backfill",coin,before:50,after:50,amount:-300,uuid:"old-order",source:"Operación histórica",kind:"historical",createdAt:now-3600000},{id:"preview-opening",coin,before:null,after:50,amount:0,uuid:null,source:"Saldo al activar el historial",kind:"opening",createdAt:now-7200000}]}),

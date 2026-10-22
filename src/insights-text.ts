@@ -25,3 +25,19 @@ export function fiatHistoryText(history:ReturnType<Store['fiatBalanceHistory']>,
     history.items.length?'':'Sin movimientos registrados.',history.hasMore&&history.page<1000?`Siguiente: <code>/historial ${escape(history.items[0]?.coin??'MONEDA')} ${history.page+1}</code>`:'',
     history.items.length>5?'🌐 Consulta la web para ver todos los movimientos de esta página.':''].filter(Boolean).join('\n\n');
 }
+
+export function profitabilityText(report:ReturnType<import('./dashboard.js').DashboardReadModel['tradingAnalytics']>){
+ return ['<b>📊 Rentabilidad de operaciones cerradas</b>',`📅 Últimos ${report.days} días`,
+  ...report.currencies.map(row=>`<b>🪙 ${escape(row.currency)}</b>\n• Resultado documentado: ${row.documentedMatchedQusd>0?amount(row.documentedProfit):'sin evidencia suficiente'}\n• QUSD vendidos con coste y cobro documentados: ${amount(row.documentedMatchedQusd)}\n• Parte estimada: ${amount(row.profit-row.documentedProfit)}`),
+  report.currencies.length?'':'Sin operaciones cerradas en el período.',
+  report.coverage.unmatchedSoldQusd?`ℹ️ ${amount(report.coverage.unmatchedSoldQusd)} QUSD vendidos sin coste identificable; no se cuentan como beneficio.`:'',
+  '🧾 FIFO por mercado. Las comisiones documentadas y los movimientos fiat respaldan la parte documentada; el resto es estimación. El historial puede estar incompleto.',
+  '🌐 Registra evidencia de comisiones en Gráficas. Los saldos y las cacerías no se modifican.'].filter(Boolean).join('\n\n');
+}
+export function simulationText(report:Awaited<ReturnType<typeof import('./price-simulation.js').simulatePrices>>,label:string){
+ return ['<b>🧪 Simulación de precios</b>',`🪙 ${escape(label)} · ${report.hours} h\n💰 Máximo por oferta: ${amount(report.maxQusd)} QUSD`,
+  `<b>🎯 Ofertas que cumplen el precio</b>\n• Compras: ${report.baseline.buy} → ${report.proposed.buy}\n• Ventas: ${report.baseline.sell} → ${report.proposed.sell}\nActuales → propuestos`,
+  `👀 ${report.uniqueOffers} ofertas distintas en la muestra.\n💸 Comisión fiat actual por salida: ${amount(report.assumptions.outgoingTransferFee)}`,
+  report.truncated?`⚠️ Cobertura limitada a 5.000 observaciones desde ${date(report.coverageSince)}.`:'',
+  `ℹ️ ${report.note}`].filter(Boolean).join('\n\n');
+}

@@ -103,6 +103,9 @@ export class WebPushService {
   async notifyHealth(id: string, message: string): Promise<void> {
     await this.notify({version:id,id,type:"system-health",title:message.split("\n")[0],body:message,url:"/?view=caceria"});
   }
+  async notifyInformation(id:string,message:string):Promise<void>{
+    await this.notify({version:id,id,type:'informational-summary',title:'Resumen informativo',body:message,url:'/?view=ofertas'});
+  }
 
   private async notify(payloadValue: Record<string, unknown> & { version: string }): Promise<void> {
     const payload = JSON.stringify(payloadValue);

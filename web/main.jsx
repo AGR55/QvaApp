@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import { createRoot } from "react-dom/client";
+import { queueNotice, noticePriority } from "./lib/notification-queue.js";
 import {
   BarChart3,
   Crosshair,
@@ -151,14 +152,22 @@ function App() {
     if (!incoming) return;
     const id = incoming.id || incoming.version;
     if (id && seenNoticeIdsRef.current.has(id)) return;
-    if (id) seenNoticeIdsRef.current.add(id);
-    if (noticeRef.current) {
-      noticeQueueRef.current.push(incoming);
-      return;
+    if(noticeRef.current&&noticePriority(incoming)===0&&noticePriority(noticeRef.current)>0){
+      const previous=noticeRef.current,result=queueNotice(noticeQueueRef.current,previous);
+      if(!result.queued)seenNoticeIdsRef.current.delete(previous.id||previous.version);
+      if(result.evicted)seenNoticeIdsRef.current.delete(result.evicted.id||result.evicted.version);
+      noticeRef.current=incoming;setNotice(incoming);playNotificationTone();
+    } else if (noticeRef.current) {
+      const result=queueNotice(noticeQueueRef.current,incoming);
+      if(!result.queued)return;
+      if(result.evicted)seenNoticeIdsRef.current.delete(result.evicted.id||result.evicted.version);
+    } else {
+      noticeRef.current = incoming;
+      setNotice(incoming);
+      playNotificationTone();
     }
-    noticeRef.current = incoming;
-    setNotice(incoming);
-    playNotificationTone();
+    if(id)seenNoticeIdsRef.current.add(id);
+    while(seenNoticeIdsRef.current.size>512)seenNoticeIdsRef.current.delete(seenNoticeIdsRef.current.values().next().value);
   }, []);
   const dismissNotification = useCallback((current) => {
     noticeRef.current = null;
@@ -188,7 +197,7 @@ function App() {
         if (active) setPriorityNotifications((payload.data || []).filter((item) =>
           item.type === "own-offer-applied" || item.type === "operation-applied",
         ));
-        if (active && payload.data?.[0]) showNotification(payload.data[0]);
+        if (active) for(const item of payload.data||[])showNotification(item);
       } catch {
         /* Web Push y Telegram continúan disponibles si el panel está desconectado. */
       }
@@ -445,7 +454,7 @@ function App() {
               <Bell aria-hidden="true" />
               <div>
                 <strong>
-                  {notice.type === "system-health" ? "Estado del bot" : notice.type === "blocked-offer"
+                  {notice.type === "informational-summary" ? "Resumen informativo" : notice.type === "system-health" ? "Estado del bot" : notice.type === "blocked-offer"
                     ? "Oferta requiere revisión"
                     : notice.type === "own-offer-applied"
                       ? "Tomaron tu oferta"
@@ -457,8 +466,8 @@ function App() {
                           ? "Reajuste requiere atención"
                           : "Conciliación necesaria"}
                 </strong>
-                <p className={notice.type === "system-health" ? "health-notice" : undefined}>
-                  {notice.type === "system-health" ? (notice.message || notice.body || "Consulta la salud del bot.") : <>
+                <p className={["system-health","informational-summary"].includes(notice.type) ? "health-notice" : undefined}>
+                  {["system-health","informational-summary"].includes(notice.type) ? (notice.message || notice.body || "Consulta la salud del bot.") : <>
                   {notice.alert?.coin || "QvaApply"}
                   {notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}
                   {notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}

@@ -23,6 +23,7 @@ import {
 import { analyticsOffers, analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
 import { OperationChatService } from "./operation-chat.js";
 import { opportunityDiagnostics, readOperationalHealth } from "./operational-insights.js";
+import { simulatePrices, type PriceSimulationInput } from "./price-simulation.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -181,6 +182,17 @@ export class DashboardReadModel {
   }
   operationalHealth() { return readOperationalHealth(this.store); }
   fiatHistory(coin: string, page: number) { return this.store.fiatBalanceHistory(coin,page); }
+  simulatePrices(input: PriceSimulationInput) {
+    const market=this.marketConfig.find(input.coin);
+    if(!market)throw new Error('Mercado no configurado.');
+    return this.coalesceRead(`simulation:${JSON.stringify(input)}`,()=>simulatePrices(this.store,input,market));
+  }
+  analyticsFeePurchases(page=1) { return this.store.analyticsFeePurchases(this.store.get('analytics_account_uuid')??'',page); }
+  recordAnalyticsFee(uuid:string,fee:number,evidence:string,version:number) {
+    const account=this.store.get('analytics_account_uuid');
+    if(!account)throw new Error('No se ha identificado la cuenta.');
+    return this.store.recordAnalyticsFee(account,uuid,fee,evidence,version);
+  }
   recordRecoveryEvidence(intentId: string, evidence: string) { return this.recovery.recordEvidence(intentId, evidence); }
   acknowledgeRecoveryIntent(intentId: string) { return this.recovery.acknowledge(intentId); }
 
@@ -606,7 +618,7 @@ export class DashboardReadModel {
             coin: event.coin,
             amount: event.amount,
           };
-      const view = item.kind === "system-health" ? "caceria" : item.kind.startsWith("rebalance-")
+      const view = item.kind === "informational-summary" ? "ofertas" : item.kind === "system-health" ? "caceria" : item.kind.startsWith("rebalance-")
         ? "ofertas"
         : item.kind === "operation-applied" || item.kind === "own-offer-applied"
           ? "operaciones"
@@ -616,7 +628,7 @@ export class DashboardReadModel {
         type: item.kind,
         message: item.message,
         alert,
-        url: item.kind === "system-health" ? "/?view=caceria" : item.kind === "recovery-blocked"
+        url: item.kind === "informational-summary" ? "/?view=ofertas" : item.kind === "system-health" ? "/?view=caceria" : item.kind === "recovery-blocked"
           ? `/?view=auditoria&intent=${encodeURIComponent(String(event.intentId ?? ""))}`
           : `/?view=${view}&operation=${encodeURIComponent(item.operationUuid ?? "")}`,
         createdAt: item.createdAt,
@@ -889,7 +901,7 @@ export class DashboardReadModel {
     const now = Date.now(), account = this.store.get("analytics_account_uuid") ?? "";
     const report = buildTradingAnalytics({ transactions: account ? this.store.analyticsTransactions(account, now - 365 * 86_400_000) : [],
       offers: account ? this.store.analyticsOffers(account, now - 365 * 86_400_000) : [],
-      accountUuid: account, fiat: this.store.analyticsFiatMovements(), markets: this.marketConfig.publicMarkets(), days, now });
+      accountUuid: account, fiat: this.store.analyticsFiatMovements(), fees:this.store.analyticsFees(account), markets: this.marketConfig.publicMarkets(), days, now });
     const history = this.store.loadRemoteResource<{ complete: boolean; page: number; limited?: boolean }>(`analytics_history:${account}`);
     const offersHistory = this.store.loadRemoteResource<{ complete: boolean; page: number }>(`analytics_offers_history:v2:${account}`);
     return { ...report, balanceHistory: sampleHistory(this.store.dashboardHistory(now - days * 86_400_000), 120),

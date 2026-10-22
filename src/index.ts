@@ -17,7 +17,7 @@ import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
 import { OperationalHealthMonitor } from "./operational-insights.js";
-import { diagnosticsText, healthText, fiatHistoryText } from "./insights-text.js";
+import { diagnosticsText, healthText, fiatHistoryText, profitabilityText, simulationText } from "./insights-text.js";
 import { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { CooperativeHunter } from "./cooperative-hunter.js";
 import {
@@ -84,6 +84,7 @@ const notifications = new NotificationDispatcher(store, {
     });
   },
   webPush: async (notification) => {
+    if(notification.kind==='informational-summary'){await webPush.notifyInformation(notification.id,notification.message);return;}
     if (notification.kind === "system-health") { await webPush.notifyHealth(notification.id,notification.message); return; }
     if (notification.kind === "offer-taken" || notification.kind === "offer-rejected") return;
     const event = notification.payload;
@@ -260,6 +261,18 @@ bot.command("diagnostico",ctx=>execute(ctx,async()=>{
   return diagnosticsText(await dashboardReadModel.opportunityDiagnostics(hours,coin),coin?trading.marketLabel(coin):"Todos los mercados");
 }));
 bot.command("salud",ctx=>ctx.reply(healthText(dashboardReadModel.operationalHealth()),{parse_mode:"HTML"}));
+bot.command("rentabilidad",ctx=>execute(ctx,async()=>{
+  const days=Number(argumentsOf(ctx.msg?.text)[0]??30);
+  if(![7,30,90].includes(days))throw new Error('Uso: /rentabilidad 7|30|90');
+  return profitabilityText(dashboardReadModel.tradingAnalytics(days));
+}));
+bot.command("simular",ctx=>execute(ctx,async()=>{
+  const [marketText,buy,sell,maximum,hoursText]=argumentsOf(ctx.msg?.text);
+  const coin=parseMarket(marketText);
+  if(!coin||!buy||!sell||!maximum)throw new Error('Uso: /simular CLASICA MAX_COMPRA MIN_VENTA MAX_QUSD [1|24|168]');
+  const report=await dashboardReadModel.simulatePrices({coin,buyMaxRate:Number(buy.replace(',','.')),sellMinRate:Number(sell.replace(',','.')),maxQusd:Number(maximum.replace(',','.')),hours:Number(hoursText??24)});
+  return simulationText(report,trading.marketLabel(coin));
+}));
 bot.command("historial",ctx=>execute(ctx,async()=>{
   const [marketText,pageText]=argumentsOf(ctx.msg?.text);
   const coin=marketText?parseMarket(marketText):trading.markets().find(m=>m.active)?.code;

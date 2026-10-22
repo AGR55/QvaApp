@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { HuntingInsights } from "./operational-insights.jsx";
+import { PriceSimulation } from "./practical-tools.jsx";
 import {
   AlertTriangle,
   Crosshair,
@@ -387,6 +388,7 @@ export function Hunting({ data, label, unit, onChanged }) {
       </Panel>
 
       <HuntingInsights markets={markets} />
+      <PriceSimulation markets={markets} />
 
       {status ? (
         <p className="detail hunt-feedback" role="status" aria-live="polite">

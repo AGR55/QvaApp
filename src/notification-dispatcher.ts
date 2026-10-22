@@ -28,6 +28,7 @@ type NotificationStore = Pick<
   | "markNotificationDelivered"
   | "markNotificationFailed"
   | "pendingNotificationDeliveries"
+  | "prepareNotificationSummaries"
 >;
 
 type DeliveryRuntime = {
@@ -36,9 +37,12 @@ type DeliveryRuntime = {
 };
 
 const RETRY_DELAYS = [15_000, 60_000, 5 * 60_000, 15 * 60_000, 60 * 60_000];
+const ACTION_KINDS:ReadonlySet<NotificationKind>=new Set(['operation-applied','own-offer-applied','recovery-blocked','reconciliation-required','rebalance-attention']);
 
 export class NotificationDispatcher {
   private delivering: Promise<void> | undefined;
+  private urgentDelivery:Promise<void>|undefined;
+  private readonly inFlight=new Map<string,Promise<void>>();
 
   constructor(
     private readonly store: NotificationStore,
@@ -57,7 +61,7 @@ export class NotificationDispatcher {
       payload: { ...input.event },
       createdAt: this.now(),
     });
-    const delivery = this.deliverDue();
+    const delivery = this.delivering&&ACTION_KINDS.has(input.event.kind)?this.deliverUrgent():this.deliverDue();
     if (options.waitForDelivery !== false) await delivery;
     else void delivery.catch(error => {
       // The outbox was persisted above; the scheduler can retry a failed batch.
@@ -77,6 +81,7 @@ export class NotificationDispatcher {
 
   private async deliverBatch(): Promise<void> {
     const now = this.now();
+    this.store.prepareNotificationSummaries(now);
     for (let delivered = 0; delivered < 50; delivered++) {
       // Re-read priority between messages so race traces cannot bury an operation.
       const notification = this.store.pendingNotificationDeliveries(now, 1)[0];
@@ -94,7 +99,32 @@ export class NotificationDispatcher {
     }
   }
 
-  private async deliver(
+  private async deliverUrgent():Promise<void>{
+    if(this.urgentDelivery)return this.urgentDelivery;
+    const run=async()=>{
+      const now=this.now();
+      for(let count=0;count<20;count++){
+        const next=this.store.pendingNotificationDeliveries(now,50).find(item=>ACTION_KINDS.has(item.kind)&&
+          !this.inFlight.has(`${item.id}:telegram`)&&!this.inFlight.has(`${item.id}:push`));
+        if(!next)break;
+        await Promise.all([
+          next.telegramDeliveredAt===null&&next.telegramNextAttemptAt<=now?this.deliver(next,'telegram'):Promise.resolve(),
+          next.pushDeliveredAt===null&&next.pushNextAttemptAt<=now?this.deliver(next,'push'):Promise.resolve(),
+        ]);
+      }
+    };
+    this.urgentDelivery=run();
+    try{await this.urgentDelivery;}finally{this.urgentDelivery=undefined;}
+  }
+
+  private async deliver(notification:DurableNotification,channel:'telegram'|'push'):Promise<void>{
+    const key=`${notification.id}:${channel}`,active=this.inFlight.get(key);
+    if(active)return active;
+    const work=this.deliverOnce(notification,channel);this.inFlight.set(key,work);
+    try{await work;}finally{this.inFlight.delete(key);}
+  }
+
+  private async deliverOnce(
     notification: DurableNotification,
     channel: "telegram" | "push",
   ): Promise<void> {
