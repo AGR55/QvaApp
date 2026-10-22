@@ -1289,13 +1289,15 @@ export class TradingEngine {
       if (!account) return;
       const own = await this.listOwnOffers();
       if (!idle()) return;
+      const requiredRelease = Math.ceil((target - balance) * 100) / 100;
       const offer = own.filter(item => item.type === "sell" && item.status === "open" && item.offer_kind !== "flexible" &&
-        item.User?.uuid === account && !item.Peer?.uuid && !this.store.hasUnresolvedMutationForOffer(item.uuid) &&
+        item.User?.uuid === account && item.amount - requiredRelease >= MIN_OFFER_QUSD && !item.Peer?.uuid && !this.store.hasUnresolvedMutationForOffer(item.uuid) &&
         this.market(item.coin)?.active && this.huntEnabled(item.coin, "sell"))
         .sort((a,b) => a.amount-b.amount)[0];
       if (!offer) return;
-      // Release only the shortfall for one operation at the configured limit.
-      const release = Math.min(offer.amount, Math.ceil((target-balance)*100)/100);
+      // Keep every published offer above the QvaPay minimum. Background
+      // preparation may reduce inventory, but never cancel it without a target.
+      const release = requiredRelease;
       const remaining = Math.round((offer.amount-release)*100)/100;
       this.nextLiquidityPreparationAt = Date.now() + 60_000;
       this.liquidityPreparingUuid = offer.uuid;
@@ -1306,9 +1308,6 @@ export class TradingEngine {
         await this.monetaryIntents.execute({ kind: "edit_offer", operationUuid: offer.uuid,
           request: { uuid: offer.uuid, amount: remaining, receive, liquidityPreparation: true },
           action: intentId => this.qva.editOffer(offer.uuid, { amount: remaining, receive }, { beforeDispatch: () => canPrepare(intentId) }) });
-      } else {
-        await this.monetaryIntents.execute({ kind: "cancel_offer", operationUuid: offer.uuid,
-          request: { uuid: offer.uuid, liquidityPreparation: true }, action: intentId => this.qva.cancel(offer.uuid, undefined, { beforeDispatch: () => canPrepare(intentId) }) });
       }
       const refreshedEpoch = this.store.get("qusd_balance_epoch") ?? "0";
       const fresh = await this.qva.qusdBalance();

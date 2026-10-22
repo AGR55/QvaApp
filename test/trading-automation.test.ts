@@ -1586,3 +1586,14 @@ test('revalida el disponible de una oferta por rango antes del envío y permite 
  assert.equal(sent,1);assert.equal(store.getOperation(offer.uuid)?.amount,5);
  await new Promise(resolve=>setImmediate(resolve));store.close();
 });
+
+test('la preparación conserva una oferta publicada cuando liberar el objetivo la dejaría bajo el mínimo',async()=>{
+ const {store,cfg,markets}=setup();const next=markets.current();next.risk.maxQusdPerOperation=25;next.risk.minQusdReserve=0;next.qusdReserve=0;markets.save(next);
+ store.set('analytics_account_uuid','me');const edits:unknown[]=[];let cancelled=0;
+ const trading=new TradingEngine(store,{qusdBalance:async()=>0,listOffers:async()=>[{uuid:'manual-published',type:'sell',coin:'BANK_CUP',amount:10,receive:10000,status:'open',User:{uuid:'me'}}],
+ editOffer:async(uuid:string,body:unknown)=>{edits.push({uuid,body});},cancel:async()=>{cancelled++;},apply:async()=>assert.fail('no hay oportunidad que aplicar')} as never,cfg as never,markets,async()=>undefined);
+ await trading.prepareHuntingLiquidity();
+ assert.equal(cancelled,0,'no cancela una oferta para acumular liquidez en ausencia de una oportunidad');
+ assert.deepEqual(edits,[],'no vacía una oferta pequeña para alcanzar un objetivo mayor');
+ store.close();
+});

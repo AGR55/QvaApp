@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.26.0",
   "type": "module",
   "engines": {
-    "node": ">=24 <26"
+    "node": ">=24.22.1 <25"
   },
   "scripts": {
     "build": "pnpm typecheck && pnpm build:server && pnpm build:web",
@@ -31,7 +31,7 @@
     "class-variance-authority": "^0.7.1",
     "cn": "^0.3.0",
     "dotenv": "^17.2.2",
-    "fastify": "^5.12.3",
+    "fastify": "^5.12.7",
     "grammy": "^1.38.2",
     "lucide-react": "^0.544.0",
     "radix-ui": "^1.6.7",
