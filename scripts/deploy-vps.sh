@@ -47,7 +47,7 @@ fi
 
 export QVAAPPLY_HOST_PORT="$host_port"
 export QVAAPPLY_REVISION="$revision"
-docker compose -f "$release_dir/deploy/compose.yaml" build
+docker compose -f "$release_dir/deploy/compose.yaml" build --pull
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"

@@ -20,7 +20,7 @@ Mesa local y bot P2P de un único administrador para QvaPay. Detecta oportunidad
 
 ## Instalación local
 
-Requisitos: Node.js 24 o 25 y pnpm 11.
+Requisitos: Node.js 24.22.1 LTS (o un parche posterior de la línea 24) y pnpm 11. La versión probada por CI se declara en `.node-version`; la imagen de producción fija el mismo parche de seguridad.
 
 ```bash
 cp .env.example .env
