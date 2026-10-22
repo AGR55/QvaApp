@@ -100,7 +100,7 @@ export class NotificationDispatcher {
   ): Promise<void> {
     try {
       if (channel === "telegram") {
-        if (notification.kind === "operation-applied" || notification.kind === "own-offer-applied")
+        if (notification.kind === "operation-applied" || notification.kind === "own-offer-applied" || notification.kind === "system-health")
           await this.runtime.telegram(notification);
       } else await this.runtime.webPush(notification);
       this.store.markNotificationDelivered(notification.id, channel, this.now());

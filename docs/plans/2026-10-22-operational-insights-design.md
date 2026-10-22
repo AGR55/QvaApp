@@ -18,3 +18,12 @@ Alternativas consideradas: consultar QvaPay para cada informe (más carga y late
 4. Verificar declaraciones, movimientos idempotentes y backfills; pruebas de API y avisos; verificación completa y despliegue habitual.
 
 La skill auxiliar writing-plans no está instalada en los directorios de skills disponibles; este documento conserva el plan explícito para ejecutar el diseño ya autorizado.
+
+## Resultado implementado
+
+- Cacería: panel de salud e informe bajo demanda, por mercado y período. Lecturas y clasificación por lotes de 250, límite de 5.000 registros, cobertura truncada explícita y solicitudes simultáneas compartidas.
+- Capital: historial paginado con saldos capturados por SQLite en la misma escritura que cambia el saldo. Las referencias antiguas sin capturas no reconstruyen saldos y los backfills indican que no modificaron el saldo declarado.
+- Telegram: `/diagnostico [MONEDA|todas] [1|24|168]`, `/historial [MONEDA] [PAGINA]` y `/salud`.
+- Salud: comprobaciones cada minuto, gracia inicial de dos minutos y dos comprobaciones consecutivas antes de avisar o confirmar recuperación; silencios del feed superiores a cinco minutos, medianas sin observación durante dos horas y última respuesta remota superior a tres segundos. No pausa ni cambia cacerías. Las transiciones usan la cola durable existente, incluyendo Web Push; una recuperación sustituye al aviso anterior.
+- Compatibilidad: migración v29 con respaldo automático previo, índices de consulta y saldos históricos desconocidos identificados explícitamente. No se agregan dependencias ni peticiones a QvaPay.
+- Verificación: 532 pruebas, comprobaciones de tipos/código/secretos y construcción aprobadas. Prueba visual y auditoría de accesibilidad en escritorio y móvil aprobadas; corregidos filtros Select y acceso por teclado a la tabla móvil.

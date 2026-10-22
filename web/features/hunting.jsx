@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { HuntingInsights } from "./operational-insights.jsx";
 import {
   AlertTriangle,
   Crosshair,
@@ -384,6 +385,8 @@ export function Hunting({ data, label, unit, onChanged }) {
           </Empty>
         )}
       </Panel>
+
+      <HuntingInsights markets={markets} />
 
       {status ? (
         <p className="detail hunt-feedback" role="status" aria-live="polite">

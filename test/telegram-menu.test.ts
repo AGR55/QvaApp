@@ -25,6 +25,9 @@ test("el menú nativo expone todas las áreas operativas sin comandos repetidos"
     "automation",
     "scan",
     "logs",
+    "diagnostico",
+    "historial",
+    "salud",
     "help",
   ]);
   assert.equal(new Set(commands).size, commands.length);

@@ -16,6 +16,8 @@ import { startDashboard } from "./http-dashboard.js";
 import { Scheduler } from "./scheduler.js";
 import { WebPushService } from "./web-push.js";
 import { NotificationDispatcher } from "./notification-dispatcher.js";
+import { OperationalHealthMonitor } from "./operational-insights.js";
+import { diagnosticsText, healthText, fiatHistoryText } from "./insights-text.js";
 import { HuntingSyncCoordinator } from "./hunting-sync.js";
 import { CooperativeHunter } from "./cooperative-hunter.js";
 import {
@@ -82,6 +84,7 @@ const notifications = new NotificationDispatcher(store, {
     });
   },
   webPush: async (notification) => {
+    if (notification.kind === "system-health") { await webPush.notifyHealth(notification.id,notification.message); return; }
     if (notification.kind === "offer-taken" || notification.kind === "offer-rejected") return;
     const event = notification.payload;
     if (notification.kind === "blocked-offer")
@@ -248,6 +251,22 @@ bot.command("scan", (ctx) =>
   execute(ctx, async () => scanSummary(await trading.scan())),
 );
 bot.command("logs", (ctx) => ctx.reply(logsText(), { parse_mode: "HTML" }));
+bot.command("diagnostico",ctx=>execute(ctx,async()=>{
+  const [marketText,hoursText]=argumentsOf(ctx.msg?.text);
+  const coin=marketText&&marketText.toLowerCase()!=="todas"?parseMarket(marketText):undefined;
+  if(marketText&&marketText.toLowerCase()!=="todas"&&!coin)throw new Error("Mercado no configurado. Usa /diagnostico todas 24.");
+  const hours=Number(hoursText??24);
+  if(![1,24,168].includes(hours))throw new Error("Períodos disponibles: 1, 24 o 168 horas.");
+  return diagnosticsText(await dashboardReadModel.opportunityDiagnostics(hours,coin),coin?trading.marketLabel(coin):"Todos los mercados");
+}));
+bot.command("salud",ctx=>ctx.reply(healthText(dashboardReadModel.operationalHealth()),{parse_mode:"HTML"}));
+bot.command("historial",ctx=>execute(ctx,async()=>{
+  const [marketText,pageText]=argumentsOf(ctx.msg?.text);
+  const coin=marketText?parseMarket(marketText):trading.markets().find(m=>m.active)?.code;
+  const page=Number(pageText??1);
+  if(!coin||!Number.isInteger(page)||page<1||page>1000)throw new Error(`Uso: /historial ${marketHint()} PAGINA`);
+  return fiatHistoryText(store.fiatBalanceHistory(coin,page,5),trading.marketLabel(coin),trading.marketCurrency(coin));
+}));
 bot.command("fiat", (ctx) =>
   execute(ctx, async () => {
     const [marketText, amountText] = argumentsOf(ctx.msg?.text);
@@ -499,6 +518,11 @@ scheduler.register("fiat_sync", 30_000, () =>
   trading.syncFiatFromQva().then(() => undefined),
 );
 scheduler.register("notifications", 15_000, () => notifications.deliverDue());
+const healthMonitor=new OperationalHealthMonitor(store,input=>notifications.publish(input,{waitForDelivery:false}));
+scheduler.register("operational_health",60_000,async()=>{
+  const markets=trading.markets().filter(m=>trading.huntEnabled(m.code,"buy")||trading.huntEnabled(m.code,"sell"));
+  await healthMonitor.check({source:marketSource.status(),markets,paused:trading.isPaused()||markets.length===0});
+});
 scheduler.register("recovery_alerts", 10_000, async () => {
   for (const intent of store.unresolvedMutationIntents()) {
     if (store.get(`recovery_ack:${intent.intentId}`)) {

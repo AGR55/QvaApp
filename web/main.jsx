@@ -445,7 +445,7 @@ function App() {
               <Bell aria-hidden="true" />
               <div>
                 <strong>
-                  {notice.type === "blocked-offer"
+                  {notice.type === "system-health" ? "Estado del bot" : notice.type === "blocked-offer"
                     ? "Oferta requiere revisión"
                     : notice.type === "own-offer-applied"
                       ? "Tomaron tu oferta"
@@ -457,10 +457,12 @@ function App() {
                           ? "Reajuste requiere atención"
                           : "Conciliación necesaria"}
                 </strong>
-                <p>
+                <p className={notice.type === "system-health" ? "health-notice" : undefined}>
+                  {notice.type === "system-health" ? (notice.message || notice.body || "Consulta la salud del bot.") : <>
                   {notice.alert?.coin || "QvaApply"}
                   {notice.alert?.amount ? ` · ${notice.alert.amount} QUSD` : ""}
                   {notice.alert?.reason ? ` · ${notice.alert.reason}` : ""}
+                  </>}
                 </p>
                 <Button
                   variant="primary"

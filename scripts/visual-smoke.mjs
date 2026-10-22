@@ -114,6 +114,11 @@ try {
       `Se esperaban 6 controles de mercado y lado; aparecieron ${huntSwitches}.`,
     );
   const huntingDesktop = await assertPageQuality("Cacería");
+  const diagnostics = await find("xpath", "//button[normalize-space(.)='Consultar diagnóstico']");
+  await command("POST", `/session/${sessionId}/element/${diagnostics}/click`, {});
+  await waitFor(() => execute("return document.body.innerText.includes('120 observaciones')"));
+  await assertPageQuality("Diagnóstico y salud");
+  await screenshot("/tmp/qvaapply-operational-insights-desktop.png");
   await screenshot("/tmp/qvaapply-hunting-desktop.png");
   await execute(
     "window.scrollTo(0, document.documentElement.scrollHeight); return true",
@@ -124,6 +129,7 @@ try {
     "xpath",
     "//button[normalize-space(.)='Cancelar aplicación']",
   );
+  await execute("Array.from(document.querySelectorAll('button')).find(button => button.textContent.trim() === 'Cancelar aplicación')?.scrollIntoView({block:'center'}); return true");
   await command(
     "POST",
     `/session/${sessionId}/element/${cancelCapture}/click`,
@@ -171,6 +177,8 @@ try {
     execute("return document.body.innerText.includes('Capital disponible')"),
   );
   const capitalDesktop = await assertPageQuality("Capital");
+  await waitFor(() => execute("return document.body.innerText.includes('Pago confirmado con comisión')"));
+  await assertPageQuality("Historial del fiat");
   const editOffer = await find(
     "xpath",
     "//button[normalize-space(.)='Editar']",

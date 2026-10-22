@@ -15,6 +15,9 @@ export const TELEGRAM_COMMANDS = [
   { command: "automation", description: "Activar o pausar automatización" },
   { command: "scan", description: "Escanear los mercados ahora" },
   { command: "logs", description: "Eventos recientes del bot" },
+  { command: "diagnostico", description: "Por qué se toman o descartan ofertas" },
+  { command: "historial", description: "Movimientos y saldos del fiat" },
+  { command: "salud", description: "Estado del feed, medianas y latencia" },
   { command: "help", description: "Ayuda y comandos avanzados" },
 ] as const;
 

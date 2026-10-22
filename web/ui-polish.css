@@ -4307,3 +4307,21 @@ tbody td small {
     min-height: 16px;
   }
 }
+
+/* Operational reports stay local and load only within their owning view. */
+.insights-controls { display:flex; align-items:end; flex-wrap:wrap; gap:1rem; margin-block:1rem; }
+.insights-controls label { display:grid; gap:.4rem; min-width:10rem; }
+.insights-checks { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; margin-top:1rem; }
+.insights-checks strong { display:block; margin-top:.5rem; }
+.insights-checks p { overflow-wrap:anywhere; }
+.insights-metrics { display:flex; flex-wrap:wrap; gap:1.5rem; margin-block:1rem; }
+.insights-metrics div { display:grid; gap:.25rem; }
+.insights-metrics strong { font-size:1.5rem; font-variant-numeric:tabular-nums; }
+.insights-table { overflow-x:auto; margin-block:1rem; }
+.insights-table table { width:100%; border-collapse:collapse; text-align:left; }
+.insights-table caption { text-align:left; padding-block:.5rem; }
+.insights-table th,.insights-table td { padding:.75rem; border-bottom:1px solid var(--border); vertical-align:top; }
+.insights-table td:not(:first-child) { white-space:nowrap; font-variant-numeric:tabular-nums; }
+.insights-table code { font-size:.75rem; overflow-wrap:anywhere; }
+.health-notice { white-space:pre-line; }
+.insights-table:focus-visible { outline:2px solid var(--ring); outline-offset:3px; }

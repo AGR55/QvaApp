@@ -896,6 +896,19 @@ export function buildDashboard(
     reply.status(204);
   });
   app.get("/api/audit", async () => ({ data: readModel.auditLog() }));
+  app.get<{Querystring:{hours?:number;coin?:string}}>("/api/hunting/diagnostics", {
+    schema:{querystring:{type:"object",additionalProperties:false,properties:{hours:{type:"integer",enum:[1,24,168]},coin:{type:"string",maxLength:50}}}},
+  },async (request,reply)=>{
+    if(request.query.coin&&!readModel.config().markets.some(m=>m.code===request.query.coin))return reply.code(400).send({error:"Mercado no configurado."});
+    return {data:await readModel.opportunityDiagnostics(request.query.hours??24,request.query.coin)};
+  });
+  app.get("/api/operational-health",async()=>({data:readModel.operationalHealth()}));
+  app.get<{Querystring:{coin:string;page?:number}}>("/api/fiat-history",{
+    schema:{querystring:{type:"object",required:["coin"],additionalProperties:false,properties:{coin:{type:"string",maxLength:50},page:{type:"integer",minimum:1,maximum:1000}}}},
+  },async(request,reply)=>{
+    if(!readModel.config().markets.some(m=>m.code===request.query.coin))return reply.code(400).send({error:"Mercado no configurado."});
+    return {data:readModel.fiatHistory(request.query.coin,request.query.page??1)};
+  });
   app.get<{
     Querystring: {
       after?: string;
@@ -1122,7 +1135,7 @@ function serviceWorkerScript(): string {
     let payload = {};
     try { payload = event.data ? event.data.json() : {}; } catch {}
     const alert = payload.alert || {};
-    const title = payload.type === "blocked-offer"
+    const title = payload.type === "system-health" ? payload.title || "Salud de QvaApply" : payload.type === "blocked-offer"
       ? "Oferta requiere revisión"
       : payload.type === "operation-applied"
         ? "Aplicación confirmada"
@@ -1131,7 +1144,7 @@ function serviceWorkerScript(): string {
           : payload.type === "rebalance-attention"
             ? "Reajuste requiere atención"
         : "Actividad de QvaApply";
-    const body = [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
+    const body = payload.type === "system-health" ? payload.body || "Consulta el estado del bot." : [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
     const url = payload.url || "/?view=auditoria";
     event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       const visible = clients.find((client) => client.visibilityState === "visible");
@@ -1256,6 +1269,9 @@ function openApiDocument() {
       "/api/recovery/{intentId}/resolve": { post: { summary: "Registrar una declaración manual revisada por el propietario" } },
       "/api/operations/{uuid}/{action}": { post: { summary: "Registrar una acción humana de la operación" } },
       "/api/hunting": { put: { summary: "Controlar cacerías y precios por mercado" } },
+      "/api/hunting/diagnostics": { get: { summary: "Diagnóstico local y acotado de oportunidades y aplicaciones" } },
+      "/api/operational-health": { get: { summary: "Última comprobación local de salud" } },
+      "/api/fiat-history": { get: { summary: "Historial paginado de cambios del saldo fiat" } },
       "/api/audit": { get: { summary: "Exportar auditoría" } },
       "/api/logs": { get: { summary: "Consultar logs operativos filtrados por cursor" } },
       "/api/decision-events": { get: { summary: "Consultar decisiones operativas paginadas" } },

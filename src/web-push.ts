@@ -100,6 +100,10 @@ export class WebPushService {
     });
   }
 
+  async notifyHealth(id: string, message: string): Promise<void> {
+    await this.notify({version:id,id,type:"system-health",title:message.split("\n")[0],body:message,url:"/?view=caceria"});
+  }
+
   private async notify(payloadValue: Record<string, unknown> & { version: string }): Promise<void> {
     const payload = JSON.stringify(payloadValue);
     const expired = new Set<string>();

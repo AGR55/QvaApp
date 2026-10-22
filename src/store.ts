@@ -20,7 +20,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 28;
+const LATEST_SCHEMA_VERSION = 29;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -199,6 +199,7 @@ export type NotificationKind =
   | "reconciliation-required"
   | "recovery-blocked"
   | "rebalance-completed"
+  | "system-health"
   | "rebalance-attention";
 
 export interface DurableNotification {
@@ -916,6 +917,32 @@ export class Store {
               DELETE FROM application_capital_reservations WHERE intent_id=NEW.intent_id;
             END;`);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (28, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 29) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS fiat_balance_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, coin TEXT NOT NULL,
+          balance_before REAL, balance_after REAL NOT NULL, amount REAL NOT NULL,
+          operation_uuid TEXT, ledger_id INTEGER UNIQUE, source TEXT NOT NULL, kind TEXT NOT NULL,
+          created_at INTEGER NOT NULL);
+          CREATE INDEX IF NOT EXISTS idx_fiat_history_coin_id ON fiat_balance_history(coin,id DESC);
+          CREATE INDEX IF NOT EXISTS idx_fiat_history_created ON fiat_balance_history(coin,created_at DESC,id DESC);
+          CREATE INDEX IF NOT EXISTS idx_fiat_ledger_created ON fiat_ledger(coin,created_at DESC,id DESC);
+          CREATE INDEX IF NOT EXISTS idx_insights_audit ON audit_log(action,id DESC);
+          INSERT INTO fiat_balance_history(coin,balance_before,balance_after,amount,source,kind,created_at)
+            SELECT substr(key,14),NULL,CAST(value AS REAL),0,'Saldo al activar el historial','opening',unixepoch('subsec')*1000
+            FROM settings WHERE key GLOB 'fiat_balance:*' AND NOT EXISTS (SELECT 1 FROM fiat_balance_history WHERE coin=substr(key,14));
+          CREATE TRIGGER IF NOT EXISTS fiat_history_insert AFTER INSERT ON settings
+            WHEN NEW.key GLOB 'fiat_balance:*' BEGIN
+            INSERT INTO fiat_balance_history(coin,balance_before,balance_after,amount,source,kind,created_at)
+              VALUES(substr(NEW.key,14),NULL,CAST(NEW.value AS REAL),0,'Saldo inicial declarado','opening',unixepoch('subsec')*1000);
+          END;
+          CREATE TRIGGER IF NOT EXISTS fiat_history_update AFTER UPDATE OF value ON settings
+            WHEN NEW.key GLOB 'fiat_balance:*' AND CAST(OLD.value AS REAL)<>CAST(NEW.value AS REAL) BEGIN
+            INSERT INTO fiat_balance_history(coin,balance_before,balance_after,amount,source,kind,created_at)
+              VALUES(substr(NEW.key,14),CAST(OLD.value AS REAL),CAST(NEW.value AS REAL),
+                CAST(NEW.value AS REAL)-CAST(OLD.value AS REAL),'Saldo declarado o actualizado','declaration',unixepoch('subsec')*1000);
+          END;`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (29, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -2076,12 +2103,18 @@ export class Store {
       (this.db.prepare("SELECT created_at FROM audit_log WHERE action='fiat_balance' AND detail LIKE ? ORDER BY id DESC LIMIT 1")
         .get(`%(${coin})`) as { created_at: number } | undefined)?.created_at ?? 0);
     if (occurredAt !== undefined && Number.isFinite(occurredAt) && occurredAt > 0 && occurredAt <= declared) {
+      const balance = Number(this.get(`fiat_balance:${coin}`) ?? 0);
+      this.db.prepare(`INSERT INTO fiat_balance_history(coin,balance_before,balance_after,amount,operation_uuid,ledger_id,source,kind,created_at)
+        VALUES(?,?,?,?,?,?,?,'historical',?)`).run(coin,balance,balance,direction === "credit" ? amount : -amount,uuid,inserted.lastInsertRowid,source,Date.now());
       this.audit("fiat_ledger_backfilled", `${amount} ${coin}: movimiento histórico ya incluido en el saldo declarado (${source}).`, uuid);
       return true;
     }
     const current = Number(this.get(`fiat_balance:${coin}`) ?? 0);
     const next = direction === "credit" ? current + amount : current - amount;
     this.set(`fiat_balance:${coin}`, String(next));
+    this.db.prepare(`UPDATE fiat_balance_history SET operation_uuid=?,ledger_id=?,source=?,kind='movement',balance_before=?,amount=?
+      WHERE id=(SELECT id FROM fiat_balance_history WHERE coin=? ORDER BY id DESC LIMIT 1)`)
+      .run(uuid,inserted.lastInsertRowid,source,current,direction === "credit" ? amount : -amount,coin);
     this.db
       .prepare("UPDATE market_config SET fiat_balance = ? WHERE code = ?")
       .run(next, coin);
@@ -2210,6 +2243,38 @@ export class Store {
   analyticsFiatMovements(): AnalyticsFiatMovement[] {
     return this.db.prepare(`SELECT operation_uuid AS uuid, direction, amount FROM fiat_ledger`).all()
       .map((row) => ({ uuid: String(row.uuid), direction: String(row.direction), amount: Number(row.amount) }));
+  }
+
+  fiatBalanceHistory(coin: string, page = 1, pageSize = 20) {
+    page = Math.max(1, Math.min(1000, Math.trunc(page) || 1));
+    pageSize = Math.max(1, Math.min(50, Math.trunc(pageSize) || 20));
+    const branchLimit=page*pageSize+1;
+    const rows = this.db.prepare(`WITH history AS (
+      SELECT 'history:'||id AS id,coin,balance_before,balance_after,amount,operation_uuid,source,kind,created_at,id AS sequence,1 AS origin
+        FROM fiat_balance_history WHERE coin=? ORDER BY created_at DESC,sequence DESC LIMIT ?
+      ), legacy AS (SELECT 'ledger:'||id,coin,NULL,NULL,CASE direction WHEN 'credit' THEN amount ELSE -amount END,
+        operation_uuid,source,'legacy',created_at,id,0 FROM fiat_ledger l WHERE coin=? AND NOT EXISTS
+          (SELECT 1 FROM fiat_balance_history h WHERE h.ledger_id=l.id) ORDER BY created_at DESC,id DESC LIMIT ?
+      ) SELECT * FROM (SELECT * FROM history UNION ALL SELECT * FROM legacy)
+        ORDER BY created_at DESC,origin DESC,sequence DESC LIMIT ? OFFSET ?`).all(coin,branchLimit,coin,branchLimit,pageSize+1,(page-1)*pageSize) as Record<string,unknown>[];
+    return { page, hasMore: rows.length>pageSize, items: rows.slice(0,pageSize).map(row => ({
+      id:String(row.id), coin:String(row.coin), before:row.balance_before===null?null:Number(row.balance_before),
+      after:row.balance_after===null?null:Number(row.balance_after),amount:Number(row.amount),
+      uuid:row.operation_uuid===null?null:String(row.operation_uuid),source:String(row.source),kind:String(row.kind),createdAt:Number(row.created_at),
+    })) };
+  }
+
+  insightAudit(since: number, beforeId = Number.MAX_SAFE_INTEGER, limit = 250) {
+    return (this.db.prepare(`SELECT id,created_at,action,offer_uuid,detail FROM audit_log
+      WHERE action IN ('market_feed_processed','offer_apply_timing','market_feed_processing_error')
+        AND created_at>=? AND id<? ORDER BY id DESC LIMIT ?`).all(since,beforeId,Math.min(250,Math.max(1,limit))) as Record<string,unknown>[])
+      .map(row=>({id:Number(row.id),createdAt:Number(row.created_at),action:String(row.action),uuid:String(row.offer_uuid??''),detail:String(row.detail)}));
+  }
+
+  latestMedianAt(coin: string): number | undefined {
+    const row=this.db.prepare(`SELECT created_at FROM market_observations WHERE coin=?
+      AND (median_buy IS NOT NULL OR median_sell IS NOT NULL) ORDER BY created_at DESC LIMIT 1`).get(coin) as {created_at:number}|undefined;
+    return row?.created_at;
   }
 
   recentFiat(
@@ -2835,7 +2900,7 @@ export class Store {
       this.db.prepare(
         `SELECT * FROM notification_events
          WHERE acknowledged_at IS NULL
-           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'recovery-blocked', 'rebalance-completed', 'rebalance-attention')
+           AND kind IN ('operation-applied', 'own-offer-applied', 'reconciliation-required', 'recovery-blocked', 'rebalance-completed', 'rebalance-attention', 'system-health')
          ORDER BY created_at DESC LIMIT ?`,
       ).all(limit) as Record<string, unknown>[]
     ).map(notificationFromRow);

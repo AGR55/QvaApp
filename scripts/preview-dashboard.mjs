@@ -171,6 +171,9 @@ const model = {
     sync: { accountKnown: true, complete: true, limited: false, pages: 18, updatedAt: now },
   }),
   recoveryItems: () => ({ items: previewRecovery, blocked: previewRecovery.length > 0 }),
+  operationalHealth: () => ({checkedAt:now,checks:[{key:"feed",label:"Datos del mercado",status:"ok",detail:"Se reciben datos del mercado."},{key:"median:CLASICA",label:"Medianas · Tarjeta Clásica",status:"warning",detail:"La última observación tiene más de dos horas."},{key:"latency",label:"Respuesta de QvaPay",status:"ok",detail:"Última solicitud: 1235 ms. No es un promedio."}]}),
+  opportunityDiagnostics: async (hours,coin) => ({hours,coin,generatedAt:now,since:now-hours*3600000,coverageSince:now-hours*3600000,truncated:false,observations:120,uniqueOffers:80,acceptedObservations:3,reasons:[{code:"price",label:"Precio o comisión fuera del objetivo",count:90},{code:"capital",label:"Saldo o límites insuficientes",count:27}],applications:{sent:4,confirmed:3,rejected:1,uncertain:0,notSent:0,unknownMarket:0},note:"Se cuentan observaciones y solicitudes registradas; no demuestra ofertas perdidas frente a otros bots."}),
+  fiatHistory: (coin,page) => ({page,hasMore:page===1,items:[{id:"preview-movement",coin,before:50,after:39.92,amount:-10.08,uuid:"562353df-4dd5-4b26-878c-eb03dfcce770",source:"Pago confirmado con comisión",kind:"movement",createdAt:now},{id:"preview-backfill",coin,before:50,after:50,amount:-300,uuid:"old-order",source:"Operación histórica",kind:"historical",createdAt:now-3600000},{id:"preview-opening",coin,before:null,after:50,amount:0,uuid:null,source:"Saldo al activar el historial",kind:"opening",createdAt:now-7200000}]}),
   acknowledgeRecoveryIntent: (intentId) => {
     const item = previewRecovery.find(item => item.intentId === intentId);
     if (item) item.acknowledged = true;

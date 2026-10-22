@@ -22,6 +22,7 @@ import {
 } from "./self-service-recovery.js";
 import { analyticsOffers, analyticsTransaction, buildTradingAnalytics } from "./trading-analytics.js";
 import { OperationChatService } from "./operation-chat.js";
+import { opportunityDiagnostics, readOperationalHealth } from "./operational-insights.js";
 
 type RuntimeConfig = typeof Config;
 type OfferView = ReturnType<typeof offerView>;
@@ -175,6 +176,11 @@ export class DashboardReadModel {
   recoveryItems() {
     return this.recovery.list();
   }
+  opportunityDiagnostics(hours: number, coin?: string) {
+    return this.coalesceRead(`diagnostics:${hours}:${coin??'all'}`,()=>opportunityDiagnostics(this.store,hours,coin));
+  }
+  operationalHealth() { return readOperationalHealth(this.store); }
+  fiatHistory(coin: string, page: number) { return this.store.fiatBalanceHistory(coin,page); }
   recordRecoveryEvidence(intentId: string, evidence: string) { return this.recovery.recordEvidence(intentId, evidence); }
   acknowledgeRecoveryIntent(intentId: string) { return this.recovery.acknowledge(intentId); }
 
@@ -600,7 +606,7 @@ export class DashboardReadModel {
             coin: event.coin,
             amount: event.amount,
           };
-      const view = item.kind.startsWith("rebalance-")
+      const view = item.kind === "system-health" ? "caceria" : item.kind.startsWith("rebalance-")
         ? "ofertas"
         : item.kind === "operation-applied" || item.kind === "own-offer-applied"
           ? "operaciones"
@@ -610,7 +616,7 @@ export class DashboardReadModel {
         type: item.kind,
         message: item.message,
         alert,
-        url: item.kind === "recovery-blocked"
+        url: item.kind === "system-health" ? "/?view=caceria" : item.kind === "recovery-blocked"
           ? `/?view=auditoria&intent=${encodeURIComponent(String(event.intentId ?? ""))}`
           : `/?view=${view}&operation=${encodeURIComponent(item.operationUuid ?? "")}`,
         createdAt: item.createdAt,

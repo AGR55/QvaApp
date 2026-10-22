@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { FiatHistory } from "./operational-insights.jsx";
 import { ArrowDownToLine, ArrowUpFromLine, Pencil, Plus, Scale, X } from "lucide-react";
 import { Offers } from "../components/offers.jsx";
 import { Freshness, Panel, Skeleton, ViewHead } from "../components/common.jsx";
@@ -139,6 +140,8 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
         )}
         {resources.ownOffers?.error ? <p className="inline-error" role="alert">{resources.ownOffers.error}</p> : null}
       </Panel>
+
+      <FiatHistory markets={data.markets} />
 
       <Dialog open={Boolean(pendingCancel)} onOpenChange={(open) => !open && closeCancel()}>
         {pendingCancel ? (
