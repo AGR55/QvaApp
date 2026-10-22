@@ -64,6 +64,16 @@ def command(args, timeout=20):
  except Exception as error:return {'error':str(error)}
 
 out['inventory']={name:command(args) for name,args in {
+ 'webLocal':['curl','-sS','-I','--max-time','10','http://127.0.0.1:8782/'],
+ 'webTlsLocal':['curl','-sS','-I','--max-time','10','--resolve','qvapply.honux.tech:443:127.0.0.1','https://qvapply.honux.tech/'],
+ 'webPublic':['curl','-sS','-I','--max-time','10','https://qvapply.honux.tech/'],
+ 'dns':['getent','ahosts','qvapply.honux.tech'],
+ 'nginxConfig':['nginx','-T'],
+ 'nginxErrors':['tail','-n','80','/var/log/nginx/qvaapply-error.log'],
+ 'networkCounters':['nstat','-az'],
+ 'nftRules':['nft','list','ruleset'],
+ 'tcpSettings':['sysctl','net.ipv4.tcp_syncookies','net.ipv4.tcp_max_syn_backlog','net.core.somaxconn','net.ipv4.tcp_synack_retries'],
+ 'qvapayTiming':['curl','-sS','-o','/dev/null','--max-time','10','-w','%{http_code}|dns=%{time_namelookup}|connect=%{time_connect}|tls=%{time_appconnect}|firstByte=%{time_starttransfer}|total=%{time_total}','https://api.qvapay.com'],
  'os':['cat','/etc/os-release'],
  'uptime':['uptime'],
  'memory':['free','-m'],
