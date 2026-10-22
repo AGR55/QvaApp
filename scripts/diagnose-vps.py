@@ -23,6 +23,36 @@ for r in rows:
 out['timings']={k:{'n':len(v),'example':v[0]} for k,v in groups.items()}
 q('recentFeed',"select created_at,offer_uuid,detail from audit_log where action='market_feed_processed' order by id desc limit 20")
 q('backgroundErrors',"select created_at,action,detail from audit_log where created_at>? and action like '%background_error' order by id desc limit 25",(since,))
+def summary(values):
+ values=sorted(values)
+ if not values:return None
+ return {'n':len(values),'p50':round(statistics.median(values),2),'p95':round(values[min(len(values)-1,int(len(values)*.95))],2),'max':round(values[-1],2)}
+out['timings']={k:{'n':len(v),'queueMs':summary([x['dispatchedAt']-x['queuedAt'] for x in v if x.get('dispatchedAt') is not None]),
+ 'remoteMs':summary([x['finishedAt']-x['dispatchedAt'] for x in v if x.get('dispatchedAt') is not None])} for k,v in groups.items()}
+q('huntingFlags','select hunt_buy_running,hunt_sell_running from bot_config where id=1')
+q('markets','select code,active,hunt_buy_enabled,hunt_sell_enabled,buy_max_rate,sell_min_rate,fiat_balance,outgoing_transfer_fee from market_config')
+reasons={}
+for row in c.execute("select created_at,detail from audit_log where created_at>? and action='market_feed_processed'",(now-2*86400000,)):
+ match=re.search(r'\(([^)]+)\) procesado desde el feed: (.*)\.$',row['detail'])
+ if not match:continue
+ coin,reason=match.groups()
+ if coin not in ['BANK_CUP','CLASICA','ETECSA']:continue
+ day=datetime.datetime.fromtimestamp(row['created_at']/1000,ZoneInfo('America/Havana')).strftime('%Y-%m-%d')
+ reason=re.sub(r'[0-9a-f]{8}-[0-9a-f-]{27,}', '<id>',reason)
+ reason=re.sub(r'\d+(?:\.\d+)?','#',reason)
+ key=day+'|'+coin+'|'+reason;reasons[key]=reasons.get(key,0)+1
+out['outcomes']=reasons
+latencies={}
+for row in c.execute("select event,received_at,processed_at,json_extract(payload_json,'$.data.coin') as coin,json_extract(payload_json,'$.sent_at') as sent from market_feed_events where received_at>? and event in ('p2p.created','p2p.reopened','p2p.range_created','p2p.range_updated')",(now-2*86400000,)):
+ if row['coin'] not in ['BANK_CUP','CLASICA','ETECSA']:continue
+ day=datetime.datetime.fromtimestamp(row['received_at']/1000,ZoneInfo('America/Havana')).strftime('%Y-%m-%d')
+ key=day+'|'+row['coin'];value=latencies.setdefault(key,{'delivery':[],'processing':[]})
+ try:
+  sent=datetime.datetime.fromisoformat(row['sent'].replace('Z','+00:00')).timestamp()*1000
+  value['delivery'].append(max(0,row['received_at']-sent))
+ except (ValueError,TypeError,AttributeError):pass
+ if row['processed_at']:value['processing'].append(max(0,row['processed_at']-row['received_at']))
+out['feedLatency']={k:{metric:summary(values) for metric,values in v.items()} for k,v in latencies.items()}
 # All commands below are read-only. Never collect environment variables, process
 # arguments, private keys, request bodies, or deployment secret files.
 import subprocess,shutil,os
@@ -50,6 +80,8 @@ out['inventory']={name:command(args) for name,args in {
  'kernel':['uname','-sr'],
  'release':['readlink','/opt/qvaapply/current'],
  'nginx':['nginx','-v'],
+ 'dockerInfo':['docker','info','--format','{{.ServerVersion}}|liveRestore={{.LiveRestoreEnabled}}'],
+ 'updatePlan':['apt-get','-s','install','--only-upgrade','docker-ce','docker-ce-cli','containerd.io','docker-compose-plugin','docker-buildx-plugin','docker-ce-rootless-extras'],
  'pendingUpdates':['apt','list','--upgradable'],
 }.items()}
 names=command(['docker','ps','--format','{{.Names}}']).get('stdout','').splitlines()
