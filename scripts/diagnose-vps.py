@@ -6,6 +6,9 @@ out={'now':now}
 def q(name,sql,args=()):
  try:out[name]=[dict(r) for r in c.execute(sql,args)]
  except Exception as e:out[name]={'error':str(e)}
+q('insightsSchema','SELECT max(version) AS version FROM schema_migrations')
+q('insightsHealth',"SELECT value FROM settings WHERE key='operational_health'")
+q('insightsHistory','SELECT coin,count(*) AS records FROM fiat_balance_history GROUP BY coin')
 q('cancellations',"select created_at,action,offer_uuid,detail from audit_log where created_at>? and (action like '%cancel%' or action like '%liquidity%' or action like '%restore%') order by id desc limit 100",(since,))
 q('monetary_cancels',"select created_at,kind,state,operation_uuid,json_extract(request_json,'$.liquidityPreparation') as preparation,error from mutation_intents where created_at>? and kind='cancel_offer' order by created_at desc limit 50",(since,))
 q('rejections',"select created_at,action,offer_uuid,detail from audit_log where created_at>? and action in ('automatic_apply_not_sent','qvapay_apply_rejected','market_feed_processing_error','market_fast_lane_warnings') order by id desc limit 70",(since,))
