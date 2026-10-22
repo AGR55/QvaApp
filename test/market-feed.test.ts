@@ -278,6 +278,43 @@ test("una consulta lenta de estado no retiene una nueva oportunidad del feed", a
   }
 });
 
+test("una oportunidad nueva ocupa un hueco libre sin esperar respuestas remotas", async () => {
+  const state = setup();
+  const started: string[] = [];
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const now = Date.parse("2026-09-24T12:00:10Z");
+  const coordinator = new MarketSourceCoordinator(state.store, new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl, async offer => { started.push(offer.uuid); await blocked; }, () => true, () => now,
+    { fetch: async () => new Response("retry: 60000\n\n", { status: 200 }), wait: async () => new Promise<void>(() => undefined) });
+  try {
+    enableRealtime(coordinator);
+    const submit = async (uuid: string, type: "buy" | "sell") => {
+      const value = payload(uuid);
+      value.data.type = type;
+      const raw = Buffer.from(JSON.stringify(value));
+      coordinator.acceptWebhook(raw, signed(raw, now));
+      await new Promise(resolve => setImmediate(resolve));
+    };
+    await submit("first-buy", "buy");
+    assert.deepEqual(started, ["first-buy"]);
+    await submit("second-sell", "sell");
+    assert.deepEqual(started, ["first-buy", "second-sell"]);
+    await submit("third-sell", "sell");
+    await submit("fourth-sell", "sell");
+    await submit("fifth-buy", "buy");
+    assert.deepEqual(started, ["first-buy", "second-sell", "third-sell"]);
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(started.length, 5);
+  } finally {
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    coordinator.stop(); state.store.close();
+  }
+});
+
 test("un evento aplicado en cola invalida la oportunidad antes de consumir apply", async () => {
   const state = setup();
   const opportunities: string[] = [];

@@ -25,6 +25,7 @@ export class MarketFeedRequestError extends Error {
 
 export class MarketSourceCoordinator implements MarketDataSource {
   private processing = false;
+  private wakeOpportunities?: () => void;
   private processingState = false;
   private recoveryRequested = false;
   private lastRecoveryPollAt = 0;
@@ -211,11 +212,22 @@ export class MarketSourceCoordinator implements MarketDataSource {
           processed = true;
           const payload = event.payload as { data?: { type?: string; uuid?: string } };
           const type = payload?.data?.type === "sell" ? "sell" : "buy";
-          const work = this.processEvent(event).finally(() => { active.delete(event.key); });
+          const work = this.processEvent(event).finally(() => {
+            active.delete(event.key);
+            this.wakeOpportunities?.();
+          });
           active.set(event.key, { type, uuid: payload.data?.uuid ?? "", work });
         }
         if (!active.size) break;
-        await Promise.race([...active.values()].map(job => job.work));
+        // New arrivals may use an idle lane while another HTTP request is
+        // outstanding. Keep the existing per-side and total concurrency limits.
+        await new Promise<void>(resolve => {
+          const wake = () => {
+            if (this.wakeOpportunities === wake) delete this.wakeOpportunities;
+            resolve();
+          };
+          this.wakeOpportunities = wake;
+        });
       }
     } finally {
       await Promise.allSettled([...active.values()].map(job => job.work));
@@ -320,7 +332,10 @@ export class MarketSourceCoordinator implements MarketDataSource {
           : `Evento ${payload.event} de oferta ${payload.data.uuid} (${payload.data.coin}) recibido por ${source} con la fuente ${this.mode()}.`,
         payload.data.uuid,
       );
-    if (queued && inserted) queueMicrotask(() => void this.processNext());
+    if (queued && inserted) {
+      if (isOpportunityEvent(payload.event)) this.wakeOpportunities?.();
+      queueMicrotask(() => void this.processNext());
+    }
     return { duplicate: !inserted, queued: queued && inserted };
   }
 
