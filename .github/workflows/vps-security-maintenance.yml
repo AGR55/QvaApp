@@ -1,0 +1,57 @@
+name: Controlled Docker security maintenance
+on:
+  workflow_dispatch:
+    inputs:
+      recipient_certificate:
+        description: Public PEM certificate for encrypting the diagnostic report
+        type: string
+        required: true
+permissions:
+  contents: read
+jobs:
+  maintain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    concurrency:
+      group: qvaapply-production
+      cancel-in-progress: false
+    environment: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure SSH and encryption recipient
+        env:
+          VPS_PRIVATE_KEY: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          DIAGNOSTIC_CERTIFICATE: ${{ inputs.recipient_certificate }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_PRIVATE_KEY"
+          test -n "$VPS_KNOWN_HOSTS"
+          umask 077
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$VPS_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          printf '%s\n' "$DIAGNOSTIC_CERTIFICATE" > recipient.pem
+          openssl x509 -in recipient.pem -noout
+      - name: Apply approved Docker update and encrypt the result
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_PORT: ${{ vars.VPS_SSH_PORT }}
+        run: |
+          set -euo pipefail
+          test -n "$VPS_HOST"
+          test -n "$VPS_USER"
+          ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 \
+            -p "${VPS_SSH_PORT:-22}" "${VPS_USER}@${VPS_HOST}" 'python3 -' \
+            < scripts/maintain-vps-security.py \
+            | openssl cms -encrypt -binary -aes-256-gcm -outform DER \
+                -out vps-maintenance.cms recipient.pem
+      - name: Upload encrypted report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: encrypted-vps-maintenance
+          path: vps-maintenance.cms
+          retention-days: 1
+          if-no-files-found: error
