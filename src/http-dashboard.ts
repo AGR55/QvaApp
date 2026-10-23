@@ -300,6 +300,41 @@ export function buildDashboard(
     if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
     return { data: typeof readModel.mobileMarkets === "function" ? readModel.mobileMarkets() : [] };
   });
+  app.get("/api/mobile/overview", async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: "Credencial de operador requerida o límite alcanzado." });
+    return { data: readModel.mobileOverview() };
+  });
+  app.get<{ Querystring: { kind: string; coin?: string; page?: number; days?: number } }>("/api/mobile/insights", {
+    schema: { querystring: { type: "object", additionalProperties: false, required: ["kind"], properties: {
+      kind: { type: "string", enum: ["health", "profitability", "history", "diagnostics"] },
+      coin: { type: "string", minLength: 1, maxLength: 50 }, page: { type: "integer", minimum: 1, maximum: 1000 },
+      days: { type: "integer", enum: [7, 30, 90] },
+    } } },
+  }, async (request, reply) => {
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: "Credencial de operador requerida o límite alcanzado." });
+    const { kind, coin, page, days } = request.query;
+    if ((kind === "history" || kind === "diagnostics") && (!coin || !readModel.mobileMarkets().some(m => m.code === coin)))
+      return reply.status(400).send({ error: "Selecciona un mercado configurado." });
+    if (kind === "health") return { data: readModel.operationalHealth() };
+    if (kind === "history") return { data: readModel.fiatHistory(coin!, page ?? 1) };
+    if (kind === "diagnostics") return { data: await readModel.opportunityDiagnostics(24, coin) };
+    // Project the small report rather than exposing archives or portfolio history.
+    return { data: readModel.mobileProfitability(days ?? 30) };
+  });
+  app.post<{ Body: PriceSimulationInput }>("/api/mobile/simulate", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["coin", "hours", "buyMaxRate", "sellMinRate", "maxQusd"], properties: {
+      coin: { type: "string", minLength: 1, maxLength: 50 }, hours: { type: "integer", enum: [1, 24, 168] },
+      buyMaxRate: { type: "number", exclusiveMinimum: 0, maximum: 1e9 }, sellMinRate: { type: "number", exclusiveMinimum: 0, maximum: 1e9 },
+      maxQusd: { type: "number", exclusiveMinimum: 0, maximum: 1e9 },
+    } } },
+  }, async (request, reply) => {
+    // Simulation is local and read-only even though its structured input uses POST.
+    const operator = mobileAuth(readModel, request, false);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: "Credencial de operador requerida o límite alcanzado." });
+    return { data: await clientAction(() => readModel.simulatePrices(request.body)) };
+  });
   app.get("/api/mobile/receipt-outcomes", async (request, reply) => {
     const operator = mobileAuth(readModel, request, false);
     if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
@@ -1191,7 +1226,8 @@ function requireJson(request: FastifyRequest): void {
 }
 
 function isMobileOperatorApi(path: string, method: string): boolean {
-  return (method === "GET" && ["/api/mobile/operator-check", "/api/mobile/operations", "/api/mobile/alerts", "/api/mobile/markets", "/api/mobile/receipt-outcomes"].includes(path)) ||
+  return (method === "GET" && ["/api/mobile/operator-check", "/api/mobile/operations", "/api/mobile/alerts", "/api/mobile/markets", "/api/mobile/receipt-outcomes", "/api/mobile/overview", "/api/mobile/insights"].includes(path)) ||
+    (method === "POST" && path === "/api/mobile/simulate") ||
     (method === "POST" && /^\/api\/mobile\/operations\/[^/]+\/(?:paid|received|cancel)$/.test(path));
 }
 
@@ -1252,6 +1288,9 @@ function openApiDocument() {
       "/api/trading-analytics": { get: { summary: "Consultar actividad, volumen y beneficio estimado del histórico local" } },
       "/api/analytics/fees": { get:{summary:"Compras completadas y evidencia de comisión"},post:{summary:"Registrar comisión analítica con evidencia y control de versión"} },
       "/api/hunting/simulate": { post:{summary:"Comparar precios localmente sin modificar cacerías"} },
+      "/api/mobile/overview": { get: {summary:"Resumen nativo de capital y cacerías desde la caché local",security:[{mobileOperator:[]}]} },
+      "/api/mobile/insights": { get: {summary:"Salud, rentabilidad acotada, historial y diagnóstico para Android",security:[{mobileOperator:[]}]} },
+      "/api/mobile/simulate": { post: {summary:"Simulación local de precios para operador móvil",security:[{mobileOperator:[]}]} },
       "/api/live/operations": { get: { summary: "Conciliar operaciones activas con QvaPay" } },
       "/api/operations/chats/unread": { get: { summary: "Contadores locales de chat por operación" } },
       "/api/operations/{uuid}/chat": {
@@ -1304,6 +1343,7 @@ function openApiDocument() {
     },
     components: {
       securitySchemes: {
+        mobileOperator: { type: "http", scheme: "bearer", description: "Token revocable de operador móvil; nunca la contraseña web." },
         sessionCookie: { type: "apiKey", in: "cookie", name: "qvaapply_session" },
         csrfToken: { type: "apiKey", in: "header", name: "x-csrf-token" },
       },

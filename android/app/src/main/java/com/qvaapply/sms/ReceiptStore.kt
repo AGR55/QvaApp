@@ -50,7 +50,7 @@ class ReceiptStore(context: Context) : SQLiteOpenHelper(context, "receipts.db", 
     }
 
     fun markSent(id: Long) { writableDatabase.execSQL("UPDATE receipts SET state='sent', last_error=NULL WHERE id=?", arrayOf(id)) }
-    fun markError(id: Long, error: String) { writableDatabase.execSQL("UPDATE receipts SET last_error=? WHERE id=?", arrayOf(error.take(300), id)) }
+    fun markError(id: Long, error: String) { writableDatabase.execSQL("UPDATE receipts SET last_error=? WHERE id=?", arrayOf<Any>(error.take(300), id)) }
     fun counts(): Pair<Int, Int> {
         readableDatabase.rawQuery("SELECT SUM(CASE WHEN state='pending' THEN 1 ELSE 0 END), SUM(CASE WHEN state='sent' THEN 1 ELSE 0 END) FROM receipts", null).use {
             if (it.moveToFirst()) return (if (it.isNull(0)) 0 else it.getInt(0)) to (if (it.isNull(1)) 0 else it.getInt(1))

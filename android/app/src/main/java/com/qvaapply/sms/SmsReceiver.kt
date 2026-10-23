@@ -17,7 +17,7 @@ class SmsReceiver : BroadcastReceiver() {
         Telephony.Sms.Intents.getMessagesFromIntent(intent).groupBy { it.originatingAddress.orEmpty() }.forEach { (sender, parts) ->
             val body = parts.joinToString("") { it.messageBody.orEmpty() }
             val receipt = ReceiptParser.parse(sender, body, receivedAt) ?: return@forEach
-            ReceiptStore(context).add(receipt)
+            ReceiptStore(context).use { it.add(receipt) }
             inserted = true
         }
         if (!inserted) return

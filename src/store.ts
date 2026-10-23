@@ -2302,6 +2302,27 @@ export class Store {
       .map((row) => ({ uuid: String(row.uuid), direction: String(row.direction), amount: Number(row.amount) }));
   }
 
+  mobileAnalyticsInputs(account: string, since: number) {
+    // Mobile reports have a hard work bound, independent of archive growth.
+    const limit = 1000;
+    const transactionRows = this.db.prepare(`SELECT payload_json FROM analytics_transactions
+      WHERE account_uuid=? AND created_at>=? ORDER BY created_at DESC,uuid DESC LIMIT ?`)
+      .all(account,since,limit+1) as {payload_json:string}[];
+    const transactions = transactionRows.slice(0,limit)
+      .flatMap(row=>{try{return [JSON.parse(row.payload_json) as AnalyticsTransaction];}catch{return [];}});
+    const offerRows = this.db.prepare(`SELECT payload_json FROM analytics_offers
+      WHERE account_uuid=? AND completed_at>=? ORDER BY completed_at DESC,uuid DESC LIMIT ?`)
+      .all(account,since,limit+1) as {payload_json:string}[];
+    const offers = offerRows.slice(0,limit)
+      .flatMap(row=>{try{return [JSON.parse(row.payload_json) as AnalyticsOffer];}catch{return [];}});
+    const selectedTransactions=transactions.slice(0,limit),selectedOffers=offers.slice(0,limit);
+    const ids=[...new Set([...selectedOffers.map(row=>row.uuid),...selectedTransactions.flatMap(row=>row.p2p?[row.p2p.uuid]:[])])];
+    const fiat:AnalyticsFiatMovement[]=ids.length ? this.db.prepare(`SELECT operation_uuid AS uuid,direction,amount FROM fiat_ledger
+      WHERE operation_uuid IN (${ids.map(()=>'?').join(',')})`).all(...ids)
+      .map(row=>({uuid:String(row.uuid),direction:String(row.direction),amount:Number(row.amount)})) : [];
+    return {transactions:selectedTransactions,offers:selectedOffers,fiat,limited:transactionRows.length>limit||offerRows.length>limit};
+  }
+
   fiatBalanceHistory(coin: string, page = 1, pageSize = 20) {
     page = Math.max(1, Math.min(1000, Math.trunc(page) || 1));
     pageSize = Math.max(1, Math.min(50, Math.trunc(pageSize) || 20));

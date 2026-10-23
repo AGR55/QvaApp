@@ -4,11 +4,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+kotlin {
+    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
+}
+
 val releaseKeyStore = System.getenv("QVAAPPLY_ANDROID_KEYSTORE_PATH")
 
 android {
     namespace = "com.qvaapply.sms"
     compileSdk = 35
+    buildFeatures { buildConfig = true }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -19,8 +24,8 @@ android {
         applicationId = "com.qvaapply.sms"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2"
+        versionCode = 4
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -35,6 +40,11 @@ android {
         }
         buildTypes.getByName("release").signingConfig = signingConfigs.getByName("privateRelease")
     }
+    buildTypes.getByName("release") {
+        isMinifyEnabled = true
+        isShrinkResources = true
+        proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
 }
 
 dependencies {
@@ -45,6 +55,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3:1.4.0")
     implementation("androidx.work:work-runtime-ktx:2.10.2")
-    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("androidx.security:security-crypto:1.1.0")
     testImplementation("junit:junit:4.13.2")
 }

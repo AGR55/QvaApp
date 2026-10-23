@@ -25,6 +25,8 @@ object MobileApi {
     private val uuidPattern = Regex("^[A-Za-z0-9_-]{1,100}$")
 
     fun get(baseUrl: String, token: String, path: String): ApiResponse<JSONObject> = request(baseUrl, token, path, "GET")
+    fun simulate(baseUrl: String, token: String, input: JSONObject): ApiResponse<JSONObject> =
+        request(baseUrl, token, "/api/mobile/simulate", "POST", input.toString()).let { it.copy(uncertain = false) }
 
     fun action(baseUrl: String, token: String, operationId: String, action: String, reference: String): ApiResponse<Unit> {
         if (!uuidPattern.matches(operationId) || action !in setOf("paid", "received", "cancel")) {
@@ -60,7 +62,10 @@ object MobileApi {
             val code = active.responseCode
             if (code == 204) return ApiResponse(JSONObject(), "__NO_CONTENT__")
             val responseText = (if (code in 200..299) active.inputStream else active.errorStream)
-                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                ?.bufferedReader(Charsets.UTF_8)?.use { reader ->
+                    val bounded = reader.readTextBounded(1_048_576)
+                    bounded
+                }.orEmpty()
             when {
                 code in 200..299 -> ApiResponse(JSONObject(responseText), "")
                 code == 401 -> ApiResponse(null, "Token de operador inválido o revocado.")
@@ -70,7 +75,9 @@ object MobileApi {
                     "Conflicto remoto (HTTP 409). Revisa el estado de la operación antes de volver a intentarlo.",
                     uncertain = true,
                 )
-                code in 400..499 -> ApiResponse(null, "El servidor rechazó la solicitud (HTTP $code).")
+                code in 400..499 -> ApiResponse(null,
+                    runCatching { JSONObject(responseText).optString("error").take(240) }.getOrNull()
+                        ?.takeIf { it.isNotBlank() } ?: "El servidor rechazó la solicitud (HTTP $code).")
                 else -> ApiResponse(null, "El servidor respondió HTTP $code.", uncertain = method == "POST")
             }
         } catch (_: Exception) {
@@ -79,4 +86,16 @@ object MobileApi {
             connection?.disconnect()
         }
     }
+}
+
+private fun java.io.Reader.readTextBounded(limit: Int): String {
+    val result = StringBuilder()
+    val buffer = CharArray(4096)
+    while (true) {
+        val count = read(buffer)
+        if (count < 0) break
+        if (result.length + count > limit) throw java.io.IOException("Respuesta demasiado grande")
+        result.append(buffer, 0, count)
+    }
+    return result.toString()
 }

@@ -6,7 +6,7 @@ Diseño aprobado el 23 de octubre de 2026 por el propietario.
 
 Evolucionar la aplicación nativa Compose existente. Inicio, Operaciones,
 Avisos y Ajustes con navegación flotante; Herramientas desde Inicio.
-Marca Preciso, tipografía jerárquica, verde profundo, marfil y acentos lima;
+Marca Preciso, tipografía jerárquica, azul Preciso, marfil y verde para estados;
 temas claro y oscuro. Transparencias limitadas a elementos de navegación,
 borde fino y profundidad discreta, sin desenfoques continuos costosos.
 Importes, estados y acciones conservan contraste y tamaño táctil adecuado.
@@ -53,3 +53,29 @@ con app cerrada siguen sin canal push verificado y se describen con honestidad.
 6. Compilar, ejecutar pruebas y emulador, corregir errores visuales/funcionales,
    medir APK y documentar límites. Generar APK firmada conservando la clave previa.
 7. Publicar backend compatible solo después de verificar; entregar APK y capturas.
+
+## Resultado verificado
+
+- Android 0.2.0 (4), Compose nativo, marca Preciso y temas Sistema/Claro/Oscuro.
+- Inicio, búsqueda/filtros y detalle con acciones separadas, Avisos priorizados,
+  Ajustes/SMS y siete herramientas locales. No cambia el motor de cacerías.
+- Capital/estado desde proyección ligera; rentabilidad móvil con un máximo de
+  1.000 ofertas y 1.000 transacciones, con aviso explícito de muestra parcial.
+  Historial paginado; diagnóstico/simulación limitados a 5.000 observaciones.
+- Caché de herramientas limitada a 24 entradas; se borra al cambiar vinculación.
+  Los helpers SQLite de SMS se cierran después de usarlos.
+- Security Crypto estable 1.1.0, exclusión de backup/transferencia, firma previa
+  conservada y R8 con reglas precisas para seis anotaciones opcionales de Tink.
+- `pnpm check` completo aprobado; contratos móviles comprueban permisos, CSRF,
+  proyecciones sin consultas remotas, límites y separación de cuentas.
+- 14 pruebas Android aprobadas y lint sin errores. APK debug y release compiladas.
+  Release: 1.575.186 bytes; firma válida y coincidente con la clave existente;
+  ninguna actividad ni fixture de vista previa en la distribución.
+- Emulador Android 16: temas claro/oscuro, texto al 130 %, búsqueda y filtros,
+  detalle, Avisos, Ajustes y Herramientas. Actualización de release conserva el
+  tema cifrado de la dependencia anterior. Arranque sin registros de crash.
+- No hay teléfono conectado. Quedan por validar en dispositivo físico el relay
+  SMS y una transacción controlada. No se promete push con la app cerrada.
+
+Referencias: [Android backup](https://developer.android.com/identity/data/autobackup)
+y [Security Crypto](https://developer.android.com/jetpack/androidx/releases/security).

@@ -5,10 +5,10 @@ import org.json.JSONObject
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
-class SecureSettings(context: Context) {
+class SecureSettings(context: Context, preferencesName: String = "device_settings") {
     private val prefs = EncryptedSharedPreferences.create(
         context,
-        "device_settings",
+        preferencesName,
         MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
@@ -16,9 +16,29 @@ class SecureSettings(context: Context) {
     var serverUrl: String get() = prefs.getString("server_url", "") ?: ""; set(v) = prefs.edit().putString("server_url", v.trim().trimEnd('/')).apply()
     var deviceToken: String get() = prefs.getString("device_token", "") ?: ""; set(v) = prefs.edit().putString("device_token", v.trim()).apply()
     var operatorToken: String get() = prefs.getString("operator_token", "") ?: ""; set(v) = prefs.edit().putString("operator_token", v.trim()).apply()
+    var theme: String get() = prefs.getString("theme", "system") ?: "system"; set(v) = prefs.edit().putString("theme", v).apply()
+
+    fun saveConnection(url: String, smsToken: String, operator: String): Boolean {
+        val cleanUrl = url.trim().trimEnd('/')
+        val changed = cleanUrl != serverUrl || operator.trim() != operatorToken
+        val edit = prefs.edit().putString("server_url", cleanUrl)
+            .putString("device_token", smsToken.trim()).putString("operator_token", operator.trim())
+        if (changed) {
+            prefs.all.keys.filter { it.startsWith("cache_") }.forEach { edit.remove(it) }
+        }
+        return edit.commit()
+    }
 
     fun cachedResponse(key: String): JSONObject? = prefs.getString("cache_$key", null)?.let { runCatching { JSONObject(it) }.getOrNull() }
-    fun saveCachedResponse(key: String, value: JSONObject) { prefs.edit().putString("cache_$key", value.toString()).apply() }
+    fun saveCachedResponse(key: String, value: JSONObject) {
+        val edit=prefs.edit().putString("cache_$key", value.toString())
+        if(key.startsWith("tool:")) {
+            prefs.all.keys.filter {it.startsWith("cache_tool:")&&it!="cache_$key"}
+                .sortedByDescending {name -> runCatching {JSONObject(prefs.getString(name,"{}")!!).optLong("savedAt")}.getOrDefault(0)}
+                .drop(23).forEach {edit.remove(it)}
+        }
+        edit.apply()
+    }
     fun cachedAt(): Long = prefs.getLong("cache_at", 0L)
     fun setCachedAt(value: Long) { prefs.edit().putLong("cache_at", value).apply() }
 

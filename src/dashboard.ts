@@ -228,6 +228,33 @@ export class DashboardReadModel {
   mobileOperations(limit: number) { return this.mobileOperator.operations(limit); }
   mobileAlerts() { return this.mobileOperator.alerts(); }
   mobileMarkets() { return this.mobileOperator.markets(); }
+  /** Native projections read the local store only; never call snapshot()/refresh*. */
+  mobileOverview() {
+    const state = this.trading.operationalState();
+    const config = this.marketConfig.current();
+    const strategy = this.trading.strategy();
+    const balance = this.store.loadRemoteResource<number>("balance");
+    return {
+      generatedAt: Date.now(), balance: balance?.data ?? null, balanceUpdatedAt: balance?.updatedAt ?? null,
+      paused: state.paused, hunting: config.hunting, activeOperations: state.active,
+      markets: config.markets.map(market => ({
+        code: market.code, label: market.label, currency: market.currency, active: market.active,
+        fiat: state.fiat[market.code] ?? 0, buyMaxRate: strategy.buyMax[market.code] ?? market.buyMaxRate,
+        sellMinRate: strategy.sellMin[market.code] ?? market.sellMinRate,
+        huntBuyEnabled: market.huntBuyEnabled, huntSellEnabled: market.huntSellEnabled,
+        outgoingTransferFee: market.outgoingTransferFee,
+      })),
+    };
+  }
+  mobileProfitability(days: number) {
+    if (![7,30,90].includes(days)) throw new Error("Periodo de análisis inválido.");
+    const now=Date.now(),account=this.store.get("analytics_account_uuid")??"";
+    const input=this.store.mobileAnalyticsInputs(account,now-365*86_400_000);
+    const report=buildTradingAnalytics({...input,accountUuid:account,fees:this.store.analyticsFees(account),
+      markets:this.marketConfig.publicMarkets(),days,now});
+    return {days:report.days,generatedAt:report.generatedAt,currencies:report.currencies,coverage:report.coverage,
+      limited:input.limited,note:input.limited?"Muestra parcial: como máximo 1.000 ofertas y 1.000 transacciones recientes. El coste anterior puede faltar; consulta Gráficas en la web para un historial más amplio.":"Calculado con el archivo local. Puede faltar historial pendiente de sincronizar."};
+  }
   mobileReceiptOutcomes() {
     return this.paymentSms.receipts().slice(0, 100).map((receipt) => ({
       id: receipt.id, status: receipt.state, receivedAt: receipt.receivedAt,

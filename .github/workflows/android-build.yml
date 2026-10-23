@@ -36,7 +36,7 @@ jobs:
 
       - name: Test and build debug APK
         working-directory: android
-        run: gradle --no-daemon :app:testDebugUnitTest :app:assembleDebug
+        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
       - name: Upload private-installation APK
         uses: actions/upload-artifact@v4
