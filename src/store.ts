@@ -20,7 +20,7 @@ import type {
   P2pType,
 } from "./types.js";
 
-const LATEST_SCHEMA_VERSION = 30;
+const LATEST_SCHEMA_VERSION = 31;
 
 export type PaymentReceiptState = "pending" | "processing" | "matched" | "review" | "failed" | "duplicate";
 export interface PaymentReceipt {
@@ -954,6 +954,23 @@ export class Store {
           CREATE INDEX IF NOT EXISTS idx_feed_simulation ON market_feed_events(received_at DESC,event_key DESC)
             WHERE event IN ('p2p.created','p2p.reopened','p2p.range_created','p2p.range_updated');`);
         this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (30, ?)").run(Date.now());
+      }
+      if (this.currentSchemaVersion() < 31) {
+        this.db.exec(`CREATE TABLE IF NOT EXISTS chat_threads (
+          id TEXT PRIMARY KEY, payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL);
+          CREATE INDEX IF NOT EXISTS idx_chat_threads_updated ON chat_threads(updated_at DESC);
+          CREATE INDEX IF NOT EXISTS idx_chat_threads_active ON chat_threads(
+            (json_extract(payload_json,'$.state') IN ('applied','acknowledged','processing','paid','revision')) DESC,updated_at DESC);
+          CREATE TABLE IF NOT EXISTS chat_push_devices (
+            operator_id TEXT PRIMARY KEY, token TEXT NOT NULL UNIQUE, updated_at INTEGER NOT NULL);
+          CREATE TABLE IF NOT EXISTS chat_push_events (
+            id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, payload_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL, next_attempt_at INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+            web_delivered INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0);
+          CREATE INDEX IF NOT EXISTS idx_chat_push_pending ON chat_push_events(done,next_attempt_at,created_at);
+          CREATE TABLE IF NOT EXISTS chat_push_deliveries (
+            event_id TEXT NOT NULL, device_hash TEXT NOT NULL, PRIMARY KEY(event_id,device_hash));`);
+        this.db.prepare("INSERT INTO schema_migrations(version, applied_at) VALUES (31, ?)").run(Date.now());
       }
       // Conserva las claves usadas por versiones anteriores durante la sustitución incremental.
       if (
@@ -2084,10 +2101,71 @@ export class Store {
     }
   }
 
+  chatTransaction<T>(action: () => T): T { return this.transaction(action); }
+
+  saveChatThread(id: string, payload: unknown, updatedAt: number): void {
+    this.db.prepare(`INSERT INTO chat_threads(id,payload_json,updated_at) VALUES(?,?,?)
+      ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json,updated_at=excluded.updated_at`)
+      .run(id, JSON.stringify(payload), updatedAt);
+  }
+  chatThreads<T>(limit = 300): T[] {
+    return (this.db.prepare(`SELECT payload_json FROM chat_threads ORDER BY
+      (json_extract(payload_json,'$.state') IN ('applied','acknowledged','processing','paid','revision')) DESC,updated_at DESC LIMIT ?`).all(limit) as {payload_json:string}[])
+      .flatMap(row => { try { return [JSON.parse(row.payload_json) as T]; } catch { return []; } });
+  }
+  chatThread<T>(id: string): T | undefined {
+    const row = this.db.prepare("SELECT payload_json FROM chat_threads WHERE id=?").get(id) as {payload_json:string}|undefined;
+    try { return row ? JSON.parse(row.payload_json) as T : undefined; } catch { return undefined; }
+  }
+  registerChatPushDevice(operatorId: string, token: string, now: number): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM chat_push_devices WHERE token=? AND operator_id<>?").run(token,operatorId);
+      this.db.prepare(`INSERT INTO chat_push_devices(operator_id,token,updated_at) VALUES(?,?,?)
+        ON CONFLICT(operator_id) DO UPDATE SET token=excluded.token,updated_at=excluded.updated_at`).run(operatorId,token,now);
+    });
+  }
+  removeChatPushDevice(operatorId: string): void { this.db.prepare("DELETE FROM chat_push_devices WHERE operator_id=?").run(operatorId); }
+  chatPushDevices(): {operatorId:string;token:string}[] {
+    return this.db.prepare("SELECT operator_id AS operatorId,token FROM chat_push_devices").all() as {operatorId:string;token:string}[];
+  }
+  enqueueChatPush(id:string, threadId:string, payload:unknown, now:number): void {
+    this.db.prepare("INSERT OR IGNORE INTO chat_push_events(id,thread_id,payload_json,created_at) VALUES(?,?,?,?)")
+      .run(id,threadId,JSON.stringify(payload),now);
+  }
+  pendingChatPush<T>(now:number): {id:string;threadId:string;payload:T;attempts:number;webDelivered:boolean}[] {
+    return (this.db.prepare(`SELECT * FROM chat_push_events WHERE done=0 AND next_attempt_at<=? ORDER BY created_at LIMIT 8`)
+      .all(now) as Record<string,unknown>[]).map(row=>({id:String(row.id),threadId:String(row.thread_id),payload:JSON.parse(String(row.payload_json)) as T,
+        attempts:Number(row.attempts),webDelivered:Boolean(row.web_delivered)}));
+  }
+  chatPushDelivered(id:string, hash:string): boolean {
+    return Boolean(this.db.prepare("SELECT 1 FROM chat_push_deliveries WHERE event_id=? AND device_hash=?").get(id,hash));
+  }
+  markChatPushDelivered(id:string, hash:string): void {
+    this.db.prepare("INSERT OR IGNORE INTO chat_push_deliveries(event_id,device_hash) VALUES(?,?)").run(id,hash);
+  }
+  finishChatPush(id:string, webDelivered:boolean, done:boolean, attempts:number, nextAttemptAt:number): void {
+    this.db.prepare("UPDATE chat_push_events SET web_delivered=?,done=?,attempts=?,next_attempt_at=? WHERE id=?")
+      .run(Number(webDelivered),Number(done),attempts,nextAttemptAt,id);
+  }
+  pruneChatData(olderThan:number): void {
+    this.transaction(()=>{
+      this.db.prepare("DELETE FROM chat_push_deliveries WHERE event_id IN (SELECT id FROM chat_push_events WHERE created_at<?)").run(olderThan);
+      this.db.prepare(`DELETE FROM settings WHERE key LIKE 'web_push:sent:chat:%' AND
+        EXISTS(SELECT 1 FROM chat_push_events WHERE created_at<? AND settings.key LIKE 'web_push:sent:chat:'||chat_push_events.id||':%')`).run(olderThan);
+      this.db.prepare("DELETE FROM chat_push_events WHERE created_at<?").run(olderThan);
+      this.db.prepare("DELETE FROM chat_threads WHERE updated_at<? AND json_extract(payload_json,'$.state') NOT IN ('applied','acknowledged','processing','paid','revision')").run(olderThan);
+    });
+  }
+
   pruneOperationChatCache(olderThan: number): number {
-    return this.db.prepare(
-      "DELETE FROM remote_resource_cache WHERE resource_key LIKE 'operation-chat:%' AND updated_at < ?",
-    ).run(olderThan).changes as number;
+    return this.transaction(()=>{
+      this.db.prepare(`DELETE FROM settings WHERE key IN (
+        SELECT 'operation-chat-read:'||substr(resource_key,16) FROM remote_resource_cache WHERE resource_key LIKE 'operation-chat:%' AND updated_at<?
+        UNION ALL SELECT 'operation-chat-unread:'||substr(resource_key,16) FROM remote_resource_cache WHERE resource_key LIKE 'operation-chat:%' AND updated_at<?
+        UNION ALL SELECT 'operation-chat-error:'||substr(resource_key,16) FROM remote_resource_cache WHERE resource_key LIKE 'operation-chat:%' AND updated_at<?)`)
+        .run(olderThan,olderThan,olderThan);
+      return this.db.prepare("DELETE FROM remote_resource_cache WHERE resource_key LIKE 'operation-chat:%' AND updated_at < ?").run(olderThan).changes as number;
+    });
   }
 
   recordFiatMovement(

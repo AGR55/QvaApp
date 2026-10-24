@@ -7,9 +7,7 @@ HTTPS; la interfaz conserva una copia cifrada de lectura y la identifica como
 desactualizada cuando no puede confirmar una actualización.
 
 Operaciones y avisos se consultan cada 5 segundos mientras la app está en primer
-plano. Los resultados de SMS se consultan aproximadamente cada 30 segundos. No
-hay un canal push de fondo verificado; no se garantiza la entrega de avisos con
-la app cerrada.
+plano. Los resultados de SMS se consultan aproximadamente cada 30 segundos. Los chats disponen de un canal push independiente mediante Firebase; su entrega depende de la conexión y los permisos de Android.
 
 ## Interfaz y herramientas
 
@@ -49,7 +47,7 @@ el APK de depuración y, en pushes a `main` o ejecuciones manuales, una release
 privada firmada con la clave guardada en los secretos del repositorio. Las
 solicitudes de cambio solo construyen la versión de depuración.
 
-La versión actual es 0.2.0 (`versionCode` 4). Las actualizaciones conservan las
+La versión actual es 0.3.0 (`versionCode` 5). Las actualizaciones conservan las
 preferencias cifradas y la cola SQLite al instalarse sobre la misma app con la
 misma firma. La copia local de la clave está en `android/.private-signing/`,
 excluida de Git; cambiarla puede impedir la actualización y obligar a reinstalar.
@@ -72,7 +70,7 @@ Para compilar una release local, define `QVAAPPLY_ANDROID_KEYSTORE_PATH` y
    consulta confirme el cambio.
 
 Comprueba primero con ejemplos sintéticos y luego con una transferencia real
-pequeña. La app se verifica en emulador Android 16; no se ha instalado ni validado en el Redmi. El flujo completo
+pequeña. La app se verifica en Android 16 y se actualiza en el Redmi conectado conservando su vinculación. El flujo completo
 con una transacción real requiere backend compatible y verificación controlada.
 
 ## Comprobantes SMS
@@ -118,3 +116,15 @@ Estos permisos no abren rutas de administración web. Las acciones monetarias
 conservan el alcance independiente de acciones y la intención durable anterior.
 Si además se envía una cookie web en un POST, siguen siendo necesarios Origin y
 CSRF. Nunca pruebes acciones reales usando los fixtures de depuración.
+
+## Conversaciones y notificaciones (0.3.0)
+
+El listado **Operaciones** reúne el registro del bot y el catálogo verificado de QvaPay. Identifica cada orden por separado y permite abrir su conversación desde el detalle. Las acciones monetarias se mantienen únicamente en operaciones gestionadas por el bot con coincidencia exacta de oferta y orden; las demás se gestionan en QvaPay.
+
+En **Operaciones → Mensajes** aparecen operaciones normales y cada orden por rango, propias y tomadas. Cada orden mantiene su historial, contador y borrador. El envío no se repite automáticamente si el resultado es incierto: actualiza y comprueba la conversación primero.
+
+Los avisos utilizan Firebase Cloud Messaging, no un servicio permanente del teléfono. Activa el permiso de notificaciones en esa sección. El aviso incluye remitente, texto y referencia, y abre la orden exacta. Se respeta la privacidad que tengas configurada en la pantalla bloqueada. Android puede impedir la entrega tras forzar la detención de una app; vuelve a abrirla para reactivar la recepción.
+
+La configuración pública `app/google-services.json` identifica el proyecto Firebase QvaApply. No contiene la credencial del servidor. La VPS requiere `QVAAPPLY_FCM_CREDENTIALS_FILE` apuntando al JSON protegido de una cuenta dedicada con rol `roles/firebasecloudmessaging.admin`. En el despliegue Docker puede guardarse como `/opt/qvaapply/data/fcm-service-account.json`, propietario 1000, modo 0400, y usar la ruta `/app/data/fcm-service-account.json`. No incorporar ese JSON a ningún artefacto, APK, repositorio o registro.
+
+El servidor conserva pendientes y entregas por dispositivo; revocar un operador elimina su registro push. La sincronización de chats tiene una cola propia, hasta ocho streams activos y consultas de respaldo acotadas. Ni las notificaciones ni la lectura de mensajes ejecutan movimientos de fiat o acciones de cacería.

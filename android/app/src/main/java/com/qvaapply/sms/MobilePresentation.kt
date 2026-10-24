@@ -13,7 +13,7 @@ internal fun dateLabel(value: String): String {
     return if(at>0) SimpleDateFormat("d MMM · HH:mm",Locale.forLanguageTag("es-CU")).format(Date(at)) else "Sin fecha"
 }
 internal fun statusLabel(status: String): String = when(status) {
-    "applied" -> "Pendiente"; "acknowledged" -> "En curso"; "paid" -> "Pago registrado"; "completed" -> "Completada"
+    "applied" -> "Pendiente"; "acknowledged" -> "En curso"; "processing" -> "En curso"; "paid" -> "Pago registrado"; "completed" -> "Completada"
     "cancelled", "canceled" -> "Cancelada"; "revision" -> "En revisión"; "disputed" -> "En disputa"; else -> "Estado: $status"
 }
 internal fun receiptStatus(status: String): String = when(status) {
@@ -36,6 +36,6 @@ internal fun filterOperations(operations: List<MobileOperation>, query: String, 
     val needle=query.trim().lowercase(Locale.ROOT)
     return operations.filter { op ->
         val matchesFilter=when(filter) { "Por atender" -> op.actions.isNotEmpty(); "Compras" -> op.side=="sell"; "Ventas" -> op.side=="buy"; else -> true }
-        matchesFilter && (needle.isBlank() || listOf(op.uuid,op.marketLabel,op.amount,op.receive,statusLabel(op.status)).any { it.lowercase(Locale.ROOT).contains(needle) })
+        matchesFilter && (needle.isBlank() || listOf(op.uuid,op.orderUuid.orEmpty(),op.marketLabel,op.amount,op.receive,statusLabel(op.status)).any { it.lowercase(Locale.ROOT).contains(needle) })
     }
 }

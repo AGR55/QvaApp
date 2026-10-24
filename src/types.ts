@@ -30,7 +30,7 @@ export interface P2pOrder {
   status: string;
   created_at?: string;
   updated_at?: string;
-  Taker?: { uuid: string };
+  Taker?: { uuid: string; username?: string; name?: string };
 }
 
 export interface P2pOffer {

@@ -1,6 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <application
@@ -11,6 +12,7 @@
         android:usesCleartextTraffic="false"
         android:theme="@style/AppTheme">
         <activity
+            android:launchMode="singleTop"
             android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
@@ -18,6 +20,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <service android:name=".ChatMessagingService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+        </service>
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
         <receiver
             android:name=".SmsReceiver"
             android:exported="true"

@@ -13,6 +13,7 @@ test-results/
 *.log
 android/.private-signing/
 android/.gradle/
+android/.kotlin/
 android/app/build/
 android/build/
 android/local.properties

@@ -1,3 +1,4 @@
+import type { ChatPushMessage } from "./chat-push.js";
 import webpush from "web-push";
 import { createHash } from "node:crypto";
 import type { TradingAlert } from "./store.js";
@@ -98,6 +99,12 @@ export class WebPushService {
       alert: { uuid: input.uuid, reason: input.reason },
       url: `/?view=ofertas&rebalance=${encodeURIComponent(input.uuid)}`,
     });
+  }
+
+  async notifyChat(message: ChatPushMessage): Promise<void> {
+    const reference = message.orderUuid ?? message.uuid;
+    await this.notify({id:message.id,version:`chat:${message.id}`,type:"chat-message",title:message.title,
+      body:`${message.body} · Ref. ${reference.slice(0,8)}`,url:`/?view=operaciones&chat=${encodeURIComponent(message.uuid)}${message.orderUuid ? `&order=${encodeURIComponent(message.orderUuid)}` : ""}`});
   }
 
   async notifyHealth(id: string, message: string): Promise<void> {

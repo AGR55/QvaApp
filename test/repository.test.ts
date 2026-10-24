@@ -28,7 +28,7 @@ const legacyRuntime = {
 test("versiona el esquema y cierra explícitamente SQLite", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "qvaapply-schema-version-"));
   const store = new Store(dataDir);
-  assert.equal(store.schemaVersion(), 30);
+  assert.equal(store.schemaVersion(), 31);
   store.close();
 });
 
@@ -396,7 +396,7 @@ test("crea un respaldo antes de migrar una base heredada", () => {
   const store = new Store(dataDir);
   const backups = readdirSync(join(dataDir, "backups"));
   assert.equal(backups.length, 1);
-  assert.match(backups[0]!, /^qvaapply-before-v30-.*\.sqlite$/);
+  assert.match(backups[0]!, /^qvaapply-before-v31-.*\.sqlite$/);
   assert.equal(store.get("paused"), "false");
   store.close();
 });
@@ -411,7 +411,7 @@ test("repara una base v12 registrada sin la tabla de reajustes", () => {
   db.close();
 
   const migrated = new Store(dataDir);
-  assert.equal(migrated.schemaVersion(), 30);
+  assert.equal(migrated.schemaVersion(), 31);
   const job = migrated.createRebalanceJob("repair-check", [], 1);
   assert.equal(job.id, "repair-check");
   migrated.close();

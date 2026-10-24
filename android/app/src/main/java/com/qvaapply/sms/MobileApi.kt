@@ -16,7 +16,12 @@ data class MobileOperation(
     val status: String,
     val createdAt: String,
     val actions: List<String>,
-)
+    val orderUuid: String? = null,
+    val role: String = "taker",
+    val chatAvailable: Boolean = false,
+) {
+    val id: String get() = "$uuid:${orderUuid ?: "fixed"}"
+}
 
 data class MobileAlert(val id: String, val type: String, val message: String, val createdAt: String, val operationUuid: String?)
 data class ApiResponse<T>(val value: T?, val message: String, val uncertain: Boolean = false)
@@ -25,6 +30,7 @@ object MobileApi {
     private val uuidPattern = Regex("^[A-Za-z0-9_-]{1,100}$")
 
     fun get(baseUrl: String, token: String, path: String): ApiResponse<JSONObject> = request(baseUrl, token, path, "GET")
+    fun post(baseUrl: String, token: String, path: String, payload: JSONObject): ApiResponse<JSONObject> = request(baseUrl, token, path, "POST", payload.toString())
     fun simulate(baseUrl: String, token: String, input: JSONObject): ApiResponse<JSONObject> =
         request(baseUrl, token, "/api/mobile/simulate", "POST", input.toString()).let { it.copy(uncertain = false) }
 

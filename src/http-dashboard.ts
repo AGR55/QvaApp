@@ -895,28 +895,49 @@ export function buildDashboard(
     data: await clientAction(() => readModel.reconcileWorkflow(request.params.workflowId)),
   }));
   app.get("/api/operations/chats/unread", async () => ({ data: readModel.operationChatUnread() }));
-  app.get<{ Params: { uuid: string }; Querystring: { fresh?: string } }>("/api/operations/:uuid/chat", {
-    schema: {
-      params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
-      querystring: { type: "object", properties: { fresh: { type: "string", enum: ["1"] } } },
-    },
-  }, async (request) => ({ data: request.query.fresh === "1"
-    ? await readModel.refreshOperationChat(request.params.uuid)
-    : readModel.readOperationChat(request.params.uuid) }));
-  app.post<{ Params: { uuid: string }; Body: { message: string } }>("/api/operations/:uuid/chat", {
-    schema: {
-      params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
-      body: { type: "object", additionalProperties: false, required: ["message"], properties: {
-        message: { type: "string", minLength: 1, maxLength: 599 },
-      } },
-    },
-  }, async (request, reply) => reply.status(201).send({ data: await readModel.sendOperationChat(request.params.uuid, request.body.message) }));
-  app.post<{ Params: { uuid: string }; Body: Record<string, never> }>("/api/operations/:uuid/chat/read", {
-    schema: {
-      params: { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 100 } } },
-      body: { type: "object", additionalProperties: false },
-    },
-  }, async (request) => ({ data: readModel.markOperationChatRead(request.params.uuid) }));
+  for (const prefix of ["/api/operations", "/api/mobile/operations"]) {
+    const mobile = prefix.includes("/mobile/");
+    const authorize = (request: FastifyRequest, write = false) => {
+      if (!mobile) return undefined;
+      const auth = mobileAuth(readModel, request, write);
+      if (!auth.ok) throw new DashboardAuthError(auth.rateLimited ? 429 : 401, "Operador móvil no autorizado.");
+      return auth;
+    };
+    app.get(`${prefix}/chats`, async request => { authorize(request); return { data: readModel.chatThreads() }; });
+    const params = { type: "object", required: ["uuid"], properties: { uuid: { type: "string", minLength: 1, maxLength: 64, pattern: "^[A-Za-z0-9_-]+$" } } };
+    const querystring = { type: "object", additionalProperties:false, properties: { fresh: { type: "string", enum: ["1"] }, order: {type:"string",minLength:1,maxLength:64,pattern:"^[A-Za-z0-9_-]+$"} } };
+    app.get<{Params:{uuid:string};Querystring:{fresh?:string;order?:string}}>(`${prefix}/:uuid/chat`, {schema:{params,querystring}}, async request => {
+      authorize(request);
+      return { data: request.query.fresh === "1" ? await readModel.refreshOperationChat(request.params.uuid,request.query.order)
+        : readModel.readOperationChat(request.params.uuid,request.query.order) };
+    });
+    app.post<{Params:{uuid:string};Querystring:{order?:string};Body:{message:string}}>(`${prefix}/:uuid/chat`, {
+      schema:{params,querystring,body:{type:"object",additionalProperties:false,required:["message"],properties:{message:{type:"string",minLength:1,maxLength:599}}}},
+    }, async(request,reply)=>{
+      authorize(request,true);
+      return reply.status(201).send({data:await readModel.sendOperationChat(request.params.uuid,request.body.message,request.query.order)});
+    });
+    app.post<{Params:{uuid:string};Querystring:{order?:string};Body:{ids?:string[]}}>(`${prefix}/:uuid/chat/read`, {
+      schema:{params,querystring,body:{type:"object",additionalProperties:false,properties:{ids:{type:"array",maxItems:100,items:{type:"string",maxLength:256}}}}},
+    }, async request=>{
+      authorize(request);
+      return {data:readModel.markOperationChatRead(request.params.uuid,request.query.order,request.body.ids)};
+    });
+  }
+  app.post<{Body:{token:string}}>("/api/mobile/push-device", {
+    schema:{body:{type:"object",additionalProperties:false,required:["token"],properties:{token:{type:"string",minLength:20,maxLength:4096,pattern:"^[A-Za-z0-9_:.-]+$"}}}},
+  }, async request=>{
+    const auth=mobileAuth(readModel,request,false);
+    if(!auth.ok || !auth.operatorId) throw new DashboardAuthError(401,"Operador móvil no autorizado.");
+    readModel.registerChatPushDevice(auth.operatorId,request.body.token);
+    return {ok:true,operatorId:auth.operatorId};
+  });
+  app.delete("/api/mobile/push-device", async request=>{
+    const auth=mobileAuth(readModel,request,false);
+    if(!auth.ok || !auth.operatorId) throw new DashboardAuthError(401,"Operador móvil no autorizado.");
+    readModel.removeChatPushDevice(auth.operatorId);
+    return {ok:true};
+  });
   app.post<{ Params: { uuid: string; action: string }; Body: { reference?: string } }>("/api/operations/:uuid/:action", {
     schema: {
       params: {
@@ -1185,7 +1206,7 @@ function serviceWorkerScript(): string {
     let payload = {};
     try { payload = event.data ? event.data.json() : {}; } catch {}
     const alert = payload.alert || {};
-    const title = payload.type === "system-health" || payload.type === "informational-summary" ? payload.title || "Actividad de QvaApply" : payload.type === "blocked-offer"
+    const title = payload.type === "chat-message" || payload.type === "system-health" || payload.type === "informational-summary" ? payload.title || "Actividad de QvaApply" : payload.type === "blocked-offer"
       ? "Oferta requiere revisión"
       : payload.type === "operation-applied"
         ? "Aplicación confirmada"
@@ -1194,7 +1215,7 @@ function serviceWorkerScript(): string {
           : payload.type === "rebalance-attention"
             ? "Reajuste requiere atención"
         : "Actividad de QvaApply";
-    const body = payload.type === "system-health" || payload.type === "informational-summary" ? payload.body || "Consulta el estado del bot." : [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
+    const body = payload.type === "chat-message" || payload.type === "system-health" || payload.type === "informational-summary" ? payload.body || "Consulta el estado del bot." : [alert.coin, alert.amount ? alert.amount + " QUSD" : "", alert.reason || ""].filter(Boolean).join(" · ");
     const url = payload.url || "/?view=auditoria";
     event.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
       const visible = clients.find((client) => client.visibilityState === "visible");
@@ -1226,7 +1247,10 @@ function requireJson(request: FastifyRequest): void {
 }
 
 function isMobileOperatorApi(path: string, method: string): boolean {
-  return (method === "GET" && ["/api/mobile/operator-check", "/api/mobile/operations", "/api/mobile/alerts", "/api/mobile/markets", "/api/mobile/receipt-outcomes", "/api/mobile/overview", "/api/mobile/insights"].includes(path)) ||
+  return ((method === "POST" || method === "DELETE") && path === "/api/mobile/push-device") ||
+    (method === "GET" && path === "/api/mobile/operations/chats") ||
+    (["GET", "POST"].includes(method) && /^\/api\/mobile\/operations\/[^/]+\/chat(?:\/read)?$/.test(path)) ||
+    (method === "GET" && ["/api/mobile/operator-check", "/api/mobile/operations", "/api/mobile/alerts", "/api/mobile/markets", "/api/mobile/receipt-outcomes", "/api/mobile/overview", "/api/mobile/insights"].includes(path)) ||
     (method === "POST" && path === "/api/mobile/simulate") ||
     (method === "POST" && /^\/api\/mobile\/operations\/[^/]+\/(?:paid|received|cancel)$/.test(path));
 }

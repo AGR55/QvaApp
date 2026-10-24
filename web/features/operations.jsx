@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, ArrowLeftRight, Bell, CheckCircle2, MessageSquareText, RefreshCcw, Workflow } from "lucide-react";
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
@@ -34,10 +34,15 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
   const [status, setStatus] = useState("");
   const [chatOperation, setChatOperation] = useState();
   const [chatUnread, setChatUnread] = useState({});
+  const [conversations, setConversations] = useState([]);
+  const openedDeepLink = useRef(false);
+  const [chatSearch, setChatSearch] = useState("");
   const refreshChatUnread = useCallback(async () => {
     try {
       const result = await requestJson("/api/operations/chats/unread", { timeoutMs: 10_000 });
       setChatUnread(result.data || {});
+      const catalog = await requestJson("/api/operations/chats", {timeoutMs:10000});
+      setConversations(catalog.data || []);
     } catch { /* La tabla conserva el último contador conocido. */ }
   }, []);
   useEffect(() => {
@@ -47,6 +52,13 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [refreshChatUnread]);
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search);
+    const uuid = query.get("chat"), order = query.get("order");
+    if (!uuid || openedDeepLink.current) return;
+    const target = conversations.find(item => item.uuid === uuid && (item.orderUuid || "") === (order || ""));
+    if (target) { openedDeepLink.current=true; setChatOperation(target); }
+  }, [conversations]);
   const closePending = useCallback(() => setPending(undefined), []);
   const run = async (path, body = {}) => {
     setStatus("Enviando acción…");
@@ -80,6 +92,20 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
             ))}
           </ol>
         ) : <Empty title="Sin avisos pendientes" icon={Bell}>Los avisos de tus operaciones aparecerán aquí.</Empty>}
+      </Panel>
+      <Panel title="Conversaciones y órdenes" wide>
+        <Field label="Buscar conversación"><Input value={chatSearch} onChange={event=>setChatSearch(event.target.value)} placeholder="Mercado, contraparte, oferta u orden…" /></Field>
+        {conversations.length ? <ol className="operation-notifications">
+          {conversations.filter(item=>`${item.uuid} ${item.orderUuid||""} ${item.coin} ${label(item.coin)} ${item.counterpartyLabel||""}`.toLowerCase().includes(chatSearch.toLowerCase())).map(item=>(
+            <li key={item.id}>
+              <div><strong>{item.counterpartyLabel || "Contraparte"} · {label(item.coin)}</strong>
+                <p>{money(item.amount)} QUSD · {item.role === "creator" ? "Tu oferta" : "Oferta tomada"} · {item.state}</p>
+                <small>Oferta {item.uuid.slice(0,8)}{item.orderUuid ? ` · Orden ${item.orderUuid.slice(0,8)}` : " · Operación normal"}</small>
+              </div>
+              <Button type="button" variant="outline" onClick={()=>setChatOperation(item)}><MessageSquareText aria-hidden="true" /> Abrir chat{item.unreadCount ? ` · ${item.unreadCount} sin leer` : ""}</Button>
+            </li>
+          ))}
+        </ol> : <Empty title="Sin conversaciones todavía" icon={MessageSquareText}>Las operaciones normales y cada orden por rango aparecerán al sincronizar tu cuenta.</Empty>}
       </Panel>
       {(data.recoveryNoticeCount ?? Number(data.risk.usage.unresolvedMutation)) > 0 ? (
         <div className="alert" role="alert">
@@ -132,7 +158,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
         </Panel>
       </div>
       <MobileSmsPanel />
-      <OperationChatSheet operation={chatOperation} label={label} onUnreadChange={refreshChatUnread} onClose={() => setChatOperation(undefined)} />
+      <OperationChatSheet key={chatOperation?.id || `${chatOperation?.uuid}:${chatOperation?.orderUuid || "fixed"}`} operation={chatOperation} label={label} onUnreadChange={refreshChatUnread} onClose={() => setChatOperation(undefined)} />
       {status ? <p className="detail" role="status" aria-live="polite">{status}</p> : null}
       <Dialog open={Boolean(pending)} onOpenChange={(open) => !open && closePending()}>
         {pending ? (

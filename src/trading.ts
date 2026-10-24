@@ -1,3 +1,4 @@
+import { ChatCatalog } from "./chat-catalog.js";
 import { huntingRequirementReason } from "./hunting-requirements.js";
 import type { config as Config } from "./config.js";
 import { randomUUID } from "node:crypto";
@@ -2317,6 +2318,8 @@ export class TradingEngine {
     for (const offer of [...created.offers, ...asPeer.offers])
       offers.set(offer.uuid, offer);
     await this.hydrateFlexibleFiatOffers(offers);
+    try { new ChatCatalog(this.store).discover(offers.values(), profile.uuid); }
+    catch { this.store.audit("chat_catalog_sync_failed", "No se pudo actualizar el catálogo de chats; continúa la conciliación de fiat."); }
     let movements = 0;
     for (const offer of offers.values()) {
       if (offer.offer_kind === "flexible") {

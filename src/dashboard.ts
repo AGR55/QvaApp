@@ -164,7 +164,8 @@ export class DashboardReadModel {
       (market) => marketConfig.current().markets.find((item) => item.code === market)?.currency,
     );
     this.mobileOperator = new MobileOperatorService(store, {
-      operations: () => store.visibleOperations(),
+      operations: () => store.visibleOperations(300),
+      threads: () => this.operationChat.threads(),
       alerts: () => this.notifications(),
       markets: () => this.marketConfig.publicMarkets(),
       markPaid: (uuid, reference) => trading.markPaid(uuid, reference),
@@ -224,7 +225,7 @@ export class DashboardReadModel {
   pairMobileOperator(label: string) { return this.mobileOperator.pair(label); }
   checkMobileOperator(token: string, write = false) { return this.mobileOperator.check(token, write); }
   mobileOperators() { return this.mobileOperator.list(); }
-  revokeMobileOperator(id: string) { return this.mobileOperator.revoke(id); }
+  revokeMobileOperator(id: string) { this.store.removeChatPushDevice(id); return this.mobileOperator.revoke(id); }
   mobileOperations(limit: number) { return this.mobileOperator.operations(limit); }
   mobileAlerts() { return this.mobileOperator.alerts(); }
   mobileMarkets() { return this.mobileOperator.markets(); }
@@ -264,11 +265,18 @@ export class DashboardReadModel {
   mobileOperationAction(operatorId: string, uuid: string, action: "paid" | "received" | "cancel", reference?: string) {
     return this.mobileOperator.act(operatorId, uuid, action, reference);
   }
-  readOperationChat(uuid: string) { return this.operationChat.read(uuid); }
-  refreshOperationChat(uuid: string) { return this.operationChat.refresh(uuid); }
-  sendOperationChat(uuid: string, message: string) { return this.operationChat.send(uuid, message); }
-  markOperationChatRead(uuid: string) { return this.operationChat.markRead(uuid); }
+  chatThreads() {
+    const markets = new Map(this.marketConfig.publicMarkets().map(market=>[market.code,market]));
+    return this.operationChat.threads().map(thread=>({...thread,marketLabel:markets.get(thread.coin)?.label??thread.coin,currency:markets.get(thread.coin)?.currency??""}));
+  }
+  registerChatPushDevice(operatorId:string, token:string) { this.store.registerChatPushDevice(operatorId, token, Date.now()); }
+  removeChatPushDevice(operatorId:string) { this.store.removeChatPushDevice(operatorId); }
+  readOperationChat(uuid: string, order?:string) { return this.operationChat.read(uuid, order); }
+  refreshOperationChat(uuid: string, order?:string) { return this.operationChat.refresh(uuid, order); }
+  sendOperationChat(uuid: string, message: string, order?:string) { return this.operationChat.send(uuid, message, order); }
+  markOperationChatRead(uuid: string, order?:string, ids?:string[]) { return this.operationChat.markRead(uuid, order, ids); }
   operationChatUnread() { return this.operationChat.unreadCounts(); }
+  stopOperationChats() { this.operationChat.close(); }
   syncOperationChats() { return this.operationChat.syncActive(); }
 
   pairSmsDevice(label: string) { return this.paymentSms.pairDevice(label); }

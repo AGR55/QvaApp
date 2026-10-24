@@ -1,3 +1,4 @@
+import { FirebaseChatPush, ChatPushDispatcher } from "./chat-push.js";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { installTelegramRecovery } from "./telegram-recovery.js";
 import { SelfServiceRecovery } from "./self-service-recovery.js";
@@ -522,7 +523,16 @@ scheduler.register("scan", 250, async () => {
 scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );
-scheduler.register("operation_chat", 15_000, () => dashboardReadModel.syncOperationChats());
+// Native/web delivery has its own worker; failures never await the hunting loop.
+let firebaseChatPush: FirebaseChatPush | undefined;
+if (process.env.QVAAPPLY_FCM_CREDENTIALS_FILE) {
+  try { firebaseChatPush = new FirebaseChatPush(process.env.QVAAPPLY_FCM_CREDENTIALS_FILE); }
+  catch { store.audit("chat_push_config_error", "No se pudo cargar la credencial de notificaciones Android."); }
+}
+const chatPush = new ChatPushDispatcher(store, {native:firebaseChatPush,web:webPush,
+  operatorActive:id=>dashboardReadModel.mobileOperators().some(operator=>operator.id===id && operator.revokedAt===null)});
+scheduler.register("chat_push", 2000, () => chatPush.drain());
+scheduler.register("operation_chat", 5_000, () => dashboardReadModel.syncOperationChats());
 scheduler.register("mutation_reconcile", 60_000, () =>
   trading.reconcilePendingStandaloneMutations().then(() => undefined),
 );
@@ -1633,6 +1643,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   stopping = true;
   console.log(`Cerrando QvaApply (${signal})...`);
   scheduler.stop();
+  dashboardReadModel.stopOperationChats();
   await cooperativeHunter.stop();
   marketSource.stop();
   if (pollingRetry) clearTimeout(pollingRetry);

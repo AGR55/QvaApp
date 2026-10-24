@@ -1,10 +1,11 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { ChatThread } from "./chat-catalog.js";
 
 export type MobileOperatorScope = "read" | "actions";
 type OperatorRecord = { id: string; label: string; tokenHash: string; scopes: MobileOperatorScope[]; createdAt: number; revokedAt: number | null; readRateWindowAt?: number; readRateCount?: number; writeRateWindowAt?: number; writeRateCount?: number };
 export type MobileOperator = Omit<OperatorRecord, "tokenHash" | "readRateWindowAt" | "readRateCount" | "writeRateWindowAt" | "writeRateCount">;
 type Storage = { get(key: string): string | undefined; set(key: string, value: string): void; audit(action: string, detail: string, uuid?: string): void };
-type Operation = { uuid: string; offerType: string; coin: string; amount: number; receive: number; rate: number; state: string; createdAt: number };
+type Operation = { uuid: string; orderUuid?: string | undefined; offerType: string; coin: string; amount: number; receive: number; rate: number; state: string; createdAt: number };
 
 const KEY = "mobile_operators_v1";
 const digest = (token: string) => createHash("sha256").update(token).digest("hex");
@@ -14,6 +15,7 @@ export class MobileOperatorService {
     private readonly storage: Storage,
     private readonly dependencies: {
       operations: () => Operation[];
+      threads?: () => ChatThread[];
       alerts: () => { id: string; type: string; message: string; createdAt: number; operationUuid?: string }[];
       markets: () => { code: string; label: string; currency: string }[];
       markPaid: (uuid: string, reference: string) => Promise<void>;
@@ -76,12 +78,34 @@ export class MobileOperatorService {
 
   operations(limit: number) {
     const markets = new Map(this.dependencies.markets().map((market) => [market.code, market]));
-    return this.dependencies.operations().slice(0, limit).map((operation) => {
+    const local = this.dependencies.operations();
+    const key = (op: { uuid: string; orderUuid?: string | undefined }) => `${op.uuid}:${op.orderUuid ?? "fixed"}`;
+    const managed = new Map(local.map(operation => [key(operation), operation]));
+    const merged = new Map<string, Operation & { role: "creator" | "taker"; chatAvailable: boolean }>();
+    for (const thread of this.dependencies.threads?.() ?? []) {
+      // The public side retains the existing mobile convention (side of the
+      // offer taken). Creators have the opposite financial role to takers.
+      merged.set(thread.id, { uuid: thread.uuid, orderUuid: thread.orderUuid,
+        offerType: thread.role === "creator" ? thread.offerType === "buy" ? "sell" : "buy" : thread.offerType,
+        coin: thread.coin, amount: thread.amount, receive: thread.receive,
+        rate: thread.amount > 0 ? thread.receive / thread.amount : 0,
+        state: thread.state, createdAt: thread.createdAt || thread.discoveredAt,
+        role: thread.role, chatAvailable: true });
+    }
+    for (const operation of local) {
+      const existing = merged.get(key(operation));
+      merged.set(key(operation), { ...operation, role: existing?.role ?? "taker", chatAvailable: true });
+    }
+    const active = new Set(["applied", "acknowledged", "processing", "paid", "revision"]);
+    const operations = [...merged.values()].sort((a,b) => Number(active.has(b.state))-Number(active.has(a.state)) || b.createdAt-a.createdAt);
+    // Retain the established ordering for callers without a remote catalog.
+    const ordered = this.dependencies.threads ? operations : [...merged.values()];
+    return ordered.slice(0, limit).map((operation) => {
       const market = markets.get(operation.coin);
       const actions = operation.offerType === "buy"
         ? ["applied", "acknowledged", "paid"].includes(operation.state) ? ["received", ...(operation.state === "applied" || operation.state === "acknowledged" ? ["cancel"] : [])] : []
         : operation.state === "applied" || operation.state === "acknowledged" ? ["paid", "cancel"] : [];
-      return { uuid: operation.uuid, side: operation.offerType, market: operation.coin, marketLabel: market?.label ?? operation.coin, currency: market?.currency ?? "", amount: operation.amount, receive: operation.receive, rate: operation.rate, status: operation.state, createdAt: operation.createdAt, actions };
+      return { id: key(operation), uuid: operation.uuid, orderUuid: operation.orderUuid, role: operation.role, chatAvailable: operation.chatAvailable, side: operation.offerType, market: operation.coin, marketLabel: market?.label ?? operation.coin, currency: market?.currency ?? "", amount: operation.amount, receive: operation.receive, rate: operation.rate, status: operation.state, createdAt: operation.createdAt, actions: managed.has(key(operation)) ? actions : [] };
     });
   }
   alerts() {

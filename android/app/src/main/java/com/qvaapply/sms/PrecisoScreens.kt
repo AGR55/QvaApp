@@ -47,7 +47,7 @@ internal fun PrecisoNavigation(selected: Destination, onSelect: (Destination) ->
         border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=0.65f)),shadowElevation=10.dp) {
         Row(Modifier.padding(6.dp),horizontalArrangement=Arrangement.SpaceEvenly) {
             listOf(Destination.Home,Destination.Operations,Destination.Alerts,Destination.Settings).forEach { item ->
-                val active = selected == item || (selected == Destination.Tools && item == Destination.Home)
+                val active = selected == item || (selected == Destination.Tools && item == Destination.Home) || (selected == Destination.Chats && item == Destination.Operations)
                 val tint = if(active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(24.dp))
                     .background(if(active) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
@@ -147,7 +147,7 @@ internal fun HomeScreen(operations: List<MobileOperation>, alerts: List<MobileAl
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun OperationsScreen(operations: List<MobileOperation>, settings: SecureSettings, stale: Boolean, busy: Boolean, message: String,
-    onRefresh: () -> Unit, onAction: (MobileOperation,String) -> Unit) {
+    onRefresh: () -> Unit, onAction: (MobileOperation,String) -> Unit, onChats: (() -> Unit)? = null, onChat: ((MobileOperation) -> Unit)? = null) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableStateOf("Todas") }
     var detailId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -155,6 +155,7 @@ internal fun OperationsScreen(operations: List<MobileOperation>, settings: Secur
     val context=androidx.compose.ui.platform.LocalContext.current
     LazyColumn(contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
         item { SectionHeading("Cada movimiento cuenta", "Operaciones", "Pagos, recepciones y seguimiento.") }
+        if(onChats!=null) item { FilledTonalButton(onClick=onChats,modifier=Modifier.fillMaxWidth()) { Text("Mensajes · Operaciones normales y órdenes") } }
         item { OutlinedTextField(query,{query=it},modifier=Modifier.fillMaxWidth(),label={Text("Buscar mercado, importe o ID")},singleLine=true,shape=RoundedCornerShape(18.dp)) }
         item { Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
             listOf("Todas","Por atender","Compras","Ventas").forEach { label -> FilterChip(selected=filter==label,onClick={filter=label},label={Text(label)}) }
@@ -165,8 +166,8 @@ internal fun OperationsScreen(operations: List<MobileOperation>, settings: Secur
         } }
         if(message.isNotBlank()) item { Text(message,color=MaterialTheme.colorScheme.primary,style=MaterialTheme.typography.bodyMedium) }
         if(visible.isEmpty()) item { EmptyState(if(query.isNotBlank()||filter!="Todas") "No hay coincidencias" else "Nada por aquí todavía",if(stale) "Actualiza la conexión para consultar tus operaciones." else "Las operaciones aparecerán aquí cuando estén disponibles.") }
-        items(visible,key={it.uuid}) { op ->
-            PrecisoPanel(Modifier.clickable { detailId=op.uuid }) {
+        items(visible,key={it.id}) { op ->
+            PrecisoPanel(Modifier.clickable { detailId=op.id }) {
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween,verticalAlignment=Alignment.CenterVertically) {
                     Text(op.marketLabel,style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
                     StatusPill(statusLabel(op.status))
@@ -178,13 +179,13 @@ internal fun OperationsScreen(operations: List<MobileOperation>, settings: Secur
                 }
                 HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant)
                 Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                    Text(op.uuid.take(8),style=MaterialTheme.typography.labelSmall,fontFamily=FontFamily.Monospace)
+                    Text(op.orderUuid?.let { "Orden ${it.take(8)}" } ?: op.uuid.take(8),style=MaterialTheme.typography.labelSmall,fontFamily=FontFamily.Monospace)
                     Text(if(op.actions.isNotEmpty()) "Requiere atención →" else "Ver detalle →",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
                 }
             }
         }
     }
-    val detail=operations.firstOrNull { it.uuid==detailId }
+    val detail=operations.firstOrNull { it.id==detailId }
     if(detail!=null) ModalBottomSheet(onDismissRequest={detailId=null},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),containerColor=MaterialTheme.colorScheme.surface) {
         Column(Modifier.fillMaxWidth().verticalScrollCompat().padding(start=24.dp,end=24.dp,bottom=32.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
             SectionHeading(detail.marketLabel, "${money(detail.amount)} QUSD",if(detail.side=="sell") "Compra de QUSD" else "Venta de QUSD")
@@ -192,6 +193,9 @@ internal fun OperationsScreen(operations: List<MobileOperation>, settings: Secur
             DetailRow("Tasa",money(detail.rate))
             DetailRow("Estado",statusLabel(detail.status))
             DetailRow("Creada",dateLabel(detail.createdAt))
+            DetailRow("Origen",if(detail.role=="creator") "Tu oferta" else "Oferta tomada")
+            detail.orderUuid?.let { DetailRow("Orden",it) }
+            if(detail.chatAvailable && onChat!=null) Button(onClick={ detailId=null; onChat(detail) },modifier=Modifier.fillMaxWidth()) { Text("Abrir conversación") }
             Text(detail.uuid,style=MaterialTheme.typography.bodySmall,fontFamily=FontFamily.Monospace)
             OutlinedButton(onClick={ (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ID de operación",detail.uuid)) },modifier=Modifier.fillMaxWidth()) { Text("Copiar ID de operación") }
             if(stale) Text("Actualiza la conexión antes de realizar una acción.",color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)
@@ -223,7 +227,7 @@ internal fun AlertsScreen(alerts: List<MobileAlert>, receipts: List<JSONObject>,
             Text(receipt.optString("reason").ifBlank { "El servidor recibió el comprobante." },style=MaterialTheme.typography.bodyMedium)
             Text(dateLabel(receipt.optString("receivedAt")),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
         } }
-        item { Text("Los avisos se actualizan con la aplicación abierta. La entrega con la app cerrada aún no está disponible.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Los avisos se actualizan con la aplicación abierta. Los chats tienen avisos push independientes; actívalos desde Mensajes.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 

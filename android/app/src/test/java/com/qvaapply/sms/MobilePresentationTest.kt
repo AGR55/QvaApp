@@ -28,4 +28,10 @@ class MobilePresentationTest {
         assertEquals("Pago registrado",statusLabel("paid"))
         assertEquals("Completada",statusLabel("completed"))
     }
+    @Test fun siblingOrdersHaveIndependentIdentityAndSearch() {
+        val first=operation("parent","sell",emptyList()).copy(orderUuid="order-one",role="creator",chatAvailable=true)
+        val second=first.copy(orderUuid="order-two")
+        assertNotEquals(first.id,second.id)
+        assertEquals(listOf(second),filterOperations(listOf(first,second),"order-two","Todas"))
+    }
 }

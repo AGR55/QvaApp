@@ -33,3 +33,28 @@ test("chat web exige sesión, CSRF y una operación autorizada", async () => {
     assert.equal((await app.inject({ method: "POST", url: "/api/operations/offer/chat/read", headers, payload: {} })).statusCode, 200);
   } finally { await app.close(); }
 });
+
+test("Android exige Bearer y conserva el ID de orden en lectura, envío y lectura visible",async()=>{
+ const calls:unknown[]=[];const token="a".repeat(48);
+ const readModel={
+  checkMobileOperator:(value:string)=>value===token?{ok:true,operatorId:"device"}:{ok:false},
+  chatThreads:()=>[{id:"parent:order",uuid:"parent",orderUuid:"order"}],
+  readOperationChat:(uuid:string,order?:string)=>{calls.push(["read",uuid,order]);return {messages:[]};},
+  sendOperationChat:async(uuid:string,message:string,order?:string)=>{calls.push(["send",uuid,order,message]);return {chat:{messages:[]}};},
+  markOperationChatRead:(uuid:string,order?:string,ids?:string[])=>{calls.push(["seen",uuid,order,ids]);return {messages:[]};},
+  registerChatPushDevice:(id:string,push:string)=>calls.push(["push",id,push]),
+ };
+ const app=buildDashboard(readModel as never,{password:"clave-muy-larga-y-segura",trustedOrigin:"http://127.0.0.1:3000"});
+ try {
+  const path="/api/mobile/operations/parent/chat?order=order";
+  assert.equal((await app.inject({url:path})).statusCode,401);
+  const headers={authorization:`Bearer ${token}`,"content-type":"application/json"};
+  assert.equal((await app.inject({url:path,headers})).statusCode,200);
+  assert.equal((await app.inject({url:path,method:"POST",headers,payload:{message:"Hola"}})).statusCode,201);
+  assert.equal((await app.inject({url:"/api/mobile/operations/parent/chat/read?order=order",method:"POST",headers,payload:{ids:["visible"]}})).statusCode,200);
+  assert.equal((await app.inject({url:"/api/mobile/operations/chats",headers})).json().data[0].orderUuid,"order");
+  assert.equal((await app.inject({url:"/api/mobile/push-device",method:"POST",headers,payload:{token:"test-firebase-token-123456789"}})).statusCode,200);
+  assert.deepEqual(calls.slice(0,3),[["read","parent","order"],["send","parent","order","Hola"],["seen","parent","order",["visible"]]]);
+  assert.deepEqual(calls[3],["push","device","test-firebase-token-123456789"]);
+ }finally{await app.close();}
+});

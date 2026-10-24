@@ -149,6 +149,11 @@ const previewChatMessages = [
 ];
 const previewChatView = () => ({ uuid: "op-demo-01", messages: previewChatMessages, updatedAt: Date.now(), stale: false, unreadCount: previewChatRead ? 0 : 1 });
 const model = {
+  chatThreads: () => [
+    {id:"op-demo-01:fixed",uuid:"op-demo-01",coin:"BANK_CUP",amount:10,receive:9300,offerType:"sell",role:"taker",state:"applied",counterpartyLabel:"Alex",unreadCount:previewChatRead?0:1},
+    {id:"range-demo:range-order-one",uuid:"range-demo",orderUuid:"range-order-one",coin:"CLASICA",amount:25,receive:27.25,offerType:"buy",role:"creator",state:"paid",counterpartyLabel:"Marta",unreadCount:2},
+    {id:"range-demo:range-order-two",uuid:"range-demo",orderUuid:"range-order-two",coin:"CLASICA",amount:12,receive:13.08,offerType:"buy",role:"creator",state:"processing",counterpartyLabel:"Luis",unreadCount:0},
+  ],
   operationChatUnread: () => ({ "op-demo-01": previewChatRead ? 0 : 1 }),
   readOperationChat: () => previewChatView(),
   refreshOperationChat: async () => previewChatView(),

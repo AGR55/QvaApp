@@ -6,7 +6,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/s
 import { requestJson } from "../lib/http.js";
 import { money } from "../lib/format.js";
 
-const chatPath = (uuid) => `/api/operations/${encodeURIComponent(uuid)}/chat`;
+const chatPath = (uuid, order, action = "", fresh = false) => {
+  const query = new URLSearchParams();
+  if (order) query.set("order", order);
+  if (fresh) query.set("fresh", "1");
+  return `/api/operations/${encodeURIComponent(uuid)}/chat${action}${query.size ? `?${query}` : ""}`;
+};
 
 export function OperationChatSheet({ operation, label, onUnreadChange, onClose }) {
   const [chat, setChat] = useState();
@@ -16,6 +21,7 @@ export function OperationChatSheet({ operation, label, onUnreadChange, onClose }
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const uuid = operation?.uuid;
+  const order = operation?.orderUuid;
 
   useEffect(() => {
     if (!uuid) return undefined;
@@ -28,13 +34,13 @@ export function OperationChatSheet({ operation, label, onUnreadChange, onClose }
       if (!active) return;
       if (fresh) setLoading(true);
       try {
-        const result = await requestJson(`${chatPath(uuid)}${fresh ? "?fresh=1" : ""}`, { timeoutMs: fresh ? 25_000 : 10_000 });
+        const result = await requestJson(chatPath(uuid, order, "", fresh), { timeoutMs: fresh ? 25_000 : 10_000 });
         if (!active) return;
         setChat(result.data);
         setError("");
         if (result.data.unreadCount) {
-          const read = await requestJson(`${chatPath(uuid)}/read`, {
-            method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+          const read = await requestJson(chatPath(uuid, order, "/read"), {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ids: result.data.messages.map(message => message.id)}),
           });
           if (active) { setChat(read.data); onUnreadChange?.(); }
         }
@@ -47,18 +53,18 @@ export function OperationChatSheet({ operation, label, onUnreadChange, onClose }
       if (document.visibilityState !== "hidden") void load(false);
     }, 15_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [uuid, onUnreadChange]);
+  }, [uuid, order, onUnreadChange]);
 
   const refresh = async () => {
     if (!uuid) return;
     setLoading(true);
     try {
-      const result = await requestJson(`${chatPath(uuid)}?fresh=1`, { timeoutMs: 25_000 });
+      const result = await requestJson(chatPath(uuid, order, "", true), { timeoutMs: 25_000 });
       setChat(result.data);
       setError("");
       if (result.data.unreadCount) {
-        const read = await requestJson(`${chatPath(uuid)}/read`, {
-          method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+        const read = await requestJson(chatPath(uuid, order, "/read"), {
+          method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ids: result.data.messages.map(message => message.id)}),
         });
         setChat(read.data);
         onUnreadChange?.();
@@ -72,7 +78,7 @@ export function OperationChatSheet({ operation, label, onUnreadChange, onClose }
     if (!uuid || !draft.trim() || sending) return;
     setSending(true); setError(""); setStatus("");
     try {
-      const result = await requestJson(chatPath(uuid), {
+      const result = await requestJson(chatPath(uuid, order), {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ message: draft.trim() }),
         timeoutMs: 20_000,
       });
@@ -94,6 +100,7 @@ export function OperationChatSheet({ operation, label, onUnreadChange, onClose }
           <p id="operation-chat-description" className="operation-chat-context">
             {operation ? `${money(operation.amount)} QUSD · ${label(operation.coin)}` : ""}
           </p>
+          {operation ? <small>Oferta {uuid.slice(0,8)}{order ? ` · Orden ${order.slice(0,8)}` : ""} · {operation.role === "creator" ? "Tu oferta" : "Oferta tomada"}</small> : null}
         </SheetHeader>
         <div className="operation-chat-toolbar">
           <span className={chat?.stale ? "operation-chat-sync stale" : "operation-chat-sync"}>

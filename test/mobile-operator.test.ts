@@ -63,3 +63,26 @@ test("operaciones móviles anuncian acciones según la dirección real del tradi
   assert.deepEqual(operations[3]?.actions, []);
   assert.deepEqual(service.alerts(), [{ id: "a1", type: "operation-applied", message: "Aviso", createdAt: 3, operationUuid: "sell-1" }]);
 });
+
+test("listado móvil incluye operaciones externas y órdenes hermanas sin exponer acciones del padre", () => {
+  const service = new MobileOperatorService({ get: () => undefined, set: () => undefined, audit: () => undefined }, {
+    operations: () => [{ uuid: "parent", orderUuid: "one", offerType: "sell", coin: "CLASICA", amount: 10, receive: 11, rate: 1.1, state: "applied", createdAt: 1 }],
+    threads: () => [
+      { id: "parent:one", uuid: "parent", orderUuid: "one", offerType: "sell", role: "taker", coin: "CLASICA", amount: 10, receive: 11, state: "applied", createdAt: 1, discoveredAt: 1, updatedAt: 1 },
+      { id: "parent:two", uuid: "parent", orderUuid: "two", offerType: "sell", role: "taker", coin: "CLASICA", amount: 20, receive: 22, state: "processing", createdAt: 2, discoveredAt: 2, updatedAt: 2 },
+      { id: "own:fixed", uuid: "own", offerType: "buy", role: "creator", coin: "CLASICA", amount: 30, receive: 33, state: "paid", createdAt: 3, discoveredAt: 3, updatedAt: 3 },
+    ],
+    alerts: () => [], markets: () => [{ code: "CLASICA", label: "Clásica", currency: "USD" }],
+    markPaid: async () => undefined, confirmReceived: async () => undefined, cancel: async () => undefined,
+  });
+  const operations = service.operations(100);
+  assert.equal(operations.length, 3);
+  assert.equal(new Set(operations.map(op => op.id)).size, 3);
+  assert.deepEqual(operations.find(op => op.orderUuid === "one")?.actions, ["paid", "cancel"]);
+  assert.deepEqual(operations.find(op => op.orderUuid === "two")?.actions, [], "no dirigir una acción monetaria a la otra orden");
+  const own = operations.find(op => op.uuid === "own")!;
+  assert.equal(own.side, "sell", "el creador de una compra paga fiat, igual que el tomador de una venta");
+  assert.equal(own.role, "creator");
+  assert.equal(own.chatAvailable, true);
+  assert.deepEqual(own.actions, []);
+});

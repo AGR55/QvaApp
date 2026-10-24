@@ -44,27 +44,40 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal enum class Destination(val title: String) { Home("Inicio"), Operations("Operaciones"), Alerts("Avisos"), Settings("Ajustes"), Tools("Herramientas") }
+internal enum class Destination(val title: String) { Home("Inicio"), Operations("Operaciones"), Alerts("Avisos"), Settings("Ajustes"), Tools("Herramientas"), Chats("Mensajes") }
 
 class MainActivity : ComponentActivity() {
     private lateinit var settings: SecureSettings
+    private var chatIntent by mutableStateOf<ChatTarget?>(null)
+    private var chatIntentVersion by mutableIntStateOf(0)
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        chatIntent = ChatTarget.fromIntent(intent)
+        chatIntentVersion++
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         settings = SecureSettings(this)
+        chatIntent = ChatTarget.fromIntent(intent)
+        ChatNotifications.register(this)
         setContent {
             var theme by remember { mutableStateOf(settings.theme) }
             PrecisoTheme(theme) {
-                QvaApplyApp(settings, this, theme) { theme = it; settings.theme = it }
+                QvaApplyApp(settings, this, theme, { theme = it; settings.theme = it }, chatIntent, chatIntentVersion)
             }
         }
     }
 }
 
 @Composable
-private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, theme: String, onTheme: (String) -> Unit) {
+private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, theme: String, onTheme: (String) -> Unit, chatIntent: ChatTarget?, chatIntentVersion: Int) {
     var destination by rememberSaveable { mutableStateOf(Destination.Home) }
-    BackHandler(enabled=destination==Destination.Tools) { destination=Destination.Home }
+    var chatTarget by remember { mutableStateOf<ChatTarget?>(null) }
+    LaunchedEffect(chatIntentVersion) { if(chatIntent!=null) {chatTarget=chatIntent; destination=Destination.Chats} }
+    BackHandler(enabled=destination==Destination.Tools || (destination==Destination.Chats && chatTarget==null)) { destination=Destination.Home }
     val cachedOperations = remember { settings.cachedResponse("operations")?.optJSONArray("data")?.let(::parseOperations).orEmpty() }
     val cachedAlerts = remember { settings.cachedResponse("alerts")?.optJSONArray("data")?.let(::parseAlerts).orEmpty() }
     val cachedReceipts = remember { settings.cachedResponse("receipts")?.optJSONArray("data")?.let(::parseJsonObjects).orEmpty() }
@@ -110,7 +123,7 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
             val requestUrl = settings.serverUrl
             val requestToken = settings.operatorToken
             val now = SystemClock.elapsedRealtime()
-            val fastDue = now - lastFastPollAt >= 5_000L
+            val fastDue = now - lastFastPollAt >= if(destination==Destination.Chats) 15_000L else 5_000L
             val overviewDue = now - lastOverviewPollAt >= 30_000L
             val receiptsDue = now - lastReceiptPollAt >= 30_000L
             if (!fastDue && !receiptsDue) return@withLock
@@ -259,7 +272,10 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                     onTools = { destination = Destination.Tools }, onSettings = { destination = Destination.Settings },
                     configured = settings.operatorToken.isNotBlank(), onRefresh = refreshNow, busy = busy)
                 Destination.Operations -> OperationsScreen(operations, settings, isStale, busy, actionMessage,
-                    onRefresh = refreshNow, onAction = { operation, action -> reference = ""; selectedAction = operation to action })
+                    onRefresh = refreshNow, onAction = { operation, action -> reference = ""; selectedAction = operation to action },
+                    onChats = { chatTarget=null; destination=Destination.Chats },
+                    onChat = { operation -> chatTarget=ChatTarget(operation.uuid,operation.orderUuid); destination=Destination.Chats })
+                Destination.Chats -> key(bindingVersion) { ChatScreen(settings,isForeground,chatTarget,{chatTarget=it}) }
                 Destination.Alerts -> AlertsScreen(alerts, receipts, busy, refreshNow)
                 Destination.Tools -> ToolsScreen(settings, overview, overviewStale, bindingVersion)
                 Destination.Settings -> SettingsScreen(settings, context, theme, onTheme, busy,
@@ -273,6 +289,7 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                         overview = null; overviewStale = true; isStale = true; receiptOutcomesConnected = false
                         connection = "Comprobando vinculación…"; actionMessage = ""
                         lastFastPollAt = 0; lastReceiptPollAt = 0; lastOverviewPollAt = 0; bindingVersion++
+                        chatTarget=null; ChatNotifications.register(context)
                         WorkManager.getInstance(context).enqueueUniqueWork("upload-payment-receipts", ExistingWorkPolicy.KEEP,
                             OneTimeWorkRequestBuilder<ReceiptUploadWorker>().build())
                     })
@@ -333,7 +350,7 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
     }
 }
 
-private fun parseOperations(array: JSONArray): List<MobileOperation> = (0 until array.length()).mapNotNull { index ->
+internal fun parseOperations(array: JSONArray): List<MobileOperation> = (0 until array.length()).mapNotNull { index ->
     val item = array.optJSONObject(index) ?: return@mapNotNull null
     val actionArray = item.optJSONArray("actions") ?: JSONArray()
     MobileOperation(
@@ -341,6 +358,8 @@ private fun parseOperations(array: JSONArray): List<MobileOperation> = (0 until 
         currency = item.optString("currency"), amount = item.optString("amount"), receive = item.optString("receive"),
         rate = item.optString("rate"), status = item.optString("status"), createdAt = item.optString("createdAt"),
         actions = (0 until actionArray.length()).map { actionArray.optString(it) },
+        orderUuid = item.optString("orderUuid").takeIf { it.isNotBlank() && it != "null" },
+        role = item.optString("role", "taker"), chatAvailable = item.optBoolean("chatAvailable", false),
     )
 }
 

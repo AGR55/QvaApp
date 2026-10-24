@@ -1,3 +1,5 @@
+import { consumeChatStream } from "./chat-stream.js";
+import { createHash } from "node:crypto";
 import { recordHuntingEligibility, recordMissingRequirements } from "./hunting-requirements.js";
 import type {
   P2pAverage,
@@ -87,6 +89,7 @@ export interface ApplyTiming {
 type RequestPolicy =
   | "read"
   | "urgent_read"
+  | "chat_read"
   | "list"
   | "create"
   | "apply"
@@ -99,6 +102,7 @@ type RequestPolicy =
 const POLICY_INTERVAL_MS: Record<RequestPolicy, number> = {
   read: 1_667,
   urgent_read: 1_667,
+  chat_read: 1_667,
   list: 2_401,
   create: 5_000,
   apply: 0, // Governed by the durable rolling window, independently of reads.
@@ -122,6 +126,7 @@ export class QvaPayClient {
   private applyQueue = Promise.resolve();
   private primaryApplyPending = 0;
   private urgentReadQueue = Promise.resolve();
+  private chatQueue = Promise.resolve();
   private readonly applyState = new Map<string, string>();
   private lastRequestAt = 0;
   private readonly lastPolicyAt = new Map<RequestPolicy, number>();
@@ -362,8 +367,21 @@ export class QvaPayClient {
     };
   }
 
+  async watchChat(uuid:string,order:string|undefined,signal:AbortSignal,changed:()=>void):Promise<void> {
+    const token=this.tokenProvider();
+    if(!token) throw new QvaApiError(401,"No hay sesión para el chat.");
+    const response=await this.fetchImpl(`${API}${orderPath(uuid,"chat/stream",order)}`,{
+      headers:{authorization:`Bearer ${token}`,accept:"text/event-stream"},
+      signal:AbortSignal.any([signal,AbortSignal.timeout(90_000)]),redirect:"error",
+    });
+    if(!response.ok || !response.body || !response.headers.get("content-type")?.includes("text/event-stream")) {
+      await response.body?.cancel();throw new Error(`Stream de chat no disponible (${response.status}).`);
+    }
+    await consumeChatStream(response.body,changed);
+  }
+
   async listChat(uuid: string, order?: string): Promise<QvaChatMessage[]> {
-    const data = await this.request(orderPath(uuid, "chat", order), { policy: "read", retryRead: true });
+    const data = await this.request(orderPath(uuid, "chat", order), { policy: "chat_read", retryRead: true });
     const source = Array.isArray(data)
       ? data
       : Array.isArray(data.chat)
@@ -373,13 +391,13 @@ export class QvaPayClient {
         : isObject(data.data) && Array.isArray(data.data.messages)
           ? data.data.messages
           : [];
-    return source.flatMap((entry, index) => {
+    return source.flatMap((entry) => {
       if (!isObject(entry)) return [];
       const peerId = stringValue(entry.peer_id ?? entry.peerId ?? (isObject(entry.Peer) ? entry.Peer.uuid : undefined));
-      const message = stringValue(entry.message);
+      const message = stringValue(entry.message) ?? (stringValue(entry.image) ? "📎 Imagen adjunta" : undefined);
       if (!peerId || message === undefined) return [];
       return [{
-        id: stringValue(entry.id ?? entry.uuid) ?? `${index}:${peerId}:${String(entry.created_at ?? "")}`,
+        id: stringValue(entry.id ?? entry.uuid) ?? createHash("sha256").update(`${peerId}:${String(entry.created_at ?? "")}:${message}`).digest("hex"),
         peerId,
         message,
         ...(timestampValue(entry.created_at) ? { createdAt: timestampValue(entry.created_at)! } : {}),
@@ -494,7 +512,7 @@ export class QvaPayClient {
               signal: AbortSignal.timeout(this.mutationTimeoutMs),
             });
       } catch (error) {
-        if (policy !== "read" && policy !== "urgent_read" && policy !== "list")
+        if (policy !== "read" && policy !== "urgent_read" && policy !== "chat_read" && policy !== "list")
           throw new QvaMutationUncertainError(policy, error);
         throw error;
       }
@@ -587,7 +605,8 @@ export class QvaPayClient {
     if (policy === "apply" && secondary) return this.enqueueSecondaryApplication(task, beforeDispatch);
     if (policy === "apply") return this.enqueueApplication(task, beforeDispatch, applyUuid);
     const priorityRead = policy === "urgent_read";
-    const run = (priorityRead ? this.urgentReadQueue : this.queue)
+    const chat = policy === "chat" || policy === "chat_read";
+    const run = (chat ? this.chatQueue : priorityRead ? this.urgentReadQueue : this.queue)
       .catch(() => undefined)
       .then(async () => {
         const current = this.now();
@@ -620,7 +639,8 @@ export class QvaPayClient {
       () => undefined,
       () => undefined,
     );
-    if (priorityRead) this.urgentReadQueue = settled;
+    if (chat) this.chatQueue = settled;
+    else if (priorityRead) this.urgentReadQueue = settled;
     else this.queue = settled;
     return run;
   }
