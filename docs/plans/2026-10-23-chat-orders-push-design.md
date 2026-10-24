@@ -37,3 +37,14 @@ La skill `writing-plans` no está instalada; este plan explícito cubre la trans
 ## Criterios de aceptación
 
 Cada orden tiene chat independiente, incluida una oferta propia con varias órdenes. Los mensajes entrantes nuevos producen avisos con texto, sin mezclar órdenes ni notificar mensajes propios. Leer en web o Android elimina el contador de esa conversación, no de otras. Reinicios no pierden pendientes ni duplican avisos visibles. FCM indisponible no bloquea operaciones ni cacerías. El APK conserva firma y datos. La entrega con app cerrada se verifica cuando la configuración externa esté disponible.
+
+## Verificación en producción y teléfono
+
+- Despliegue `70f4d1b` comprobado saludable, esquema 31 y credencial FCM legible por el proceso, sin claves dentro de Git ni de la APK.
+- Catálogo real: 61 conversaciones/operaciones (46 normales y 15 órdenes por rango); pantalla Android conectada y órdenes de una misma oferta visibles por separado, con contrapartes.
+- Redmi con Android 16 actualizado mediante APK release firmada, conservando vinculación. Registro FCM del dispositivo confirmado.
+- Aviso de prueba enviado únicamente al teléfono vinculado, con la app en segundo plano: texto, remitente y referencia presentes en Android. Dos envíos del mismo evento produjeron una sola notificación.
+- Pulsar esa notificación abrió exactamente la orden por rango elegida y su historial real. No se enviaron mensajes a contrapartes ni acciones financieras durante la prueba.
+- `pnpm check` local completo aprobado (73 archivos de pruebas); 21 casos focalizados de catálogo, chats, autorización y entrega aprobados. CI y despliegue con Node 24 también aprobados. Android: pruebas, lint y APK debug/release aprobados localmente y en CI.
+- Diagnóstico posterior sin errores recientes de chat y motor sin pausa. Memoria del contenedor observada: 114 MiB, medición puntual tras el despliegue.
+- Revisión final: cada familia de caché del teléfono (herramientas, chats y borradores) conserva como máximo 24 entradas.

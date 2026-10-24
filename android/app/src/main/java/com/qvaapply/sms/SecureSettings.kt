@@ -38,7 +38,11 @@ class SecureSettings(context: Context, preferencesName: String = "device_setting
     fun saveCachedResponse(key: String, value: JSONObject) {
         val edit=prefs.edit().putString("cache_$key", value.toString())
         if(key.startsWith("tool:") || key.startsWith("chat:") || key.startsWith("chat_draft:")) {
-            val family=if(key.startsWith("chat:") || key.startsWith("chat_draft:")) "cache_chat:" else "cache_tool:"
+            val family=when {
+                key.startsWith("chat_draft:") -> "cache_chat_draft:"
+                key.startsWith("chat:") -> "cache_chat:"
+                else -> "cache_tool:"
+            }
             prefs.all.keys.filter {it.startsWith(family)&&it!="cache_$key"}
                 .sortedByDescending {name -> runCatching {JSONObject(prefs.getString(name,"{}")!!).optLong("savedAt")}.getOrDefault(0)}
                 .drop(23).forEach {edit.remove(it)}
