@@ -3044,13 +3044,14 @@ export class TradingEngine {
       (candidate.type === "sell" ? this.isAutomaticBuyStillEligible(candidate, ownIntentId) :
         this.isAutomaticSellStillEligible(candidate, ownIntentId));
     if (!eligible(offer)) return false;
+    if (queuedForMs > 5_000) return false;
     if (checkCapital && offer.type === "buy") {
       const reserve = offer.offer_kind === "flexible" ? Math.max(this.strategy().reserve, this.marketConfig.current().risk.minQusdReserve) : this.strategy().reserve;
       if (await this.fastLaneQusdBalance(ownIntentId) - reserve - this.uncertainFlexibleCapital("buy", undefined, ownIntentId) < offer.amount) return false;
+      // A balance lookup can yield while a pause or other invalidation arrives.
+      return eligible(offer);
     }
-    if (queuedForMs > 5_000) return false;
-    // A balance lookup can yield while a pause or other invalidation arrives.
-    return eligible(offer);
+    return true;
   }
 
   private async evaluateAutomaticBuy(

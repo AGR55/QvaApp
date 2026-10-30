@@ -141,3 +141,17 @@ test("una reanudación antigua no aplica el precio anterior a una reanudación m
   assert.equal(result.action, "aplicada resume-price");
   assert.equal(posts, 1);
 });
+
+test("el preflight solo repite la consulta del feed cuando espera saldo QUSD", async t => {
+  const { store, trading } = setup({ qusdBalance: async () => 100 });
+  t.after(() => store.close());
+  let reads = 0;
+  const original = store.latestMarketFeedState.bind(store);
+  store.latestMarketFeedState = uuid => { reads++; return original(uuid); };
+  const guard = (trading as unknown as { automaticDispatchAllowed: (value: P2pOffer) => Promise<boolean> }).automaticDispatchAllowed.bind(trading);
+  assert.equal(await guard(offer("fiat-guard")), true);
+  assert.equal(reads, 1);
+  reads = 0;
+  assert.equal(await guard({ ...offer("qusd-guard"), type: "buy", receive: 11000 }), true);
+  assert.equal(reads, 2);
+});

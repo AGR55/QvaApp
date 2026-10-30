@@ -43,6 +43,10 @@ La segunda revisión reprodujo y corrigió tres carreras adicionales: una pausa 
 
 Pruebas nuevas cubren pausa malformada/vencida, reanudación y cancelación manual, pausa durante cola y durante consulta de saldo, estado de operaciones intacto, clasificación de colas y empates, índice y reapertura, cota de telemetría, retry SSE y Retry-After.
 
+## Ajuste final de coste local
+
+Se eliminó una segunda validación redundante en el preflight fiat, donde no hay await entre las comprobaciones. La validación posterior a una lectura QUSD se mantiene. Tres ejecuciones locales aisladas Node 24 tras el ajuste: p50 2,84 / 2,97 / 2,67 ms; p95 5,98 / 6,48 / 6,65 ms. Son compatibles con el baseline medido (p50 2,80 / 2,72 / 3,42 ms), sin demostrar una diferencia estable entre versiones. Una regresión verifica una consulta del feed en fiat y dos cuando se espera saldo QUSD.
+
 ## Fuentes oficiales
 
 - https://www.qvapay.com/docs/p2p/webhooks
