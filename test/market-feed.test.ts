@@ -178,6 +178,36 @@ test("recibe pausas y reanudaciones por webhook y stream conservando pause", asy
   }
 });
 
+test("distingue ciclos de pausa por sent_at y deduplica la misma entrega entre canales", async () => {
+  const uuid = "pause-cycles";
+  const base = payload(uuid, "p2p.resumed");
+  const first = { ...base, sent_at: "2026-09-24T12:00:01Z", data: { ...base.data, pause: null } };
+  const state = setup(() => false, first);
+  try {
+    enableRealtime(state.coordinator);
+    await new Promise(resolve => setImmediate(resolve));
+    const send = (value: unknown) => {
+      const raw = Buffer.from(JSON.stringify(value));
+      return state.coordinator.acceptWebhook(raw, signed(raw, Date.parse("2026-09-24T12:00:10Z")));
+    };
+    assert.deepEqual(send(first), { duplicate: true, queued: false });
+    for (const [event, second, pause] of [
+      ["p2p.paused", "02", { reason: "owner", until: null }],
+      ["p2p.resumed", "03", null],
+      ["p2p.paused", "04", { reason: "owner", until: null }],
+      ["p2p.resumed", "05", null],
+    ] as const) {
+      const next = { ...base, event, sent_at: `2026-09-24T12:00:${second}Z`, data: { ...base.data, pause } };
+      assert.deepEqual(send(next), { duplicate: false, queued: true });
+      assert.deepEqual(send(next), { duplicate: true, queued: false });
+    }
+    assert.equal(state.coordinator.status().pendingWebhookEvents, 5);
+    await new Promise(resolve => setImmediate(resolve));
+  } finally {
+    state.coordinator.stop(); state.store.close();
+  }
+});
+
 test("procesa dos reaperturas legítimas del mismo UUID en ciclos distintos", async () => {
   const state = setup();
   enableRealtime(state.coordinator);

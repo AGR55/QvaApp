@@ -1831,12 +1831,17 @@ export class Store {
     sentAt: number;
     receivedAt: number;
     range?: { available: number; minimum: number; maximum: number; rate: number };
+    quote?: { amount: number; receive: number; rate: number };
+    updatedAt?: number;
   } | undefined {
     const rows = this.db.prepare(
       `SELECT event, payload_json, received_at FROM market_feed_events
        WHERE json_extract(payload_json, '$.data.uuid') = ?
-       ORDER BY julianday(json_extract(payload_json, '$.sent_at')) DESC LIMIT 2`,
-    ).all(uuid) as Array<{
+         AND julianday(json_extract(payload_json, '$.sent_at')) = (
+           SELECT MAX(julianday(json_extract(payload_json, '$.sent_at'))) FROM market_feed_events
+           WHERE json_extract(payload_json, '$.data.uuid') = ?
+         )`,
+    ).all(uuid, uuid) as Array<{
       event: string;
       payload_json: string;
       received_at: number;
@@ -1847,12 +1852,14 @@ export class Store {
       sentAt: number;
       receivedAt: number;
       range?: { available: number; minimum: number; maximum: number; rate: number };
+      quote?: { amount: number; receive: number; rate: number };
+      updatedAt?: number;
     }> = [];
     for (const row of rows) {
       try {
         const payload = JSON.parse(row.payload_json) as {
           sent_at?: unknown;
-          data?: { status?: unknown; pause?: unknown; available_amount?: unknown; order_min?: unknown; order_max?: unknown; amount?: unknown; receive?: unknown };
+          data?: { status?: unknown; pause?: unknown; offer_kind?: unknown; updated_at?: unknown; available_amount?: unknown; order_min?: unknown; order_max?: unknown; amount?: unknown; receive?: unknown };
         };
         const sentAt = typeof payload.sent_at === "string"
           ? Date.parse(payload.sent_at)
@@ -1867,12 +1874,18 @@ export class Store {
           : "unknown";
         const range = { available: Number(payload.data?.available_amount), minimum: Number(payload.data?.order_min),
           maximum: Number(payload.data?.order_max), rate: Number(payload.data?.receive) / Number(payload.data?.amount) };
+        const amount = Number(payload.data?.amount), receive = Number(payload.data?.receive);
+        const updatedAt = typeof payload.data?.updated_at === "string" ? Date.parse(payload.data.updated_at) : NaN;
         candidates.push({
           event,
           status,
           sentAt,
           receivedAt: Number(row.received_at),
           ...(event.startsWith("p2p.range_") && Object.values(range).every(Number.isFinite) ? { range } : {}),
+          ...(!event.startsWith("p2p.range_") && payload.data?.offer_kind !== "flexible" && status === "open" &&
+            Number.isFinite(amount) && amount > 0 && Number.isFinite(receive) && receive > 0 && Number.isFinite(receive / amount)
+            ? { quote: { amount, receive, rate: receive / amount } } : {}),
+          ...(Number.isSafeInteger(updatedAt) ? { updatedAt } : {}),
         });
       } catch {
         // Malformed historical feed payloads cannot establish lifecycle order.

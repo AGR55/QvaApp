@@ -74,3 +74,28 @@ test("pausas invalidan la oferta y solo una reanudación posterior y explícita 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("el estado más reciente detecta pausas entre tres eventos empatados y expone cotización fija", () => {
+  const directory = mkdtempSync(join(tmpdir(), "qva-hunting-tie-"));
+  const store = new Store(directory);
+  const uuid = "tie-offer";
+  const add = (key: string, event: string, sentAt: string, data: Record<string, unknown>) => store.enqueueMarketFeedEvent({
+    key, event, payload: { event, sent_at: sentAt, data: { uuid, ...data } },
+  });
+  try {
+    const timestamp = "2026-09-24T12:00:00Z";
+    add("a", "p2p.created", timestamp, { status: "open", amount: "5", receive: "100" });
+    add("b", "p2p.reopened", timestamp, { status: "open", amount: "5", receive: "100" });
+    add("c", "p2p.paused", timestamp, { status: "open", pause: { reason: "owner", until: null } });
+    assert.equal(store.latestMarketFeedState(uuid)?.status, "unknown");
+    add("d", "p2p.resumed", "2026-09-24T12:00:01Z", { status: "open", pause: null, amount: "5", receive: "110", updated_at: timestamp });
+    const latest = store.latestMarketFeedState(uuid);
+    assert.deepEqual(latest?.quote, { amount: 5, receive: 110, rate: 22 });
+    assert.equal(latest?.updatedAt, Date.parse(timestamp));
+    add("e", "p2p.resumed", "2026-09-24T12:00:02Z", { status: "open", pause: null, amount: "0", receive: "110" });
+    assert.equal(store.latestMarketFeedState(uuid)?.quote, undefined);
+  } finally {
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

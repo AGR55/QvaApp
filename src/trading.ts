@@ -896,6 +896,7 @@ export class TradingEngine {
     if (offer.status !== "open")
       return { inspected: 1, candidates: 0, action: `ya no disponible (${offer.status})` };
     if (isOfferPaused(offer)) return { inspected: 1, candidates: 0, action: "Oferta pausada" };
+    if (offer.offer_kind !== "flexible" && this.offerInvalidatedByFeed(offer)) return { inspected: 1, candidates: 0, action: "Oferta invalidada por el feed" };
     const accountUuid = this.store.get("analytics_account_uuid");
     if (this.ownsOfferUuid(offer.uuid) || (accountUuid && (offer.owner_uuid === accountUuid || offer.User?.uuid === accountUuid)))
       return { inspected: 1, candidates: 0, action: "oferta propia; no consume cupo de aplicación" };
@@ -3030,6 +3031,8 @@ export class TradingEngine {
     const latest = this.store.latestMarketFeedState(offer.uuid);
     const version = offer.updated_at ? Date.parse(offer.updated_at) : NaN;
     if (!latest || Number.isFinite(version) && latest.sentAt < version) return false;
+    if (offer.offer_kind !== "flexible" && latest.quote &&
+      (offer.amount !== latest.quote.amount || offer.receive !== latest.quote.receive)) return true;
     if (offer.offer_kind === "flexible" && latest.range &&
       (offer.amount > latest.range.available || offer.amount < latest.range.minimum || offer.amount > latest.range.maximum ||
         Math.abs(rate(offer) - latest.range.rate) > 1e-8)) return true;

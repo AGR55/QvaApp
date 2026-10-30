@@ -68,6 +68,9 @@ test("pausa recibida durante la espera invalida el preflight antes del POST", as
   const pending = trading.ingestMarketOffer(offer("race"), sent, "p2p.created", new Date(sent).toISOString());
   await ready;
   const pausedAt = sent + 1000;
+  for (const event of ["p2p.created", "p2p.reopened"])
+    store.enqueueMarketFeedEvent({ key: `tie-${event}`, event, receivedAt: pausedAt,
+      payload: { event, sent_at: new Date(pausedAt).toISOString(), data: offer("race", null) } });
   store.enqueueMarketFeedEvent({ key: "pause-race", event: "p2p.paused", receivedAt: pausedAt,
     payload: { event: "p2p.paused", sent_at: new Date(pausedAt).toISOString(), data: offer("race", { reason: "owner", until: null }) } });
   release();
@@ -116,4 +119,25 @@ test("el evento paused retira la oferta visible sin cambiar su operación", asyn
   await trading.ingestMarketStateEvent("p2p.paused", paused);
   assert.equal(store.getOperation(paused.uuid)?.state, "applied");
   assert.deepEqual(store.loadRemoteResource<{ offers: P2pOffer[] }>("market:BANK_CUP")?.data.offers, []);
+});
+
+test("una reanudación antigua no aplica el precio anterior a una reanudación más reciente", async t => {
+  let posts = 0;
+  const { store, trading } = setup({ apply: async () => { posts++; }, sendChat: async () => ({}) });
+  t.after(async () => { await new Promise(resolve => setImmediate(resolve)); store.close(); });
+  const at = Date.now() - 3000;
+  const older = offer("resume-price", null);
+  const newer = { ...older, receive: 9250 };
+  for (const [event, time, data] of [
+    ["p2p.resumed", at, older],
+    ["p2p.paused", at + 1000, { ...older, pause: { reason: "owner", until: null } }],
+    ["p2p.resumed", at + 2000, newer],
+  ] as const) store.enqueueMarketFeedEvent({ key: `${event}-${time}`, event, receivedAt: time,
+    payload: { event, sent_at: new Date(time).toISOString(), data } });
+  const stale = await trading.ingestMarketOffer(older, at, "p2p.resumed", new Date(at).toISOString());
+  assert.match(stale.action ?? "", /invalidada/);
+  assert.equal(posts, 0);
+  const result = await trading.ingestMarketOffer(newer, at + 2000, "p2p.resumed", new Date(at + 2000).toISOString());
+  assert.equal(result.action, "aplicada resume-price");
+  assert.equal(posts, 1);
 });

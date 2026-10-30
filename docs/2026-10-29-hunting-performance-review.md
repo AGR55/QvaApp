@@ -39,6 +39,8 @@ El operador confirmó que activó paused y resumed tanto en webhook como en stre
 
 Árbol aislado basado en b08e374, únicamente con este alcance. Node 24.22.1: comprobación de tipos, knip, suite completa de 75 archivos, build servidor, build web, compresión y escáner de secretos aprobados. Benchmark recepción directa a POST con SQLite real, red/cuota simuladas y lectura de panel retenida: 50 ofertas, p50 3,22 ms / p95 7,02 ms. Es una referencia local, no una promesa de mejora de red ni una medición antes/después comparable entre máquinas.
 
+La segunda revisión reprodujo y corrigió tres carreras adicionales: una pausa oculta por un tercer evento con el mismo sent_at, ciclos repetidos con updated_at constante y una reanudación antigua entregada después de una nueva cotización fija. La consulta considera todos los eventos de la fecha máxima y el guard compara los importes vigentes antes de reservar y de enviar. Se repitió la verificación general completa tras estas correcciones.
+
 Pruebas nuevas cubren pausa malformada/vencida, reanudación y cancelación manual, pausa durante cola y durante consulta de saldo, estado de operaciones intacto, clasificación de colas y empates, índice y reapertura, cota de telemetría, retry SSE y Retry-After.
 
 ## Fuentes oficiales

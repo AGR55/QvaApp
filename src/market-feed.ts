@@ -330,6 +330,8 @@ export class MarketSourceCoordinator implements MarketDataSource {
       : payload.sent_at;
     const key = payload.event.startsWith("p2p.range_")
       ? `${payload.event}:${payload.data.uuid}:${version}:${payload.sent_at}:${payload.data.available_amount ?? ""}`
+      : payload.event === "p2p.paused" || payload.event === "p2p.resumed"
+        ? `${payload.event}:${payload.data.uuid}:${version}:${payload.sent_at}`
       : `${payload.event}:${payload.data.uuid}:${version}`;
     const queued = this.mode() === "hybrid" && isMarketFeedEvent(payload.event);
     const receivedAt = this.now();
