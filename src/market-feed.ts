@@ -11,6 +11,7 @@ import {
 } from "./qvapay-feed-stream.js";
 
 export type MarketSourceMode = "polling" | "hybrid";
+const MAX_MONOTONIC_RECEIPTS = 1_024;
 
 export interface MarketFeedHeaders {
   signature?: string;
@@ -29,6 +30,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
   private processingState = false;
   private recoveryRequested = false;
   private lastRecoveryPollAt = 0;
+  private readonly receivedMonotonic = new Map<string, number>();
   private readonly stream: QvaPayFeedStream;
   private streamState: QvaPayStreamState = { phase: "idle" };
 
@@ -40,18 +42,19 @@ export class MarketSourceCoordinator implements MarketDataSource {
     private readonly ingest: (
       offer: P2pOffer,
       receivedAt: number,
-      event: "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated",
+      event: "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated",
       sentAt: string,
     ) => Promise<unknown>,
     private readonly canProcess: () => boolean = () => true,
     private readonly now: () => number = Date.now,
     streamRuntime: QvaPayStreamRuntime = {},
     private readonly ingestState: (
-      event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated">,
+      event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated">,
       offer: P2pOffer,
       receivedAt: number,
       sentAt: string,
     ) => Promise<unknown> = async () => undefined,
+    private readonly monotonicNow: () => number = () => performance.now(),
   ) {
     this.stream = new QvaPayFeedStream(
       (payload) => this.acceptStreamPayload(payload),
@@ -78,6 +81,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
     this.store.set("market_source_mode", mode);
     if (mode === "polling") {
       this.store.ignorePendingMarketFeedEvents();
+      this.receivedMonotonic.clear();
       this.stream.stop();
     }
     this.store.audit(
@@ -117,6 +121,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
 
   stop(): void {
     this.stream.stop();
+    this.receivedMonotonic.clear();
   }
 
   hasWebhookSecret(): boolean {
@@ -254,6 +259,9 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   private async processEvent(event: MarketFeedEvent): Promise<void> {
+    const receivedMonotonic = this.receivedMonotonic.get(event.key);
+    this.receivedMonotonic.delete(event.key);
+    let queueTiming: { uuid: string; side: string; queueMs: number; clock: string } | undefined;
     try {
       const payload = normalizeStoredPayload(event.payload);
       if (!isMarketFeedEvent(payload.event)) {
@@ -265,6 +273,14 @@ export class MarketSourceCoordinator implements MarketDataSource {
         if (this.store.hasPendingMarketFeedInvalidation(payload.data.uuid, Date.parse(payload.sent_at))) {
           outcome = "invalidada antes de evaluar";
         } else {
+          queueTiming = {
+            uuid: payload.data.uuid,
+            side: payload.data.type,
+            queueMs: Math.max(0, receivedMonotonic === undefined
+              ? this.now() - event.receivedAt
+              : this.monotonicNow() - receivedMonotonic),
+            clock: receivedMonotonic === undefined ? "wall" : "monotonic",
+          };
           const result = await this.ingest(payload.data, event.receivedAt, payload.event, payload.sent_at);
           if (isRecord(result) && typeof result.action === "string") outcome = result.action;
         }
@@ -285,6 +301,11 @@ export class MarketSourceCoordinator implements MarketDataSource {
       this.store.set("market_feed_last_error", message);
       const metadata = eventMetadata(event.payload);
       this.store.audit("market_feed_processing_error", `${metadata.text}. Error: ${message}`, metadata.uuid);
+    } finally {
+      if (queueTiming) {
+        try { this.store.audit("market_feed_queue_timing", JSON.stringify(queueTiming), queueTiming.uuid); }
+        catch { /* Telemetry must not change the outcome of an opportunity. */ }
+      }
     }
   }
 
@@ -311,13 +332,22 @@ export class MarketSourceCoordinator implements MarketDataSource {
       ? `${payload.event}:${payload.data.uuid}:${version}:${payload.sent_at}:${payload.data.available_amount ?? ""}`
       : `${payload.event}:${payload.data.uuid}:${version}`;
     const queued = this.mode() === "hybrid" && isMarketFeedEvent(payload.event);
+    const receivedAt = this.now();
+    const receivedMonotonic = this.monotonicNow();
     const inserted = this.store.enqueueMarketFeedEvent({
       key,
       event: payload.event,
       payload,
       state: queued ? "pending" : "ignored",
-      receivedAt: this.now(),
+      receivedAt,
     });
+    if (inserted && queued && isOpportunityEvent(payload.event)) {
+      if (this.receivedMonotonic.size >= MAX_MONOTONIC_RECEIPTS) {
+        const oldest = this.receivedMonotonic.keys().next().value;
+        if (oldest !== undefined) this.receivedMonotonic.delete(oldest);
+      }
+      this.receivedMonotonic.set(key, receivedMonotonic);
+    }
     const sentAt = Date.parse(payload.sent_at);
     if (inserted && Number.isFinite(sentAt))
       this.store.set(
@@ -380,12 +410,13 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 }
 
-function isOpportunityEvent(event: string): event is "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated" {
-  return event === "p2p.created" || event === "p2p.reopened" || event === "p2p.range_created" || event === "p2p.range_updated";
+function isOpportunityEvent(event: string): event is "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated" {
+  return event === "p2p.created" || event === "p2p.reopened" || event === "p2p.resumed" || event === "p2p.range_created" || event === "p2p.range_updated";
 }
 
 function isMarketFeedEvent(event: string): event is P2pFeedEvent {
   return isOpportunityEvent(event) ||
+    event === "p2p.paused" ||
     event === "p2p.applied" ||
     event === "p2p.paid" ||
     event === "p2p.completed" ||

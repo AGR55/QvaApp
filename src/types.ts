@@ -2,6 +2,8 @@ export type P2pType = "buy" | "sell";
 export type P2pFeedEvent =
   | "p2p.created"
   | "p2p.reopened"
+  | "p2p.paused"
+  | "p2p.resumed"
   | "p2p.applied"
   | "p2p.paid"
   | "p2p.completed"
@@ -40,6 +42,8 @@ export interface P2pOffer {
   amount: number;
   receive: number;
   status: P2pStatus;
+  /** QvaPay supplies null or { reason: 'owner' | 'taker_left', until: string | null }. Preserve unexpected values for safe handling. */
+  pause?: unknown;
   message?: string | null;
   tags?: string[];
   only_kyc?: boolean | number;

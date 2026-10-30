@@ -206,6 +206,7 @@ export class TradingEngine {
     if (this.mode() !== "real" || this.isPaused() || this.store.get("emergency_stop") === "true") return "Motor propio detenido";
     if (this.store.hasUnresolvedMutationForOffer(offer.uuid)) return "Oferta pendiente de conciliación";
     if (!this.isMarket(offer.coin) || offer.type !== "sell" || offer.status !== "open" || offer.offer_kind === "flexible") return "Oferta no compatible";
+    if (isOfferPaused(offer)) return "Oferta pausada";
     if (explicitFlag(offer.only_vip) !== "false") return "Restricción VIP";
     const requirementReason = huntingRequirementReason(this.store, offer);
     if (requirementReason) return requirementReason;
@@ -807,7 +808,7 @@ export class TradingEngine {
   async ingestMarketOffer(
     offer: P2pOffer,
     receivedAt = Date.now(),
-    event: "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated" = "p2p.created",
+    event: "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated" = "p2p.created",
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     if (this.offersInFlight.has(offer.uuid)) return { inspected: 1, candidates: 0, action: "Aplicación a esta oferta ya en curso" };
@@ -884,7 +885,7 @@ export class TradingEngine {
   private async ingestPreparedMarketOffer(
     offer: P2pOffer,
     receivedAt: number,
-    event: "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated",
+    event: "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated",
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     if (this.isExcludedAfterManualCancel(offer.uuid))
@@ -894,6 +895,7 @@ export class TradingEngine {
     if (this.isPaused()) return { inspected: 0, candidates: 0, action: "pausado" };
     if (offer.status !== "open")
       return { inspected: 1, candidates: 0, action: `ya no disponible (${offer.status})` };
+    if (isOfferPaused(offer)) return { inspected: 1, candidates: 0, action: "Oferta pausada" };
     const accountUuid = this.store.get("analytics_account_uuid");
     if (this.ownsOfferUuid(offer.uuid) || (accountUuid && (offer.owner_uuid === accountUuid || offer.User?.uuid === accountUuid)))
       return { inspected: 1, candidates: 0, action: "oferta propia; no consume cupo de aplicación" };
@@ -1045,7 +1047,7 @@ export class TradingEngine {
   private async ingestFastFiatFundedOffer(
     offer: P2pOffer,
     receivedAt: number,
-    event: "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated",
+    event: "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated",
     observedAt = receivedAt,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     const decisionStartedAt = Date.now();
@@ -1079,7 +1081,7 @@ export class TradingEngine {
     } else if (suspiciousPriceReason) {
       decision = "blocked";
       reason = suspiciousPriceReason;
-    } else if (this.store.isSeen(offer.uuid) && event !== "p2p.reopened") {
+    } else if (this.store.isSeen(offer.uuid) && event !== "p2p.reopened" && event !== "p2p.resumed") {
       decision = "ignored";
       reason = "Oferta ya evaluada";
     }
@@ -1148,7 +1150,7 @@ export class TradingEngine {
   private async ingestFastQusdFundedOffer(
     offer: P2pOffer,
     receivedAt: number,
-    event: "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated",
+    event: "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated",
     observedAt = receivedAt,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
     const decisionStartedAt = Date.now();
@@ -1177,7 +1179,7 @@ export class TradingEngine {
     } else if (quotedRate < market.sellMinRate) {
       decision = "ignored";
       reason = `La tasa ${quotedRate.toFixed(6)} no alcanza el mínimo ${market.sellMinRate.toFixed(6)}`;
-    } else if (this.store.isSeen(offer.uuid) && event !== "p2p.reopened") {
+    } else if (this.store.isSeen(offer.uuid) && event !== "p2p.reopened" && event !== "p2p.resumed") {
       decision = "ignored";
       reason = "Oferta ya evaluada";
     }
@@ -1336,7 +1338,7 @@ export class TradingEngine {
   }
 
   async ingestMarketStateEvent(
-    event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated">,
+    event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated">,
     offer: P2pOffer,
     receivedAt = Date.now(),
   ): Promise<void> {
@@ -1357,7 +1359,7 @@ export class TradingEngine {
     }
 
     const operation = this.store.getOperation(offer.uuid);
-    if (event === "p2p.range_closed") return; // Closing a parent does not settle its orders.
+    if (event === "p2p.range_closed" || event === "p2p.paused") return; // Leaving the book does not settle an order.
     this.store.resolveTradingAlert(
       offer.uuid,
       event === "p2p.applied" && operation ? "applied" : "expired",
@@ -2823,6 +2825,7 @@ export class TradingEngine {
 
   private classifyOffer(offer: P2pOffer, statistics?: P2pAverage): MarketItem {
     const value = rate(offer);
+    if (isOfferPaused(offer)) return { offer, rate: value, decision: "ignored", reason: "Oferta pausada" };
     if (this.isExcludedAfterManualCancel(offer.uuid))
       return { offer, rate: value, decision: "ignored", reason: "Excluida por cancelación manual" };
     if (this.store.getOperation(offer.uuid))
@@ -2987,7 +2990,7 @@ export class TradingEngine {
   }
 
   private isAutomaticSellStillEligible(offer: P2pOffer, ownIntentId?: string): boolean {
-    if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
+    if (isOfferPaused(offer) || this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
     if (this.store.hasUnresolvedMutationForOffer(offer.uuid, ownIntentId) || this.offerInvalidatedByFeed(offer)) return false;
     if (this.store.getOperation(offer.uuid)) return false;
     if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0) return false;
@@ -2997,7 +3000,7 @@ export class TradingEngine {
   }
 
   private isAutomaticBuyStillEligible(offer: P2pOffer, ownIntentId?: string): boolean {
-    if (this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
+    if (isOfferPaused(offer) || this.isPaused() || this.store.get("emergency_stop") === "true" || this.isExcludedAfterManualCancel(offer.uuid)) return false;
     if (this.store.hasUnresolvedMutationForOffer(offer.uuid, ownIntentId) || this.offerInvalidatedByFeed(offer)) return false;
     if (this.store.getOperation(offer.uuid)) return false;
     if (offer.status !== "open" || !this.isMarket(offer.coin) || !Number.isFinite(offer.amount) || !Number.isFinite(offer.receive) || offer.amount <= 0 || offer.receive <= 0) return false;
@@ -3030,7 +3033,7 @@ export class TradingEngine {
     if (offer.offer_kind === "flexible" && latest.range &&
       (offer.amount > latest.range.available || offer.amount < latest.range.minimum || offer.amount > latest.range.maximum ||
         Math.abs(rate(offer) - latest.range.rate) > 1e-8)) return true;
-    return latest.status !== "open";
+    return latest.event === "p2p.paused" || latest.status !== "open";
   }
 
   private async automaticDispatchAllowed(offer: P2pOffer, ownIntentId?: string, queuedForMs = 0, checkCapital = true): Promise<boolean> {
@@ -3042,8 +3045,9 @@ export class TradingEngine {
       const reserve = offer.offer_kind === "flexible" ? Math.max(this.strategy().reserve, this.marketConfig.current().risk.minQusdReserve) : this.strategy().reserve;
       if (await this.fastLaneQusdBalance(ownIntentId) - reserve - this.uncertainFlexibleCapital("buy", undefined, ownIntentId) < offer.amount) return false;
     }
-    if (queuedForMs <= 5_000) return true;
-    return false;
+    if (queuedForMs > 5_000) return false;
+    // A balance lookup can yield while a pause or other invalidation arrives.
+    return eligible(offer);
   }
 
   private async evaluateAutomaticBuy(
@@ -3745,9 +3749,9 @@ function operationStateFromRemote(
 
 function operationStateFromFeed(
   current: OperationState,
-  event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.range_created" | "p2p.range_updated">,
+  event: Exclude<P2pFeedEvent, "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated">,
 ): OperationState {
-  if (current === "completed" || current === "cancelled" || event === "p2p.range_closed") return current;
+  if (current === "completed" || current === "cancelled" || event === "p2p.range_closed" || event === "p2p.paused") return current;
   switch (event) {
     case "p2p.applied":
       return ["acknowledged", "paid", "revision"].includes(current)
@@ -3840,4 +3844,8 @@ function dayStart(now: number): number {
   const date = new Date(now);
   date.setHours(0, 0, 0, 0);
   return date.getTime();
+}
+
+function isOfferPaused(offer: P2pOffer): boolean {
+  return (offer as P2pOffer & { pause?: unknown }).pause != null;
 }

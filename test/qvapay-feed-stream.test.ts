@@ -77,3 +77,38 @@ test("clasifica credenciales rechazadas sin filtrar el secreto", async () => {
   assert.doesNotMatch(JSON.stringify(states), /never-log-this-secret/);
   stream.stop();
 });
+
+test("reconecta tras cierre limpio en un segundo y respeta retry del servidor", async () => {
+  for (const [body, expected] of [["", 1_000], ["retry: 120000\n\n", 120_000]] as const) {
+    let delay: number | undefined;
+    const stream = new QvaPayFeedStream(() => undefined, () => undefined, {
+      fetch: async () => new Response(body),
+      wait: (milliseconds, signal) => {
+        delay = milliseconds;
+        return new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+      },
+    });
+    stream.start({ appId: "test", appSecret: "test" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(delay, expected);
+    stream.stop();
+  }
+});
+
+test("respeta Retry-After en 429 y mantiene espera conservadora ante error", async () => {
+  for (const [response, expected] of [[new Response("", { status: 429, headers: { "retry-after": "75" } }), 75_000], [new Response("", { status: 500 }), 10_000]] as const) {
+    let delay: number | undefined;
+    const stream = new QvaPayFeedStream(() => undefined, () => undefined, {
+      fetch: async () => response,
+      random: () => 0.5,
+      wait: (milliseconds, signal) => {
+        delay = milliseconds;
+        return new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+      },
+    });
+    stream.start({ appId: "test", appSecret: "test" });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(delay, expected);
+    stream.stop();
+  }
+});

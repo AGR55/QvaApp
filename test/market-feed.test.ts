@@ -145,6 +145,39 @@ test("procesa reaperturas y deduplica el mismo evento entre stream y webhook", a
   state.store.close();
 });
 
+test("recibe pausas y reanudaciones por webhook y stream conservando pause", async () => {
+  const state = setup();
+  const opportunities: Array<{ uuid: string; event: string; pause: unknown }> = [];
+  const states: Array<{ uuid: string; event: string; pause: unknown }> = [];
+  const now = Date.parse("2026-09-24T12:00:10Z");
+  const streamed = { ...payload("stream-resumed", "p2p.resumed"), data: { ...payload().data, uuid: "stream-resumed", pause: null } };
+  const streamedPaused = { ...payload("stream-paused", "p2p.paused"), data: { ...payload().data, uuid: "stream-paused", pause: { reason: "owner", until: null } } };
+  const coordinator = new MarketSourceCoordinator(state.store, new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl, async (offer, _receivedAt, event) => { opportunities.push({ uuid: offer.uuid, event, pause: offer.pause }); },
+    () => true, () => now,
+    { fetch: async () => new Response(`event: p2p.resumed\ndata: ${JSON.stringify(streamed)}\n\nevent: p2p.paused\ndata: ${JSON.stringify(streamedPaused)}\n\n`), wait: async () => new Promise<void>(() => undefined) },
+    async (event, offer) => { states.push({ uuid: offer.uuid, event, pause: offer.pause }); });
+  try {
+    enableRealtime(coordinator);
+    const pause = { reason: "taker_left", until: "2026-09-24T12:05:00Z" };
+    for (const [event, uuid, value] of [["p2p.paused", "webhook-paused", pause], ["p2p.resumed", "webhook-resumed", null], ["p2p.created", "unknown-pause", "unexpected"]] as const) {
+      const body = payload(uuid, event);
+      const raw = Buffer.from(JSON.stringify({ ...body, data: { ...body.data, pause: value } }));
+      assert.equal(coordinator.acceptWebhook(raw, signed(raw, now)).queued, true);
+    }
+    await new Promise(resolve => setImmediate(resolve));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(states.some(item => item.uuid === "webhook-paused" && item.event === "p2p.paused" && JSON.stringify(item.pause) === JSON.stringify(pause)));
+    assert.ok(states.some(item => item.uuid === "stream-paused" && item.event === "p2p.paused" && JSON.stringify(item.pause) === JSON.stringify(streamedPaused.data.pause)));
+    assert.ok(opportunities.some(item => item.uuid === "webhook-resumed" && item.event === "p2p.resumed" && item.pause === null));
+    assert.ok(opportunities.some(item => item.uuid === "stream-resumed" && item.event === "p2p.resumed" && item.pause === null));
+    assert.ok(opportunities.some(item => item.uuid === "unknown-pause" && item.pause === "unexpected"));
+  } finally {
+    coordinator.stop(); state.store.close();
+  }
+});
+
 test("procesa dos reaperturas legítimas del mismo UUID en ciclos distintos", async () => {
   const state = setup();
   enableRealtime(state.coordinator);
@@ -312,6 +345,69 @@ test("una oportunidad nueva ocupa un hueco libre sin esperar respuestas remotas"
     release();
     await new Promise(resolve => setImmediate(resolve));
     coordinator.stop(); state.store.close();
+  }
+});
+
+test("mide la espera en cola por lado con reloj monotónico", async () => {
+  const state = setup();
+  let monotonic = 100;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const now = Date.parse("2026-09-24T12:00:10Z");
+  const coordinator = new MarketSourceCoordinator(state.store, new Vault("a".repeat(64)),
+    { pollNext: async () => undefined, status: () => state.coordinator.status() } as unknown as PollingMarketSource,
+    webhookUrl, async offer => { if (offer.uuid === "first-buy") await blocked; }, () => true, () => now,
+    { fetch: async () => new Response("retry: 60000\n\n"), wait: async () => new Promise<void>(() => undefined) },
+    async () => undefined, () => monotonic);
+  try {
+    enableRealtime(coordinator);
+    const submit = (uuid: string) => {
+      const value = payload(uuid);
+      value.data.type = "buy";
+      const raw = Buffer.from(JSON.stringify(value));
+      coordinator.acceptWebhook(raw, signed(raw, now));
+    };
+    submit("first-buy");
+    await new Promise(resolve => setImmediate(resolve));
+    monotonic = 200;
+    submit("second-buy");
+    await new Promise(resolve => setImmediate(resolve));
+    monotonic = 850;
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    const entry = state.store.recentAudit(30).find(row => row.action === "market_feed_queue_timing" && row.detail.includes("second-buy"));
+    assert.deepEqual(JSON.parse(entry!.detail), { uuid: "second-buy", side: "buy", queueMs: 650, clock: "monotonic" });
+  } finally {
+    release();
+    await new Promise(resolve => setImmediate(resolve));
+    coordinator.stop(); state.store.close();
+  }
+});
+
+test("limita marcas monotónicas mientras está pausado y usa reloj persistido para eventos antiguos", async () => {
+  let active = false;
+  const state = setup(() => active);
+  const now = Date.parse("2026-09-24T12:00:10Z");
+  const timestamps = (state.coordinator as unknown as { receivedMonotonic: Map<string, number> }).receivedMonotonic;
+  try {
+    enableRealtime(state.coordinator);
+    const submit = (uuid: string) => {
+      const raw = Buffer.from(JSON.stringify(payload(uuid)));
+      state.coordinator.acceptWebhook(raw, signed(raw, now));
+    };
+    submit("old-event");
+    for (let i = 0; i < 1_023; i++) timestamps.set(`synthetic-${i}`, i);
+    submit("new-event");
+    assert.equal(timestamps.size, 1_024);
+    state.setNow(now + 750);
+    active = true;
+    await state.coordinator.processNext();
+    const entry = state.store.recentAudit(30).find(row => row.action === "market_feed_queue_timing" && row.detail.includes("old-event"));
+    assert.deepEqual(JSON.parse(entry!.detail), { uuid: "old-event", side: "sell", queueMs: 750, clock: "wall" });
+    state.coordinator.stop();
+    assert.equal(timestamps.size, 0);
+  } finally {
+    state.coordinator.stop(); state.store.close();
   }
 });
 

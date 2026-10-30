@@ -372,6 +372,8 @@ export class Store {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_offer_action ON audit_log(offer_uuid, action, id DESC);`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_apply_intent_offer
       ON mutation_intents(operation_uuid, created_at DESC) WHERE kind='apply';`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_mutation_intents_unresolved_offer
+      ON mutation_intents(operation_uuid, intent_id) WHERE state IN ('submitted', 'uncertain');`);
   }
 
   private migrate(): void {
@@ -1794,8 +1796,8 @@ export class Store {
     const row = this.db.prepare(
       `SELECT * FROM market_feed_events
        WHERE state = 'pending' AND next_attempt_at <= ?
-         ${lane === "opportunity" ? "AND event IN ('p2p.created', 'p2p.reopened', 'p2p.range_created', 'p2p.range_updated')" :
-           lane === "state" ? "AND event NOT IN ('p2p.created', 'p2p.reopened', 'p2p.range_created', 'p2p.range_updated')" : ""}
+         ${lane === "opportunity" ? "AND event IN ('p2p.created', 'p2p.reopened', 'p2p.resumed', 'p2p.range_created', 'p2p.range_updated')" :
+           lane === "state" ? "AND event NOT IN ('p2p.created', 'p2p.reopened', 'p2p.resumed', 'p2p.range_created', 'p2p.range_updated')" : ""}
          ${excludeKeys.length ? `AND event_key NOT IN (${excludeKeys.map(() => "?").join(",")})` : ""}
          ${excludeTypes.length ? `AND json_extract(payload_json,'$.data.type') NOT IN (${excludeTypes.map(() => "?").join(",")})` : ""}
          ${excludeOffers.length ? `AND json_extract(payload_json,'$.data.uuid') NOT IN (${excludeOffers.map(() => "?").join(",")})` : ""}
@@ -1850,14 +1852,16 @@ export class Store {
       try {
         const payload = JSON.parse(row.payload_json) as {
           sent_at?: unknown;
-          data?: { status?: unknown; available_amount?: unknown; order_min?: unknown; order_max?: unknown; amount?: unknown; receive?: unknown };
+          data?: { status?: unknown; pause?: unknown; available_amount?: unknown; order_min?: unknown; order_max?: unknown; amount?: unknown; receive?: unknown };
         };
         const sentAt = typeof payload.sent_at === "string"
           ? Date.parse(payload.sent_at)
           : Number.NaN;
         if (!Number.isSafeInteger(sentAt)) continue;
         const event = String(row.event);
-        const rawStatus = event === "p2p.range_closed" ? "closed" : payload.data?.status;
+        const rawStatus = event === "p2p.paused" ? "paused" : event === "p2p.range_closed" ? "closed" :
+          event === "p2p.resumed" && (payload.data?.status !== "open" || payload.data?.pause !== null) ? "unknown" :
+          payload.data?.pause != null ? "paused" : payload.data?.status;
         const status = typeof rawStatus === "string" && rawStatus.trim()
           ? rawStatus.trim().toLowerCase()
           : "unknown";
@@ -1877,29 +1881,56 @@ export class Store {
     if (!candidates.length) return undefined;
     const latestSentAt = Math.max(...candidates.map((candidate) => candidate.sentAt));
     const latest = candidates.filter((candidate) => candidate.sentAt === latestSentAt);
-    if (latest.length !== 1) return undefined;
+    if (latest.length !== 1) {
+      if (latest.some(item => item.event === "p2p.paused" || item.event === "p2p.resumed"))
+        return { event: "ambiguous", status: "unknown", sentAt: latestSentAt, receivedAt: Math.max(...latest.map(item => item.receivedAt)) };
+      return undefined;
+    }
     return latest[0];
   }
 
   hasPendingMarketFeedInvalidation(uuid: string, since?: number): boolean {
     if (since !== undefined) {
-      const rows = this.db.prepare(`SELECT payload_json FROM market_feed_events
-        WHERE event IN ('p2p.applied', 'p2p.paid', 'p2p.completed', 'p2p.cancelled', 'p2p.range_closed')
-          AND json_extract(payload_json, '$.data.uuid') = ?`).all(uuid) as Array<{ payload_json: string }>;
-      return rows.some(row => {
+      const rows = this.db.prepare(`SELECT event, payload_json FROM market_feed_events
+        WHERE event IN ('p2p.applied', 'p2p.paid', 'p2p.completed', 'p2p.cancelled', 'p2p.range_closed', 'p2p.paused', 'p2p.resumed')
+          AND json_extract(payload_json, '$.data.uuid') = ?`).all(uuid) as Array<{ event: string; payload_json: string }>;
+      let latestPause = -Infinity;
+      let latestResume = -Infinity;
+      let terminal = false;
+      for (const row of rows) {
         try {
-          const payload = JSON.parse(row.payload_json) as { sent_at?: string };
-          return Date.parse(payload.sent_at ?? "") >= since;
-        } catch { return false; }
-      });
+          const payload = JSON.parse(row.payload_json) as { sent_at?: string; data?: { status?: unknown; pause?: unknown } };
+          const at = Date.parse(payload.sent_at ?? "");
+          if (!Number.isFinite(at)) continue;
+          if (row.event === "p2p.paused") latestPause = Math.max(latestPause, at);
+          else if (row.event === "p2p.resumed") {
+            if (payload.data?.status === "open" && payload.data.pause === null) latestResume = Math.max(latestResume, at);
+          } else if (at >= since) terminal = true;
+        } catch { /* Invalid historical payloads are not timing evidence. */ }
+      }
+      return terminal || (latestPause >= since && latestResume <= latestPause);
     }
-    return Boolean(this.db.prepare(
+    const terminal = Boolean(this.db.prepare(
       `SELECT 1 FROM market_feed_events
        WHERE state = 'pending'
          AND event IN ('p2p.applied', 'p2p.cancelled', 'p2p.range_closed')
          AND json_extract(payload_json, '$.data.uuid') = ?
        LIMIT 1`,
     ).get(uuid));
+    if (terminal) return true;
+    const pauseRows = this.db.prepare(`SELECT event, state, payload_json FROM market_feed_events
+      WHERE event IN ('p2p.paused', 'p2p.resumed') AND json_extract(payload_json, '$.data.uuid') = ?`).all(uuid) as Array<{ event: string; state: string; payload_json: string }>;
+    let pendingPause = -Infinity, latestResume = -Infinity;
+    for (const row of pauseRows) {
+      try {
+        const payload = JSON.parse(row.payload_json) as { sent_at?: string; data?: { status?: unknown; pause?: unknown } };
+        const at = Date.parse(payload.sent_at ?? "");
+        if (!Number.isFinite(at)) continue;
+        if (row.event === "p2p.paused" && row.state === "pending") pendingPause = Math.max(pendingPause, at);
+        if (row.event === "p2p.resumed" && payload.data?.status === "open" && payload.data.pause === null) latestResume = Math.max(latestResume, at);
+      } catch { /* Invalid historical payloads are not timing evidence. */ }
+    }
+    return pendingPause !== -Infinity && pendingPause >= latestResume;
   }
 
   completeMarketFeedEvent(key: string, state: "processed" | "ignored"): void {

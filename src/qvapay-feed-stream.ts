@@ -69,7 +69,7 @@ export class QvaPayFeedStream {
   }
 
   private async run(credentials: QvaPayStreamCredentials, generation: number): Promise<void> {
-    let retryMilliseconds = 10_000;
+    let retryMilliseconds = 1_000;
     let failures = 0;
     while (this.active && generation === this.generation) {
       const controller = new AbortController();
@@ -98,7 +98,8 @@ export class QvaPayFeedStream {
             error: `QvaPay respondió HTTP ${response.status} al abrir el stream.`,
           });
           failures += 1;
-          await this.pause(phase === "backoff" ? backoff(failures, this.random) : 60_000, controller.signal);
+          const retryAfter = response.status === 429 ? retryAfterMilliseconds(response.headers.get("retry-after")) : undefined;
+          await this.pause(phase === "backoff" ? Math.max(10_000, retryMilliseconds, backoff(failures, this.random), retryAfter ?? 0) : 60_000, controller.signal);
           continue;
         }
         if (!response.body)
@@ -123,7 +124,7 @@ export class QvaPayFeedStream {
           const payload = JSON.parse(event.data) as unknown;
           this.onPayload(payload);
         }, (retry) => {
-          retryMilliseconds = Math.min(60_000, Math.max(1_000, retry));
+          retryMilliseconds = Math.max(1_000, retry);
         });
         if (subscriptionExpired) {
           await this.pause(60_000, controller.signal);
@@ -137,7 +138,7 @@ export class QvaPayFeedStream {
         if (this.controller === controller) this.controller = undefined;
       }
       if (!this.active || generation !== this.generation) return;
-      const delay = Math.max(retryMilliseconds, backoff(failures, this.random));
+      const delay = failures ? Math.max(retryMilliseconds, 10_000, backoff(failures, this.random)) : retryMilliseconds;
       const pauseController = new AbortController();
       this.controller = pauseController;
       this.onState({ phase: "backoff" });
@@ -220,18 +221,37 @@ function backoff(failures: number, random: () => number): number {
   return Math.round(base * (0.8 + random() * 0.4));
 }
 
+function retryAfterMilliseconds(value: string | null): number | undefined {
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? Math.max(0, timestamp - Date.now()) : undefined;
+}
+
 function abortableWait(milliseconds: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) {
       reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
       return;
     }
-    const timer = setTimeout(resolve, milliseconds);
-    timer.unref?.();
-    signal.addEventListener("abort", () => {
+    let remaining = milliseconds;
+    let timer: ReturnType<typeof setTimeout>;
+    const onAbort = () => {
       clearTimeout(timer);
       reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
-    }, { once: true });
+    };
+    const schedule = () => {
+      const chunk = Math.min(remaining, 2_147_483_647);
+      remaining -= chunk;
+      timer = setTimeout(() => {
+        if (remaining > 0) schedule();
+        else { signal.removeEventListener("abort", onAbort); resolve(); }
+      }, chunk);
+      timer.unref?.();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    schedule();
   });
 }
 
