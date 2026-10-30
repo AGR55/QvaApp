@@ -35,7 +35,7 @@ async function setup(
     });
   ready = true;
   calls.length = 0;
-  const source = new PollingMarketSource(
+  const createSource = () => new PollingMarketSource(
     store,
     accounts,
     factory("primary-token"),
@@ -46,7 +46,8 @@ async function setup(
   return {
     store,
     accounts,
-    source,
+    source: createSource(),
+    createSource,
     calls,
     setNow(value: number) { now = value; },
   };
@@ -125,6 +126,55 @@ test("un 429 enfría solo la cuenta afectada y respeta Retry-After", async () =>
   const secondary = state.accounts.list()[0]!;
   assert.equal(secondary.health, "cooldown");
   assert.equal(secondary.nextEligibleAt, 1_011_500);
+  state.store.close();
+});
+
+test("conserva el Retry-After de una lectora al reiniciar la fuente", async () => {
+  let failSecondary = true;
+  const state = await setup(async (token) => {
+    if (token.startsWith("secondary") && failSecondary)
+      throw new QvaApiError(429, "Demasiadas solicitudes", 10_000);
+    return emptyPage;
+  });
+
+  await state.source.pollNext();
+  state.setNow(1_001_500);
+  await state.source.pollNext();
+  const restarted = state.createSource();
+  state.setNow(1_002_000);
+  assert.equal(restarted.status().accounts.find(account => account.role === "reader")?.nextEligibleAt, 1_011_500);
+  await restarted.pollNext();
+  state.setNow(1_011_499);
+  await restarted.pollNext();
+  assert.equal(state.calls.filter(call => call.token.startsWith("secondary")).length, 1);
+  failSecondary = false;
+  state.setNow(1_011_500);
+  await restarted.pollNext();
+  assert.equal(state.calls.filter(call => call.token.startsWith("secondary")).length, 2);
+  assert.equal(state.accounts.list()[0]?.health, "healthy");
+  state.store.close();
+});
+
+test("una lectura lenta impide solapamientos y libera el turno para la otra cuenta", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async (token) => {
+    if (token === "primary-token") await gate;
+    return emptyPage;
+  });
+
+  const pending = state.source.pollNext();
+  state.setNow(1_001_500);
+  assert.equal(await state.source.pollNext(), undefined);
+  assert.deepEqual(state.calls.map(call => call.token), ["primary-token"]);
+  release();
+  assert.equal((await pending)?.sourceAccountId, "primary");
+  assert.equal((await state.source.pollNext())?.sourceAccountId, state.accounts.list()[0]?.id);
+  state.setNow(1_003_000);
+  await state.source.pollNext();
+  assert.deepEqual(state.calls.map(call => call.token), [
+    "primary-token", "secondary-reader-token", "primary-token",
+  ]);
   state.store.close();
 });
 

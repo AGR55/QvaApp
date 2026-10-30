@@ -872,14 +872,18 @@ export class TradingEngine {
     if (update.side === "sell" && samples.length >= 3 && Date.now() - update.scannedAt <= 5_000)
       this.store.recordMarketObservation({ coin: update.coin, medianSell: median(samples)!,
         openOffers: snapshot.total, eligible: 0 });
+    const completed = (candidates: number, action?: string) => {
+      this.recordScan(snapshot.items.length, candidates, action ?? "Sin aplicación");
+      return { inspected: snapshot.items.length, candidates, ...(action ? { action } : {}) };
+    };
     let candidates = 0;
     for (const item of snapshot.items.slice().sort((a, b) => this.opportunityScore(b.offer) - this.opportunityScore(a.offer))) {
       const result = await this.ingestMarketOffer(item.offer, update.scannedAt, "p2p.created", new Date(update.scannedAt).toISOString());
       candidates += result.candidates;
       if (result.action?.startsWith("aplicada ") || result.action?.startsWith("venta aplicada "))
-        return { inspected: snapshot.items.length, candidates, action: result.action };
+        return completed(candidates, result.action);
     }
-    return { inspected: snapshot.items.length, candidates };
+    return completed(candidates);
   }
 
   private async ingestPreparedMarketOffer(

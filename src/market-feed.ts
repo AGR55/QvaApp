@@ -28,8 +28,6 @@ export class MarketSourceCoordinator implements MarketDataSource {
   private processing = false;
   private wakeOpportunities?: () => void;
   private processingState = false;
-  private recoveryRequested = false;
-  private lastRecoveryPollAt = 0;
   private readonly receivedMonotonic = new Map<string, number>();
   private readonly stream: QvaPayFeedStream;
   private streamState: QvaPayStreamState = { phase: "idle" };
@@ -133,15 +131,9 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   async pollNext(): Promise<MarketPageUpdate | undefined> {
-    if (this.mode() === "polling") return this.polling.pollNext();
-    const disconnected = this.streamState.phase !== "connected";
-    if (!disconnected && !this.recoveryRequested) return undefined;
-    const now = this.now();
-    if (now - this.lastRecoveryPollAt < 3_000) return undefined;
-    this.lastRecoveryPollAt = now;
-    const update = await this.polling.pollNext();
-    if (update && !disconnected) this.recoveryRequested = false;
-    return update;
+    // Hybrid uses all three sources continuously. Account rotation, quotas and
+    // cooldowns belong to PollingMarketSource, including while SSE is healthy.
+    return this.polling.pollNext();
   }
 
   status(): MarketSourceStatus {
@@ -392,10 +384,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   private updateStreamState(state: QvaPayStreamState): void {
-    const previous = this.streamState.phase;
     this.streamState = state;
-    if (state.phase === "connected" && previous !== "connected")
-      this.recoveryRequested = true;
     if (state.error) this.store.set("market_stream_last_error", safeError(state.error));
     else if (state.phase === "connected") this.store.set("market_stream_last_error", "");
   }

@@ -1,3 +1,4 @@
+import { registerMarketHuntingLoops } from "./application/market-hunting-loops.js";
 import { FirebaseChatPush, ChatPushDispatcher } from "./chat-push.js";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { installTelegramRecovery } from "./telegram-recovery.js";
@@ -514,12 +515,7 @@ const scheduler = new Scheduler((name, error) => {
   store.audit(`${name}_background_error`, message);
   console.error(`Error de tarea ${name}:`, message);
 });
-scheduler.register("scan", 250, async () => {
-  if (trading.isPaused()) return;
-  if (marketSource.mode() === "hybrid" && await marketSource.processNext()) return;
-  const update = await marketSource.pollNext();
-  if (update) await trading.ingestMarketUpdate(update, { realtimeRecovery: marketSource.mode() === "hybrid" });
-});
+registerMarketHuntingLoops(scheduler, marketSource, trading);
 scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MarketConfigService } from "../src/market-config.js";
-import { QvaApiError } from "../src/qvapay.js";
+import { QvaApiError, QvaMutationUncertainError } from "../src/qvapay.js";
 import { Store } from "../src/store.js";
 import { TradingEngine } from "../src/trading.js";
 import type { P2pOffer } from "../src/types.js";
@@ -1596,4 +1596,53 @@ test('la preparación conserva una oferta publicada cuando liberar el objetivo l
  assert.equal(cancelled,0,'no cancela una oferta para acumular liquidez en ausencia de una oportunidad');
  assert.deepEqual(edits,[],'no vacía una oferta pequeña para alcanzar un objetivo mayor');
  store.close();
+});
+
+test("el sondeo híbrido actualiza último escaneo incluso con página vacía", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  const trading = new TradingEngine(store, {} as never, cfg as never, markets, async () => undefined);
+  const result = await trading.ingestMarketUpdate({ coin: "BANK_CUP", side: "sell", page: { offers: [], total: 0, currentPage: 1, perPage: 100 }, scannedAt: Date.now(), sourceAccountId: "reader" }, { realtimeRecovery: true });
+  const scan = JSON.parse(store.get("last_scan") ?? "null");
+  assert.ok(scan, "el resumen debe reflejar el sondeo híbrido, no conservar una fecha antigua");
+  assert.equal(scan.inspected, result.inspected);
+  assert.equal(scan.candidates, 0);
+});
+
+for (const uncertain of [false, true]) test(`polling y feed simultáneos reservan y aplican una sola vez (${uncertain ? "incierto" : "confirmado"})`, async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  let release!: () => void, entered!: () => void, posts = 0;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const offer: P2pOffer = { uuid: "same-poll-and-feed", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" };
+  const trading = new TradingEngine(store, { apply: async () => { posts++; entered(); await blocked; if (uncertain) throw new QvaMutationUncertainError("apply", new Error("timeout")); }, sendChat: async () => ({}) } as never, cfg as never, markets, async () => undefined);
+  const feed = trading.ingestMarketOffer(offer).catch(error => error);
+  await started;
+  assert.equal(store.applicationReservedCapital("BANK_CUP").fiat, 9200);
+  const page = { coin: "BANK_CUP", side: "sell" as const, page: { offers: [offer], total: 1, currentPage: 1, perPage: 100 }, scannedAt: Date.now(), sourceAccountId: "reader" };
+  await trading.ingestMarketUpdate(page, { realtimeRecovery: true });
+  assert.equal(posts, 1);
+  assert.equal(store.applicationReservedCapital("BANK_CUP").fiat, 9200);
+  release(); const result = await feed;
+  assert.equal(posts, 1);
+  if (uncertain) {
+    assert.ok(result instanceof QvaMutationUncertainError);
+    assert.equal(store.applicationReservedCapital("BANK_CUP").fiat, 9200);
+    assert.equal(store.activeOperations().length, 0);
+  } else {
+    assert.equal(store.activeOperations().length, 1);
+    assert.equal(store.applicationReservedCapital("BANK_CUP").fiat, 0);
+  }
+});
+
+test("el sondeo híbrido registra también la aplicación que termina anticipadamente", async t => {
+  const { store, cfg, markets } = setup();
+  t.after(() => store.close());
+  const trading = new TradingEngine(store, { apply: async () => undefined, sendChat: async () => ({}) } as never, cfg as never, markets, async () => undefined);
+  const result = await trading.ingestMarketUpdate({ coin: "BANK_CUP", side: "sell", page: { offers: [{ uuid: "polling-early", type: "sell", coin: "BANK_CUP", amount: 10, receive: 9200, status: "open" }], total: 1, currentPage: 1, perPage: 100 }, scannedAt: Date.now(), sourceAccountId: "reader" }, { realtimeRecovery: true });
+  const scan = JSON.parse(store.get("last_scan")!);
+  assert.equal(scan.inspected, 1);
+  assert.equal(scan.result, result.action);
+  assert.match(scan.result, /aplicada/);
 });

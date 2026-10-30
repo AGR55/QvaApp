@@ -657,3 +657,23 @@ test("el feed de rangos evalúa cada cambio de disponible y el cierre invalida s
     assert.notEqual(s.store.latestMarketFeedState(uuid)?.status,"open");
   } finally {s.coordinator.stop();s.store.close();}
 });
+
+test("tiempo real sigue consultando polling con stream conectado y delega el intervalo por cuenta", async t => {
+  const state = setup();
+  let close!: () => void;
+  let polls = 0;
+  const page = { coin: "BANK_CUP" as const, side: "sell" as const, page: { offers: [], total: 0, currentPage: 1, perPage: 100 }, scannedAt: Date.now(), sourceAccountId: "reader" };
+  const coordinator = new MarketSourceCoordinator(state.store, new Vault("a".repeat(64)), {
+    pollNext: async () => { polls++; return page; }, status: () => state.coordinator.status(),
+  } as unknown as PollingMarketSource, webhookUrl, async () => undefined, () => true, Date.now, {
+    fetch: async () => new Response(new ReadableStream<Uint8Array>({ start(controller) { close = () => controller.close(); } })),
+    wait: async () => new Promise<void>(() => undefined),
+  });
+  t.after(() => { coordinator.stop(); close(); state.store.close(); });
+  enableRealtime(coordinator);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(coordinator.status().streamPhase, "connected");
+  assert.equal(await coordinator.pollNext(), page);
+  assert.equal(await coordinator.pollNext(), page, "el coordinador no impone una espera global de tres segundos a distintas cuentas");
+  assert.equal(polls, 2);
+});

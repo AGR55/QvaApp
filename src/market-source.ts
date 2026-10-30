@@ -244,7 +244,10 @@ export class PollingMarketSource implements MarketDataSource {
     );
     active.forEach((account, index) => {
       if (account.seeded) return;
-      account.nextEligibleAt = now + (baseInterval * index) / active.length;
+      account.nextEligibleAt = Math.max(
+        account.nextEligibleAt,
+        now + (baseInterval * index) / active.length,
+      );
       account.seeded = true;
     });
   }
