@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { MarketAccountService } from "../src/market-accounts.js";
-import { PollingMarketSource, weightedMarketJobs } from "../src/market-source.js";
+import { PollingMarketSource, weightedMarketJobs, type MarketPollTiming } from "../src/market-source.js";
 import { QvaApiError } from "../src/qvapay.js";
 import { Store } from "../src/store.js";
 import { Vault } from "../src/vault.js";
@@ -18,6 +18,7 @@ async function setup(
   let now = 1_000_000;
   let ready = false;
   const calls: Array<{ token: string; at: number }> = [];
+  const timings: MarketPollTiming[] = [];
   const store = new Store(mkdtempSync(join(tmpdir(), "qvaapply-market-source-")));
   const vault = new Vault("a".repeat(64));
   const factory = (token: string) => ({
@@ -41,7 +42,7 @@ async function setup(
     factory("primary-token"),
     () => 3,
     () => [{ coin: "BANK_CUP", side: "sell" }],
-    { now: () => now },
+    { now: () => now, onPollTiming: timing => timings.push(timing) },
   );
   return {
     store,
@@ -49,6 +50,7 @@ async function setup(
     source: createSource(),
     createSource,
     calls,
+    timings,
     setNow(value: number) { now = value; },
   };
 }
@@ -175,6 +177,187 @@ test("una lectura lenta impide solapamientos y libera el turno para la otra cuen
   assert.deepEqual(state.calls.map(call => call.token), [
     "primary-token", "secondary-reader-token", "primary-token",
   ]);
+  state.store.close();
+});
+
+test("cuentas con titulares verificados distintos avanzan mientras una lectura está bloqueada", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token === "primary-token") await gate; return emptyPage; });
+  state.store.set("analytics_account_uuid", "owner-primary");
+  const reader = state.accounts.list()[0]!;
+  state.store.updateMarketReaderAccount(reader.id, { qvaPayUuid: "owner-secondary" });
+  const first = state.source.pollNext();
+  state.setNow(1_001_500);
+  const second = await state.source.pollNext();
+  assert.equal(second?.sourceAccountId, reader.id);
+  release();
+  await first;
+  state.store.close();
+});
+
+test("una cuenta desconocida elegible espera al turno activo sin ser adelantada indefinidamente", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token === "primary-token") await gate; return emptyPage; },
+    ["unknown-reader-token", "known-reader-token"]);
+  state.store.set("analytics_account_uuid", "owner-primary");
+  const [unknown, known] = state.accounts.list();
+  state.store.updateMarketReaderAccount(known!.id, { qvaPayUuid: "owner-known" });
+  const active = state.source.pollNext();
+  state.setNow(1_002_000);
+  assert.equal(await state.source.pollNext(), undefined);
+  assert.deepEqual(state.calls.map(item => item.token), ["primary-token"]);
+  release(); await active;
+  assert.equal((await state.source.pollNext())?.sourceAccountId, unknown!.id);
+  state.store.close();
+});
+
+test("tokens del mismo titular comparten espera y no se solapan", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token === "primary-token") await gate; return emptyPage; });
+  state.store.set("analytics_account_uuid", "same-owner");
+  state.store.updateMarketReaderAccount(state.accounts.list()[0]!.id, { qvaPayUuid: "same-owner" });
+  const first = state.source.pollNext();
+  state.setNow(1_001_500);
+  assert.equal(await state.source.pollNext(), undefined);
+  release(); await first;
+  assert.equal(await state.source.pollNext(), undefined, "se respeta el intervalo común");
+  state.setNow(1_003_000);
+  assert.ok(await state.source.pollNext());
+  state.store.close();
+});
+
+test("una lectora deshabilitada no alarga el intervalo del titular activo", async () => {
+  const state = await setup(async () => emptyPage);
+  state.store.set("analytics_account_uuid", "same-owner");
+  const reader = state.accounts.list()[0]!;
+  state.store.updateMarketReaderAccount(reader.id, { qvaPayUuid: "same-owner", intervalSeconds: 3600, enabled: false });
+  assert.ok(await state.source.pollNext());
+  state.setNow(1_003_000);
+  assert.ok(await state.source.pollNext());
+  assert.equal(state.calls.length, 2);
+  state.store.close();
+});
+
+test("descarta respuesta de lectora deshabilitada durante la consulta", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token.startsWith("secondary")) await gate; return emptyPage; });
+  state.store.set("analytics_account_uuid", "owner-primary");
+  const reader = state.accounts.list()[0]!;
+  state.store.updateMarketReaderAccount(reader.id, { qvaPayUuid: "owner-secondary" });
+  await state.source.pollNext();
+  state.setNow(1_001_500);
+  const pending = state.source.pollNext();
+  state.accounts.update(reader.id, { enabled: false });
+  release();
+  assert.equal(await pending, undefined);
+  assert.equal(state.timings.at(-1)?.outcome, "discarded");
+  assert.equal(state.timings.at(-1)?.discardReason, "credential_changed");
+  assert.equal(state.accounts.list()[0]?.enabled, false);
+  state.store.close();
+});
+
+test("descarta respuesta tras deshabilitar y habilitar durante una consulta", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token.startsWith("secondary")) await gate; return emptyPage; });
+  const reader = state.accounts.list()[0]!;
+  await state.source.pollNext();
+  state.setNow(1_001_500);
+  const pending = state.source.pollNext();
+  state.accounts.update(reader.id, { enabled: false });
+  state.accounts.update(reader.id, { enabled: true });
+  release();
+  assert.equal(await pending, undefined);
+  assert.equal(state.timings.at(-1)?.discardReason, "credential_changed");
+  state.store.close();
+});
+
+test("una respuesta anterior no reemplaza otra despachada y recibida después", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token === "primary-token") await gate; return emptyPage; });
+  state.store.set("analytics_account_uuid", "owner-primary");
+  state.store.updateMarketReaderAccount(state.accounts.list()[0]!.id, { qvaPayUuid: "owner-secondary" });
+  const first = state.source.pollNext();
+  state.setNow(1_001_500);
+  const newer = await state.source.pollNext();
+  assert.equal(newer?.dispatchSequence, 2);
+  release();
+  assert.equal(await first, undefined);
+  assert.equal(state.timings.at(-1)?.outcome, "discarded");
+  assert.equal(state.timings.at(-1)?.discardReason, "superseded");
+  state.store.close();
+});
+
+test("libera el turno si falla persistir el intervalo del titular", async () => {
+  const state = await setup(async () => emptyPage, []);
+  state.store.set("analytics_account_uuid", "owner-primary");
+  const original = state.store.set.bind(state.store);
+  let fail = true;
+  state.store.set = (key, value) => {
+    if (fail && key.startsWith("market_reader_owner_ready:")) { fail = false; throw new Error("disco"); }
+    return original(key, value);
+  };
+  assert.equal(await state.source.pollNext(), undefined);
+  assert.equal(state.calls.length, 0);
+  state.setNow(1_003_000);
+  assert.ok(await state.source.pollNext(), "el turno anterior se liberó pese al fallo");
+  assert.equal(state.calls.length, 1);
+  state.store.close();
+});
+
+test("limita a cuatro consultas activas incluso con más titulares distintos", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async () => { await gate; return emptyPage; }, ["reader-token-one", "reader-token-two", "reader-token-three", "reader-token-four"]);
+  state.store.set("analytics_account_uuid", "owner-primary");
+  for (const [i, reader] of state.accounts.list().entries())
+    state.store.updateMarketReaderAccount(reader.id, { qvaPayUuid: `owner-${i}` });
+  const pending: Array<ReturnType<typeof state.source.pollNext>> = [];
+  for (let i = 0; i < 4; i++) { state.setNow(1_000_000 + i * 1_000); pending.push(state.source.pollNext()); }
+  state.setNow(1_004_000);
+  assert.equal(await state.source.pollNext(), undefined);
+  assert.equal(state.calls.length, 4);
+  release(); await Promise.all(pending);
+  state.store.close();
+});
+
+test("un 429 tardío conserva el cooldown del titular tras deshabilitar la credencial", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token.startsWith("secondary")) { await gate; throw new QvaApiError(429, "límite", 10_000); } return emptyPage; });
+  state.store.set("analytics_account_uuid", "other-owner");
+  const reader = state.accounts.list()[0]!;
+  state.store.updateMarketReaderAccount(reader.id, { qvaPayUuid: "limited-owner" });
+  await state.source.pollNext();
+  state.setNow(1_001_500);
+  const pending = state.source.pollNext();
+  state.accounts.update(reader.id, { enabled: false });
+  release(); await pending;
+  assert.notEqual(state.accounts.list()[0]?.health, "cooldown", "no altera la credencial deshabilitada");
+  state.accounts.update(reader.id, { enabled: true });
+  const restarted = state.createSource();
+  state.setNow(1_004_000);
+  await restarted.pollNext();
+  assert.equal(state.calls.filter(call => call.token.startsWith("secondary")).length, 1);
+  state.store.close();
+});
+
+test("un error del token anterior no marca fallida la credencial rotada", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const state = await setup(async token => { if (token === "secondary-reader-token") { await gate; throw new QvaApiError(401, "vencido"); } return emptyPage; });
+  const reader = state.accounts.list()[0]!;
+  await state.source.pollNext();
+  state.setNow(1_001_500);
+  const pending = state.source.pollNext();
+  await state.accounts.rotate(reader.id, "new-secondary-token");
+  release(); await pending;
+  assert.equal(state.accounts.list()[0]?.health, "healthy");
   state.store.close();
 });
 

@@ -15,6 +15,7 @@ RUN pnpm install --prod --frozen-lockfile --ignore-scripts
 
 COPY dist ./dist
 COPY public ./public
+COPY scripts/report-hunting-latency.mjs ./scripts/report-hunting-latency.mjs
 
 USER node
 

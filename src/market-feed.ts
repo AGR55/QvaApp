@@ -25,6 +25,9 @@ export class MarketFeedRequestError extends Error {
 }
 
 export class MarketSourceCoordinator implements MarketDataSource {
+  private modeGeneration = 0;
+  private stopped = false;
+  private readonly activeWork = new Set<Promise<unknown>>();
   private processing = false;
   private wakeOpportunities?: () => void;
   private processingState = false;
@@ -68,7 +71,10 @@ export class MarketSourceCoordinator implements MarketDataSource {
       : "polling";
   }
 
+  generation(): number { return this.modeGeneration; }
+
   setMode(mode: MarketSourceMode): void {
+    if (this.stopped) throw new Error("La fuente de mercado se está cerrando.");
     if (mode !== "polling" && mode !== "hybrid")
       throw new Error("Modo de fuente de mercado inválido.");
     if (mode === "hybrid" && !this.hasWebhookSecret())
@@ -77,6 +83,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
       ? this.streamCredentials()
       : undefined;
     this.store.set("market_source_mode", mode);
+    this.modeGeneration++;
     if (mode === "polling") {
       this.store.ignorePendingMarketFeedEvents();
       this.receivedMonotonic.clear();
@@ -88,7 +95,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
     );
     if (mode === "hybrid") {
       this.stream.start(streamCredentials!);
-      queueMicrotask(() => void this.processNext());
+      this.scheduleProcessing();
     }
   }
 
@@ -114,12 +121,16 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   start(): void {
+    if (this.stopped) return;
     if (this.mode() === "hybrid" && this.hasStreamCredentials()) this.startStream();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopped = true;
     this.stream.stop();
     this.receivedMonotonic.clear();
+    this.wakeOpportunities?.();
+    while (this.activeWork.size) await Promise.allSettled([...this.activeWork]);
   }
 
   hasWebhookSecret(): boolean {
@@ -176,6 +187,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
   } {
     if (!rawBody.length || rawBody.length > 10_000)
       throw new MarketFeedRequestError(400, "Payload del feed inválido.");
+    if (this.stopped) throw new MarketFeedRequestError(503, "La fuente de mercado se está cerrando.");
     const secret = this.secret();
     const timestamp = parseTimestamp(headers.timestamp);
     if (Math.abs(this.now() - timestamp) > 5 * 60_000)
@@ -188,18 +200,37 @@ export class MarketSourceCoordinator implements MarketDataSource {
     return result;
   }
 
-  async processNext(): Promise<boolean> {
-    if (this.mode() !== "hybrid" || !this.canProcess()) return false;
+  processNext(): Promise<boolean> {
+    if (this.stopped) return Promise.resolve(false);
+    return this.trackWork(this.processNextWork());
+  }
+
+  private trackWork<T>(work: Promise<T>): Promise<T> {
+    this.activeWork.add(work);
+    void work.then(() => this.activeWork.delete(work), () => this.activeWork.delete(work));
+    return work;
+  }
+
+  private scheduleProcessing(): void {
+    queueMicrotask(() => {
+      void this.processNext().catch(error => {
+        if (!this.stopped) console.error("Error al procesar el feed de mercado:", safeError(error));
+      });
+    });
+  }
+
+  private async processNextWork(): Promise<boolean> {
+    if (this.stopped || this.mode() !== "hybrid" || !this.canProcess()) return false;
     // State reconciliation may need remote reads. Its queue must not hold fresh
     // opportunities; pending invalidations are checked directly in SQLite.
-    const stateWork = this.processStateEvents();
+    const stateWork = this.trackWork(this.processStateEvents());
     if (this.processing) return stateWork;
     this.processing = true;
     let processed = false;
     const active = new Map<string, { type: "buy" | "sell"; uuid: string; work: Promise<void> }>();
     try {
-      while (this.mode() === "hybrid" && this.canProcess()) {
-        while (active.size < 3) {
+      while (!this.stopped && this.mode() === "hybrid" && this.canProcess()) {
+        while (!this.stopped && active.size < 3) {
           const blocked: Array<"buy" | "sell"> = [];
           const jobs = [...active.values()];
           if (jobs.some(job => job.type === "buy")) blocked.push("buy");
@@ -238,7 +269,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
     this.processingState = true;
     let processed = false;
     try {
-      while (this.mode() === "hybrid" && this.canProcess()) {
+      while (!this.stopped && this.mode() === "hybrid" && this.canProcess()) {
         const event = this.store.nextMarketFeedEvent(this.now(), "state");
         if (!event) break;
         processed = true;
@@ -302,6 +333,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   private acceptStreamPayload(value: unknown): void {
+    if (this.stopped) return;
     try {
       const payload = normalizeStoredPayload(value);
       this.store.set("market_stream_last_received_at", String(this.now()));
@@ -358,12 +390,13 @@ export class MarketSourceCoordinator implements MarketDataSource {
       );
     if (queued && inserted) {
       if (isOpportunityEvent(payload.event)) this.wakeOpportunities?.();
-      queueMicrotask(() => void this.processNext());
+      this.scheduleProcessing();
     }
     return { duplicate: !inserted, queued: queued && inserted };
   }
 
   private startStream(): void {
+    if (this.stopped) return;
     const credentials = this.streamCredentials();
     this.stream.start(credentials);
   }
@@ -384,6 +417,7 @@ export class MarketSourceCoordinator implements MarketDataSource {
   }
 
   private updateStreamState(state: QvaPayStreamState): void {
+    if (this.stopped) return;
     this.streamState = state;
     if (state.error) this.store.set("market_stream_last_error", safeError(state.error));
     else if (state.phase === "connected") this.store.set("market_stream_last_error", "");

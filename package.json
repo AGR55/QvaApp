@@ -16,6 +16,7 @@
     "dev:all": "pnpm dev & pnpm dev:web & wait",
     "preview:ui": "pnpm build:server && pnpm build:web && node scripts/preview-dashboard.mjs",
     "login": "tsx src/login.ts",
+    "report:hunting": "node scripts/report-hunting-latency.mjs",
     "start": "node --enable-source-maps dist/index.js",
     "test": "node --import tsx --test test/*.test.ts",
     "test:watch": "node --import tsx --test --watch test/*.test.ts",

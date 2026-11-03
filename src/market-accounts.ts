@@ -25,9 +25,14 @@ export interface PublicMarketReaderAccount {
   updatedAt: number;
 }
 
-type ReaderFactory = (token: string) => MarketListingGateway;
+type IdentityReader = MarketListingGateway & Partial<Pick<QvaPayClient, "profile">>;
+type ReaderFactory = (token: string) => IdentityReader;
 
 export class MarketAccountService {
+  private readonly accountGenerations = new Map<string, number>();
+  private readonly identityAttempts = new Map<string, { fingerprint: string; retryAt: number }>();
+  private identityRefresh: Promise<void> | undefined;
+  private stopped = false;
   constructor(
     private readonly store: Store,
     private readonly vault: Vault,
@@ -43,6 +48,13 @@ export class MarketAccountService {
     return this.store.marketReaderAccounts();
   }
 
+  generation(id: string): number { return this.accountGenerations.get(id) ?? 0; }
+
+  ownerForToken(token: string): string | undefined {
+    const tokenFingerprint = fingerprint(token);
+    return this.store.marketReaderAccounts().find(account => account.tokenFingerprint === tokenFingerprint)?.qvaPayUuid;
+  }
+
   reader(account: MarketReaderAccount): MarketListingGateway {
     return this.readerFactory(this.vault.decrypt(account.encryptedToken));
   }
@@ -52,8 +64,13 @@ export class MarketAccountService {
     token: string;
     intervalSeconds: number;
   }): Promise<PublicMarketReaderAccount> {
+    if (this.stopped) throw new Error("Las cuentas lectoras se están cerrando.");
     const normalized = validateInput(input);
-    await validateReader(this.readerFactory(normalized.token));
+    const reader = this.readerFactory(normalized.token);
+    await validateReader(reader);
+    if (this.stopped) throw new Error("Las cuentas lectoras se están cerrando.");
+    const qvaPayUuid = await readIdentity(reader);
+    if (this.stopped) throw new Error("Las cuentas lectoras se están cerrando.");
     let account: MarketReaderAccount;
     try {
       account = this.store.createMarketReaderAccount({
@@ -62,6 +79,7 @@ export class MarketAccountService {
         encryptedToken: this.vault.encrypt(normalized.token),
         tokenFingerprint: fingerprint(normalized.token),
         intervalSeconds: normalized.intervalSeconds,
+        ...(qvaPayUuid ? { qvaPayUuid } : {}),
       });
     } catch (error) {
       if (error instanceof Error && /token_fingerprint|UNIQUE/i.test(error.message))
@@ -97,6 +115,8 @@ export class MarketAccountService {
         ...(input.enabled === undefined ? {} : { enabled: input.enabled }),
       }),
     );
+    if (updated.enabled !== current.enabled)
+      this.accountGenerations.set(id, this.generation(id) + 1);
     this.store.audit(
       "market_reader_updated",
       `Cuenta lectora actualizada: ${updated.label}.`,
@@ -105,16 +125,23 @@ export class MarketAccountService {
   }
 
   async rotate(id: string, token: string): Promise<PublicMarketReaderAccount> {
+    if (this.stopped) throw new Error("Las cuentas lectoras se están cerrando.");
     const current = required(this.store.marketReaderAccount(id));
     const normalized = validateToken(token);
-    await validateReader(this.readerFactory(normalized));
+    const reader = this.readerFactory(normalized);
+    await validateReader(reader);
+    if (this.stopped) throw new Error("Las cuentas lectoras se están cerrando.");
+    const qvaPayUuid = await readIdentity(reader);
+    if (this.stopped || this.store.marketReaderAccount(id)?.tokenFingerprint !== current.tokenFingerprint)
+      throw new Error("La cuenta lectora cambió durante la validación del token.");
     const updated = required(
       this.store.updateMarketReaderAccount(id, {
         encryptedToken: this.vault.encrypt(normalized),
         tokenFingerprint: fingerprint(normalized),
-        qvaPayUuid: null,
+        qvaPayUuid: qvaPayUuid ?? null,
       }),
     );
+    this.accountGenerations.set(id, this.generation(id) + 1);
     this.store.audit(
       "market_reader_token_rotated",
       `Token rotado para la cuenta lectora ${current.label}.`,
@@ -126,11 +153,54 @@ export class MarketAccountService {
     const current = required(this.store.marketReaderAccount(id));
     if (!this.store.deleteMarketReaderAccount(id))
       throw new Error("La cuenta lectora no existe.");
+    this.accountGenerations.delete(id);
     this.store.audit(
       "market_reader_removed",
       `Cuenta lectora eliminada: ${current.label}.`,
     );
   }
+
+  /** Probe one legacy reader at a time; read-only tokens need not grant /user. */
+  refreshIdentity(now = Date.now()): Promise<void> {
+    if (this.stopped) return Promise.resolve();
+    if (this.identityRefresh) return this.identityRefresh;
+    const work = this.refreshIdentityOnce(now);
+    this.identityRefresh = work;
+    void work.then(() => { if (this.identityRefresh === work) this.identityRefresh = undefined; },
+      () => { if (this.identityRefresh === work) this.identityRefresh = undefined; });
+    return work;
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.identityRefresh) await Promise.allSettled([this.identityRefresh]);
+  }
+
+  private async refreshIdentityOnce(now: number): Promise<void> {
+    const accounts = this.store.marketReaderAccounts();
+    const ids = new Set(accounts.map(account => account.id));
+    for (const id of this.identityAttempts.keys()) if (!ids.has(id)) this.identityAttempts.delete(id);
+    const account = accounts.find(item => {
+      const attempted = this.identityAttempts.get(item.id);
+      return item.enabled && !item.qvaPayUuid && (attempted?.fingerprint !== item.tokenFingerprint || attempted.retryAt <= now);
+    });
+    if (!account) return;
+    this.identityAttempts.set(account.id, { fingerprint: account.tokenFingerprint, retryAt: now + 3_600_000 });
+    const identity = await readIdentity(this.readerFactory(this.vault.decrypt(account.encryptedToken)));
+    if (this.stopped || !identity) return;
+    const current = this.store.marketReaderAccount(account.id);
+    if (current?.enabled && current.tokenFingerprint === account.tokenFingerprint && !current.qvaPayUuid)
+      this.store.updateMarketReaderAccount(account.id, { qvaPayUuid: identity });
+  }
+}
+
+async function readIdentity(reader: IdentityReader): Promise<string | undefined> {
+  if (!reader.profile) return undefined;
+  try {
+    const { uuid } = await reader.profile();
+    // Only the authenticated profile establishes identity; list offer owners do not.
+    return typeof uuid === "string" && uuid.trim() && uuid.length <= 128 ? uuid.trim().toLowerCase() : undefined;
+  } catch { return undefined; } // Profile access is optional; keep p2p:read usable.
 }
 
 function publicAccount(account: MarketReaderAccount): PublicMarketReaderAccount {

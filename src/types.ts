@@ -72,11 +72,31 @@ export interface P2pOffer {
   Peer?: { uuid: string; username?: string; name?: string } | null;
 }
 
+export interface ListTiming {
+  queueMs: number | null;
+  responseMs: number | null;
+  totalMs: number;
+  attempts: number;
+  outcome: "success" | "failed";
+  status?: number;
+  cacheStatus?: "HIT" | "MISS";
+}
+
+export interface QusdReadTiming {
+  priority: "urgent" | "normal";
+  outcome: "success" | "failed";
+  queueMs: number | null;
+  responseMs: number | null;
+  totalMs: number;
+}
+
 export interface P2pListPage {
   offers: P2pOffer[];
   total: number;
   currentPage: number;
   perPage: number;
+  timing?: ListTiming;
+  cacheStatus?: "HIT" | "MISS";
 }
 export interface P2pAverage {
   average?: number;
