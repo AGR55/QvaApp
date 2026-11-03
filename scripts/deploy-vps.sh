@@ -47,14 +47,19 @@ fi
 
 export QVAAPPLY_HOST_PORT="$host_port"
 export QVAAPPLY_REVISION="$revision"
+bash "$release_dir/scripts/backup-vps.sh"
 docker compose -f "$release_dir/deploy/compose.yaml" build --pull
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"
-docker compose -f "$app_root/current/deploy/compose.yaml" up -d --remove-orphans
+started=true
+if ! docker compose -f "$app_root/current/deploy/compose.yaml" up -d --remove-orphans; then
+  started=false
+fi
 
 healthy=false
 for _ in {1..30}; do
+  if [[ $started != true ]]; then break; fi
   if curl --fail --silent --show-error "http://127.0.0.1:${host_port}/api/session" >/dev/null; then
     healthy=true
     break

@@ -1,4 +1,6 @@
 import { ChatCatalog } from "./chat-catalog.js";
+import { QusdBalanceCache } from "./qusd-balance-cache.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { huntingRequirementReason } from "./hunting-requirements.js";
 import type { config as Config } from "./config.js";
 import { randomUUID } from "node:crypto";
@@ -36,6 +38,7 @@ import { applyReadyAt } from "./core/apply-budget.js";
 import { sizeFlexibleOffer, orderForOperation, matchingRecoveryOrder } from "./flexible-order.js";
 
 type RuntimeConfig = typeof Config;
+
 interface BlockedOfferNotification {
   kind: "blocked-offer";
   alert: {
@@ -78,13 +81,14 @@ export interface MarketSnapshot {
 }
 
 export class TradingEngine {
+  private readonly marketEvaluationContext = new AsyncLocalStorage<() => boolean>();
   private readonly reconciliationInFlight = new Set<string>();
   private averagesCache?: {
     value: Record<string, P2pAverage>;
     expiresAt: number;
   };
   private refreshRoundInFlight = false;
-  private qusdBalanceCache?: { value: number; updatedAt: number; epoch: string };
+  private readonly qusdBalanceCache: QusdBalanceCache;
   private readinessInFlight = false;
   private liquidityPreparingUuid?: string;
   private nextLiquidityPreparationAt = 0;
@@ -124,6 +128,11 @@ export class TradingEngine {
         ? marketConfigOrNotify
         : notify!;
     this.monetaryIntents = new MonetaryIntents(this.store);
+    this.qusdBalanceCache = new QusdBalanceCache({
+      read: priority => this.qva.qusdBalance(priority ? { priority: true } : {}),
+      epoch: () => `${this.store.get("qusd_balance_epoch") ?? "0"}:${this.marketWorkGeneration()}`,
+      observe: timing => { try { this.store.audit("qusd_cache_timing", JSON.stringify(timing)); } catch { /* Metrics never change a balance decision. */ } },
+    });
     this.opportunityOrchestrator = new OpportunityOrchestrator(
       this.store as Store,
       this.qva,
@@ -246,6 +255,7 @@ export class TradingEngine {
       source,
       reason,
     );
+    this.marketWorkEpoch++;
     for (const market of saved.markets) {
       this.store.set(`fiat_balance:${market.code}`, String(market.fiatBalance));
       if (source === "panel" && previousBalances.get(market.code) !== market.fiatBalance) {
@@ -301,6 +311,9 @@ export class TradingEngine {
   isPaused(): boolean {
     return this.store.get("paused") !== "false";
   }
+  private marketWorkEpoch = 0;
+  marketWorkGeneration(): number { return this.marketWorkEpoch; }
+  private marketEvaluationIsCurrent(): boolean { return this.marketEvaluationContext.getStore()?.() !== false; }
   mode(): "simulation" | "real" {
     return this.store.get("mode") === "real" ? "real" : "simulation";
   }
@@ -317,6 +330,7 @@ export class TradingEngine {
         "Desactiva primero la parada de emergencia; la reanudación permanece bloqueada.",
       );
     this.store.set("paused", String(paused));
+    this.marketWorkEpoch++;
     this.store.audit(
       paused ? "paused" : "resumed",
       `Automatización modificada desde ${source}`,
@@ -413,6 +427,7 @@ export class TradingEngine {
 
   setEmergencyStop(enabled: boolean, source = "panel"): void {
     this.store.set("emergency_stop", String(enabled));
+    this.marketWorkEpoch++;
     if (enabled) this.store.set("paused", "true");
     this.store.audit(
       enabled ? "emergency_stop" : "emergency_stop_cleared",
@@ -790,13 +805,27 @@ export class TradingEngine {
     };
   }
 
-  async ingestMarketUpdate(update: MarketPageUpdate, options: { realtimeRecovery?: boolean } = {}): Promise<{
+  async ingestMarketUpdate(update: MarketPageUpdate, options: { realtimeRecovery?: boolean; isCurrent?: () => boolean } = {}): Promise<{
     inspected: number;
     candidates: number;
     action?: string;
   }> {
-    if (this.scanInFlight) return this.scanInFlight;
-    const run = options.realtimeRecovery ? this.ingestRealtimeRecovery(update) : this.ingestMarketUpdateOnce(update);
+    // A manual scan may own the shared projection. Its result does not mean
+    // this page was evaluated; wait for it and then process the received page.
+    const generation = this.marketWorkGeneration();
+    const isCurrent = () => {
+      const callerCurrent = options.isCurrent?.() !== false;
+      return !this.isPaused() && generation === this.marketWorkGeneration() && callerCurrent;
+    };
+    while (this.scanInFlight) {
+      try { await this.scanInFlight; } catch { /* A failed scan must not discard a different page. */ }
+    }
+    if (!isCurrent())
+      return { inspected: 0, candidates: 0, action: "página descartada tras pausa" };
+    // Keep the page's generation attached to async preflights and dispatch
+    // guards, without sharing mutable state with independent feed decisions.
+    const run = this.marketEvaluationContext.run(isCurrent, () => options.realtimeRecovery
+      ? this.ingestRealtimeRecovery(update) : this.ingestMarketUpdateOnce(update));
     this.scanInFlight = run;
     try {
       return await run;
@@ -861,6 +890,7 @@ export class TradingEngine {
   private async ingestRealtimeRecovery(update: MarketPageUpdate): Promise<{ inspected: number; candidates: number; action?: string }> {
     const snapshot = { ...await this.marketSnapshotFromPage(update.coin, update.side, update.page, update.scannedAt, true),
       coin: update.coin, side: update.side };
+    if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
     this.persistIncrementalMarketOffer(snapshot, snapshot.items);
     // Only fresh, distinct observations may renew the safety reference. Cached
     // averages are display context and must not become a fresh trading median.
@@ -878,6 +908,7 @@ export class TradingEngine {
     };
     let candidates = 0;
     for (const item of snapshot.items.slice().sort((a, b) => this.opportunityScore(b.offer) - this.opportunityScore(a.offer))) {
+      if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
       const result = await this.ingestMarketOffer(item.offer, update.scannedAt, "p2p.created", new Date(update.scannedAt).toISOString());
       candidates += result.candidates;
       if (result.action?.startsWith("aplicada ") || result.action?.startsWith("venta aplicada "))
@@ -892,6 +923,7 @@ export class TradingEngine {
     event: "p2p.created" | "p2p.reopened" | "p2p.resumed" | "p2p.range_created" | "p2p.range_updated",
     sentAt?: string,
   ): Promise<{ inspected: number; candidates: number; action?: string }> {
+    if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
     if (this.isExcludedAfterManualCancel(offer.uuid))
       return { inspected: 1, candidates: 0, action: "Excluida por cancelación manual" };
     if (this.store.getOperation(offer.uuid))
@@ -938,7 +970,7 @@ export class TradingEngine {
     const quote = rate(offer);
     if (!Number.isFinite(quote) || quote <= 0 || (offer.type === "sell" ? quote > market.buyMaxRate : quote < market.sellMinRate))
       return skip("La tasa flexible no cumple el objetivo");
-    const { sized, desired, balance } = await this.sizeFlexibleTake(offer);
+    const { sized, desired } = await this.sizeFlexibleTake(offer);
     if (offer.type === "buy" && desired && (!sized || sized.amount < desired.amount)) {
       if (this.liquidityPreparingUuid) return skip("Saldo QUSD en preparación; se conserva el disponible verificado");
       this.requireRealMode();
@@ -954,7 +986,7 @@ export class TradingEngine {
           this.automaticDispatchAllowed(desired, intentId, Math.max(queued, Date.now() - freshAt), false) } : {}),
       });
       // Cancellation, application and restoration all change the remote balance.
-      delete this.qusdBalanceCache;
+      this.qusdBalanceCache.invalidate();
       if (!result.applicationConfirmed) return skip(result.decision.reasons.join(" · "));
       this.store.markSeen(offer.uuid);
       queueMicrotask(() => void this.sendChatBestEffort(offer.uuid).catch(error =>
@@ -968,6 +1000,8 @@ export class TradingEngine {
       return skip("Las condiciones de la cacería cambiaron");
     this.requireRealMode();
     let result: { order: string; amount: number; receive: number };
+    const balanceVersion = this.qusdBalanceCache.version();
+    const grossBalance = this.qusdBalanceCache.peek()?.value;
     try {
       result = await this.monetaryIntents.execute({
       kind: "apply", operationUuid: offer.uuid,
@@ -988,11 +1022,15 @@ export class TradingEngine {
       this.store.audit("flexible_order_rejected", error.message, offer.uuid);
       return skip(error.message);
     }
+    const balanceUnchanged = balanceVersion === this.qusdBalanceCache.version();
     this.store.createOperation({ uuid: offer.uuid, orderUuid: result.order, offerType: offer.type, coin: offer.coin,
       amount: result.amount, receive: result.receive, rate: result.receive / result.amount,
       state: "applied", autoApplied: automatic, cancelAt: null, createdAt: Date.now(),
       ...(offer.User?.uuid ? { counterpartyId: offer.User.uuid } : {}) });
-    if (offer.type === "buy") this.qusdBalanceCache = { epoch: this.store.get("qusd_balance_epoch") ?? "0", value: Math.max(0, balance + this.cooperativeQusdOwed() - result.amount), updatedAt: Date.now() };
+    if (offer.type === "buy") {
+      if (balanceUnchanged && grossBalance !== undefined) this.qusdBalanceCache.replace(Math.max(0, grossBalance - result.amount));
+      else this.qusdBalanceCache.invalidate();
+    }
     this.store.markSeen(offer.uuid);
     this.store.audit("flexible_order_applied", `Orden ${result.order}: ${result.amount} QUSD por ${result.receive} ${market.currency}.`, offer.uuid);
     queueMicrotask(() => void Promise.all([this.sendChatBestEffort(offer.uuid), this.notify(
@@ -1213,6 +1251,8 @@ export class TradingEngine {
       return { inspected: 1, candidates: 0, action: "Saldo QUSD libre insuficiente" };
     if (!this.isAutomaticSellStillEligible(offer))
       return { inspected: 1, candidates: 1, action: "La tasa, el mínimo de venta o las condiciones de seguridad cambiaron antes de aplicar" };
+    const balanceVersion = this.qusdBalanceCache.version();
+    const grossBalance = this.qusdBalanceCache.peek()?.value;
     try {
       this.store.set("market_feed_last_decision_ms", String(Math.max(0, Date.now() - decisionStartedAt)));
       await this.monetaryIntents.execute({
@@ -1230,6 +1270,7 @@ export class TradingEngine {
       this.store.audit(error.code?.startsWith("LOCAL_") ? "automatic_apply_not_sent" : "qvapay_apply_rejected", detail, offer.uuid);
       return { inspected: 1, candidates: 1, action: detail };
     }
+    const balanceUnchanged = balanceVersion === this.qusdBalanceCache.version();
     this.store.createOperation({
       uuid: offer.uuid,
       offerType: "buy",
@@ -1254,7 +1295,8 @@ export class TradingEngine {
       decision: "applied",
       reason: "Venta automática confirmada por la vía rápida de precio y capital.",
     });
-    this.qusdBalanceCache = { epoch: this.store.get("qusd_balance_epoch") ?? "0", value: Math.max(0, availableQusd + this.cooperativeQusdOwed() - offer.amount), updatedAt: Date.now() };
+    if (balanceUnchanged && grossBalance !== undefined) this.qusdBalanceCache.replace(Math.max(0, grossBalance - offer.amount));
+    else this.qusdBalanceCache.invalidate();
     this.store.audit(
       "market_fast_lane_applied",
       `Venta aplicada en ${Math.max(0, Date.now() - receivedAt)} ms desde la recepción.`,
@@ -1278,18 +1320,41 @@ export class TradingEngine {
     return { inspected: 1, candidates: 1, action: `venta aplicada ${offer.uuid}` };
   }
 
+  private huntingBalanceRefreshEnabled(): boolean {
+    const config = this.marketConfig.current();
+    return config.hunting.sellRunning && !this.isPaused() && this.mode() === "real" &&
+      this.store.get("emergency_stop") !== "true" && config.markets.some(market => market.active && market.huntSellEnabled);
+  }
+
+  async refreshHuntingQusdBalance(): Promise<void> {
+    if (!this.huntingBalanceRefreshEnabled()) return;
+    const generation = this.marketWorkGeneration();
+    const current = () => generation === this.marketWorkGeneration() && this.huntingBalanceRefreshEnabled();
+    const cached = this.qusdBalanceCache.peek();
+    if (cached && Date.now() - cached.updatedAt < 10_000) return;
+    try { await this.qusdBalanceCache.get({ priority: false, force: true, context: "warmup", isCurrent: current }); }
+    catch (error) { if (current()) throw error; }
+  }
+
+  async stopHuntingBalanceReads(): Promise<void> { await this.qusdBalanceCache.stop(); }
+
   async prepareHuntingLiquidity(): Promise<void> {
+    const generation = this.marketWorkGeneration();
     const idle = () => this.marketConfig.current().hunting.sellRunning && !this.isPaused() && this.mode() === "real" && this.store.get("emergency_stop") !== "true" &&
+      generation === this.marketWorkGeneration() &&
       !this.ownDecisionBusy() && this.store.applicationReservedCapital().count === 0 && this.store.activeReservedQusd() === 0;
     const config = this.marketConfig.current();
     if (this.readinessInFlight || !idle() || !config.hunting.sellRunning ||
       !config.markets.some(market => market.active && market.huntSellEnabled)) return;
     this.readinessInFlight = true;
+    const readPreparedBalance = async (context: "readiness" | "readiness_after_edit"): Promise<number | undefined> => {
+      try { return await this.qusdBalanceCache.get({ priority: false, force: true, context, isCurrent: idle }); }
+      catch (error) { if (idle()) throw error; return undefined; }
+    };
     try {
       const epoch = this.store.get("qusd_balance_epoch") ?? "0";
-      const balance = await this.qva.qusdBalance();
-      if (!idle() || epoch !== (this.store.get("qusd_balance_epoch") ?? "0")) return;
-      this.qusdBalanceCache = { epoch: this.store.get("qusd_balance_epoch") ?? "0", value: balance, updatedAt: Date.now() };
+      const balance = await readPreparedBalance("readiness");
+      if (balance === undefined || !idle() || epoch !== (this.store.get("qusd_balance_epoch") ?? "0")) return;
       const targetConfig = this.marketConfig.current();
       const target = targetConfig.risk.maxQusdPerOperation + Math.max(targetConfig.qusdReserve, targetConfig.risk.minQusdReserve) + this.cooperativeQusdOwed();
       if (!Number.isFinite(target) || target <= 0 || balance >= target || Date.now() < this.nextLiquidityPreparationAt) return;
@@ -1318,8 +1383,9 @@ export class TradingEngine {
           action: intentId => this.qva.editOffer(offer.uuid, { amount: remaining, receive }, { beforeDispatch: () => canPrepare(intentId) }) });
       }
       const refreshedEpoch = this.store.get("qusd_balance_epoch") ?? "0";
-      const fresh = await this.qva.qusdBalance();
-      if (idle() && refreshedEpoch === (this.store.get("qusd_balance_epoch") ?? "0")) this.qusdBalanceCache = { epoch: this.store.get("qusd_balance_epoch") ?? "0", value: fresh, updatedAt: Date.now() };
+      if (!idle()) return;
+      const fresh = await readPreparedBalance("readiness_after_edit");
+      if (fresh === undefined || !idle() || refreshedEpoch !== (this.store.get("qusd_balance_epoch") ?? "0")) return;
       this.store.audit("hunting_liquidity_prepared", `Liquidez verificada: ${fresh} QUSD libres; objetivo para una operación: ${target}.`, offer.uuid);
     } finally {
       delete this.liquidityPreparingUuid;
@@ -1328,12 +1394,7 @@ export class TradingEngine {
   }
 
   private async fastLaneQusdBalance(ignoreIntent?: string): Promise<number> {
-    const epoch = this.store.get("qusd_balance_epoch") ?? "0";
-    if (this.qusdBalanceCache && this.qusdBalanceCache.epoch === epoch && Date.now() - this.qusdBalanceCache.updatedAt <= 15_000)
-      return Math.max(0, this.qusdBalanceCache.value - this.cooperativeQusdOwed() - this.store.applicationReservedCapital(undefined, ignoreIntent).qusd - this.store.activeReservedQusd());
-    const value = await this.qva.qusdBalance({ priority: true });
-    if (epoch !== (this.store.get("qusd_balance_epoch") ?? "0")) return this.fastLaneQusdBalance(ignoreIntent);
-    this.qusdBalanceCache = { epoch: this.store.get("qusd_balance_epoch") ?? "0", value, updatedAt: Date.now() };
+    const value = await this.qusdBalanceCache.get({ priority: true, context: "fast_lane", isCurrent: () => this.marketEvaluationIsCurrent() });
     return Math.max(0, value - this.cooperativeQusdOwed() - this.store.applicationReservedCapital(undefined, ignoreIntent).qusd - this.store.activeReservedQusd());
   }
 
@@ -1431,6 +1492,7 @@ export class TradingEngine {
         coin: update.coin,
         side: update.side,
       };
+      if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
       this.marketSnapshotCache.set(snapshotKey(update.coin, update.side), snapshot);
       const now = Date.now();
       const maxAgeMs = this.marketConfig.current().risk.maxQuoteAgeSeconds * 1_000;
@@ -1533,6 +1595,7 @@ export class TradingEngine {
     candidates: number;
     action?: string;
   }> {
+      if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
       const items = snapshots.flatMap((market) => market.items);
       const offers = items.map((item) => item.offer);
       const candidates = items
@@ -1615,6 +1678,7 @@ export class TradingEngine {
         .sort((left, right) => this.opportunityScore(right) - this.opportunityScore(left));
       let blockedUuid: string | undefined;
       for (const best of rankedSells) {
+        if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
         if (best.offer_kind === "flexible") {
           const result = await this.takeFlexibleOffer(best, true, snapshots.find(item => item.coin === best.coin && item.side === best.type)?.scannedAt);
           if (result.candidates) return result;
@@ -1632,6 +1696,7 @@ export class TradingEngine {
               .map((item) => item.rate),
           );
           const risk = await this.evaluateAutomaticBuy(best, reference);
+          if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
           if (risk.kind !== "apply") {
             blockedUuid ??= best.uuid;
             const reason = risk.reasons.join(" · ");
@@ -1728,6 +1793,7 @@ export class TradingEngine {
         .slice()
         .sort((left, right) => this.opportunityScore(right) - this.opportunityScore(left));
       for (const bestExternalBuy of rankedBuys) {
+        if (!this.marketEvaluationIsCurrent()) return { inspected: 0, candidates: 0, action: "página descartada tras cambio de control" };
         if (this.mode() !== "real") break;
         if (bestExternalBuy.offer_kind === "flexible") {
           const result = await this.takeFlexibleOffer(bestExternalBuy, true, snapshots.find(item => item.coin === bestExternalBuy.coin && item.side === bestExternalBuy.type)?.scannedAt);
@@ -2673,11 +2739,7 @@ export class TradingEngine {
   }
 
   async qusdBalance(): Promise<number> {
-    const epoch = this.store.get("qusd_balance_epoch") ?? "0";
-    const value = await this.qva.qusdBalance();
-    if (epoch === (this.store.get("qusd_balance_epoch") ?? "0"))
-      this.qusdBalanceCache = { epoch, value, updatedAt: Date.now() };
-    return value;
+    return this.qusdBalanceCache.get({ priority: false, force: true, context: "manual" });
   }
 
   lastRefresh(uuid: string): number | undefined {
@@ -3044,7 +3106,7 @@ export class TradingEngine {
   }
 
   private async automaticDispatchAllowed(offer: P2pOffer, ownIntentId?: string, queuedForMs = 0, checkCapital = true): Promise<boolean> {
-    const eligible = (candidate: P2pOffer) => !huntingRequirementReason(this.store, candidate) && explicitFlag(candidate.only_vip) === "false" &&
+    const eligible = (candidate: P2pOffer) => this.marketEvaluationIsCurrent() && !huntingRequirementReason(this.store, candidate) && explicitFlag(candidate.only_vip) === "false" &&
       (candidate.type === "sell" ? this.isAutomaticBuyStillEligible(candidate, ownIntentId) :
         this.isAutomaticSellStillEligible(candidate, ownIntentId));
     if (!eligible(offer)) return false;

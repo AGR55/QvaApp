@@ -3,7 +3,9 @@ import { createHash } from "node:crypto";
 import { recordHuntingEligibility, recordMissingRequirements } from "./hunting-requirements.js";
 import type {
   P2pAverage,
+  ListTiming,
   P2pListPage,
+  QusdReadTiming,
   P2pOffer,
   QvaTransaction,
   QvaTransactionPage,
@@ -65,6 +67,13 @@ export interface QvaChatMessage {
 }
 export interface QvaPayRuntime {
   onApplyTiming?: (timing: ApplyTiming) => void;
+  onListTiming?: (timing: ListTiming) => void;
+  onQusdReadTiming?: (timing: QusdReadTiming) => void;
+  monotonicNow?: () => number;
+  listBudget?: {
+    waitForDispatch(token: string): Promise<string | undefined>;
+    noteRateLimit(owner: string | undefined, retryAfterMs?: number): void;
+  };
   fetch?: typeof globalThis.fetch;
   now?: () => number;
   sleep?: (milliseconds: number) => Promise<void>;
@@ -122,7 +131,12 @@ export class QvaPayClient {
   private readonly mutationTimeoutMs: number;
   private readonly throttleState?: QvaPayRuntime["throttleState"];
   private readonly onApplyTiming?: QvaPayRuntime["onApplyTiming"];
+  private readonly onListTiming?: QvaPayRuntime["onListTiming"];
+  private readonly onQusdReadTiming?: QvaPayRuntime["onQusdReadTiming"];
+  private readonly monotonicNow: () => number;
+  private readonly listBudget: QvaPayRuntime["listBudget"];
   private queue = Promise.resolve();
+  private listQueue = Promise.resolve();
   private applyQueue = Promise.resolve();
   private primaryApplyPending = 0;
   private urgentReadQueue = Promise.resolve();
@@ -143,6 +157,10 @@ export class QvaPayClient {
     this.mutationTimeoutMs = runtime.mutationTimeoutMs ?? 25_000;
     this.throttleState = runtime.throttleState;
     this.onApplyTiming = runtime.onApplyTiming;
+    this.onListTiming = runtime.onListTiming;
+    this.onQusdReadTiming = runtime.onQusdReadTiming;
+    this.monotonicNow = runtime.monotonicNow ?? (() => performance.now());
+    this.listBudget = runtime.listBudget;
   }
 
   async login(
@@ -194,12 +212,26 @@ export class QvaPayClient {
     params: Record<string, string | number | boolean | undefined>,
     options: { analyticsOnly?: boolean } = {},
   ): Promise<P2pListPage> {
+    const started = this.monotonicNow();
+    const timing: ListTiming = { queueMs: null, responseMs: null, totalMs: 0, attempts: 0, outcome: "failed" };
+    let dispatched: number | undefined;
+    try {
     const query = new URLSearchParams();
     for (const [key, value] of Object.entries(params))
       if (value !== undefined) query.set(key, String(value));
     const data = await this.request(`/p2p?${query}`, {
       policy: "list",
       retryRead: true,
+      listTrace: {
+        dispatch: () => { dispatched = this.monotonicNow(); timing.queueMs = Math.max(0, dispatched - started); },
+        attempt: () => { timing.attempts++; },
+        response: (response) => {
+          timing.status = response.status;
+          const cache = response.headers.get("x-cache")?.trim().toLowerCase();
+          if (cache === "hit" || cache === "miss") timing.cacheStatus = cache === "hit" ? "HIT" : "MISS";
+        },
+        finish: () => { if (dispatched !== undefined) timing.responseMs = Math.max(0, this.monotonicNow() - dispatched); },
+      },
     });
     // La API actual usa `data` para la lista paginada. `offers` se conserva por compatibilidad.
     const rawOffers = Array.isArray(data.data)
@@ -218,6 +250,7 @@ export class QvaPayClient {
     const offers = rawOffers.map((offer, index) =>
       parseOffer(offer, `lista P2P, posición ${index + 1}`, options.analyticsOnly),
     );
+    timing.outcome = "success";
     return {
       offers,
       total: numberField(data.total, offers.length),
@@ -226,7 +259,13 @@ export class QvaPayClient {
         data.per_page,
         numberField(data.take, offers.length),
       ),
+      timing,
+      ...(timing.cacheStatus ? { cacheStatus: timing.cacheStatus } : {}),
     };
+    } finally {
+      timing.totalMs = Math.max(0, this.monotonicNow() - started);
+      try { this.onListTiming?.({ ...timing }); } catch { /* Observability must not affect listing. */ }
+    }
   }
 
   async getOffer(uuid: string, options: { priority?: boolean; analyticsOnly?: boolean } = {}): Promise<P2pOffer> {
@@ -239,11 +278,21 @@ export class QvaPayClient {
   }
 
   async qusdBalance(options: { priority?: boolean } = {}): Promise<number> {
+    const started = this.monotonicNow();
+    const timing: QusdReadTiming = { priority: options.priority ? "urgent" : "normal", outcome: "failed", queueMs: null, responseMs: null, totalMs: 0 };
+    let dispatched: number | undefined;
+    try {
+    const identityToken = this.tokenProvider();
     const data = await this.request("/user", {
       policy: options.priority ? "urgent_read" : "read",
       retryRead: true,
+      readTrace: {
+        dispatch: () => { dispatched = this.monotonicNow(); timing.queueMs = Math.max(0, dispatched - started); },
+        finish: () => { if (dispatched !== undefined) timing.responseMs = Math.max(0, this.monotonicNow() - dispatched); },
+      },
     });
     if (typeof data.uuid === "string") this.throttleState?.set("analytics_account_uuid", data.uuid);
+    this.recordListingOwner(identityToken, data.uuid);
     const candidates = [
       data.balance,
       (data.data as Record<string, unknown> | undefined)?.balance,
@@ -255,14 +304,19 @@ export class QvaPayClient {
         typeof candidate === "string" || typeof candidate === "number"
           ? Number(candidate)
           : Number.NaN;
-      if (Number.isFinite(value) && value >= 0) return value;
+      if (Number.isFinite(value) && value >= 0) { timing.outcome = "success"; return value; }
     }
     throw new Error(
       "La respuesta de balance de QvaPay no contiene un saldo QUSD reconocible; se bloqueó la venta por seguridad.",
     );
+    } finally {
+      timing.totalMs = Math.max(0, this.monotonicNow() - started);
+      try { this.onQusdReadTiming?.({ ...timing }); } catch { /* Observability must not affect balance reads. */ }
+    }
   }
 
   async profile(): Promise<{ uuid: string; balance?: number }> {
+    const identityToken = this.tokenProvider();
     const data = await this.request("/user", {
       policy: "read",
       retryRead: true,
@@ -270,11 +324,21 @@ export class QvaPayClient {
     if (typeof data.uuid !== "string")
       throw new Error("QvaPay no devolvió el UUID del usuario.");
     this.throttleState?.set("analytics_account_uuid", data.uuid);
+    this.recordListingOwner(identityToken, data.uuid);
     recordHuntingEligibility(this.throttleState, data, this.now());
     return {
       uuid: data.uuid,
       ...(typeof data.balance === "number" ? { balance: data.balance } : {}),
     };
+  }
+
+  verifiedListingOwner(token: string): string | undefined {
+    return this.throttleState?.get(`qva_listing_identity:${createHash("sha256").update(token).digest("hex")}`);
+  }
+
+  private recordListingOwner(token: string | undefined, owner: unknown): void {
+    if (token && typeof owner === "string" && owner.trim() && owner.length <= 128)
+      this.throttleState?.set(`qva_listing_identity:${createHash("sha256").update(token).digest("hex")}`, owner.trim().toLowerCase());
   }
 
   async p2pAverages(): Promise<Record<string, P2pAverage>> {
@@ -481,6 +545,8 @@ export class QvaPayClient {
       retryRead?: boolean;
       beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>;
       secondary?: boolean;
+      listTrace?: { dispatch(): void; attempt(): void; response(response: Response): void; finish(): void };
+      readTrace?: { dispatch(): void; finish(): void };
     } = {},
   ): Promise<Record<string, unknown>> {
     const token = this.tokenProvider();
@@ -490,34 +556,75 @@ export class QvaPayClient {
         "No hay sesión de QvaPay. Ejecuta pnpm login en la terminal.",
       );
     const policy = options.policy ?? "read";
-    return this.enqueue(policy, async () => {
-      const init: RequestInit = {
-        method: options.method ?? "GET",
-        headers: {
-          authorization: `Bearer ${token}`,
-          ...(options.body ? { "content-type": "application/json" } : {}),
-        },
-        ...(options.body ? { body: JSON.stringify(options.body) } : {}),
-      };
+    try {
+      const result = await this.enqueue(policy, async () => {
+        const init: RequestInit = {
+          method: options.method ?? "GET",
+          headers: {
+            authorization: `Bearer ${token}`,
+            ...(options.body ? { "content-type": "application/json" } : {}),
+          },
+          ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+        };
+        let response: Response;
+        try {
+          if (policy !== "list") options.readTrace?.dispatch();
+          response = policy === "list"
+            ? await this.fetchListRead(`${API}${path}`, init, token, () => {
+
+                options.listTrace?.dispatch();
+              }, options.listTrace?.attempt)
+            : options.retryRead
+            ? await this.fetchRead(
+                `${API}${path}`,
+                init,
+                true,
+              )
+            : await this.fetchImpl(`${API}${path}`, {
+                ...init,
+                signal: AbortSignal.timeout(this.mutationTimeoutMs),
+              });
+        } catch (error) {
+          options.listTrace?.finish();
+          options.readTrace?.finish();
+          if (policy !== "read" && policy !== "urgent_read" && policy !== "chat_read" && policy !== "list")
+            throw new QvaMutationUncertainError(policy, error);
+          throw error;
+        }
+        options.listTrace?.response(response);
+        try { return await this.json(response); }
+        finally { options.listTrace?.finish(); options.readTrace?.finish(); }
+      }, options.beforeDispatch, options.secondary, policy === "apply" ? path.split("/")[2] : undefined);
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async fetchListRead(input: string, init: RequestInit, token: string, onDispatch: () => void, onAttempt?: () => void): Promise<Response> {
+    let lastError: unknown;
+    let dispatched = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      // The budget failure is not a network error and must never trigger a retry.
+      const owner = await this.listBudget?.waitForDispatch(token);
+      const dispatchedAt = this.now();
+      this.lastRequestAt = dispatchedAt;
+      this.lastPolicyAt.set("list", dispatchedAt);
+      if (!dispatched) { dispatched = true; onDispatch(); }
+      onAttempt?.();
       let response: Response;
       try {
-        response = options.retryRead
-          ? await this.fetchRead(
-              `${API}${path}`,
-              init,
-              policy !== "list",
-            )
-          : await this.fetchImpl(`${API}${path}`, {
-              ...init,
-              signal: AbortSignal.timeout(this.mutationTimeoutMs),
-            });
+        response = await this.fetchImpl(input, { ...init, signal: AbortSignal.timeout(this.requestTimeoutMs) });
       } catch (error) {
-        if (policy !== "read" && policy !== "urgent_read" && policy !== "chat_read" && policy !== "list")
-          throw new QvaMutationUncertainError(policy, error);
-        throw error;
+        lastError = error;
+        if (attempt < 2) await this.sleep(800 * (attempt + 1));
+        continue;
       }
-      return this.json(response);
-    }, options.beforeDispatch, options.secondary, policy === "apply" ? path.split("/")[2] : undefined);
+      // Preserve the server's 429; do not turn a quota response into a retry.
+      if (response.status === 429) this.listBudget?.noteRateLimit(owner, retryAfterMilliseconds(response.headers.get("retry-after")));
+      return response;
+    }
+    throw new QvaConnectionError(isTimeoutFailure(lastError) ? "timeout" : "network", lastError);
   }
 
   private async fetchRead(
@@ -605,8 +712,9 @@ export class QvaPayClient {
     if (policy === "apply" && secondary) return this.enqueueSecondaryApplication(task, beforeDispatch);
     if (policy === "apply") return this.enqueueApplication(task, beforeDispatch, applyUuid);
     const priorityRead = policy === "urgent_read";
+    const list = policy === "list";
     const chat = policy === "chat" || policy === "chat_read";
-    const run = (chat ? this.chatQueue : priorityRead ? this.urgentReadQueue : this.queue)
+    const run = (chat ? this.chatQueue : priorityRead ? this.urgentReadQueue : list ? this.listQueue : this.queue)
       .catch(() => undefined)
       .then(async () => {
         const current = this.now();
@@ -626,8 +734,10 @@ export class QvaPayClient {
         if (beforeDispatch && !await beforeDispatch(Math.max(0, this.now() - current)))
           throw new QvaApiError(409, "Las condiciones cambiaron antes de la mutación; no se envió.", undefined, "LOCAL_CONDITIONS_CHANGED");
         const startedAt = this.now();
-        this.lastRequestAt = startedAt;
-        this.lastPolicyAt.set(policy, startedAt);
+        if (!list) {
+          this.lastRequestAt = startedAt;
+          this.lastPolicyAt.set(policy, startedAt);
+        }
         if (isPersistentThrottle(policy))
           this.throttleState?.set(
             `qva_throttle:${policy}`,
@@ -641,6 +751,7 @@ export class QvaPayClient {
     );
     if (chat) this.chatQueue = settled;
     else if (priorityRead) this.urgentReadQueue = settled;
+    else if (list) this.listQueue = settled;
     else this.queue = settled;
     return run;
   }

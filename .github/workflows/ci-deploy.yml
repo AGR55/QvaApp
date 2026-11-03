@@ -69,6 +69,7 @@ jobs:
           --file "qvaapply-${GITHUB_SHA}.tar.gz"
           package.json pnpm-lock.yaml dist public deploy
           scripts/deploy-vps.sh scripts/cleanup-vps.sh scripts/backup-vps.sh scripts/enable-vps-tls.sh
+          scripts/report-hunting-latency.mjs
 
       - name: Configure production SSH
         env:

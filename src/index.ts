@@ -1,4 +1,5 @@
 import { registerMarketHuntingLoops } from "./application/market-hunting-loops.js";
+import { registerHuntingBalanceLoops } from "./application/hunting-balance-loops.js";
 import { FirebaseChatPush, ChatPushDispatcher } from "./chat-push.js";
 import { Bot, Context, InlineKeyboard } from "grammy";
 import { installTelegramRecovery } from "./telegram-recovery.js";
@@ -31,6 +32,7 @@ import {
   type PendingRateEdit,
 } from "./telegram-menu.js";
 import { MarketAccountService } from "./market-accounts.js";
+import { ListingReadBudget } from "./market-list-budget.js";
 import { PollingMarketSource, weightedMarketJobs } from "./market-source.js";
 import { MarketSourceCoordinator } from "./market-feed.js";
 import {
@@ -52,15 +54,31 @@ const marketConfig = new MarketConfigService(config.dataDir, config, store);
 void store.refreshConfigIntegrity();
 const vault = new Vault(config.encryptionKey);
 const session = new Session(store, vault);
-const marketAccounts = new MarketAccountService(store, vault);
+const listingBudget = new ListingReadBudget(store);
+const listBudgetFor = (owner: (token: string) => string | undefined, isCurrent?: (token: string) => boolean) => ({
+  waitForDispatch: async (token: string) => {
+    if (isCurrent?.(token) === false) throw new Error("La credencial de listado cambió antes del envío.");
+    const capturedOwner = owner(token);
+    const identity = await listingBudget.waitForDispatch(() => capturedOwner);
+    if (isCurrent?.(token) === false) throw new Error("La credencial de listado cambió antes del envío.");
+    return identity;
+  },
+  noteRateLimit: (identity: string | undefined, retryAfterMs?: number) => listingBudget.noteRateLimit(identity, retryAfterMs),
+});
+const marketAccounts: MarketAccountService = new MarketAccountService(store, vault, token => new QvaPayClient(() => token, {
+  listBudget: listBudgetFor(requestToken => marketAccounts.ownerForToken(requestToken)),
+}));
 const huntingSync = new HuntingSyncCoordinator(
   config.huntingSync,
   store,
   vault,
 );
-const qva = new QvaPayClient(() => session.token(), {
+const qva: QvaPayClient = new QvaPayClient(() => session.token(), {
   throttleState: store,
+  listBudget: listBudgetFor(token => qva.verifiedListingOwner(token), token => token === session.token()),
   onApplyTiming: timing => store.audit("offer_apply_timing",JSON.stringify(timing),timing.uuid),
+  onListTiming: timing => store.audit("qva_list_timing", JSON.stringify(timing)),
+  onQusdReadTiming: timing => store.audit("qusd_read_timing", JSON.stringify(timing)),
 });
 const bot = new Bot(config.telegramToken);
 const huntingRates = new HuntingRateSessions();
@@ -133,6 +151,8 @@ const pollingMarketSource = new PollingMarketSource(
       sellEnabled: trading.huntEnabled(market.code, "sell"),
     })),
   }),
+  { onPollTiming: timing => store.audit("market_poll_timing", JSON.stringify(timing)),
+    primaryOwner: () => { const token = session.token(); return token ? qva.verifiedListingOwner(token) : undefined; } },
 );
 const cooperativeHunter = new CooperativeHunter(store, huntingSync, qva, {
   ownBusy: () => trading.ownDecisionBusy(),
@@ -515,7 +535,11 @@ const scheduler = new Scheduler((name, error) => {
   store.audit(`${name}_background_error`, message);
   console.error(`Error de tarea ${name}:`, message);
 });
-registerMarketHuntingLoops(scheduler, marketSource, trading);
+const marketHuntingLoops = registerMarketHuntingLoops(scheduler, marketSource, trading, {
+  generation: () => `${trading.marketWorkGeneration()}:${marketSource.generation()}`,
+  onError: () => store.audit("market_loop_error", "Falló un trabajo del mercado; los bucles continúan."),
+  onEvaluationTiming: timing => store.audit("market_evaluation_timing", JSON.stringify(timing)),
+});
 scheduler.register("operation_sync", 30_000, () =>
   trading.syncRemoteOperations().then(() => undefined),
 );
@@ -564,7 +588,8 @@ scheduler.register("market_observation", 15_000, () =>
 scheduler.register("dashboard_cache", 30_000, () =>
   dashboardReadModel.refreshCache({ refreshMarkets: false }),
 );
-scheduler.register("hunting_liquidity", 10_000, () => trading.prepareHuntingLiquidity());
+const huntingBalanceLoops = registerHuntingBalanceLoops(scheduler, trading);
+scheduler.register("market_reader_identity", 60_000, () => marketAccounts.refreshIdentity());
 scheduler.register("portfolio_commitments", 60_000, () =>
   dashboardReadModel.refreshPortfolioCommitments().then(() => undefined),
 );
@@ -1639,9 +1664,13 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   stopping = true;
   console.log(`Cerrando QvaApply (${signal})...`);
   scheduler.stop();
+  const marketHuntingStopped = marketHuntingLoops.stop();
+  const marketSourceStopped = marketSource.stop();
+  const marketAccountsStopped = marketAccounts.stop();
+  const huntingBalanceStopped = huntingBalanceLoops.stop();
   dashboardReadModel.stopOperationChats();
   await cooperativeHunter.stop();
-  marketSource.stop();
+  await Promise.all([marketSourceStopped, marketHuntingStopped, marketAccountsStopped, huntingBalanceStopped]);
   if (pollingRetry) clearTimeout(pollingRetry);
   try {
     await bot.stop();
