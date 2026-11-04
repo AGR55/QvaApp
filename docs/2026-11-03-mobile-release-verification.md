@@ -61,8 +61,10 @@ progreso del feed y errores nuevos, sin ejecutar transacciones de prueba.
   que había quedado desactualizado al agregar el adjunto; se conservan las
   comprobaciones de contenido, origen local y formato de todos los iconos.
 - Pruebas de despliegue y sintaxis Bash correctas después del plazo de cierre.
-- Android: pendiente de consignar el resultado de esta compilación firmada y
-  verificar los manifests finales antes de publicar.
+- Android: 45 pruebas debug y 45 lab correctas; lint sin errores (31 advertencias
+  por variante); compilaciones debug, lab y release firmada correctas. Se verificó
+  el manifest combinado: PaymentFormService existe solo en debug, y la constante
+  de release es false. La compilación terminó correctamente en 3 min 5 s.
 
 La evidencia posterior al despliegue se añadirá tras completarlo. No se envían
 pagos, mensajes a contrapartes ni aplicaciones de prueba a ofertas reales.
