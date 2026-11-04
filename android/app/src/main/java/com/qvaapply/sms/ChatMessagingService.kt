@@ -45,7 +45,14 @@ internal object ChatNotifications {
     const val CHANNEL = "operation_chats_v1"
     fun enabled(context: Context): Boolean {
         val manager=context.getSystemService(NotificationManager::class.java)
-        return manager.areNotificationsEnabled() && manager.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
+        return SecureSettings(context).notificationsEnabled && manager.areNotificationsEnabled() && manager.getNotificationChannel(CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE
+    }
+    @Synchronized fun setEnabled(context: Context, enabled: Boolean) {
+        SecureSettings(context).notificationsEnabled = enabled
+        if (!enabled) {
+            context.getSystemService(NotificationManager::class.java).cancelAll()
+            PushRegistrationWorker.enqueue(context)
+        } else register(context)
     }
     fun channel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -54,8 +61,12 @@ internal object ChatNotifications {
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
             })
     }
+    // The runtime guard below also handles lab builds, which deliberately omit
+    // POST_NOTIFICATIONS from their manifest and cannot receive production push.
+    @android.annotation.SuppressLint("NotificationPermission")
     @Synchronized fun show(context: Context, data: Map<String, String>) {
         val settings = SecureSettings(context)
+        if (!settings.notificationsEnabled) return
         if (settings.operatorToken.isBlank() || settings.serverUrl.isBlank() || data["operatorId"] != settings.pushOperatorId || settings.pushOperatorId.isBlank()) return
         val uuid = data["uuid"] ?: return
         val order = data["orderUuid"].orEmpty().takeIf { it.isNotBlank() }
@@ -93,6 +104,11 @@ internal object ChatNotifications {
     }
     fun register(context: Context) {
         channel(context)
+        val settings = SecureSettings(context)
+        if (!settings.notificationsEnabled) {
+            if (settings.pushRegistered) PushRegistrationWorker.enqueue(context)
+            return
+        }
         FirebaseMessaging.getInstance().token.addOnSuccessListener {
             SecureSettings(context).pushToken = it
             PushRegistrationWorker.enqueue(context)
@@ -103,10 +119,18 @@ internal object ChatNotifications {
 class PushRegistrationWorker(context: Context, parameters: WorkerParameters) : Worker(context, parameters) {
     override fun doWork(): Result {
         val settings = SecureSettings(applicationContext)
-        if (settings.serverUrl.isBlank() || settings.operatorToken.isBlank() || settings.pushToken.isBlank()) return Result.success()
-        val result = MobileApi.post(settings.serverUrl, settings.operatorToken, "/api/mobile/push-device", JSONObject().put("token", settings.pushToken))
+        val desired = settings.notificationsEnabled
+        if (settings.serverUrl.isBlank() || settings.operatorToken.isBlank() || desired && settings.pushToken.isBlank()) return Result.success()
+        val result = if (desired) MobileApi.post(settings.serverUrl, settings.operatorToken, "/api/mobile/push-device", JSONObject().put("token", settings.pushToken))
+            else MobileApi.delete(settings.serverUrl, settings.operatorToken, "/api/mobile/push-device")
+        if (settings.notificationsEnabled != desired) { enqueue(applicationContext); return Result.success() }
+        if (!desired && result.value?.optBoolean("ok") == true) {
+            settings.pushRegistered = false
+            settings.pushOperatorId = ""
+            return Result.success()
+        }
         if (result.value?.optBoolean("ok") == true) { settings.pushOperatorId = result.value.optString("operatorId"); settings.pushRegistered = true; return Result.success() }
-        settings.pushRegistered = false
+        if (desired) settings.pushRegistered = false
         return if (runAttemptCount < 8) Result.retry() else Result.failure()
     }
     companion object {

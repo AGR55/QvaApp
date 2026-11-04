@@ -1,8 +1,9 @@
 package com.qvaapply.sms
 
-import androidx.compose.foundation.Canvas
+import android.os.Build
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -10,53 +11,95 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.util.Locale
+
+object UiSpace {
+    val xs = 4.dp
+    val sm = 8.dp
+    val md = 12.dp
+    val lg = 16.dp
+    val xl = 24.dp
+    val touchTarget = 48.dp
+}
+
+object UiShapes {
+    val small = RoundedCornerShape(8.dp)
+    val medium = RoundedCornerShape(12.dp)
+    val large = RoundedCornerShape(16.dp)
+}
+
+private val PrecisoShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = UiShapes.small,
+    medium = UiShapes.medium,
+    large = UiShapes.large,
+    extraLarge = RoundedCornerShape(24.dp),
+)
 
 private val Day = lightColorScheme(
-    primary = Color(0xFF1D4E86), onPrimary = Color.White, primaryContainer = Color(0xFFE1EBF8), onPrimaryContainer = Color(0xFF123B70),
-    secondary = Color(0xFF286748), secondaryContainer = Color(0xFFDCEDE0), onSecondaryContainer = Color(0xFF164D30),
-    background = Color(0xFFF6F2EA), onBackground = Color(0xFF242720), surface = Color(0xFFFFFDF8), onSurface = Color(0xFF242720),
-    surfaceVariant = Color(0xFFECE7DF), onSurfaceVariant = Color(0xFF5D625D), outline = Color(0xFF798078), outlineVariant = Color(0xFFD8D9D1),
-    error = Color(0xFFA62F42), errorContainer = Color(0xFFFCE6E8), onErrorContainer = Color(0xFF742030),
+    primary=Color(0xFF2463EB),onPrimary=Color.White,primaryContainer=Color(0xFFE7EEFF),onPrimaryContainer=Color(0xFF174AB0),
+    secondary=Color(0xFF12765D),onSecondary=Color.White,secondaryContainer=Color(0xFFD9F6EA),onSecondaryContainer=Color(0xFF07533E),
+    tertiary=Color(0xFF996315),onTertiary=Color.White,tertiaryContainer=Color(0xFFFFF0D8),onTertiaryContainer=Color(0xFF674308),
+    background=Color(0xFFF5F7FC),onBackground=Color(0xFF15243C),surface=Color.White,onSurface=Color(0xFF15243C),
+    surfaceVariant=Color(0xFFEDF1F8),onSurfaceVariant=Color(0xFF66738A),outline=Color(0xFF8290A6),outlineVariant=Color(0xFFE4EAF3),
+    surfaceContainer=Color(0xFFF0F3FA),surfaceContainerLow=Color(0xFFF8FAFF),surfaceContainerHigh=Color(0xFFEDF1F8),
+    surfaceContainerLowest=Color.White,surfaceContainerHighest=Color(0xFFE4EAF3),surfaceDim=Color(0xFFDCE2EB),surfaceBright=Color.White,
+    inverseSurface=Color(0xFF293448),inverseOnSurface=Color(0xFFEDF2FC),inversePrimary=Color(0xFFA6C4FF),surfaceTint=Color(0xFF2463EB),
+    error=Color(0xFFB63950),onError=Color.White,errorContainer=Color(0xFFFFE8ED),onErrorContainer=Color(0xFF8D2035),
 )
 private val Night = darkColorScheme(
-    primary = Color(0xFFA5C9FA), onPrimary = Color(0xFF0B2B50), primaryContainer = Color(0xFF183D65), onPrimaryContainer = Color(0xFFDAE9FF),
-    secondary = Color(0xFFAAD9B8), secondaryContainer = Color(0xFF1C4431), onSecondaryContainer = Color(0xFFCBF0D3),
-    background = Color(0xFF101A22), onBackground = Color(0xFFF0F1EB), surface = Color(0xFF18252E), onSurface = Color(0xFFF0F1EB),
-    surfaceVariant = Color(0xFF24333C), onSurfaceVariant = Color(0xFFBBC7CB), outline = Color(0xFF8C9BA2), outlineVariant = Color(0xFF354852),
-    error = Color(0xFFFFAAB5), errorContainer = Color(0xFF572C37), onErrorContainer = Color(0xFFFFD9DE),
+    primary=Color(0xFFA6C4FF),onPrimary=Color(0xFF102E68),primaryContainer=Color(0xFF1F3963),onPrimaryContainer=Color(0xFFD9E6FF),
+    secondary=Color(0xFF83DFC0),onSecondary=Color(0xFF003829),secondaryContainer=Color(0xFF164C3E),onSecondaryContainer=Color(0xFFA6F0D7),
+    tertiary=Color(0xFFEBC481),onTertiary=Color(0xFF422C09),tertiaryContainer=Color(0xFF4F3B1B),onTertiaryContainer=Color(0xFFFFE5B8),
+    background=Color(0xFF0D1524),onBackground=Color(0xFFEDF2FC),surface=Color(0xFF172236),onSurface=Color(0xFFEDF2FC),
+    surfaceVariant=Color(0xFF223148),onSurfaceVariant=Color(0xFFA9B8CF),outline=Color(0xFF7D8FA9),outlineVariant=Color(0xFF29394F),
+    surfaceContainer=Color(0xFF1B293F),surfaceContainerLow=Color(0xFF131E31),surfaceContainerHigh=Color(0xFF223148),
+    surfaceContainerLowest=Color(0xFF080F1C),surfaceContainerHighest=Color(0xFF29394F),surfaceDim=Color(0xFF0D1524),surfaceBright=Color(0xFF304057),
+    inverseSurface=Color(0xFFEDF2FC),inverseOnSurface=Color(0xFF293448),inversePrimary=Color(0xFF2463EB),surfaceTint=Color(0xFFA6C4FF),
+    error=Color(0xFFFFACBB),onError=Color(0xFF650E25),errorContainer=Color(0xFF512A38),onErrorContainer=Color(0xFFFFD9E1),
 )
 
 @Composable
 fun PrecisoTheme(mode: String, content: @Composable () -> Unit) {
-    val dark = mode == "dark" || (mode == "system" && isSystemInDarkTheme())
+    val dark=mode=="dark" || (mode=="system" && isSystemInDarkTheme())
+    val context=LocalContext.current
+    val colors=if(mode=="system" && Build.VERSION.SDK_INT>=Build.VERSION_CODES.S) {
+        if(dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+    } else if(dark) Night else Day
     val view=androidx.compose.ui.platform.LocalView.current
     SideEffect {
         (view.context as? android.app.Activity)?.let { activity ->
             androidx.core.view.WindowCompat.getInsetsController(activity.window,view).apply {
-                isAppearanceLightStatusBars = !dark
-                isAppearanceLightNavigationBars = !dark
+                isAppearanceLightStatusBars=!dark
+                isAppearanceLightNavigationBars=!dark
             }
         }
     }
-    MaterialTheme(colorScheme = if (dark) Night else Day, typography = Typography(
-        displaySmall = TextStyle(fontFamily = FontFamily.Serif, fontSize = 38.sp, lineHeight = 44.sp),
-        headlineLarge = TextStyle(fontFamily = FontFamily.Serif, fontSize = 32.sp, lineHeight = 38.sp),
-        headlineMedium = TextStyle(fontFamily = FontFamily.Serif, fontSize = 28.sp, lineHeight = 34.sp),
-        titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
-        titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-        bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
-        bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
-        labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, letterSpacing = 0.3.sp),
-    ), content = content)
+    MaterialTheme(colorScheme=colors,shapes=PrecisoShapes,typography=Typography(
+        displayLarge=TextStyle(fontSize=40.sp,lineHeight=48.sp,fontWeight=FontWeight.SemiBold),
+        displayMedium=TextStyle(fontSize=36.sp,lineHeight=44.sp,fontWeight=FontWeight.SemiBold),
+        displaySmall=TextStyle(fontSize=32.sp,lineHeight=40.sp,fontWeight=FontWeight.SemiBold,letterSpacing=(-0.5).sp),
+        headlineLarge=TextStyle(fontSize=28.sp,lineHeight=36.sp,fontWeight=FontWeight.SemiBold),
+        headlineMedium=TextStyle(fontSize=24.sp,lineHeight=32.sp,fontWeight=FontWeight.SemiBold),
+        headlineSmall=TextStyle(fontSize=22.sp,lineHeight=28.sp,fontWeight=FontWeight.SemiBold),
+        titleLarge=TextStyle(fontSize=20.sp,lineHeight=28.sp,fontWeight=FontWeight.SemiBold),
+        titleMedium=TextStyle(fontSize=16.sp,lineHeight=22.sp,fontWeight=FontWeight.SemiBold),
+        titleSmall=TextStyle(fontSize=14.sp,lineHeight=20.sp,fontWeight=FontWeight.SemiBold),
+        bodyLarge=TextStyle(fontSize=16.sp,lineHeight=24.sp),bodyMedium=TextStyle(fontSize=14.sp,lineHeight=20.sp),
+        bodySmall=TextStyle(fontSize=12.sp,lineHeight=18.sp),
+        labelLarge=TextStyle(fontSize=14.sp,lineHeight=20.sp,fontWeight=FontWeight.Medium),
+        labelMedium=TextStyle(fontSize=12.sp,lineHeight=16.sp,fontWeight=FontWeight.Medium),
+        labelSmall=TextStyle(fontSize=11.sp,lineHeight=15.sp,fontWeight=FontWeight.Medium),
+    ),content=content)
 }
 
 @Composable
@@ -79,36 +122,61 @@ fun PrecisoMark(modifier: Modifier = Modifier, color: Color = MaterialTheme.colo
     }
 }
 
-/** Small vector glyphs, independent of emoji fonts and large icon libraries. */
 @Composable
-fun PrecisoIcon(kind: String, modifier: Modifier = Modifier, color: Color = MaterialTheme.colorScheme.primary) {
-    Canvas(modifier.size(24.dp)) {
-        val s = size.minDimension / 24f
-        fun line(a: Float, b: Float, c: Float, d: Float) = drawLine(color, Offset(a*s,b*s),Offset(c*s,d*s),1.7f*s, androidx.compose.ui.graphics.StrokeCap.Round)
-        when (kind) {
-            "home" -> { line(3f,11f,12f,3f); line(12f,3f,21f,11f); line(6f,10f,6f,21f); line(6f,21f,18f,21f); line(18f,21f,18f,10f); line(10f,21f,10f,15f); line(10f,15f,14f,15f); line(14f,15f,14f,21f) }
-            "operations" -> { line(4f,7f,20f,7f); line(20f,7f,16f,3f); line(20f,17f,4f,17f); line(4f,17f,8f,21f) }
-            "alerts" -> { drawRoundRect(color,Offset(6*s,4*s), androidx.compose.ui.geometry.Size(12*s,14*s), androidx.compose.ui.geometry.CornerRadius(5*s),style=Stroke(1.7f*s)); line(4f,18f,20f,18f); line(10f,21f,14f,21f) }
-            "settings" -> { for(y in listOf(6f,12f,18f)) line(3f,y,21f,y); drawCircle(color,2*s,Offset(8*s,6*s)); drawCircle(color,2*s,Offset(16*s,12*s)); drawCircle(color,2*s,Offset(10*s,18*s)) }
-            "target" -> { drawCircle(color,9*s,style=Stroke(1.7f*s)); drawCircle(color,4*s,style=Stroke(1.7f*s)); line(12f,2f,12f,7f); line(17f,12f,22f,12f) }
-            else -> { line(4f,20f,4f,4f); line(4f,20f,21f,20f); line(7f,16f,11f,11f); line(11f,11f,15f,14f); line(15f,14f,21f,5f) }
-        }
+fun PrecisoIcon(kind: String, modifier: Modifier = Modifier, color: Color = LocalContentColor.current, description: String? = null) {
+    val resource=when(kind) {
+        "home"->R.drawable.ph_house; "wallet","capital"->R.drawable.ph_wallet
+        "operations"->R.drawable.ph_arrows_left_right; "chat"->R.drawable.ph_chat_circle_dots
+        "tools"->R.drawable.ph_squares_four; "settings"->R.drawable.ph_gear_six
+        "alerts"->R.drawable.ph_bell; "back"->R.drawable.ph_arrow_left
+        "send"->R.drawable.ph_paper_plane_right; "image"->R.drawable.ph_image; "search"->R.drawable.ph_magnifying_glass
+        "next"->R.drawable.ph_caret_right; "buy"->R.drawable.ph_arrow_down_left
+        "sell"->R.drawable.ph_arrow_up_right; "target"->R.drawable.ph_crosshair
+        "chart"->R.drawable.ph_chart_bar; "history"->R.drawable.ph_clock_counter_clockwise
+        "health"->R.drawable.ph_heartbeat; "filter"->R.drawable.ph_sliders_horizontal
+        "phone"->R.drawable.ph_device_mobile; "shield"->R.drawable.ph_shield_check
+        "check"->R.drawable.ph_check_circle; "warning"->R.drawable.ph_warning_circle
+        "copy"->R.drawable.ph_copy; "refresh"->R.drawable.ph_arrow_clockwise
+        "moon"->R.drawable.ph_moon; "sun"->R.drawable.ph_sun
+        "receipt"->R.drawable.ph_receipt; "info"->R.drawable.ph_info
+        "coins"->R.drawable.ph_coins; "more"->R.drawable.ph_dots_three_vertical
+        "eye"->R.drawable.ph_eye; "eye-off"->R.drawable.ph_eye_slash
+        "card"->R.drawable.ph_credit_card; "bank"->R.drawable.ph_bank
+        "close"->R.drawable.ph_x; else->R.drawable.ph_info
+    }
+    Icon(androidx.compose.ui.res.painterResource(resource),description,modifier.size(24.dp),tint=color)
+}
+
+@Composable
+fun MarketLogo(market: String, modifier: Modifier = Modifier) {
+    val resource=when(market.trim().uppercase(Locale.ROOT)) {
+        "BANK_CUP","CUP"->R.drawable.market_cup
+        "BANDECPREPAGO","TROPICAL"->R.drawable.market_tropical
+        "CLASICA","CLÁSICA"->R.drawable.market_clasica
+        "QUSD","QVAPAY"->R.drawable.market_qusd
+        "ETECSA"->R.drawable.market_etecsa
+        "ZELLE"->R.drawable.market_zelle
+        else->null
+    }
+    if(resource!=null) {
+        Image(painterResource(resource),contentDescription=null,modifier=modifier.size(32.dp),contentScale=ContentScale.Fit)
+    } else {
+        Icon(painterResource(R.drawable.ph_bank),contentDescription=null,modifier=modifier.size(32.dp),tint=MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 @Composable
 fun PrecisoPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape=RoundedCornerShape(24.dp), color=MaterialTheme.colorScheme.surface.copy(alpha=0.94f),
-        border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant.copy(alpha=0.65f))) {
-        Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp),content=content)
+    Surface(modifier.fillMaxWidth(), shape=UiShapes.medium, color=MaterialTheme.colorScheme.surface,
+        border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(UiSpace.md),verticalArrangement=Arrangement.spacedBy(UiSpace.sm),content=content)
     }
 }
 
 @Composable
 fun SectionHeading(eyebrow: String, title: String, subtitle: String? = null) {
-    Column(verticalArrangement=Arrangement.spacedBy(6.dp)) {
-        Text(eyebrow.uppercase(),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
-        Text(title,style=MaterialTheme.typography.headlineLarge)
-        if(subtitle!=null) Text(subtitle,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(verticalArrangement=Arrangement.spacedBy(UiSpace.xs)) {
+        Text(title,style=MaterialTheme.typography.titleLarge)
+        if(subtitle!=null) Text(subtitle,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

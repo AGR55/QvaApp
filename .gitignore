@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .pnpm-store/
 dist/
 public/dashboard/
@@ -16,5 +16,8 @@ android/.gradle/
 android/.kotlin/
 android/app/build/
 android/build/
+android/scripts/__pycache__/
+scripts/__pycache__/
+artifacts/git-archive/
 android/local.properties
 artifacts/android/

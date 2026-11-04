@@ -7,22 +7,45 @@ HTTPS; la interfaz conserva una copia cifrada de lectura y la identifica como
 desactualizada cuando no puede confirmar una actualización.
 
 Operaciones y avisos se consultan cada 5 segundos mientras la app está en primer
-plano. Los resultados de SMS se consultan aproximadamente cada 30 segundos. Los chats disponen de un canal push independiente mediante Firebase; su entrega depende de la conexión y los permisos de Android.
+plano (15 segundos al conversar), con espera creciente hasta 80 segundos cuando
+falla la actualización y sin peticiones de refresco al no haber red disponible.
+Los resultados de SMS se consultan aproximadamente cada 30 segundos. Los chats
+disponen de un canal push independiente mediante Firebase; su entrega depende
+de la conexión, del interruptor local y de los permisos de Android.
 
 ## Interfaz y herramientas
 
-- **Inicio:** saldo QUSD con fecha de origen, pendientes, conexión y accesos.
+- **Inicio:** saldo QUSD con fecha de origen, pendientes y accesos.
 - **Operaciones:** búsqueda local, filtros de compra/venta y pendientes, detalle,
   copia de ID y acciones protegidas. QUSD e importe fiat se muestran por separado.
-- **Avisos:** pagos y conciliaciones primero; resultados SMS con estado legible.
+- **Avisos:** filas compactas, pagos y conciliaciones primero; descarte local
+  deslizando con animación, deshacer y alternativa accesible. Ocultar un aviso
+  no resuelve la operación ni acusa recepción global en el servidor.
 - **Herramientas:** capital fiat, límites y estado de cacerías (lectura), salud,
   diagnóstico de 24 horas, historial paginado, rentabilidad 7/30/90 días y
   simulación local de precios. No se modifican límites ni saldos al consultar.
-- **Ajustes:** temas Sistema/Claro/Oscuro, tokens independientes y cola SMS.
+- **Ajustes:** temas Sistema/Claro/Oscuro, interruptor de notificaciones,
+  tokens independientes y cola SMS. Silenciar no afecta QvaPay ni los avisos
+  dentro de QvaApply; cancela las notificaciones visibles y solicita la baja
+  del registro push cuando vuelve la red. Reactivar respeta el permiso Android.
 
-La identidad Preciso se conserva en el icono adaptativo y la interfaz. La barra
-flotante usa transparencias y bordes suaves, sin desenfoque continuo. Los
-importes y las acciones usan superficies legibles. Las herramientas cargan al
+La identidad Preciso se conserva en el icono adaptativo. La interfaz usa
+superficies Material 3 planas, escala 4/8 dp, iconos outline y chevrons locales
+(ver `THIRD-PARTY-NOTICES.md`). En modo Sistema, Android 12+ aporta color dinámico.
+Los logos originales de mercado y QUSD se empaquetan desde `public/icons`
+durante la compilación mediante Python 3, sin descarga en ejecución; un mercado
+desconocido usa un pictograma local neutro. Se conservan los PNG originales y
+se extrae el raster embebido en los SVG de ETECSA/Zelle, evitando su recorte.
+La navegación reúne Inicio, Operaciones, Herramientas y Ajustes; los avisos se
+abren desde la campana. La barra superior integra búsqueda local, sin logo,
+nombre de sección ni indicador permanente de conexión. Una acción sin red
+muestra un snackbar y conserva el estado.
+El detalle usa un sheet ajustado al contenido y la conversación se abre dentro
+de la operación, manteniendo el regreso al detalle y las notificaciones por orden.
+El compositor acepta imágenes comprimidas, muestra progreso hacia el servidor
+y conserva el borrador ante fallos. Véanse los límites de descarga y los envíos
+inciertos en `../docs/chat-images.md`. Las opciones de vinculación y SMS se
+despliegan bajo demanda. Las herramientas cargan al
 abrirse o al solicitar actualizar; no añaden llamadas a QvaPay. La rentabilidad
 móvil limita sus entradas a 1.000 ofertas y 1.000 transacciones, señalando una
 muestra parcial cuando corresponde. Diagnóstico y simulación conservan el
@@ -39,6 +62,61 @@ forman parte de la APK release. No muestran ni ejecutan operaciones reales.
 
 ## Compilar
 
+### Laboratorio aislado de pagos asistidos
+
+`gradle :app:testDebugUnitTest :app:testLabUnitTest :app:lintLab :app:assembleLab`
+genera `app/build/outputs/apk/lab/app-lab.apk`, con identificador separado
+`com.qvaapply.sms.lab`. Se instala junto a la app habitual y abre **QvaApply ·
+Laboratorio**. No sustituye su vinculación ni sus datos. La variante lab elimina
+los permisos de Internet, estado de red, recepción SMS y notificaciones, además
+de la actividad operativa, el receptor SMS y la inicialización Firebase. No usa
+la configuración de Google Services de producción.
+
+El laboratorio usa destinos `DEMO-…`, sin números de cuentas o teléfonos reales,
+y nunca pide claves. **Aceptar simulación** solo cambia su estado local. Cada
+banco se autentica por separado; hay que confirmar la desconexión del anterior
+antes de autenticar otro. Puedes dejar esperando la respuesta más de un minuto
+para representar congestión y simular incertidumbre: esta bloquea reenvíos hasta
+una comprobación explícita ficticia. Ninguna espera genera reintentos automáticos.
+La máquina de estados conserva su estado al recrear la actividad.
+
+Los controles de respuesta se habilitan a los cinco segundos. La sesión ETECSA
+es independiente de las sesiones bancarias y no se introduce su clave de saldo.
+El simulador no comprueba tiempos ni garantías del proveedor real.
+
+Los archivos de laboratorio viven en `src/debug`, se comparten con `lab` y no
+se incluyen en release. Sus pruebas puras están en `src/testDebug`. Para revisar
+el compositor con datos sintéticos en la instalación aislada:
+
+```bash
+adb shell am start -n com.qvaapply.sms.lab/com.qvaapply.sms.PreviewActivity --es screen conversation
+```
+
+El laboratorio puede abrir **Probar pago desde una operación**, con datos ficticios.
+No ejecuta códigos USSD ni abre Transfermóvil.
+
+### App habitual
+
+El detalle de compras tomadas elegibles incorpora **Realizar pago**. Requiere el
+backend con `/api/mobile/operations/:uuid/payment-preview` y un operador con
+permiso de acciones. La preparación consulta la oferta actual y muestra tarjeta,
+móvil e importe; después de autorizar con Android vuelve a comprobarlos.
+
+En la release 0.6.0 solo está disponible la revisión de datos: el usuario realiza
+la transferencia manualmente. `PAYMENT_FORM_ENABLED=false` y el manifest release
+elimina el servicio de accesibilidad. No se puede activarlo desde Ajustes.
+El rellenado permanece en debug para completar la prueba controlada pendiente.
+
+El asistente experimental **QvaApply · Rellenar Transfermóvil**, en Accesibilidad de debug,
+está limitado al paquete y versión 1.260416 de Transfermóvil. Rellena datos y
+puede abrir una sola vez la primera revisión bancaria descrita por el operador;
+se detiene antes de su confirmación final. ETECSA se detiene antes de ACEPTAR.
+El usuario revisa cuenta de origen, moneda e importe y autoriza en Transfermóvil.
+No introduce claves ni construye códigos USSD. La autenticación
+y desconexión del banco siguen manuales en esta fase. Su recorrido completo real
+requiere todavía una prueba de rellenado controlada; no se activó por ADB.
+Véase `../docs/plans/2026-11-03-operation-payment-handoff.md`.
+
 Abrir `android/` en Android Studio con Android SDK 35 y JDK 17, o ejecutar
 `gradle :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` con Gradle 8.11.1 o posterior.
 No se incluye Gradle Wrapper. Los APK se generan en
@@ -47,7 +125,7 @@ el APK de depuración y, en pushes a `main` o ejecuciones manuales, una release
 privada firmada con la clave guardada en los secretos del repositorio. Las
 solicitudes de cambio solo construyen la versión de depuración.
 
-La versión actual es 0.3.0 (`versionCode` 5). Las actualizaciones conservan las
+La versión actual es 0.6.0 (`versionCode` 8). Las actualizaciones conservan las
 preferencias cifradas y la cola SQLite al instalarse sobre la misma app con la
 misma firma. La copia local de la clave está en `android/.private-signing/`,
 excluida de Git; cambiarla puede impedir la actualización y obligar a reinstalar.

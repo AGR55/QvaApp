@@ -21,6 +21,9 @@ class SecureSettings(context: Context, preferencesName: String = "device_setting
     var pushToken: String get() = prefs.getString("push_token", "") ?: ""; set(v) = prefs.edit().putString("push_token", v).apply()
     var pushOperatorId: String get() = prefs.getString("push_operator_id", "") ?: ""; set(v) = prefs.edit().putString("push_operator_id", v).apply()
     var pushRegistered: Boolean get() = prefs.getBoolean("push_registered", false); set(v) = prefs.edit().putBoolean("push_registered", v).apply()
+    var notificationsEnabled: Boolean
+        get() = prefs.getBoolean("notifications_enabled", true)
+        set(value) { prefs.edit().putBoolean("notifications_enabled", value).commit() }
 
     fun saveConnection(url: String, smsToken: String, operator: String): Boolean {
         val cleanUrl = url.trim().trimEnd('/')
@@ -28,6 +31,7 @@ class SecureSettings(context: Context, preferencesName: String = "device_setting
         val edit = prefs.edit().putString("server_url", cleanUrl)
             .putString("device_token", smsToken.trim()).putString("operator_token", operator.trim())
         if (changed) {
+            edit.remove("payment_form")
             edit.putBoolean("push_registered", false).remove("push_operator_id")
             prefs.all.keys.filter { it.startsWith("cache_") }.forEach { edit.remove(it) }
         }
@@ -67,4 +71,9 @@ class SecureSettings(context: Context, preferencesName: String = "device_setting
         current -= "$operationId:$action"
         prefs.edit().putStringSet("uncertain_actions", current).apply()
     }
+
+    /** Short-lived, encrypted, synchronous handoff; no account data in Intent extras. */
+    internal fun pendingPaymentForm(): JSONObject? = prefs.getString("payment_form",null)?.let {runCatching {JSONObject(it)}.getOrNull()}
+    internal fun savePaymentForm(request: JSONObject): Boolean = prefs.edit().putString("payment_form",request.toString()).commit()
+    internal fun clearPaymentForm() {prefs.edit().remove("payment_form").commit()}
 }

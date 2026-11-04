@@ -11,3 +11,11 @@ Validación del checkout aislado: Node 24.22.1; pnpm check aprobado, con 89 arch
 Una simulación del script Bash real, con raíz y comandos Docker/HTTP sustituidos solo en la copia de prueba, verificó tres escenarios: éxito con cleanup; error de respaldo que aborta antes de build/cambio de symlink; error de arranque que restaura la release anterior sin cleanup. No se enviaron transacciones financieras de prueba.
 
 La autorización del usuario incluye publicar y desplegar cuando las comprobaciones estén listas. El estado final de CI y producción se verificará sobre el SHA integrado; la prueba HTTP de salud no demuestra por sí sola una reducción de latencia ni una captura real.
+
+## Resultado del despliegue
+
+PR integrado: https://github.com/AGR55/QvaApp/pull/27. Revisión publicada en main: `4f3ea6ec9c686847b38813921d774a9065ae59ad`.
+
+CI de producción aprobado: https://github.com/AGR55/QvaApp/actions/runs/41559792641. Los jobs verify y deploy terminaron correctamente. El log remoto confirmó a las 2026-11-03T01:32:36Z: `QvaApply desplegado en /opt/qvaapply/releases/4f3ea6ec9c686847b38813921d774a9065ae59ad`. El script de respaldo previo terminó sin error; no se inspeccionó el contenido ni la existencia del archivo de respaldo remoto de forma independiente.
+
+Después del despliegue, HTTPS público devolvió HTTP 200 tanto para `https://qvapply.honux.tech/api/session` como para `https://qvapply.honux.tech/`. No se enviaron operaciones financieras de prueba. La mejora cuantitativa queda pendiente de comparar las métricas con actividad real; no se atribuye una reducción en milisegundos a la comprobación de salud.

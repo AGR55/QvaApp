@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { ChatCatalog, type ChatThread } from "./chat-catalog.js";
 import type { QvaChatMessage, QvaPayClient } from "./qvapay.js";
-import { QvaMutationUncertainError } from "./qvapay.js";
+import { QvaApiError, QvaMutationUncertainError } from "./qvapay.js";
+import { validateChatImage, type ChatImage } from "./chat-images.js";
 import type { Store } from "./store.js";
 
 const MAX_MESSAGES = 100;
@@ -12,7 +13,7 @@ const READ_KEY = (uuid: string) => `operation-chat-read:${uuid}`;
 const UNREAD_KEY = (id: string) => `operation-chat-unread:${id}`;
 const ERROR_KEY = (uuid: string) => `operation-chat-error:${uuid}`;
 
-type ChatGateway = Pick<QvaPayClient, "listChat" | "sendChat"> & Partial<Pick<QvaPayClient,"watchChat">>;
+type ChatGateway = Pick<QvaPayClient, "listChat" | "sendChat"> & Partial<Pick<QvaPayClient,"watchChat" | "downloadChatImage">>;
 
 export class OperationChatError extends Error {
   constructor(public readonly status: 400 | 404 | 409, message: string) { super(message); }
@@ -111,18 +112,59 @@ export class OperationChatService {
     }
   }
 
-  async send(uuid: string, text: string, order?: string): Promise<{ id?: string; chat: OperationChatView }> {
+  private attemptKey(threadId: string, attemptId: string) {
+    if (!/^[a-zA-Z0-9_-]{16,80}$/.test(attemptId)) throw new OperationChatError(400, "Identificador de envío inválido.");
+    return `chat-send:${createHash("sha256").update(`${threadId}\0${attemptId}`).digest("hex")}`;
+  }
+
+  sendStatus(uuid: string, attemptId: string, order?: string): { state: string; id?: string } {
+    const thread = this.requireOperation(uuid, order);
+    const saved = this.store.get(this.attemptKey(thread.id, attemptId));
+    if (!saved) return { state: "not_found" };
+    const attempt = JSON.parse(saved) as { state: string; id?: string };
+    return { state: attempt.state === "sending" ? "uncertain" : attempt.state, ...(attempt.id ? { id: attempt.id } : {}) };
+  }
+
+  async image(uuid: string, messageId: string, order?: string): Promise<ChatImage> {
+    const thread = this.requireOperation(uuid, order);
+    const message = this.cached(thread)?.data.find(item => item.id === messageId);
+    if (!message?.image || !this.qva.downloadChatImage) throw new OperationChatError(404, "Imagen no disponible en la copia local.");
+    return this.qva.downloadChatImage(message.image);
+  }
+
+  async send(uuid: string, text: string, order?: string, image?: ChatImage, attemptId?: string): Promise<{ id?: string; chat: OperationChatView }> {
     const operation = this.requireOperation(uuid, order);
     const message = text.trim();
-    if (!message) throw new OperationChatError(400, "El mensaje no puede estar vacío.");
+    if (!message && !image) throw new OperationChatError(400, "El mensaje no puede estar vacío.");
     if (message.length > 599) throw new OperationChatError(400, "El mensaje no puede superar 599 caracteres.");
+    if (image) {
+      try { validateChatImage(image.bytes, image.mimeType); }
+      catch { throw new OperationChatError(400, "Imagen inválida: JPEG/PNG, máximo 1 MiB y 1000×1000 píxeles."); }
+      if (!attemptId) throw new OperationChatError(400, "La imagen requiere un identificador de envío.");
+    }
+    const key = attemptId ? this.attemptKey(operation.id, attemptId) : undefined;
+    const fingerprint = createHash("sha256").update(message).update("\0").update(image?.bytes ?? new Uint8Array()).digest("hex");
+    if (key) {
+      const saved = this.store.get(key);
+      if (saved) {
+        const previous = JSON.parse(saved) as { state: string; fingerprint: string; id?: string };
+        if (previous.fingerprint !== fingerprint) throw new OperationChatError(409, "El identificador pertenece a otro envío.");
+        if (previous.state === "confirmed") return { ...(previous.id ? { id: previous.id } : {}), chat: this.read(uuid, order) };
+        if (previous.state !== "rejected") throw new OperationChatError(409, "El envío quedó incierto. Comprueba el chat; no se repetirá automáticamente.");
+      }
+      this.store.set(key, JSON.stringify({ state: "sending", fingerprint, at: this.now() }));
+    }
     let result: Awaited<ReturnType<ChatGateway["sendChat"]>>;
-    try { result = await this.qva.sendChat(uuid, message, operation.orderUuid); }
+    try { result = await this.qva.sendChat(uuid, message, operation.orderUuid, image); }
     catch (error) {
+      const rejected = error instanceof QvaApiError && error.status >= 400 && error.status < 500 && error.status !== 409;
+      if (key) this.store.set(key, JSON.stringify({ state: rejected ? "rejected" : "uncertain", fingerprint, at: this.now() }));
+      if (key && !rejected) throw new OperationChatError(409, "El envío quedó incierto. Comprueba el chat antes de intentar enviarlo de nuevo.");
       if (error instanceof QvaMutationUncertainError)
         throw new OperationChatError(409, "El envío quedó incierto. Comprueba el chat antes de intentar enviarlo de nuevo.");
       throw error;
     }
+    if (key) this.store.set(key, JSON.stringify({ state: "confirmed", fingerprint, ...result, at: this.now() }));
     // El POST ya fue confirmado; un fallo posterior de lectura no lo convierte
     // en un fallo de envío ni provoca un segundo POST.
     try { await this.refresh(uuid, operation.orderUuid); } catch { /* Se conserva la copia local. */ }

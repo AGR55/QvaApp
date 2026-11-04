@@ -41,7 +41,27 @@ test("acción móvil registra solicitud y resultado incierto sin ocultar el fall
     markPaid: async () => { throw new Error("QvaPay timeout"); }, confirmReceived: async () => undefined, cancel: async () => undefined,
   });
   await assert.rejects(service.act("operator-1", "operation-1", "paid", "REF-1"), /timeout/);
-  assert.deepEqual(audit, ["mobile_paid_requested", "mobile_paid_uncertain"]);
+  assert.deepEqual(audit, ["mobile_paid_requested", "mobile_paid_uncertain", "mobile_action_timing"]);
+});
+
+test("auditoría posterior no convierte una acción móvil confirmada en reintento", async () => {
+  let mutations = 0;
+  const timings: Record<string, unknown>[] = [];
+  const service = new MobileOperatorService({
+    get: () => undefined, set: () => undefined,
+    audit: (action, detail) => {
+      if (action === "mobile_action_timing") timings.push(JSON.parse(detail));
+      if (action === "mobile_paid_confirmed") throw new Error("audit unavailable");
+    },
+  }, {
+    operations: () => [], alerts: () => [], markets: () => [],
+    markPaid: async () => { mutations++; }, confirmReceived: async () => undefined, cancel: async () => undefined,
+  });
+  await service.act("operator", "operation", "paid", "SECRET");
+  assert.equal(mutations, 1);
+  assert.equal(timings[0]?.outcome, "confirmed");
+  assert.ok(Number(timings[0]?.totalMs) >= 0);
+  assert.ok(!JSON.stringify(timings).includes("SECRET"));
 });
 
 test("operaciones móviles anuncian acciones según la dirección real del trading y compactan avisos", () => {

@@ -1,6 +1,7 @@
 package com.qvaapply.sms
 
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CancellationException
@@ -23,8 +26,35 @@ import org.json.JSONObject
 private val toolNames=listOf("Capital","Cacerías","Salud","Rentabilidad","Historial","Diagnóstico","Simular")
 
 @Composable
-internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overviewStale: Boolean, bindingVersion: Int) {
-    var tool by rememberSaveable { mutableStateOf("Capital") }
+internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overviewStale: Boolean, bindingVersion: Int, onDetailOpen: (Boolean)->Unit = {}) {
+    var selected by rememberSaveable {mutableStateOf<String?>(null)}
+    LaunchedEffect(selected) {onDetailOpen(selected!=null)}
+    DisposableEffect(Unit) {onDispose {onDetailOpen(false)}}
+    androidx.activity.compose.BackHandler(selected!=null) {selected=null}
+    if(selected==null) {
+        LazyColumn(contentPadding=PaddingValues(UiSpace.lg),verticalArrangement=Arrangement.spacedBy(UiSpace.sm)) {
+            items(toolNames,key={it}) {name->
+                Surface(modifier=Modifier.fillMaxWidth().heightIn(min=UiSpace.touchTarget),onClick={selected=name},shape=UiShapes.medium,
+                    color=MaterialTheme.colorScheme.surface,border=BorderStroke(1.dp,MaterialTheme.colorScheme.outlineVariant)) {
+                    Row(Modifier.padding(UiSpace.md),horizontalArrangement=Arrangement.spacedBy(UiSpace.md),verticalAlignment=Alignment.CenterVertically) {
+                        PrecisoIcon(when(name){"Capital"->"wallet";"Cacerías"->"target";"Salud"->"health";"Rentabilidad"->"chart";"Historial"->"history";"Diagnóstico"->"filter";else->"filter"},color=MaterialTheme.colorScheme.primary)
+                        Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(UiSpace.xs)) {
+                            Text(name,style=MaterialTheme.typography.titleMedium)
+                            Text(when(name){"Capital"->"Saldos por moneda";"Cacerías"->"Motor y límites";"Salud"->"Estado de servicios";"Rentabilidad"->"Resultados y costes";"Historial"->"Movimientos de fiat";"Diagnóstico"->"Capturas y descartes";else->"Comparar precios"},style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        PrecisoIcon("next",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    } else Column(Modifier.fillMaxSize()) {
+        PageBar(selected!!,{selected=null})
+        key(selected) {ToolDetailScreen(settings,overview,overviewStale,bindingVersion,selected!!)}
+    }
+}
+
+@Composable
+private fun ToolDetailScreen(settings: SecureSettings, overview: JSONObject?, overviewStale: Boolean, bindingVersion: Int, tool: String) {
     val markets=remember(overview) { objects(overview?.optJSONArray("markets")) }
     var coin by rememberSaveable { mutableStateOf(markets.firstOrNull()?.optString("code").orEmpty()) }
     var page by remember { mutableIntStateOf(1) }
@@ -43,6 +73,9 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
     var maximum by rememberSaveable { mutableStateOf("25") }
     var hours by rememberSaveable { mutableIntStateOf(24) }
     val scope=rememberCoroutineScope()
+    val context=LocalContext.current
+    val snackbar=remember {SnackbarHostState()}
+    LaunchedEffect(error) { if(error.startsWith("Sin conexión")) snackbar.showSnackbar("Sin conexión") }
     val key="tool:$tool:$coin:$page:$days"
     LaunchedEffect(markets) { if(markets.none {it.optString("code")==coin}) coin=markets.firstOrNull()?.optString("code").orEmpty() }
     LaunchedEffect(tool,coin) { simulation=null }
@@ -55,6 +88,7 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
         if(tool=="Simular") { report=null;return@LaunchedEffect }
         if(settings.operatorToken.isBlank()) {error="Vincula primero tu token de operador en Ajustes.";return@LaunchedEffect}
         if(tool in listOf("Historial","Diagnóstico") && coin.isBlank()) {error="Todavía no hay mercados guardados. Actualiza Inicio.";return@LaunchedEffect}
+        if(!networkAvailable(context)) return@LaunchedEffect
         val path=when(tool) {
             "Capital","Cacerías" -> "/api/mobile/overview"
             "Salud" -> "/api/mobile/insights?kind=health"
@@ -70,39 +104,42 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
             if(value!=null && value.has("data")) {
                 report=value.optJSONObject("data");cachedAt=System.currentTimeMillis();stale=false
                 settings.saveCachedResponse(key,JSONObject().put("data",report?:JSONObject.NULL).put("savedAt",cachedAt))
+            } else if(response.message.startsWith("Sin conexión")) {
+                if(reload>0) snackbar.showSnackbar("Sin conexión")
             } else error=response.message
         } catch(cancelled: CancellationException) {throw cancelled}
         finally {if(version==requestVersion) busy=false}
     }
     val needsMarket=tool in listOf("Historial","Diagnóstico","Simular")
-    LazyColumn(contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
-        item { SectionHeading("Observa. Comprende. Decide.","Herramientas","Capital, rendimiento y precios, en un solo lugar.") }
-        item { Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            toolNames.forEach { name -> FilterChip(selected=tool==name,onClick={tool=name;page=1},label={Text(name)}) }
-        } }
-        if(needsMarket) item { Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-            markets.forEach { m -> FilterChip(selected=coin==m.optString("code"),onClick={coin=m.optString("code");page=1},label={Text(m.optString("label"))}) }
+    Box(Modifier.fillMaxSize()) {
+    LazyColumn(contentPadding=PaddingValues(UiSpace.lg),verticalArrangement=Arrangement.spacedBy(UiSpace.sm)) {
+        if(needsMarket) item { Row(Modifier.horizontalScroll(rememberScrollState()),horizontalArrangement=Arrangement.spacedBy(UiSpace.sm)) {
+            markets.forEach { m -> FilterChip(selected=coin==m.optString("code"),onClick={coin=m.optString("code");page=1},
+                leadingIcon={MarketLogo(m.optString("code"),Modifier.size(20.dp))},label={Text(m.optString("label"))}) }
         } }
         if(tool=="Rentabilidad") item { Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf(7,30,90).forEach {d-> FilterChip(selected=days==d,onClick={days=d},label={Text("$d días")}) }} }
         if(tool!="Simular") item {
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
                 Text(if(busy) "Consultando…" else if(stale) "Datos guardados · sin verificar" else "Consultado ${dateLabel(cachedAt.toString())}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.weight(1f))
-                TextButton(enabled=!busy,onClick={reload++}) {Text("Actualizar")}
+                TextButton(enabled=!busy,onClick={
+                    if(!networkAvailable(context)) scope.launch {snackbar.showSnackbar("Sin conexión")}
+                    else reload++
+                }) {Text("Actualizar")}
             }
         }
         if(busy) item {LinearProgressIndicator(Modifier.fillMaxWidth())}
-        if(error.isNotBlank()) item {Text(error,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)}
+        if(error.isNotBlank()&&!error.startsWith("Sin conexión")) item {Text(error,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodyMedium)}
         when(tool) {
             "Capital" -> {
                 item {PrecisoPanel {
-                    Text("QUSD disponibles",style=MaterialTheme.typography.titleMedium)
+                    ToolMarketHeading("QUSD","QUSD disponibles")
                     Text(if(report==null||report!!.isNull("balance")) "Sin dato" else money(report!!.optString("balance")),style=MaterialTheme.typography.displaySmall)
                     Text("Saldo informado: ${dateLabel(report?.optString("balanceUpdatedAt").orEmpty())}",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }}
                 items(objects(report?.optJSONArray("markets")),key={it.optString("code")}) { m -> PrecisoPanel {
-                    Text(m.optString("label"),style=MaterialTheme.typography.titleMedium)
+                    ToolMarketHeading(m.optString("code"),m.optString("label"))
                     Text("${money(m.optString("fiat"))} ${m.optString("currency")}",style=MaterialTheme.typography.headlineMedium)
-                    Text("Saldo fiat registrado · no es una consulta a tu banco",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Fiat registrado",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 } }
             }
             "Cacerías" -> {
@@ -115,7 +152,7 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
                     Text("Vista de lectura. Los límites se gestionan desde la web o Telegram.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }}
                 items(objects(report?.optJSONArray("markets")),key={it.optString("code")}) { m ->PrecisoPanel {
-                    Text(m.optString("label"),style=MaterialTheme.typography.titleMedium)
+                    ToolMarketHeading(m.optString("code"),m.optString("label"))
                     DetailRow("Máximo de compra",money(m.optString("buyMaxRate")))
                     DetailRow("Mínimo de venta",money(m.optString("sellMinRate")))
                     Text(if(!m.optBoolean("active")) "Mercado desactivado" else "Compras: ${if(m.optBoolean("huntBuyEnabled")) "habilitadas" else "deshabilitadas"} · Ventas: ${if(m.optBoolean("huntSellEnabled")) "habilitadas" else "deshabilitadas"}",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -125,7 +162,11 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
                 val checks=objects(report?.optJSONArray("checks"))
                 if(checks.isEmpty()&&!busy) item {EmptyState("Esperando comprobaciones","El monitor publica su estado periódicamente.")}
                 items(checks,key={it.optString("key")}) { check ->PrecisoPanel {
-                    Text(check.optString("label"),style=MaterialTheme.typography.titleMedium)
+                    Row(horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=androidx.compose.ui.Alignment.CenterVertically) {
+                        PrecisoIcon(if(check.optString("status")=="ok") "check" else if(check.optString("status")=="warning") "warning" else "health",
+                            color=if(check.optString("status")=="warning") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(check.optString("label"),style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
+                    }
                     StatusPill(when(check.optString("status")){"ok"->"Correcto";"warning"->"Necesita atención";else->"Sin actividad suficiente"},check.optString("status")=="warning")
                     Text(check.optString("detail"),style=MaterialTheme.typography.bodyMedium)
                 }}
@@ -185,6 +226,10 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
                     OutlinedTextField(maximum,{maximum=it;simulation=null},Modifier.fillMaxWidth(),label={Text("Máximo QUSD por oferta")},keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Decimal),singleLine=true)
                     Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {listOf(1,24,168).forEach {h->FilterChip(selected=hours==h,onClick={hours=h;simulation=null},label={Text(if(h==168) "7 días" else "$h h")})}}
                     Button(enabled=!busy&&coin.isNotBlank()&&settings.operatorToken.isNotBlank(),modifier=Modifier.fillMaxWidth(),onClick={
+                        if(!networkAvailable(context)) {
+                            scope.launch {snackbar.showSnackbar("Sin conexión")}
+                            return@Button
+                        }
                         fun positive(value:String)=value.replace(',','.').toDoubleOrNull()?.takeIf {it.isFinite()&&it>0&&it<=1e9}
                         val b=positive(buy);val s=positive(sell);val m=positive(maximum)
                         if(b==null||s==null||m==null) error="Introduce tasas e importe positivos y válidos."
@@ -210,16 +255,26 @@ internal fun ToolsScreen(settings: SecureSettings, overview: JSONObject?, overvi
                     }) {Text(if(busy) "Calculando…" else "Comparar precios")}
                 }}
                 simulation?.let { sim -> item {PrecisoPanel {
-                    Text("Actuales → propuestos",style=MaterialTheme.typography.titleMedium)
+                    Text("Actuales / propuestos",style=MaterialTheme.typography.titleMedium)
                     val base=sim.optJSONObject("baseline");val proposed=sim.optJSONObject("proposed")
-                    DetailRow("Compras", "${base?.optInt("buy")?:0} → ${proposed?.optInt("buy")?:0}")
-                    DetailRow("Ventas", "${base?.optInt("sell")?:0} → ${proposed?.optInt("sell")?:0}")
+                    DetailRow("Compras", "${base?.optInt("buy")?:0} / ${proposed?.optInt("buy")?:0}")
+                    DetailRow("Ventas", "${base?.optInt("sell")?:0} / ${proposed?.optInt("sell")?:0}")
                     Text("${sim.optInt("uniqueOffers")} ofertas distintas en la muestra.",style=MaterialTheme.typography.bodyMedium)
                     if(sim.optBoolean("truncated")) Text("Muestra limitada a 5.000 observaciones.",style=MaterialTheme.typography.bodySmall)
                     Text(sim.optString("note"),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }} }
             }
         }
+    }
+    SnackbarHost(snackbar,Modifier.align(Alignment.BottomCenter).padding(UiSpace.lg))
+    }
+}
+
+@Composable
+private fun ToolMarketHeading(code: String, label: String) {
+    Row(horizontalArrangement=Arrangement.spacedBy(UiSpace.sm),verticalAlignment=Alignment.CenterVertically) {
+        MarketLogo(code)
+        Text(label,style=MaterialTheme.typography.titleMedium,modifier=Modifier.weight(1f))
     }
 }
 

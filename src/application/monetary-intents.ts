@@ -14,6 +14,7 @@ export interface MonetaryMutation<T> {
   request: unknown;
   action: (intentId: string) => Promise<T>;
   idempotencyKey?: string;
+  onTiming?: (phase: "intentPersistMs" | "mutationMs" | "resultPersistMs", milliseconds: number) => void;
 }
 
 export interface MonetaryIntentsRuntime {
@@ -41,32 +42,43 @@ export class MonetaryIntents {
 
   async execute<T>(mutation: MonetaryMutation<T>): Promise<T> {
     const intentId = this.createId();
-    this.repository.createMutationIntent({
-      intentId,
-      ...(mutation.operationUuid
-        ? { operationUuid: mutation.operationUuid }
-        : {}),
-      ...(mutation.workflowId ? { workflowId: mutation.workflowId } : {}),
-      kind: mutation.kind,
-      ...(mutation.idempotencyKey
-        ? { idempotencyKey: mutation.idempotencyKey }
-        : {}),
-      request: mutation.request,
-    });
+    const report = (phase: "intentPersistMs" | "mutationMs" | "resultPersistMs", started: number) => {
+      try { mutation.onTiming?.(phase, performance.now() - started); } catch {}
+    };
+    const persistStarted = performance.now();
+    try {
+      this.repository.createMutationIntent({
+        intentId,
+        ...(mutation.operationUuid
+          ? { operationUuid: mutation.operationUuid }
+          : {}),
+        ...(mutation.workflowId ? { workflowId: mutation.workflowId } : {}),
+        kind: mutation.kind,
+        ...(mutation.idempotencyKey
+          ? { idempotencyKey: mutation.idempotencyKey }
+          : {}),
+        request: mutation.request,
+      });
+    } finally {
+      report("intentPersistMs", persistStarted);
+    }
 
     try {
-      const response = await mutation.action(intentId);
-      this.repository.updateMutationIntent(intentId, "confirmed", response);
+      const mutationStarted = performance.now();
+      let response: T;
+      try { response = await mutation.action(intentId); }
+      finally { report("mutationMs", mutationStarted); }
+      const resultStarted = performance.now();
+      try { this.repository.updateMutationIntent(intentId, "confirmed", response); }
+      finally { report("resultPersistMs", resultStarted); }
       return response;
     } catch (error) {
       const outcome = mutationFailureOutcome(error);
       const detail = errorMessage(error);
-      this.repository.updateMutationIntent(
-        intentId,
-        outcome,
-        undefined,
-        detail,
-      );
+      const resultStarted = performance.now();
+      try {
+        this.repository.updateMutationIntent(intentId, outcome, undefined, detail);
+      } finally { report("resultPersistMs", resultStarted); }
       this.repository.audit(
         outcome === "uncertain" ? "mutation_uncertain" : "mutation_rejected",
         `${mutation.kind}: ${detail}`,

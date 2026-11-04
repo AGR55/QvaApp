@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Store } from "../src/store.js";
-import { QvaMutationUncertainError } from "../src/qvapay.js";
+import { QvaApiError, QvaMutationUncertainError } from "../src/qvapay.js";
 import { OperationChatService } from "../src/operation-chat.js";
 
 function setup() {
@@ -15,6 +15,58 @@ function setup() {
     createdAt: Date.now(), counterpartyId: "seller" });
   return store;
 }
+
+test("image send is durable, idempotent and cannot reuse an attempt for different content", async t => {
+  const store=setup(); t.after(()=>store.close());
+  const image={bytes:Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=","base64"),mimeType:"image/png" as const};
+  let sends=0;
+  const gateway={listChat:async()=>[],sendChat:async()=>{sends++;return {id:"remote-image"};}};
+  const service=new OperationChatService(store,gateway);
+  await service.send("offer","",undefined,image,"attempt-0000000001");
+  const restarted=new OperationChatService(store,gateway);
+  assert.equal((await restarted.send("offer","",undefined,image,"attempt-0000000001")).id,"remote-image");
+  assert.equal(sends,1);
+  assert.equal(restarted.sendStatus("offer","attempt-0000000001").state,"confirmed");
+  await assert.rejects(restarted.send("offer","different",undefined,image,"attempt-0000000001"),/otro envío/);
+  await assert.rejects(restarted.send("foreign","",undefined,image,"attempt-0000000001"),/operación/);
+});
+
+test("concurrent and uncertain attempts never redispatch, even after service restart", async t => {
+  const store=setup(); t.after(()=>store.close());
+  let sends=0;
+  let finish!:()=>void;
+  const wait=new Promise<void>(resolve=>{finish=resolve;});
+  const gateway={listChat:async()=>[],sendChat:async()=>{sends++;await wait;throw new QvaMutationUncertainError("chat",new Error("timeout"));}};
+  const service=new OperationChatService(store,gateway);
+  const first=service.send("offer","Hola",undefined,undefined,"attempt-0000000002");
+  await assert.rejects(service.send("offer","Hola",undefined,undefined,"attempt-0000000002"),/incierto/);
+  finish();
+  await assert.rejects(first,/incierto/);
+  const restarted=new OperationChatService(store,gateway);
+  await assert.rejects(restarted.send("offer","Hola",undefined,undefined,"attempt-0000000002"),/incierto/);
+  assert.equal(restarted.sendStatus("offer","attempt-0000000002").state,"uncertain");
+  assert.equal(sends,1);
+});
+
+test("only definitive rejection permits retry of the same attempt", async t => {
+  const store=setup(); t.after(()=>store.close());
+  let sends=0;
+  const service=new OperationChatService(store,{listChat:async()=>[],sendChat:async()=>{if(++sends===1) throw new QvaApiError(400,"invalid");return {id:"ok"};}});
+  await assert.rejects(service.send("offer","Hola",undefined,undefined,"attempt-0000000003"),/invalid/);
+  assert.equal(service.sendStatus("offer","attempt-0000000003").state,"rejected");
+  assert.equal((await service.send("offer","Hola",undefined,undefined,"attempt-0000000003")).id,"ok");
+});
+
+test("image download resolves cached message belonging to the authorized conversation only", async t => {
+  const store=setup();t.after(()=>store.close());
+  const service=new OperationChatService(store,{listChat:async()=>[{id:"image",peerId:"seller",message:"Recibo",image:"remote-reference"}],sendChat:async()=>({}),downloadChatImage:async reference=>{
+    assert.equal(reference,"remote-reference");return {bytes:new Uint8Array(),mimeType:"image/png"};
+  }});
+  await service.refresh("offer");
+  assert.equal((await service.image("offer","image")).mimeType,"image/png");
+  await assert.rejects(service.image("offer","foreign"),/no disponible/);
+  await assert.rejects(service.image("foreign","image"),/operación/);
+});
 
 test("conserva una copia local, deduplica por ID y marca leídos solo los mensajes visibles", async t => {
   const store = setup(); t.after(() => store.close());

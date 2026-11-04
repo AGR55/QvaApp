@@ -6,6 +6,9 @@ out={'now':now}
 def q(name,sql,args=()):
  try:out[name]=[dict(r) for r in c.execute(sql,args)]
  except Exception as e:out[name]={'error':str(e)}
+q('insightsSchema','SELECT max(version) AS version FROM schema_migrations')
+q('insightsHealth',"SELECT value FROM settings WHERE key='operational_health'")
+q('insightsHistory','SELECT coin,count(*) AS records FROM fiat_balance_history GROUP BY coin')
 q('cancellations',"select created_at,action,offer_uuid,detail from audit_log where created_at>? and (action like '%cancel%' or action like '%liquidity%' or action like '%restore%') order by id desc limit 100",(since,))
 q('monetary_cancels',"select created_at,kind,state,operation_uuid,json_extract(request_json,'$.liquidityPreparation') as preparation,error from mutation_intents where created_at>? and kind='cancel_offer' order by created_at desc limit 50",(since,))
 q('rejections',"select created_at,action,offer_uuid,detail from audit_log where created_at>? and action in ('automatic_apply_not_sent','qvapay_apply_rejected','market_feed_processing_error','market_fast_lane_warnings') order by id desc limit 70",(since,))
@@ -64,6 +67,16 @@ def command(args, timeout=20):
  except Exception as error:return {'error':str(error)}
 
 out['inventory']={name:command(args) for name,args in {
+ 'webLocal':['curl','-sS','-I','--max-time','10','http://127.0.0.1:8782/'],
+ 'webTlsLocal':['curl','-sS','-I','--max-time','10','--resolve','qvapply.honux.tech:443:127.0.0.1','https://qvapply.honux.tech/'],
+ 'webPublic':['curl','-sS','-I','--max-time','10','https://qvapply.honux.tech/'],
+ 'dns':['getent','ahosts','qvapply.honux.tech'],
+ 'nginxConfig':['nginx','-T'],
+ 'nginxErrors':['tail','-n','80','/var/log/nginx/qvaapply-error.log'],
+ 'networkCounters':['nstat','-az'],
+ 'nftRules':['nft','list','ruleset'],
+ 'tcpSettings':['sysctl','net.ipv4.tcp_syncookies','net.ipv4.tcp_max_syn_backlog','net.core.somaxconn','net.ipv4.tcp_synack_retries'],
+ 'qvapayTiming':['curl','-sS','-o','/dev/null','--max-time','10','-w','%{http_code}|dns=%{time_namelookup}|connect=%{time_connect}|tls=%{time_appconnect}|firstByte=%{time_starttransfer}|total=%{time_total}','https://api.qvapay.com'],
  'os':['cat','/etc/os-release'],
  'uptime':['uptime'],
  'memory':['free','-m'],

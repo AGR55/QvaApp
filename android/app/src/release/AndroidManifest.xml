@@ -1,0 +1,8 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Keep financial UI automation out of production until the controlled
+         Transfermóvil form/review test is complete. Data review remains available. -->
+    <application>
+        <service android:name=".PaymentFormService" tools:node="remove" />
+    </application>
+</manifest>

@@ -8,6 +8,9 @@ services:
     image: qvaapply:${QVAAPPLY_REVISION:?Falta QVAAPPLY_REVISION}
     container_name: qvaapply
     restart: unless-stopped
+    # Allow the existing shutdown handler to drain in-flight requests rather
+    # than hitting Docker's default ten-second kill deadline during releases.
+    stop_grace_period: 90s
     env_file:
       - /opt/qvaapply/config/env
     environment:

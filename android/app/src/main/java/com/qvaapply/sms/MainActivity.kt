@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.SystemClock
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,6 +22,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -60,6 +62,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         settings = SecureSettings(this)
         chatIntent = ChatTarget.fromIntent(intent)
         ChatNotifications.register(this)
@@ -76,22 +79,33 @@ class MainActivity : ComponentActivity() {
 private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, theme: String, onTheme: (String) -> Unit, chatIntent: ChatTarget?, chatIntentVersion: Int) {
     var destination by rememberSaveable { mutableStateOf(Destination.Home) }
     var chatTarget by remember { mutableStateOf<ChatTarget?>(null) }
-    LaunchedEffect(chatIntentVersion) { if(chatIntent!=null) {chatTarget=chatIntent; destination=Destination.Chats} }
-    BackHandler(enabled=destination==Destination.Tools || (destination==Destination.Chats && chatTarget==null)) { destination=Destination.Home }
+    var operationDetailId by rememberSaveable { mutableStateOf<String?>(null) }
+    var paymentOperation by remember {mutableStateOf<MobileOperation?>(null)}
+    var search by rememberSaveable { mutableStateOf("") }
+    val operationState = rememberSaveableStateHolder()
+    LaunchedEffect(destination) { if (destination == Destination.Chats) destination = Destination.Operations }
+    LaunchedEffect(chatIntentVersion) { if(chatIntent!=null) {chatTarget=chatIntent; operationDetailId=chatIntent.id; destination=Destination.Operations} }
+    BackHandler(enabled=destination==Destination.Tools || destination==Destination.Chats) { destination=Destination.Home }
     val cachedOperations = remember { settings.cachedResponse("operations")?.optJSONArray("data")?.let(::parseOperations).orEmpty() }
     val cachedAlerts = remember { settings.cachedResponse("alerts")?.optJSONArray("data")?.let(::parseAlerts).orEmpty() }
     val cachedReceipts = remember { settings.cachedResponse("receipts")?.optJSONArray("data")?.let(::parseJsonObjects).orEmpty() }
     var bindingVersion by remember { mutableIntStateOf(0) }
+    var hiddenAlertIds by remember(bindingVersion) {
+        val stored = settings.cachedResponse("hidden_alerts")?.optJSONArray("data")
+        mutableStateOf((0 until (stored?.length() ?: 0)).mapNotNull { stored?.optString(it) }.toSet())
+    }
     var overview by remember { mutableStateOf(settings.cachedResponse("overview")?.optJSONObject("data")) }
     var overviewStale by remember { mutableStateOf(true) }
     var operations by remember { mutableStateOf(cachedOperations) }
     var alerts by remember { mutableStateOf(cachedAlerts) }
+    val displayedAlerts = alerts.filterNot { it.id in hiddenAlertIds }
     var receipts by remember { mutableStateOf(cachedReceipts) }
-    var lastUpdated by remember { mutableStateOf(if (settings.cachedAt() > 0) java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(settings.cachedAt())) else "") }
-    var connection by remember { mutableStateOf("Configura el servidor y el token de operador en Ajustes.") }
     var isStale by remember { mutableStateOf(true) }
     var receiptOutcomesConnected by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var actionBusy by remember { mutableStateOf(false) }
+    val actionStates = remember { mutableStateMapOf<String, String>() }
+    val snackbar = remember { SnackbarHostState() }
     var actionMessage by remember { mutableStateOf("") }
     var selectedAction by remember { mutableStateOf<Pair<MobileOperation, String>?>(null) }
     var pendingAuthenticatedAction by remember { mutableStateOf<Pair<MobileOperation, String>?>(null) }
@@ -103,6 +117,10 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
     var lastOverviewPollAt by remember { mutableLongStateOf(0L) }
     var lastReceiptPollAt by remember { mutableLongStateOf(0L) }
     var isForeground by remember { mutableStateOf(activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
+    var failedRefreshes by remember { mutableIntStateOf(0) }
+    LaunchedEffect(actionMessage) {
+        if (actionMessage.isNotBlank()) snackbar.showSnackbar(actionMessage, duration = SnackbarDuration.Short)
+    }
 
     DisposableEffect(activity.lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -118,12 +136,18 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
 
     suspend fun refresh() {
         refreshMutex.withLock {
-            if (settings.serverUrl.isBlank() || settings.operatorToken.isBlank()) return@withLock
+            if (settings.serverUrl.isBlank() || settings.operatorToken.isBlank()) {
+                return@withLock
+            }
+            if (!networkAvailable(context)) {
+                return@withLock
+            }
             val requestBinding = bindingVersion
             val requestUrl = settings.serverUrl
             val requestToken = settings.operatorToken
             val now = SystemClock.elapsedRealtime()
-            val fastDue = now - lastFastPollAt >= if(destination==Destination.Chats) 15_000L else 5_000L
+            val fastInterval = if (chatTarget != null) 15_000L else 5_000L
+            val fastDue = now - lastFastPollAt >= fastInterval
             val overviewDue = now - lastOverviewPollAt >= 30_000L
             val receiptsDue = now - lastReceiptPollAt >= 30_000L
             if (!fastDue && !receiptsDue) return@withLock
@@ -132,14 +156,23 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
             if (overviewDue) lastOverviewPollAt = now
             busy = true
             val result = try {
-                withContext(Dispatchers.IO) {
-                    coroutineScope {
-                        val operationsCall = if (fastDue) async { MobileApi.get(requestUrl, requestToken, "/api/mobile/operations?limit=100") } else null
-                        val alertsCall = if (fastDue) async { MobileApi.get(requestUrl, requestToken, "/api/mobile/alerts") } else null
-                        val receiptsCall = if (receiptsDue) async { MobileApi.get(requestUrl, requestToken, "/api/mobile/receipt-outcomes") } else null
-                        val overviewCall = if (overviewDue) async { MobileApi.get(requestUrl, requestToken, "/api/mobile/overview") } else null
-                        listOf(operationsCall?.await(), alertsCall?.await(), receiptsCall?.await(), overviewCall?.await())
+                coroutineScope {
+                    val operationsCall = if (fastDue) async(Dispatchers.IO) { MobileApi.get(requestUrl, requestToken, "/api/mobile/operations?limit=100") } else null
+                    val alertsCall = if (fastDue) async(Dispatchers.IO) { MobileApi.get(requestUrl, requestToken, "/api/mobile/alerts") } else null
+                    val receiptsCall = if (receiptsDue) async(Dispatchers.IO) { MobileApi.get(requestUrl, requestToken, "/api/mobile/receipt-outcomes") } else null
+                    val overviewCall = if (overviewDue) async(Dispatchers.IO) { MobileApi.get(requestUrl, requestToken, "/api/mobile/overview") } else null
+                    val operationsResponse = operationsCall?.await()
+                    if (requestBinding == bindingVersion) operationsResponse?.value?.let { response ->
+                        response.optJSONArray("data")?.let { data ->
+                            operations = parseOperations(data)
+                            settings.saveCachedResponse("operations", response)
+                            settings.setCachedAt(System.currentTimeMillis())
+                            for (operation in operations) listOf("paid", "received", "cancel").forEach { action ->
+                                if (action !in operation.actions) settings.clearActionUncertain(operation.uuid, action)
+                            }
+                        }
                     }
+                    listOf(operationsResponse, alertsCall?.await(), receiptsCall?.await(), overviewCall?.await())
                 }
             } catch (cancelled: CancellationException) {
                 busy = false
@@ -148,7 +181,7 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                 busy = false
                 isStale = true
                 overviewStale = true
-                connection = "No se pudo actualizar; se conservan los últimos datos recibidos."
+                failedRefreshes = (failedRefreshes + 1).coerceAtMost(4)
                 return@withLock
             }
             if (requestBinding != bindingVersion) { busy = false; return@withLock }
@@ -162,15 +195,7 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
             var alertsConnected = !isStale
             if (fastDue) {
                 if (opsJson != null) {
-                    settings.saveCachedResponse("operations", result[0]!!.value!!)
-                    operations = parseOperations(opsJson)
-                    settings.setCachedAt(System.currentTimeMillis())
-                    lastUpdated = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(settings.cachedAt()))
                     operationsConnected = true
-                    // Clear a persisted uncertain intent only once the server no longer offers that action.
-                    for (op in operations) listOf("paid", "received", "cancel").forEach { action ->
-                        if (action !in op.actions) settings.clearActionUncertain(op.uuid, action)
-                    }
                 } else {
                     operationsConnected = false
                 }
@@ -194,43 +219,52 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                 }
             }
             isStale = !operationsConnected || !alertsConnected || !receiptOutcomesConnected
-            if (fastDue) {
-                connection = when {
-                    !operationsConnected -> result[0]?.message?.ifBlank { "No se pudieron actualizar las operaciones." } ?: "No se pudieron actualizar las operaciones."
-                    !alertsConnected -> "Operaciones actualizadas; no se pudieron cargar los avisos."
-                    !receiptOutcomesConnected -> "Operaciones y avisos actualizados; resultados SMS desactualizados."
-                    else -> "Conectado · actualizado $lastUpdated"
-                }
-            } else if (receiptsDue && !receiptOutcomesConnected) {
-                connection = "Resultados SMS desactualizados; se conservan los últimos datos recibidos."
-            }
+            failedRefreshes = if (operationsConnected && alertsConnected) 0 else (failedRefreshes + 1).coerceAtMost(4)
             busy = false
         }
     }
 
     suspend fun submitAction(operation: MobileOperation, action: String) {
+        if (!networkAvailable(context)) {
+            actionBusy = false
+            snackbar.showSnackbar("Sin conexión", duration = SnackbarDuration.Short)
+            return
+        }
         if (settings.actionIsUncertain(operation.uuid, action)) {
             actionMessage = "Esta acción ya tiene un resultado incierto. Verifica la operación en el portal."
-            busy = false
+            actionBusy = false
             selectedAction = null
             return
         }
         // Persist the intent only after the device credential challenge succeeds, but before network I/O.
         if (!settings.markActionUncertain(operation.uuid, action)) {
             actionMessage = "No se pudo guardar la intención de forma segura. La acción no se envió."
-            busy = false
+            actionBusy = false
             selectedAction = null
             return
         }
+        actionStates[operation.id] = "Pendiente de confirmar"
+        val requestBinding = bindingVersion
+        val requestUrl = settings.serverUrl
+        val requestToken = settings.operatorToken
+        val submittedReference = reference.trim()
+        selectedAction = null
         val result = withContext(Dispatchers.IO) {
-            MobileApi.action(settings.serverUrl, settings.operatorToken, operation.uuid, action, reference.trim())
+            MobileApi.action(requestUrl, requestToken, operation.uuid, action, submittedReference)
         }
+        if (requestBinding != bindingVersion) { actionBusy = false; return }
         if (!result.uncertain && result.message != "Acción confirmada por el servidor.") {
             settings.clearActionUncertain(operation.uuid, action)
         }
         actionMessage = result.message
+        actionStates[operation.id] = when {
+            result.value != null -> "Confirmada"
+            result.uncertain -> "Pendiente de confirmar"
+            else -> "Fallida"
+        }
         selectedAction = null
-        busy = false
+        actionBusy = false
+        lastFastPollAt = 0
         refresh()
     }
 
@@ -238,13 +272,13 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
         val pending = pendingAuthenticatedAction
         pendingAuthenticatedAction = null
         if (pending == null) {
-            busy = false
+            actionBusy = false
         } else if (DeviceCredentialAuth.confirmed(result.resultCode)) {
             scope.launch { submitAction(pending.first, pending.second) }
         } else {
             actionMessage = "Autenticación cancelada o fallida. La acción no se envió."
             selectedAction = null
-            busy = false
+            actionBusy = false
         }
     }
 
@@ -252,32 +286,56 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
         if (isForeground) {
             refresh()
             while (isForeground) {
-                delay(5_000L)
+                delay(5_000L * (1L shl failedRefreshes))
                 if (isForeground) refresh()
             }
         }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val refreshNow: () -> Unit = { scope.launch { lastFastPollAt = 0; lastReceiptPollAt = 0; lastOverviewPollAt = 0; refresh() } }
+    val refreshNow: () -> Unit = { scope.launch {
+        if (!networkAvailable(context)) snackbar.showSnackbar("Sin conexión", duration = SnackbarDuration.Short)
+        else { lastFastPollAt = 0; lastReceiptPollAt = 0; lastOverviewPollAt = 0; refresh() }
+    } }
+    var detailOpen by remember {mutableStateOf(false)}
+    val immersive=detailOpen || chatTarget!=null
+    androidx.activity.compose.BackHandler(destination==Destination.Alerts) {destination=Destination.Home}
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = { PrecisoNavigation(destination) { destination = it } },
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {if(!immersive) {
+            NativeHeader(destination.title,isStale,busy,displayedAlerts.size,{destination=Destination.Alerts},query=search,
+                onQueryChange={search=it;destination=Destination.Operations},onBack=if(destination==Destination.Alerts) {{destination=Destination.Home}} else null)
+        }},
+        bottomBar = {if(!immersive && destination!=Destination.Alerts) PrecisoNavigation(destination) { destination = it; search="" } },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            ConnectionHeader(connection, isStale, busy)
+        Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)) {
             when (destination) {
-                Destination.Home -> HomeScreen(operations, alerts, overview, overviewStale,
+                Destination.Home -> HomeScreen(operations, displayedAlerts, overview, overviewStale,
                     onOperations = { destination = Destination.Operations },
                     onTools = { destination = Destination.Tools }, onSettings = { destination = Destination.Settings },
                     configured = settings.operatorToken.isNotBlank(), onRefresh = refreshNow, busy = busy)
-                Destination.Operations -> OperationsScreen(operations, settings, isStale, busy, actionMessage,
-                    onRefresh = refreshNow, onAction = { operation, action -> reference = ""; selectedAction = operation to action },
-                    onChats = { chatTarget=null; destination=Destination.Chats },
-                    onChat = { operation -> chatTarget=ChatTarget(operation.uuid,operation.orderUuid); destination=Destination.Chats })
+                Destination.Operations -> if(chatTarget != null) {
+                    val current = operations.firstOrNull { it.id == chatTarget?.id }
+                    current?.let { operation ->
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment=Alignment.CenterVertically, horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            MarketLogo(operation.market, Modifier.size(32.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("${money(operation.amount)} QUSD · ${operation.marketLabel}", style=MaterialTheme.typography.titleSmall)
+                                Text(statusLabel(operation.status), style=MaterialTheme.typography.bodySmall)
+                            }
+                            TextButton(onClick={chatTarget=null}) { Text("Detalles") }
+                        }
+                    }
+                    key(bindingVersion) { ChatScreen(settings,isForeground,chatTarget,{chatTarget=it}) }
+                } else operationState.SaveableStateProvider("operations:$bindingVersion") {
+                    OperationsScreen(operations, settings, isStale, false, "",
+                    onRefresh = refreshNow, onAction = { operation, action -> actionMessage="";reference = ""; selectedAction = operation to action },
+                    onChat = { operation -> operationDetailId=operation.id;chatTarget=ChatTarget(operation.uuid,operation.orderUuid) }, onDetailOpen={detailOpen=it},query=search,actionStates=actionStates,initialDetailId=operationDetailId,onPayment={paymentOperation=it})
+                }
                 Destination.Chats -> key(bindingVersion) { ChatScreen(settings,isForeground,chatTarget,{chatTarget=it}) }
-                Destination.Alerts -> AlertsScreen(alerts, receipts, busy, refreshNow)
-                Destination.Tools -> ToolsScreen(settings, overview, overviewStale, bindingVersion)
+                Destination.Alerts -> AlertsScreen(alerts, receipts, busy, refreshNow, settings=settings,onHiddenChanged={hiddenAlertIds=it})
+                Destination.Tools -> ToolsScreen(settings, overview, overviewStale, bindingVersion,onDetailOpen={detailOpen=it})
                 Destination.Settings -> SettingsScreen(settings, context, theme, onTheme, busy,
                     onPermission = {
                         if(ContextCompat.checkSelfPermission(context,Manifest.permission.RECEIVE_SMS)==PackageManager.PERMISSION_GRANTED)
@@ -287,7 +345,7 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                     onSave = {
                         operations = emptyList(); alerts = emptyList(); receipts = emptyList()
                         overview = null; overviewStale = true; isStale = true; receiptOutcomesConnected = false
-                        connection = "Comprobando vinculación…"; actionMessage = ""
+                        actionMessage = ""; actionStates.clear(); operationDetailId=null;paymentOperation=null
                         lastFastPollAt = 0; lastReceiptPollAt = 0; lastOverviewPollAt = 0; bindingVersion++
                         chatTarget=null; ChatNotifications.register(context)
                         WorkManager.getInstance(context).enqueueUniqueWork("upload-payment-receipts", ExistingWorkPolicy.KEEP,
@@ -297,13 +355,16 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
         }
     }
 
+    paymentOperation?.let {operation->
+        key(bindingVersion,operation.id) {AssistedPaymentDialog(operation,settings,{paymentOperation=null})}
+    }
     selectedAction?.let { (operation, action) ->
         val label = actionLabel(action)
         AlertDialog(
-            onDismissRequest = { if (!busy) selectedAction = null },
+            onDismissRequest = { if (!actionBusy) selectedAction = null },
             title = { Text("Confirmar: $label") },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.verticalScroll(rememberScrollState()),verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Operación ${operation.uuid.take(12)} · ${money(operation.amount)} QUSD · ${money(operation.receive)} ${operation.currency}. Esta acción se enviará una vez.")
                     Text("Android pedirá confirmar tu identidad con las credenciales del dispositivo antes de enviarla.", style = MaterialTheme.typography.bodySmall)
                     if (action == "paid") OutlinedTextField(
@@ -314,7 +375,11 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                 }
             },
             confirmButton = {
-                TextButton(enabled = !busy && (action != "paid" || reference.isNotBlank()), onClick = {
+                TextButton(enabled = !actionBusy && (action != "paid" || reference.isNotBlank()), onClick = {
+                    if (!networkAvailable(context)) {
+                        scope.launch { snackbar.showSnackbar("Sin conexión", duration=SnackbarDuration.Short) }
+                        return@TextButton
+                    }
                     val keyguard = context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
                     if (!keyguard.isDeviceSecure) {
                         actionMessage = "Configura un bloqueo de pantalla para autorizar acciones sensibles."
@@ -335,17 +400,17 @@ private fun QvaApplyApp(settings: SecureSettings, activity: ComponentActivity, t
                         selectedAction = null
                         return@TextButton
                     }
-                    busy = true
+                    actionBusy = true
                     pendingAuthenticatedAction = operation to action
                     runCatching { credentialLauncher.launch(confirmationIntent) }.onFailure {
                         pendingAuthenticatedAction = null
                         actionMessage = "No se pudo abrir la confirmación de credenciales. La acción no se envió."
                         selectedAction = null
-                        busy = false
+                        actionBusy = false
                     }
                 }) { Text("Confirmar") }
             },
-            dismissButton = { TextButton(enabled = !busy, onClick = { selectedAction = null }) { Text("Volver") } },
+            dismissButton = { TextButton(enabled = !actionBusy, onClick = { selectedAction = null }) { Text("Volver") } },
         )
     }
 }
@@ -360,6 +425,8 @@ internal fun parseOperations(array: JSONArray): List<MobileOperation> = (0 until
         actions = (0 until actionArray.length()).map { actionArray.optString(it) },
         orderUuid = item.optString("orderUuid").takeIf { it.isNotBlank() && it != "null" },
         role = item.optString("role", "taker"), chatAvailable = item.optBoolean("chatAvailable", false),
+        market = item.optString("market", item.optString("marketLabel")),
+        paymentAvailable = item.optBoolean("paymentAvailable",false),
     )
 }
 
