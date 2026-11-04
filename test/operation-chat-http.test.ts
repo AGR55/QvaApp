@@ -2,6 +2,58 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildDashboard } from "../src/http-dashboard.js";
 import { OperationChatError } from "../src/operation-chat.js";
+import { CHAT_MULTIPART_MAX_BYTES, type ChatImage } from "../src/chat-images.js";
+
+test("image HTTP contract enforces auth, scope, CSRF, payload limits and exact order", async t => {
+  const token="o".repeat(48);
+  const imageBytes=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=","base64");
+  const calls:unknown[]=[];
+  let writable=true;
+  const readModel={
+    checkMobileOperator:(value:string,write:boolean)=>({ok:value===token&&(!write||writable),scopes:["read","actions"]}),
+    sendOperationChat:async(uuid:string,message:string,order?:string,image?:ChatImage,attemptId?:string)=>{
+      if(uuid!=="offer"||order!=="child") throw new OperationChatError(404,"Operación ajena.");
+      calls.push({uuid,message,order,image,attemptId});return {id:"remote",chat:{messages:[]}};
+    },
+    operationChatSendStatus:(uuid:string,attemptId:string,order?:string)=>{
+      calls.push({uuid,attemptId,order});return {state:"confirmed",id:"remote"};
+    },
+    operationChatImage:(uuid:string,messageId:string,order?:string)=>{
+      if(uuid!=="offer"||messageId!=="remote"||order!=="child") throw new OperationChatError(404,"Imagen ajena.");
+      return {bytes:imageBytes,mimeType:"image/png"};
+    },
+  };
+  const origin="http://127.0.0.1:3000";
+  const app=buildDashboard(readModel as never,{password:"clave-muy-larga-y-segura",trustedOrigin:origin});
+  t.after(()=>app.close());
+  const form=new FormData();form.set("file",new Blob([imageBytes],{type:"image/png"}),"receipt.png");form.set("message","Recibo");form.set("attemptId","attempt-0000000010");
+  const encoded=new Request("https://local.invalid",{method:"POST",body:form});
+  const payload=Buffer.from(await encoded.arrayBuffer());
+  const headers={authorization:`Bearer ${token}`,"content-type":encoded.headers.get("content-type")!};
+  const path="/api/mobile/operations/offer/chat/images?order=child";
+  assert.equal((await app.inject({url:path,method:"POST",headers:{"content-type":headers["content-type"]},payload})).statusCode,401);
+  writable=false;
+  assert.equal((await app.inject({url:path,method:"POST",headers,payload})).statusCode,401);
+  writable=true;
+  assert.equal((await app.inject({url:path,method:"POST",headers,payload})).statusCode,201);
+  const sent=calls[0] as {order:string;image:ChatImage;attemptId:string};
+  assert.equal(sent.order,"child");assert.deepEqual(Buffer.from(sent.image.bytes),imageBytes);assert.equal(sent.attemptId,"attempt-0000000010");
+  assert.equal((await app.inject({url:path,method:"POST",headers,payload:Buffer.alloc(CHAT_MULTIPART_MAX_BYTES+1)})).statusCode,413);
+  assert.equal((await app.inject({url:path,method:"POST",headers,payload:Buffer.from("invalid")})).statusCode,400);
+  assert.equal((await app.inject({url:path.replace("offer","foreign"),method:"POST",headers,payload})).statusCode,404);
+  const binary=await app.inject({url:"/api/mobile/operations/offer/chat/images/remote?order=child",headers});
+  assert.equal(binary.statusCode,200);assert.equal(binary.headers["content-type"],"image/png");assert.deepEqual(binary.rawPayload,imageBytes);assert.equal(binary.headers["cache-control"],"no-store");
+  assert.equal((await app.inject({url:"/api/mobile/operations/offer/chat/images/foreign?order=child",headers})).statusCode,404);
+  assert.equal((await app.inject({url:"/api/mobile/operations/offer/chat/sends/attempt-0000000010?order=child",headers})).json().data.state,"confirmed");
+  const login=await app.inject({url:"/api/session",method:"POST",headers:{origin,"content-type":"application/json"},payload:{password:"clave-muy-larga-y-segura"}});
+  const cookie=String(login.headers["set-cookie"]).split(";",1)[0]!;
+  const csrf=login.json().data.csrfToken;
+  assert.equal((await app.inject({url:path,method:"POST",headers:{...headers,cookie,origin},payload})).statusCode,403);
+  assert.equal((await app.inject({url:path,method:"POST",headers:{...headers,cookie,origin,"x-csrf-token":csrf},payload})).statusCode,201);
+  const webPath=path.replace("/mobile","");
+  assert.equal((await app.inject({url:webPath,method:"POST",headers:{...headers,authorization:"",cookie,origin,"x-csrf-token":csrf},payload})).statusCode,201);
+  assert.equal((await app.inject({url:"/api/operations/offer/chat",method:"POST",headers:{...headers,cookie,origin,"x-csrf-token":csrf},payload})).statusCode,400);
+});
 
 test("chat web exige sesión, CSRF y una operación autorizada", async () => {
   const sent: string[] = [];

@@ -10,11 +10,22 @@ kotlin {
 }
 
 val releaseKeyStore = System.getenv("QVAAPPLY_ANDROID_KEYSTORE_PATH")
+val marketLogoSources = rootProject.layout.projectDirectory.dir("../public/icons")
+val generatedMarketLogos = layout.buildDirectory.dir("generated/marketLogos/res")
+val generateMarketLogos by tasks.registering(Exec::class) {
+    val script = rootProject.layout.projectDirectory.file("scripts/generate_market_logos.py")
+    inputs.file(script)
+    inputs.files(listOf("cup.png", "tropical.png", "clasica.png", "qusd.png", "etecsa.svg", "zelle.svg").map { marketLogoSources.file(it) })
+    outputs.dir(generatedMarketLogos)
+    commandLine("python3", script.asFile.absolutePath, "--source", marketLogoSources.asFile.absolutePath,
+        "--output", generatedMarketLogos.get().asFile.absolutePath)
+}
 
 android {
     namespace = "com.qvaapply.sms"
     compileSdk = 35
-    buildFeatures { buildConfig = true }
+    buildFeatures { buildConfig = true; compose = true }
+    sourceSets.getByName("main").res.srcDir(generatedMarketLogos)
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -25,8 +36,9 @@ android {
         applicationId = "com.qvaapply.sms"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 8
+        versionName = "0.6.0"
+        buildConfigField("boolean", "PAYMENT_FORM_ENABLED", "false")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -46,7 +58,23 @@ android {
         isShrinkResources = true
         proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
     }
+    buildTypes.getByName("debug") {
+        buildConfigField("boolean", "PAYMENT_FORM_ENABLED", "true")
+    }
+    buildTypes.create("lab") {
+        initWith(buildTypes.getByName("debug"))
+        applicationIdSuffix = ".lab"
+        versionNameSuffix = "-lab"
+        matchingFallbacks += "debug"
+    }
+    sourceSets.getByName("lab").java.srcDir("src/debug/java")
+    sourceSets.getByName("testLab").java.srcDir("src/testDebug/java")
 }
+
+// Isolated laboratory has no Firebase registration, network permission or real tokens.
+tasks.matching { it.name == "processLabGoogleServices" }.configureEach { enabled = false }
+
+tasks.named("preBuild") { dependsOn(generateMarketLogos) }
 
 dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))

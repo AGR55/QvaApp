@@ -19,6 +19,8 @@ import { MarketFeedRequestError, type MarketSourceCoordinator, type MarketSource
 import { PaymentSmsError, validPaymentReceipt } from "./payment-sms.js";
 import { RecoveryConflictError, RecoveryInputError } from "./self-service-recovery.js";
 import { OperationChatError } from "./operation-chat.js";
+import { CHAT_MULTIPART_MAX_BYTES, parseChatImageMultipart } from "./chat-images.js";
+import { AssistedPaymentError } from "./assisted-payment.js";
 
 type AuthOptions = {
   password: string;
@@ -58,11 +60,12 @@ export function buildDashboard(
   const app = Fastify({
     logger: false,
     bodyLimit: 10_000,
-    requestTimeout: 15_000,
+    requestTimeout: 60_000,
     connectionTimeout: 10_000,
     maxRequestsPerSocket: 100,
   });
   app.removeContentTypeParser("application/json");
+  app.addContentTypeParser(/^multipart\/form-data(?:;|$)/i, { parseAs: "buffer" }, (_request, body, done) => done(null, body));
   app.addContentTypeParser(
     "application/json",
     { parseAs: "buffer" },
@@ -106,7 +109,7 @@ export function buildDashboard(
       // present, preserve the dashboard's Origin/CSRF checks for mutations.
       if (auth.session(request.headers.cookie) && !["GET", "HEAD"].includes(request.method)) {
         auth.assertOrigin(request.headers.origin);
-        requireJson(request);
+        requireChatContent(request);
         auth.assertCsrf(request.headers.cookie, headerValue(request, "x-csrf-token"));
       }
       return;
@@ -117,14 +120,17 @@ export function buildDashboard(
       throw new DashboardAuthError(401, "Autenticación requerida.");
     if (!["GET", "HEAD"].includes(request.method)) {
       auth.assertOrigin(request.headers.origin);
-      requireJson(request);
+      requireChatContent(request);
       auth.assertCsrf(request.headers.cookie, headerValue(request, "x-csrf-token"));
     }
   });
 
-  app.setErrorHandler((error, _request, reply) => {
+  app.setErrorHandler((error, request, reply) => {
     const normalized = error instanceof Error ? error : new Error(String(error));
-    const status = normalized instanceof PaymentSmsError ? normalized.status : httpStatus(normalized, 500);
+    const chatBodyStatus = /^\/api\/(?:mobile\/)?operations\/[^/]+\/chat\/images(?:\?|$)/.test(request.url) &&
+      [413,415].includes((normalized as Error & {statusCode?:number}).statusCode ?? 0)
+      ? (normalized as Error & {statusCode:number}).statusCode : undefined;
+    const status = chatBodyStatus ?? (normalized instanceof PaymentSmsError ? normalized.status : httpStatus(normalized, 500));
     if (status >= 500) console.error("Error HTTP local:", normalized);
     void reply.status(status).send({
       error: status >= 500 ? "No se pudo completar la solicitud." : normalized.message,
@@ -284,6 +290,16 @@ export function buildDashboard(
     if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
     return { ok: true, scopes: operator.scopes };
   });
+  app.get<{ Params: { uuid: string }; Querystring: { order?: string } }>("/api/mobile/operations/:uuid/payment-preview", {
+    schema: {
+      params: { type: "object", additionalProperties: false, required: ["uuid"], properties: { uuid: { type: "string", pattern: "^[A-Za-z0-9_-]{1,100}$" } } },
+      querystring: { type: "object", additionalProperties: false, properties: { order: { type: "string", pattern: "^[A-Za-z0-9_-]{1,100}$" } } },
+    },
+  }, async (request, reply) => {
+    const operator = mobileAuth(readModel, request, true);
+    if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: "Se necesita un operador con permiso de acciones." });
+    return { data: await readModel.prepareMobilePayment(request.params.uuid, request.query.order) };
+  });
   app.get<{ Querystring: { limit?: string } }>("/api/mobile/operations", async (request, reply) => {
     const operator = mobileAuth(readModel, request, false);
     if (!operator.ok) return reply.status(operator.rateLimited ? 429 : 401).send({ error: operator.rateLimited ? "Límite de solicitudes alcanzado." : "Credencial de operador requerida o revocada." });
@@ -354,6 +370,7 @@ export function buildDashboard(
     if (action === "paid" && !reference) throw new ClientInputError("La referencia del pago es obligatoria.");
     if (action !== "paid" && reference !== undefined) throw new ClientInputError("La referencia solo se admite al marcar pagado.");
     if (typeof readModel.mobileOperationAction !== "function") return reply.status(503).send({ error: "Acciones móviles no disponibles." });
+    request.raw.socket.setTimeout?.(60_000);
     await readModel.mobileOperationAction(operator.operatorId!, uuid, action as "paid" | "received" | "cancel", reference);
     return reply.status(204).send();
   });
@@ -911,11 +928,45 @@ export function buildDashboard(
       return { data: request.query.fresh === "1" ? await readModel.refreshOperationChat(request.params.uuid,request.query.order)
         : readModel.readOperationChat(request.params.uuid,request.query.order) };
     });
-    app.post<{Params:{uuid:string};Querystring:{order?:string};Body:{message:string}}>(`${prefix}/:uuid/chat`, {
-      schema:{params,querystring,body:{type:"object",additionalProperties:false,required:["message"],properties:{message:{type:"string",minLength:1,maxLength:599}}}},
+    app.get<{Params:{uuid:string;attemptId:string};Querystring:{order?:string}}>(`${prefix}/:uuid/chat/sends/:attemptId`, {
+      schema:{params:{type:"object",required:["uuid","attemptId"],properties:{...params.properties,attemptId:{type:"string",pattern:"^[a-zA-Z0-9_-]{16,80}$"}}},querystring},
+    }, async request => {
+      authorize(request);
+      return { data: readModel.operationChatSendStatus(request.params.uuid,request.params.attemptId,request.query.order) };
+    });
+    app.get<{Params:{uuid:string;messageId:string};Querystring:{order?:string}}>(`${prefix}/:uuid/chat/images/:messageId`, {
+      schema:{params:{type:"object",required:["uuid","messageId"],properties:{...params.properties,messageId:{type:"string",minLength:1,maxLength:256}}},querystring},
+    }, async(request,reply)=>{
+      authorize(request);
+      const image = await readModel.operationChatImage(request.params.uuid,request.params.messageId,request.query.order);
+      return reply.type(image.mimeType).header("cache-control","no-store").send(Buffer.from(image.bytes));
+    });
+    app.post<{Params:{uuid:string};Querystring:{order?:string};Body:Buffer}>(`${prefix}/:uuid/chat/images`, {
+      bodyLimit:CHAT_MULTIPART_MAX_BYTES,
+      schema:{params,querystring},
+      onRequest:async request=>{
+        authorize(request,true);
+        if (!mobile || auth.session(request.headers.cookie)) {
+          if (!auth.session(request.headers.cookie)) throw new DashboardAuthError(401,"Autenticación requerida.");
+          auth.assertOrigin(request.headers.origin);
+          requireChatContent(request);
+          auth.assertCsrf(request.headers.cookie,headerValue(request,"x-csrf-token"));
+        }
+        request.raw.socket.setTimeout?.(60_000);
+      },
+    }, async(request,reply)=>{
+      let input;
+      try {
+        if (!Buffer.isBuffer(request.body) || !request.headers["content-type"]?.startsWith("multipart/form-data;")) throw new Error("Se requiere multipart.");
+        input = await parseChatImageMultipart(request.body,request.headers["content-type"]);
+      } catch { throw new OperationChatError(400,"Imagen inválida: multipart JPEG/PNG, máximo 1 MiB y 1000×1000 píxeles."); }
+      return reply.status(201).send({data:await readModel.sendOperationChat(request.params.uuid,input.message,request.query.order,input.image,input.attemptId)});
+    });
+    app.post<{Params:{uuid:string};Querystring:{order?:string};Body:{message:string;attemptId?:string}}>(`${prefix}/:uuid/chat`, {
+      schema:{params,querystring,body:{type:"object",additionalProperties:false,required:["message"],properties:{message:{type:"string",minLength:1,maxLength:599},attemptId:{type:"string",pattern:"^[a-zA-Z0-9_-]{16,80}$"}}}},
     }, async(request,reply)=>{
       authorize(request,true);
-      return reply.status(201).send({data:await readModel.sendOperationChat(request.params.uuid,request.body.message,request.query.order)});
+      return reply.status(201).send({data:await readModel.sendOperationChat(request.params.uuid,request.body.message,request.query.order,undefined,request.body.attemptId)});
     });
     app.post<{Params:{uuid:string};Querystring:{order?:string};Body:{ids?:string[]}}>(`${prefix}/:uuid/chat/read`, {
       schema:{params,querystring,body:{type:"object",additionalProperties:false,properties:{ids:{type:"array",maxItems:100,items:{type:"string",maxLength:256}}}}},
@@ -956,6 +1007,7 @@ export function buildDashboard(
     },
   }, async (request, reply) => {
     const { uuid, action } = request.params;
+    request.raw.socket.setTimeout?.(60_000);
     if (action === "ack") await clientAction(() => readModel.acknowledge(uuid));
     else if (action === "paid") {
       const reference = request.body.reference?.trim();
@@ -1246,8 +1298,17 @@ function requireJson(request: FastifyRequest): void {
     throw new DashboardAuthError(403, "Se requiere contenido JSON.");
 }
 
+function requireChatContent(request: FastifyRequest): void {
+  if (request.method === "POST" && /^\/api\/(?:mobile\/)?operations\/[^/]+\/chat\/images$/.test(request.url.split("?")[0]!) &&
+      request.headers["content-type"]?.toLowerCase().startsWith("multipart/form-data;")) return;
+  requireJson(request);
+}
+
 function isMobileOperatorApi(path: string, method: string): boolean {
-  return ((method === "POST" || method === "DELETE") && path === "/api/mobile/push-device") ||
+  return (method === "GET" && /^\/api\/mobile\/operations\/[^/]+\/payment-preview$/.test(path)) ||
+    ((method === "POST" || method === "DELETE") && path === "/api/mobile/push-device") ||
+    (method === "GET" && /^\/api\/mobile\/operations\/[^/]+\/chat\/(?:images|sends)\/[^/]+$/.test(path)) ||
+    (method === "POST" && /^\/api\/mobile\/operations\/[^/]+\/chat\/images$/.test(path)) ||
     (method === "GET" && path === "/api/mobile/operations/chats") ||
     (["GET", "POST"].includes(method) && /^\/api\/mobile\/operations\/[^/]+\/chat(?:\/read)?$/.test(path)) ||
     (method === "GET" && ["/api/mobile/operator-check", "/api/mobile/operations", "/api/mobile/alerts", "/api/mobile/markets", "/api/mobile/receipt-outcomes", "/api/mobile/overview", "/api/mobile/insights"].includes(path)) ||
@@ -1268,6 +1329,7 @@ function headerValue(request: FastifyRequest, name: string): string | undefined 
 }
 
 function httpStatus(error: Error, fallback: number): number {
+  if (error instanceof AssistedPaymentError) return error.status;
   if (error instanceof OperationChatError) return error.status;
   if (error instanceof DashboardAuthError) return error.status;
   if (error instanceof RecoveryConflictError) return error.status;

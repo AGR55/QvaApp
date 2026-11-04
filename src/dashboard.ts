@@ -16,6 +16,7 @@ import type { HuntingSyncCoordinator } from "./hunting-sync.js";
 import type { CooperativeHunter } from "./cooperative-hunter.js";
 import { PaymentSmsService, type PaymentReceiptInput } from "./payment-sms.js";
 import { MobileOperatorService } from "./mobile-operator.js";
+import { AssistedPaymentService } from "./assisted-payment.js";
 import {
   SelfServiceRecovery,
   type ManualRecoveryOutcome,
@@ -229,6 +230,10 @@ export class DashboardReadModel {
   mobileOperations(limit: number) { return this.mobileOperator.operations(limit); }
   mobileAlerts() { return this.mobileOperator.alerts(); }
   mobileMarkets() { return this.mobileOperator.markets(); }
+  prepareMobilePayment(uuid: string, order?: string) {
+    return this.coalesceRead(`payment-preview:${uuid}:${order ?? "fixed"}`, () =>
+      new AssistedPaymentService(this.store, this.qva, code => this.marketConfig.find(code)).prepare(uuid, order));
+  }
   /** Native projections read the local store only; never call snapshot()/refresh*. */
   mobileOverview() {
     const state = this.trading.operationalState();
@@ -273,7 +278,9 @@ export class DashboardReadModel {
   removeChatPushDevice(operatorId:string) { this.store.removeChatPushDevice(operatorId); }
   readOperationChat(uuid: string, order?:string) { return this.operationChat.read(uuid, order); }
   refreshOperationChat(uuid: string, order?:string) { return this.operationChat.refresh(uuid, order); }
-  sendOperationChat(uuid: string, message: string, order?:string) { return this.operationChat.send(uuid, message, order); }
+  sendOperationChat(uuid: string, message: string, order?:string, image?: import("./chat-images.js").ChatImage, attemptId?: string) { return this.operationChat.send(uuid, message, order, image, attemptId); }
+  operationChatSendStatus(uuid: string, attemptId: string, order?: string) { return this.operationChat.sendStatus(uuid, attemptId, order); }
+  operationChatImage(uuid: string, messageId: string, order?: string) { return this.operationChat.image(uuid, messageId, order); }
   markOperationChatRead(uuid: string, order?:string, ids?:string[]) { return this.operationChat.markRead(uuid, order, ids); }
   operationChatUnread() { return this.operationChat.unreadCounts(); }
   stopOperationChats() { this.operationChat.close(); }

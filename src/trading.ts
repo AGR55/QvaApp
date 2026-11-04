@@ -36,9 +36,12 @@ import { planLiquidity } from "./core/liquidity-plan.js";
 import { ReconciliationScheduler } from "./reconciliation-scheduler.js";
 import { applyReadyAt } from "./core/apply-budget.js";
 import { sizeFlexibleOffer, orderForOperation, matchingRecoveryOrder } from "./flexible-order.js";
+import { withOperationTrace } from "./operation-trace.js";
 
 type RuntimeConfig = typeof Config;
+const operationActionsInFlight = new WeakMap<TradingRepository, Set<string>>();
 
+type OperationActionTiming = Partial<Record<"preflightMs" | "intentPersistMs" | "mutationMs" | "resultPersistMs" | "operationPersistMs", number>>;
 interface BlockedOfferNotification {
   kind: "blocked-offer";
   alert: {
@@ -2121,6 +2124,10 @@ export class TradingEngine {
   }
 
   async markPaid(uuid: string, reference: string): Promise<void> {
+    return this.withOperationAction(uuid, "paid", timing => this.markPaidExclusive(uuid, reference, timing));
+  }
+
+  private async markPaidExclusive(uuid: string, reference: string, timing: OperationActionTiming): Promise<void> {
     this.requireRealMode();
     const operation = this.requireOperation(uuid);
     if (this.store.hasUnresolvedMutationForOffer(uuid))
@@ -2134,20 +2141,32 @@ export class TradingEngine {
       );
     if (!reference.trim())
       throw new Error("La referencia de transferencia es obligatoria.");
-    const remote = orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid);
+    const preflightStarted = performance.now();
+    let remote: P2pOffer;
+    try { remote = orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid); }
+    finally { timing.preflightMs = performance.now() - preflightStarted; }
     if (remote.status.toLowerCase() !== "processing")
       throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se marcó el pago.`);
+    this.revalidateOperationAction(operation);
     await this.monetaryIntents.execute({
       kind: "paid",
       operationUuid: uuid,
       request: { uuid, orderUuid: operation.orderUuid, reference: reference.trim() },
       action: () => this.qva.markPaid(uuid, reference.trim(), operation.orderUuid),
+      onTiming: (phase, milliseconds) => { timing[phase] = (timing[phase] ?? 0) + milliseconds; },
     });
-    this.store.updateOperation(uuid, "paid");
-    this.store.audit("marked_paid", "Pago fiat marcado por el usuario", uuid);
+    const persistStarted = performance.now();
+    try {
+      this.store.updateOperation(uuid, "paid");
+      this.store.audit("marked_paid", "Pago fiat marcado por el usuario", uuid);
+    } finally { timing.operationPersistMs = performance.now() - persistStarted; }
   }
 
   async confirmReceived(uuid: string): Promise<void> {
+    return this.withOperationAction(uuid, "received", timing => this.confirmReceivedExclusive(uuid, timing));
+  }
+
+  private async confirmReceivedExclusive(uuid: string, timing: OperationActionTiming): Promise<void> {
     this.requireRealMode();
     const operation = this.requireOperation(uuid);
     if (this.store.hasUnresolvedMutationForOffer(uuid))
@@ -2156,19 +2175,67 @@ export class TradingEngine {
       throw new Error(
         "En una compra de QUSD debes marcar pago, no confirmar recepción.",
       );
-    orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid);
+    if (!["applied", "acknowledged", "paid"].includes(operation.state))
+      throw new Error("Esta operación no permite confirmar recepción en su estado actual.");
+    const preflightStarted = performance.now();
+    let remote: P2pOffer;
+    try { remote = orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid); }
+    finally { timing.preflightMs = performance.now() - preflightStarted; }
+    if (!["processing", "paid"].includes(remote.status.toLowerCase()))
+      throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se confirmó recepción.`);
+    this.revalidateOperationAction(operation);
     await this.monetaryIntents.execute({
       kind: "received",
       operationUuid: uuid,
       request: { uuid, orderUuid: operation.orderUuid },
       action: () => this.qva.confirmReceived(uuid, operation.orderUuid),
+      onTiming: (phase, milliseconds) => { timing[phase] = (timing[phase] ?? 0) + milliseconds; },
     });
-    this.store.updateOperation(uuid, "completed");
-    this.recordFlexibleFiat(operation, "completed");
-    this.store.audit("received", "Usuario confirmó recepción de fiat", uuid);
+    const persistStarted = performance.now();
+    try {
+      this.store.updateOperation(uuid, "completed");
+      this.recordFlexibleFiat(operation, "completed");
+      this.store.audit("received", "Usuario confirmó recepción de fiat", uuid);
+    } finally { timing.operationPersistMs = performance.now() - persistStarted; }
+  }
+
+  private revalidateOperationAction(operation: import("./store.js").Operation): void {
+    this.requireRealMode();
+    const current = this.requireOperation(operation.uuid);
+    if (current.state !== operation.state || current.orderUuid !== operation.orderUuid)
+      throw new Error("La operación cambió durante la validación; consulta su estado antes de continuar.");
+    if (this.store.hasUnresolvedMutationForOffer(operation.uuid))
+      throw new Error("Esta operación tiene una mutación pendiente de conciliación.");
+  }
+
+  private async withOperationAction(uuid: string, action: string, run: (timing: OperationActionTiming) => Promise<void>): Promise<void> {
+    let active = operationActionsInFlight.get(this.store);
+    if (!active) { active = new Set(); operationActionsInFlight.set(this.store, active); }
+    if (active.has(uuid))
+      throw new QvaApiError(409, "Esta operación ya tiene una acción en curso; consulta su estado antes de continuar.");
+    active.add(uuid);
+    const started = performance.now();
+    const timing: OperationActionTiming = {};
+    const traceId = randomUUID();
+    let outcome = "not_confirmed";
+    try {
+      await withOperationTrace({ traceId, operationUuid: uuid, action }, transport => {
+        this.store.audit("qva_action_request_timing", JSON.stringify(transport), uuid);
+      }, () => run(timing));
+      outcome = "confirmed";
+    } finally {
+      active.delete(uuid);
+      try {
+        this.store.audit("operation_action_timing", JSON.stringify({ traceId, action, outcome, ...timing, totalMs: performance.now() - started }), uuid);
+      } catch {}
+    }
   }
 
   async cancel(uuid: string, automatic = false): Promise<void> {
+    return this.withOperationAction(uuid, "cancel", () => this.cancelExclusive(uuid, automatic));
+  }
+
+  private async cancelExclusive(uuid: string, automatic: boolean): Promise<void> {
     if (automatic) throw new Error("La cancelación automática por falta de ACK está desactivada.");
     this.requireRealMode();
     const operation = this.requireOperation(uuid);
@@ -2180,6 +2247,7 @@ export class TradingEngine {
     const remote = orderForOperation(await this.qva.getOffer(uuid), operation.orderUuid);
     if (remote.status.toLowerCase() !== "processing")
       throw new Error(`QvaPay muestra la oferta en estado ${remote.status}; no se canceló.`);
+    this.revalidateOperationAction(operation);
     const cancellation = await this.monetaryIntents.execute({
       kind: "cancel",
       operationUuid: uuid,
@@ -2391,7 +2459,12 @@ export class TradingEngine {
     for (const offer of [...created.offers, ...asPeer.offers])
       offers.set(offer.uuid, offer);
     await this.hydrateFlexibleFiatOffers(offers);
-    try { new ChatCatalog(this.store).discover(offers.values(), profile.uuid); }
+    try {
+      const catalog = new ChatCatalog(this.store);
+      catalog.discover(offers.values(), profile.uuid);
+      await catalog.refreshMissing(new Set(offers.keys()), profile.uuid,
+        uuid => this.qva.getOffer(uuid, { analyticsOnly: true }));
+    }
     catch { this.store.audit("chat_catalog_sync_failed", "No se pudo actualizar el catálogo de chats; continúa la conciliación de fiat."); }
     let movements = 0;
     for (const offer of offers.values()) {

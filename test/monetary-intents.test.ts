@@ -50,6 +50,24 @@ class MemoryIntentRepository implements MutationIntentRepository {
   }
 }
 
+test("mide persistencias y mutación sin permitir que el observador cambie el resultado", async () => {
+  const repository = new MemoryIntentRepository();
+  const phases: string[] = [];
+  const durations: number[] = [];
+  const intents = new MonetaryIntents(repository, { createId: () => "timed" });
+  await intents.execute({
+    kind: "received", request: {}, action: async () => undefined,
+    onTiming: (phase, milliseconds) => {
+      durations.push(milliseconds);
+      phases.push(phase);
+      throw new Error("observer failed");
+    },
+  });
+  assert.deepEqual(phases, ["intentPersistMs", "mutationMs", "resultPersistMs"]);
+  assert.ok(durations.every(milliseconds => Number.isFinite(milliseconds) && milliseconds >= 0));
+  assert.equal(repository.intents.get("timed")?.state, "confirmed");
+});
+
 test("persiste submitted antes de despachar y confirma después de responder", async () => {
   const repository = new MemoryIntentRepository();
   const intents = new MonetaryIntents(repository, { createId: () => "intent-1" });

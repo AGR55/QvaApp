@@ -43,6 +43,7 @@ test("transporte envía amount y dirige todas las acciones al ID de orden", asyn
   const client = new QvaPayClient(() => "test", { now: () => now, sleep: async ms => { now += ms; },
     fetch: async (input, init) => {
       calls.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (String(input).includes("/chat?") && init?.method === "POST") return new Response(JSON.stringify({message:"chat-created"}));
       return new Response(JSON.stringify(String(input).endsWith("/apply") ? { order: "child", amount: "10", receive: "9000" } : { status: "revision", chat: [] }));
     } });
   assert.deepEqual(await client.apply("parent", { amount: 10 }), { order: "child", amount: 10, receive: 9000 });

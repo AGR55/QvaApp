@@ -1,15 +1,14 @@
 package com.qvaapply.sms
 
-import android.Manifest
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import android.provider.Settings
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,16 +17,23 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 private fun chatPath(target: ChatTarget, action: String = "", fresh: Boolean = false): String {
     val query = mutableListOf<String>()
@@ -38,102 +44,162 @@ private fun chatPath(target: ChatTarget, action: String = "", fresh: Boolean = f
 private fun chatObjects(array: JSONArray?): List<JSONObject> = (0 until (array?.length() ?: 0)).mapNotNull { array?.optJSONObject(it) }
 
 @Composable
-internal fun ChatScreen(settings: SecureSettings, foreground: Boolean, target: ChatTarget?, onTarget: (ChatTarget?) -> Unit) {
+internal fun ChatScreen(settings: SecureSettings, foreground: Boolean, target: ChatTarget? = null, onTarget: (ChatTarget?) -> Unit = {}, initialTarget: ChatTarget? = target) {
     val context = LocalContext.current
+    val selectedTarget = initialTarget ?: target
     var search by rememberSaveable { mutableStateOf("") }
     var threads by remember { mutableStateOf(chatObjects(settings.cachedResponse("chat_threads")?.optJSONArray("data"))) }
-    var status by remember { mutableStateOf("Última copia guardada") }
-    var registered by remember { mutableStateOf(settings.pushRegistered) }
-    var notifications by remember { mutableStateOf(ChatNotifications.enabled(context)) }
-    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        notifications = ChatNotifications.enabled(context)
-        ChatNotifications.register(context)
-    }
-    LaunchedEffect(foreground, settings.serverUrl, settings.operatorToken) {
-        if (!foreground) return@LaunchedEffect
-        notifications = ChatNotifications.enabled(context)
-        ChatNotifications.register(context)
+    LaunchedEffect(foreground, selectedTarget, settings.serverUrl, settings.operatorToken) {
+        if (!foreground || selectedTarget != null) return@LaunchedEffect
         while (true) {
+            if (!networkAvailable(context)) { delay(10_000); continue }
             val response = withContext(Dispatchers.IO) { MobileApi.get(settings.serverUrl, settings.operatorToken, "/api/mobile/operations/chats") }
             response.value?.let { threads = chatObjects(it.optJSONArray("data")); settings.saveCachedResponse("chat_threads", it) }
-            registered=settings.pushRegistered
-            status = if(response.value != null) "Tus ofertas y las que has tomado" else response.message
             delay(10_000)
         }
     }
-    BackHandler(target != null) { onTarget(null) }
+    BackHandler(selectedTarget != null) { onTarget(null) }
     Column(Modifier.fillMaxSize()) {
-        if(notifications && !registered) Text("Activando avisos de chat… Se reintentará cuando haya conexión.",Modifier.padding(horizontal=22.dp,vertical=8.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        if (!notifications) {
-            Surface(color=MaterialTheme.colorScheme.secondaryContainer,shape=RoundedCornerShape(18.dp),modifier=Modifier.padding(horizontal=22.dp,vertical=8.dp)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Recibe los mensajes al instante",style=MaterialTheme.typography.titleSmall)
-                    Text("Activa las notificaciones para ver el remitente y el texto con la app cerrada.",style=MaterialTheme.typography.bodySmall)
-                    TextButton(onClick={
-                        if(Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)
-                            permission.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        else context.startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,context.packageName))
-                    }) { Text("Activar notificaciones") }
+        if(selectedTarget == null) {
+            LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                item { OutlinedTextField(search,{search=it},placeholder={Text("Buscar conversación")},leadingIcon={PrecisoIcon("search")},modifier=Modifier.fillMaxWidth(),singleLine=true,shape=RoundedCornerShape(12.dp)) }
+                if(threads.isEmpty()) item {
+                    Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                        PrecisoIcon("chat",description=null)
+                        EmptyState("Sin conversaciones", "Aparecerán al sincronizar tu cuenta.")
+                    }
                 }
-            }
-        }
-        if(target == null) {
-            LazyColumn(contentPadding=PaddingValues(22.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
-                item { SectionHeading("Cada orden, su conversación", "Mensajes", status) }
-                item { OutlinedTextField(search,{search=it},label={Text("Mercado, contraparte u orden")},modifier=Modifier.fillMaxWidth(),singleLine=true,shape=RoundedCornerShape(18.dp)) }
-                if(threads.isEmpty()) item { EmptyState("Sin conversaciones", "Las operaciones normales y cada orden por rango aparecerán al sincronizar tu cuenta.") }
                 items(threads.filter { "$it".contains(search,ignoreCase=true) },key={it.optString("id")}) { thread ->
                     val order=thread.optString("orderUuid").takeIf {it.isNotBlank()&&it!="null"}
-                    PrecisoPanel(Modifier.clickable { onTarget(ChatTarget(thread.optString("uuid"),order)) }) {
-                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-                            Text(thread.optString("counterpartyLabel").takeIf {it.isNotBlank()&&it!="null"} ?: "Contraparte",style=MaterialTheme.typography.titleMedium)
+                    Surface(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {onTarget(ChatTarget(thread.optString("uuid"),order))},color=MaterialTheme.colorScheme.surface,shape=RoundedCornerShape(12.dp)) {
+                        Row(Modifier.padding(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically) {
+                            val name=thread.optString("counterpartyLabel").takeIf {it.isNotBlank()&&it!="null"}?:"Contraparte"
+                            Surface(shape=CircleShape,color=MaterialTheme.colorScheme.secondaryContainer,modifier=Modifier.size(48.dp)) {
+                                Box(contentAlignment=Alignment.Center) {Text(name.take(2).uppercase(),style=MaterialTheme.typography.titleMedium,color=MaterialTheme.colorScheme.onSecondaryContainer)}
+                            }
+                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                                Text(name,style=MaterialTheme.typography.titleMedium)
+                                Text("${thread.optString("marketLabel",thread.optString("coin"))} · ${money(thread.optString("amount"))} QUSD",style=MaterialTheme.typography.bodyMedium)
+                                Text("${if(order!=null) "Orden ${order.take(8)}" else "Oferta ${thread.optString("uuid").take(8)}"} · ${statusLabel(thread.optString("state"))}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                             val unread=thread.optInt("unreadCount")
-                            if(unread>0) Badge { Text("$unread") }
+                            if(unread>0) Badge {Text("$unread")} else PrecisoIcon("next",color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Text("${thread.optString("marketLabel",thread.optString("coin"))} · ${money(thread.optString("amount"))} QUSD",style=MaterialTheme.typography.bodyLarge)
-                        Text("${if(thread.optString("role")=="creator") "Tu oferta" else "Oferta tomada"} · ${statusLabel(thread.optString("state"))}",style=MaterialTheme.typography.bodySmall)
-                        Text("Oferta ${thread.optString("uuid").take(8)}${order?.let {" · Orden ${it.take(8)}"} ?: " · Normal"}",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
-        } else key(target.id) { ConversationScreen(settings,foreground,target,{onTarget(null)}) }
+        } else key(selectedTarget.id, settings.serverUrl, settings.operatorToken) { ConversationScreen(settings,foreground,selectedTarget,{onTarget(null)}) }
     }
 }
 
 @Composable
 private fun ConversationScreen(settings: SecureSettings, foreground: Boolean, target: ChatTarget, onBack: ()->Unit) {
+    val context = LocalContext.current
     val cacheKey = "chat:${target.id}"
     var chat by remember { mutableStateOf(settings.cachedResponse(cacheKey)?.optJSONObject("data")) }
     var draft by rememberSaveable { mutableStateOf(settings.cachedResponse("chat_draft:${target.id}")?.optString("draft").orEmpty()) }
     var error by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
+    var preparing by remember { mutableStateOf(false) }
+    var image by remember { mutableStateOf<ByteArray?>(null) }
+    var progress by remember { mutableIntStateOf(0) }
+    var attemptId by rememberSaveable { mutableStateOf(settings.cachedResponse("chat_draft:${target.id}")?.optString("attemptId").orEmpty()) }
     var uncertain by remember { mutableStateOf(settings.actionIsUncertain(target.id,"chat")) }
-    var stale by remember { mutableStateOf(true) }
+    var stale by remember { mutableStateOf(chat?.optBoolean("stale",true) ?: true) }
     var refreshVersion by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    fun connected(): Boolean {
+        if (networkAvailable(context)) return true
+        scope.launch { snackbar.showSnackbar("Sin conexión") }
+        return false
+    }
+    LaunchedEffect(error) { if (error.startsWith("Sin conexión")) snackbar.showSnackbar("Sin conexión") }
+    val pendingImageKey = "pending:${target.id}"
+    LaunchedEffect(target.id) {
+        preparing=true
+        try { image = withContext(Dispatchers.IO) { ChatImages.read(context, settings, pendingImageKey) } }
+        finally { preparing=false }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null && !sending && !uncertain) scope.launch {
+            preparing = true
+            try {
+                image = withContext(Dispatchers.IO) {
+                    ChatImages.prepare(context, uri).also { ChatImages.save(context, settings, pendingImageKey, it) }
+                }
+                attemptId = ""
+                error = ""
+            } catch (cause: Exception) {
+                if (cause is kotlinx.coroutines.CancellationException) throw cause
+                error = cause.message ?: "No se pudo preparar la imagen."
+            } finally { preparing = false }
+        }
+    }
     val listState = rememberLazyListState()
     val messages = remember(chat) { chatObjects(chat?.optJSONArray("messages")) }
     val marked = remember { mutableSetOf<String>() }
-    LaunchedEffect(draft) { settings.saveCachedResponse("chat_draft:${target.id}",JSONObject().put("draft",draft).put("savedAt",System.currentTimeMillis())) }
+    LaunchedEffect(draft, attemptId) { settings.saveCachedResponse("chat_draft:${target.id}",JSONObject().put("draft",draft).put("attemptId",attemptId).put("savedAt",System.currentTimeMillis())) }
+    suspend fun checkAttempt() {
+        if (attemptId.isBlank()) return
+        val response = withContext(Dispatchers.IO) { MobileApi.get(settings.serverUrl,settings.operatorToken,chatPath(target,"/sends/${Uri.encode(attemptId)}")) }
+        when (response.value?.optJSONObject("data")?.optString("state")) {
+            "confirmed" -> {
+                val sentId=response.value.optJSONObject("data")?.optString("id").orEmpty()
+                if(sentId.isNotBlank()) withContext(Dispatchers.IO) {
+                    runCatching {
+                        val pending=image ?: ChatImages.read(context,settings,pendingImageKey)
+                        if(pending!=null) ChatImages.save(context,settings,"${target.id}:$sentId",pending)
+                    }
+                }
+                settings.clearActionUncertain(target.id,"chat")
+                uncertain = false
+                draft = ""
+                image = null
+                withContext(Dispatchers.IO) { ChatImages.remove(context,settings,pendingImageKey) }
+                attemptId = ""
+                refreshVersion++
+            }
+            "rejected" -> {
+                settings.clearActionUncertain(target.id,"chat")
+                uncertain = false
+            }
+            "not_found" -> error = "El servidor aún no tiene evidencia del envío. Se mantiene bloqueado para evitar duplicados."
+            else -> if (response.value == null) error = response.message
+        }
+    }
+    LaunchedEffect(foreground, uncertain, attemptId) { if (foreground && uncertain && networkAvailable(context)) checkAttempt() }
     LaunchedEffect(foreground,refreshVersion) {
         if(!foreground) return@LaunchedEffect
         var first=true
+        var failures=0
         while(true) {
+            if(!networkAvailable(context)) { delay(10_000); continue }
             val response=withContext(Dispatchers.IO) { MobileApi.get(settings.serverUrl,settings.operatorToken,chatPath(target,fresh=first)) }
             first=false
             if(response.value != null) {
                 chat=response.value.optJSONObject("data"); settings.saveCachedResponse(cacheKey,response.value)
                 stale=chat?.optBoolean("stale",true) ?: true
                 error=""
-            } else { error=response.message; stale=true }
-            delay(6000)
+                failures=0
+            } else {
+                if(!response.message.startsWith("Sin conexión")) error=response.message
+                stale=true
+                failures=(failures+1).coerceAtMost(4)
+            }
+            delay((6_000L * (1L shl failures)).coerceAtMost(80_000L))
         }
     }
-    LaunchedEffect(messages.size) { if(messages.isNotEmpty()) listState.scrollToItem(messages.lastIndex) }
+    var initialScroll by remember {mutableStateOf(true)}
+    LaunchedEffect(messages.size) {
+        val nearBottom=listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let {it>=messages.size-3}?:true
+        if(messages.isNotEmpty()&&(initialScroll||nearBottom)) {listState.scrollToItem(messages.lastIndex);initialScroll=false}
+    }
     LaunchedEffect(foreground,chat) {
         if(!foreground || chat==null) return@LaunchedEffect
         while(true) {
             delay(2000)
+            if(!networkAvailable(context)) continue
             val visible=listState.layoutInfo.visibleItemsInfo.mapNotNull {item->(item.key as? String)?.takeUnless {it in marked}}
             if(visible.isNotEmpty()) {
                 val result=withContext(Dispatchers.IO) { MobileApi.post(settings.serverUrl,settings.operatorToken,chatPath(target,"/read"),JSONObject().put("ids",JSONArray(visible))) }
@@ -141,45 +207,157 @@ private fun ConversationScreen(settings: SecureSettings, foreground: Boolean, ta
             }
         }
     }
-    Column(Modifier.fillMaxSize().imePadding().padding(horizontal=22.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
-            TextButton(onClick=onBack) { Text("‹ Conversaciones") }
-            TextButton(onClick={refreshVersion++}) { Text("Actualizar") }
+    val thread=remember(settings,target.id) {chatObjects(settings.cachedResponse("chat_threads")?.optJSONArray("data")).firstOrNull {it.optString("id")==target.id}}
+    val name=thread?.optString("counterpartyLabel")?.takeIf {it.isNotBlank()&&it!="null"}?:"Conversación"
+    Column(Modifier.fillMaxSize().imePadding()) {
+        Surface(color=MaterialTheme.colorScheme.surface) {
+            PageBar(name,onBack,"${thread?.optString("marketLabel").orEmpty()} · ${if(target.orderUuid!=null) "Orden ${target.orderUuid.take(8)}" else "Oferta ${target.uuid.take(8)}"}") {
+                IconButton(onClick={if(connected()) refreshVersion++}) {PrecisoIcon("refresh",description="Actualizar conversación")}
+            }
         }
-        Text("Oferta ${target.uuid.take(8)}${target.orderUuid?.let {" · Orden ${it.take(8)}"} ?: ""}",style=MaterialTheme.typography.titleMedium)
-        Text(if(stale) "Copia guardada · pendiente de verificar" else "Conversación actualizada",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        LazyColumn(state=listState,modifier=Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(10.dp),contentPadding=PaddingValues(vertical=10.dp)) {
-            if(messages.isEmpty()) item { EmptyState("Aún no hay mensajes", "Escribe aquí para coordinar esta operación.") }
-            items(messages,key={it.optString("id")}) { message ->
+        if(stale) Text("Copia guardada · pendiente de verificar",Modifier.fillMaxWidth().padding(8.dp),style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+        LazyColumn(state=listState,modifier=Modifier.weight(1f).fillMaxWidth(),verticalArrangement=Arrangement.spacedBy(8.dp),contentPadding=PaddingValues(16.dp)) {
+            if(messages.isEmpty()) item {
+                Column(Modifier.fillMaxWidth().padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp),horizontalAlignment=Alignment.CenterHorizontally) {
+                    PrecisoIcon("chat",description=null)
+                    EmptyState("Inicia la conversación","Coordina aquí esta operación.")
+                }
+            }
+            items(messages,key={it.optString("id")}) {message->
                 val own=message.optString("sender")=="own"
-                Surface(shape=RoundedCornerShape(20.dp),color=if(own) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier=Modifier.fillMaxWidth().padding(start=if(own) 28.dp else 0.dp,end=if(own) 0.dp else 28.dp)) {
-                    Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(5.dp)) {
-                        Text(if(own) "Tú" else if(message.optString("sender")=="moderator") "Moderación" else "Contraparte",style=MaterialTheme.typography.labelSmall)
-                        Text(message.optString("message"),style=MaterialTheme.typography.bodyLarge)
-                        if(message.has("createdAt")) Text(dateLabel(message.optString("createdAt")),style=MaterialTheme.typography.labelSmall)
+                Row(Modifier.fillMaxWidth(),horizontalArrangement=if(own) Arrangement.End else Arrangement.Start) {
+                    Surface(shape=RoundedCornerShape(topStart=12.dp,topEnd=12.dp,bottomStart=if(own) 12.dp else 8.dp,bottomEnd=if(own) 8.dp else 12.dp),
+                        color=if(own) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                        contentColor=if(own) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        modifier=Modifier.widthIn(max=320.dp)) {
+                        Column(Modifier.padding(12.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                            if(message.optString("sender")=="moderator") Text("Moderación",style=MaterialTheme.typography.labelSmall)
+                            if (message.optString("image").let { it.isNotBlank() && it != "null" }) ChatImageBubble(settings,target,message.optString("id"),foreground) { error = it }
+                            Text(message.optString("message"),style=MaterialTheme.typography.bodyMedium)
+                            if(message.has("createdAt")) Text(dateLabel(message.optString("createdAt")),style=MaterialTheme.typography.labelSmall,modifier=Modifier.align(Alignment.End),color=LocalContentColor.current.copy(alpha=.65f))
+                        }
                     }
                 }
             }
         }
-        if(error.isNotBlank()) Text(error,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)
+        if(error.isNotBlank()&&!error.startsWith("Sin conexión")) Text(error,Modifier.padding(8.dp),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)
         if(uncertain) {
             Text("No se confirmó el último envío. Comprueba los mensajes antes de volver a enviarlo.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.error)
-            TextButton(onClick={settings.clearActionUncertain(target.id,"chat");uncertain=false}) { Text("He comprobado la conversación") }
+            TextButton(onClick={if(connected()) scope.launch { checkAttempt(); refreshVersion++ }}) { Text("Comprobar envío (sin reenviar)") }
         }
-        OutlinedTextField(draft,{if(it.length<=599) draft=it},label={Text("Mensaje")},supportingText={Text("${draft.length}/599")},modifier=Modifier.fillMaxWidth(),maxLines=4,shape=RoundedCornerShape(18.dp))
-        Button(onClick={
-            if(sending||uncertain||draft.isBlank()) return@Button
-            if(!settings.markActionUncertain(target.id,"chat")) {error="No se pudo guardar el envío de forma segura.";return@Button}
+        if (preparing) LinearProgressIndicator(Modifier.fillMaxWidth())
+        image?.let { bytes ->
+            Row(Modifier.padding(8.dp),verticalAlignment=Alignment.CenterVertically) {
+                val preview = remember(bytes) { runCatching { ChatImages.bitmap(bytes).asImageBitmap() }.getOrNull() }
+                if (preview != null) Image(preview,"Imagen preparada para enviar",Modifier.size(72.dp))
+                Text("JPEG · ${bytes.size / 1024} KiB",Modifier.weight(1f).padding(8.dp))
+                TextButton(enabled=!sending&&!uncertain&&!preparing,onClick={
+                    preparing=true
+                    scope.launch {
+                        try {
+                            withContext(Dispatchers.IO) { ChatImages.remove(context,settings,pendingImageKey) }
+                            image=null;attemptId=""
+                        } finally {preparing=false}
+                    }
+                }) { Text("Quitar") }
+            }
+        }
+        if (sending) {
+            LinearProgressIndicator(progress={progress / 100f},modifier=Modifier.fillMaxWidth())
+            Text(if(progress<100) "Subiendo al servidor · $progress%" else "Esperando confirmación de QvaPay…",style=MaterialTheme.typography.labelSmall)
+        }
+        Surface(color=MaterialTheme.colorScheme.surface) {
+        Row(Modifier.fillMaxWidth().padding(8.dp),verticalAlignment=Alignment.Bottom,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+        FilledTonalIconButton(enabled=!sending&&!uncertain&&!preparing,onClick={picker.launch("image/*")},
+            modifier=Modifier.size(48.dp),shape=CircleShape) { PrecisoIcon("image",description="Adjuntar imagen") }
+        ChatDraftInput(draft,{if(it.length<=599) {draft=it;attemptId=""}},!sending&&!uncertain,Modifier.weight(1f))
+        FilledIconButton(onClick={
+            if(sending||uncertain||preparing||(draft.isBlank()&&image==null)) return@FilledIconButton
+            if(!connected()) return@FilledIconButton
+            if(attemptId.isBlank()) attemptId=UUID.randomUUID().toString()
+            settings.saveCachedResponse("chat_draft:${target.id}",JSONObject().put("draft",draft).put("attemptId",attemptId).put("savedAt",System.currentTimeMillis()))
+            if(!settings.markActionUncertain(target.id,"chat")) {error="No se pudo guardar el envío de forma segura.";return@FilledIconButton}
+            val outgoing=draft.trim()
+            val outgoingImage=image
+            val outgoingId=attemptId
             sending=true
+            progress=0
             scope.launch {
-                val response=withContext(Dispatchers.IO) {MobileApi.post(settings.serverUrl,settings.operatorToken,chatPath(target),JSONObject().put("message",draft.trim()))}
+                val response=withContext(Dispatchers.IO) {
+                    if(outgoingImage!=null) MobileApi.sendChatImage(settings.serverUrl,settings.operatorToken,chatPath(target,"/images"),outgoingImage,outgoing,outgoingId) { value -> scope.launch { progress=value } }
+                    else MobileApi.post(settings.serverUrl,settings.operatorToken,chatPath(target),JSONObject().put("message",outgoing).put("attemptId",outgoingId))
+                }
                 uncertain=response.uncertain
                 if(!uncertain) settings.clearActionUncertain(target.id,"chat")
-                if(response.value!=null) {draft="";chat=response.value.optJSONObject("data")?.optJSONObject("chat");refreshVersion++}
+                if(response.value!=null) {
+                    val sentId=response.value.optJSONObject("data")?.optString("id").orEmpty()
+                    if(outgoingImage!=null && sentId.isNotBlank()) withContext(Dispatchers.IO) { runCatching { ChatImages.save(context,settings,"${target.id}:$sentId",outgoingImage) } }
+                    draft="";image=null;attemptId="";error=""
+                    withContext(Dispatchers.IO) { ChatImages.remove(context,settings,pendingImageKey) }
+                    chat=response.value.optJSONObject("data")?.optJSONObject("chat");refreshVersion++
+                }
                 else error=response.message
                 sending=false
             }
-        },enabled=!sending&&!uncertain&&draft.isNotBlank(),modifier=Modifier.fillMaxWidth().padding(bottom=10.dp)) { Text(if(sending) "Enviando…" else "Enviar mensaje") }
+        },enabled=!sending&&!uncertain&&!preparing&&(draft.isNotBlank()||image!=null),modifier=Modifier.size(48.dp),shape=CircleShape) {
+            if(sending) CircularProgressIndicator(Modifier.size(24.dp),strokeWidth=2.dp,color=MaterialTheme.colorScheme.onPrimary)
+            else PrecisoIcon("send",description="Enviar mensaje")
+        }
+        }
+        }
+        if(draft.length>=550) Text("${draft.length}/599",Modifier.fillMaxWidth().padding(horizontal=16.dp),style=MaterialTheme.typography.labelSmall)
+        SnackbarHost(snackbar)
+    }
+}
+
+/** Shares the buttons' 48 dp minimum height and round ends; grows only for multiline text. */
+@Composable
+internal fun ChatDraftInput(value: String, onValueChange: (String)->Unit, enabled: Boolean, modifier: Modifier = Modifier) {
+    val shape=RoundedCornerShape(24.dp)
+    BasicTextField(value,onValueChange,enabled=enabled,maxLines=4,
+        textStyle=MaterialTheme.typography.bodyLarge.copy(color=MaterialTheme.colorScheme.onSurface),
+        cursorBrush=SolidColor(MaterialTheme.colorScheme.primary),
+        modifier=modifier.heightIn(min=48.dp).clip(shape)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .border(1.dp,MaterialTheme.colorScheme.outlineVariant,shape)
+            .padding(horizontal=16.dp,vertical=12.dp).semantics {contentDescription="Mensaje"},
+        decorationBox={inner->
+            Box(contentAlignment=Alignment.CenterStart) {
+                if(value.isEmpty()) Text("Escribe un mensaje…",style=MaterialTheme.typography.bodyLarge,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=1)
+                inner()
+            }
+        })
+}
+
+@Composable
+private fun ChatImageBubble(settings: SecureSettings, target: ChatTarget, messageId: String, foreground: Boolean, onError: (String) -> Unit) {
+    val context = LocalContext.current
+    var bitmap by remember(messageId) { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+    var retry by remember { mutableIntStateOf(0) }
+    var loading by remember { mutableStateOf(false) }
+    LaunchedEffect(messageId,foreground,retry) {
+        loading=true
+        try {
+            val key="${target.id}:$messageId"
+            val cached=withContext(Dispatchers.IO) {ChatImages.read(context,settings,key)}
+            if(cached!=null) bitmap=withContext(Dispatchers.IO) {runCatching {ChatImages.bitmap(cached).asImageBitmap()}.getOrNull()}
+            if(bitmap==null && foreground && networkAvailable(context)) {
+                val response=withContext(Dispatchers.IO) {MobileApi.chatImage(settings.serverUrl,settings.operatorToken,chatPath(target,"/images/${Uri.encode(messageId)}"))}
+                response.value?.let {bytes->
+                    bitmap=withContext(Dispatchers.IO) {
+                        runCatching {ChatImages.bitmap(bytes).asImageBitmap().also {ChatImages.save(context,settings,key,bytes)}}.getOrNull()
+                    }
+                }
+                if(retry>0&&response.message.startsWith("Sin conexión")) onError("Sin conexión")
+            }
+        } finally {loading=false}
+    }
+    val rendered=bitmap
+    if(rendered!=null) Image(rendered,"Imagen adjunta",Modifier.fillMaxWidth().heightIn(max=300.dp))
+    else Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
+        PrecisoIcon("receipt",description=null)
+        if(loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text(if(loading) "Cargando imagen…" else "Sin copia local de la imagen. Descarga fallida o referencia aún no verificada.",style=MaterialTheme.typography.bodySmall)
+        TextButton(enabled=!loading&&foreground,onClick={if(networkAvailable(context)) retry++ else onError("Sin conexión")}) {Text("Reintentar descarga")}
     }
 }

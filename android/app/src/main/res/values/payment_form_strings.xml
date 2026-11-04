@@ -1,0 +1,4 @@
+<resources>
+    <string name="payment_form_description">Rellena destinatario, importe y móvil en Transfermóvil después de revisar una operación en QvaApply. En formularios bancarios puede abrir la primera revisión y se detiene allí. No introduce claves ni acepta la confirmación final. ETECSA se queda en el formulario.</string>
+    <string name="payment_form_label">QvaApply · Rellenar Transfermóvil</string>
+</resources>

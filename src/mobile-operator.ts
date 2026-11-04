@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { ChatThread } from "./chat-catalog.js";
+import { operationDisplayState } from "./operation-display-state.js";
+import { assistedPaymentMarkets } from "./assisted-payment.js";
 
 export type MobileOperatorScope = "read" | "actions";
 type OperatorRecord = { id: string; label: string; tokenHash: string; scopes: MobileOperatorScope[]; createdAt: number; revokedAt: number | null; readRateWindowAt?: number; readRateCount?: number; writeRateWindowAt?: number; writeRateCount?: number };
@@ -94,7 +96,7 @@ export class MobileOperatorService {
     }
     for (const operation of local) {
       const existing = merged.get(key(operation));
-      merged.set(key(operation), { ...operation, role: existing?.role ?? "taker", chatAvailable: true });
+      merged.set(key(operation), { ...operation, state: operationDisplayState(operation.state, existing?.state), role: existing?.role ?? "taker", chatAvailable: true });
     }
     const active = new Set(["applied", "acknowledged", "processing", "paid", "revision"]);
     const operations = [...merged.values()].sort((a,b) => Number(active.has(b.state))-Number(active.has(a.state)) || b.createdAt-a.createdAt);
@@ -105,7 +107,10 @@ export class MobileOperatorService {
       const actions = operation.offerType === "buy"
         ? ["applied", "acknowledged", "paid"].includes(operation.state) ? ["received", ...(operation.state === "applied" || operation.state === "acknowledged" ? ["cancel"] : [])] : []
         : operation.state === "applied" || operation.state === "acknowledged" ? ["paid", "cancel"] : [];
-      return { id: key(operation), uuid: operation.uuid, orderUuid: operation.orderUuid, role: operation.role, chatAvailable: operation.chatAvailable, side: operation.offerType, market: operation.coin, marketLabel: market?.label ?? operation.coin, currency: market?.currency ?? "", amount: operation.amount, receive: operation.receive, rate: operation.rate, status: operation.state, createdAt: operation.createdAt, actions: managed.has(key(operation)) ? actions : [] };
+      const paymentAvailable = operation.offerType === "sell" && operation.role === "taker" &&
+        ["applied", "acknowledged", "processing"].includes(operation.state) &&
+        assistedPaymentMarkets[operation.coin]?.currency === market?.currency && Boolean(assistedPaymentMarkets[operation.coin]);
+      return { id: key(operation), uuid: operation.uuid, orderUuid: operation.orderUuid, role: operation.role, chatAvailable: operation.chatAvailable, side: operation.offerType, market: operation.coin, marketLabel: market?.label ?? operation.coin, currency: market?.currency ?? "", amount: operation.amount, receive: operation.receive, rate: operation.rate, status: operation.state, createdAt: operation.createdAt, paymentAvailable, actions: managed.has(key(operation)) ? actions : [] };
     });
   }
   alerts() {
@@ -118,15 +123,24 @@ export class MobileOperatorService {
   async act(operatorId: string, uuid: string, action: "paid" | "received" | "cancel", reference?: string) {
     if (action === "paid" && !reference?.trim()) throw new Error("La referencia del pago es obligatoria.");
     this.storage.audit(`mobile_${action}_requested`, `Acción ${action} solicitada desde app móvil por operador ${operatorId}.`, uuid);
+    const started = performance.now();
+    let outcome = "not_confirmed";
     try {
       if (action === "paid") await this.dependencies.markPaid(uuid, reference!.trim());
       else if (action === "received") await this.dependencies.confirmReceived(uuid);
       else await this.dependencies.cancel(uuid);
-      this.storage.audit(`mobile_${action}_confirmed`, `Acción ${action} confirmada desde app móvil por operador ${operatorId}.`, uuid);
+      outcome = "confirmed";
     } catch (error) {
       this.storage.audit(`mobile_${action}_uncertain`, `Acción móvil ${action} no confirmada: ${error instanceof Error ? error.message : String(error)}. No se debe reintentar sin conciliar.`, uuid);
       throw error;
+    } finally {
+      try {
+        this.storage.audit("mobile_action_timing", JSON.stringify({ action, outcome, totalMs: performance.now() - started }), uuid);
+      } catch {}
     }
+    try {
+      this.storage.audit(`mobile_${action}_confirmed`, `Acción ${action} confirmada desde app móvil por operador ${operatorId}.`, uuid);
+    } catch {}
   }
   private public(item: OperatorRecord): MobileOperator { return { id: item.id, label: item.label, scopes: item.scopes, createdAt: item.createdAt, revokedAt: item.revokedAt }; }
 }

@@ -1,5 +1,6 @@
 import { consumeChatStream } from "./chat-stream.js";
 import { createHash } from "node:crypto";
+import { chatImageUrl, CHAT_IMAGE_MAX_BYTES, validateChatImage, type ChatImage } from "./chat-images.js";
 import { recordHuntingEligibility, recordMissingRequirements } from "./hunting-requirements.js";
 import type {
   P2pAverage,
@@ -11,6 +12,7 @@ import type {
   QvaTransactionPage,
 } from "./types.js";
 import { APPLY_WINDOW_KEY, APPLY_WINDOW_MS, applyAttempts, applyReadyAt } from "./core/apply-budget.js";
+import { beginOperationRequest, type OperationRequestTimer } from "./operation-trace.js";
 
 const API = "https://api.qvapay.com";
 
@@ -62,6 +64,7 @@ export interface QvaChatMessage {
   id: string;
   peerId: string;
   message: string;
+  image?: string;
   createdAt?: number;
   isModerator?: boolean;
 }
@@ -417,18 +420,49 @@ export class QvaPayClient {
       policy: "received",
     });
   }
-  async sendChat(uuid: string, message: string, order?: string): Promise<{ id?: string; createdAt?: number }> {
+  async sendChat(uuid: string, message: string, order?: string, image?: ChatImage): Promise<{ id?: string; createdAt?: number }> {
+    let form: FormData | undefined;
+    if (image) {
+      validateChatImage(image.bytes, image.mimeType);
+      form = new FormData();
+      form.set("file", new Blob([new Uint8Array(image.bytes)], { type: image.mimeType }), image.mimeType === "image/png" ? "chat.png" : "chat.jpg");
+      if (message) form.set("message", message);
+    }
     const data = await this.request(orderPath(uuid, "chat", order), {
       method: "POST",
-      body: { message },
+      body: form ?? { message },
       policy: "chat",
     });
     const raw = isObject(data.message) ? data.message : isObject(data.data) ? data.data : data;
+    if (!stringValue(raw.id ?? raw.uuid ?? (typeof data.message === "string" ? data.message : undefined)))
+      throw new QvaMutationUncertainError("chat", new Error("QvaPay no devolvió el identificador del mensaje."));
     return {
       ...(stringValue(raw.id ?? raw.uuid ?? (typeof data.message === "string" ? data.message : undefined))
         ? { id: stringValue(raw.id ?? raw.uuid ?? data.message)! } : {}),
       ...(timestampValue(raw.created_at) ? { createdAt: timestampValue(raw.created_at)! } : {}),
     };
+  }
+
+  async downloadChatImage(reference: string): Promise<ChatImage> {
+    const url = chatImageUrl(reference);
+    const response = await this.fetchImpl(url.href, { redirect: "error", signal: AbortSignal.timeout(12_000) });
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new Error("No se pudo descargar la imagen.");
+    }
+    const reader = response.body.getReader();
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > CHAT_IMAGE_MAX_BYTES) throw new Error("Imagen remota demasiado grande.");
+        parts.push(chunk.value);
+      }
+    } finally { await reader.cancel(); reader.releaseLock(); }
+    return validateChatImage(Buffer.concat(parts), response.headers.get("content-type")?.split(";")[0]?.trim() ?? "");
   }
 
   async watchChat(uuid:string,order:string|undefined,signal:AbortSignal,changed:()=>void):Promise<void> {
@@ -458,12 +492,14 @@ export class QvaPayClient {
     return source.flatMap((entry) => {
       if (!isObject(entry)) return [];
       const peerId = stringValue(entry.peer_id ?? entry.peerId ?? (isObject(entry.Peer) ? entry.Peer.uuid : undefined));
-      const message = stringValue(entry.message) ?? (stringValue(entry.image) ? "📎 Imagen adjunta" : undefined);
+      const image = stringValue(entry.image);
+      const message = stringValue(entry.message) ?? (image ? "📎 Imagen adjunta" : undefined);
       if (!peerId || message === undefined) return [];
       return [{
-        id: stringValue(entry.id ?? entry.uuid) ?? createHash("sha256").update(`${peerId}:${String(entry.created_at ?? "")}:${message}`).digest("hex"),
+        id: stringValue(entry.id ?? entry.uuid) ?? createHash("sha256").update(`${peerId}:${String(entry.created_at ?? "")}:${message}${image ? `:${image}` : ""}`).digest("hex"),
         peerId,
         message,
+        ...(image ? { image } : {}),
         ...(timestampValue(entry.created_at) ? { createdAt: timestampValue(entry.created_at)! } : {}),
         ...(entry.is_moderator === true ? { isModerator: true } : {}),
       }];
@@ -556,22 +592,24 @@ export class QvaPayClient {
         "No hay sesión de QvaPay. Ejecuta pnpm login en la terminal.",
       );
     const policy = options.policy ?? "read";
+    const timer = policy === "apply" ? undefined : beginOperationRequest(policy, options.method ?? "GET");
     try {
       const result = await this.enqueue(policy, async () => {
         const init: RequestInit = {
           method: options.method ?? "GET",
           headers: {
             authorization: `Bearer ${token}`,
-            ...(options.body ? { "content-type": "application/json" } : {}),
+            ...(options.body && !(options.body instanceof FormData) ? { "content-type": "application/json" } : {}),
           },
-          ...(options.body ? { body: JSON.stringify(options.body) } : {}),
+          ...(options.body ? { body: options.body instanceof FormData ? options.body : JSON.stringify(options.body) } : {}),
+          ...(policy === "chat" ? { redirect: "error" as const } : {}),
         };
         let response: Response;
         try {
-          if (policy !== "list") options.readTrace?.dispatch();
+          if (policy !== "list") { timer?.dispatched(); options.readTrace?.dispatch(); }
           response = policy === "list"
             ? await this.fetchListRead(`${API}${path}`, init, token, () => {
-
+                timer?.dispatched();
                 options.listTrace?.dispatch();
               }, options.listTrace?.attempt)
             : options.retryRead
@@ -594,9 +632,11 @@ export class QvaPayClient {
         options.listTrace?.response(response);
         try { return await this.json(response); }
         finally { options.listTrace?.finish(); options.readTrace?.finish(); }
-      }, options.beforeDispatch, options.secondary, policy === "apply" ? path.split("/")[2] : undefined);
+      }, options.beforeDispatch, options.secondary, policy === "apply" ? path.split("/")[2] : undefined, timer);
+      timer?.finish("success");
       return result;
     } catch (error) {
+      timer?.finish("failed");
       throw error;
     }
   }
@@ -708,6 +748,7 @@ export class QvaPayClient {
     beforeDispatch?: (queuedForMs: number) => boolean | Promise<boolean>,
     secondary = false,
     applyUuid?: string,
+    timer?: OperationRequestTimer,
   ): Promise<T> {
     if (policy === "apply" && secondary) return this.enqueueSecondaryApplication(task, beforeDispatch);
     if (policy === "apply") return this.enqueueApplication(task, beforeDispatch, applyUuid);
@@ -717,6 +758,7 @@ export class QvaPayClient {
     const run = (chat ? this.chatQueue : priorityRead ? this.urgentReadQueue : list ? this.listQueue : this.queue)
       .catch(() => undefined)
       .then(async () => {
+        timer?.dequeued();
         const current = this.now();
         const persistedAt = this.persistedPolicyAt(policy);
         const generalDelay = !priorityRead && this.lastRequestAt

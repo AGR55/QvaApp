@@ -40,9 +40,12 @@ jobs:
           set -euo pipefail
           test -n "$VPS_HOST"
           test -n "$VPS_USER"
+          {
+          python3 -c 'import subprocess,json; p=subprocess.run(["curl","-sS","-I","--max-time","15","https://qvapply.honux.tech/"],capture_output=True,text=True); print(json.dumps({"externalWebProbe":{"status":p.returncode,"stdout":p.stdout,"stderr":p.stderr}}))'
           ssh -F /dev/null -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=20 \
             -p "${VPS_SSH_PORT:-22}" "${VPS_USER}@${VPS_HOST}" 'python3 -' \
-            < scripts/diagnose-vps.py \
+            < scripts/diagnose-vps.py
+          } \
             | openssl cms -encrypt -binary -aes-256-gcm -outform DER \
                 -out vps-diagnostics.cms recipient.pem
       - name: Upload encrypted report

@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'android/**'
+      - 'public/icons/**'
       - '.github/workflows/android-build.yml'
   pull_request:
     paths:
       - 'android/**'
+      - 'public/icons/**'
       - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
@@ -36,7 +38,9 @@ jobs:
 
       - name: Test and build debug APK
         working-directory: android
-        run: gradle --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+        run: |
+          python3 scripts/test_generate_market_logos.py
+          gradle --no-daemon :app:testDebugUnitTest :app:testLabUnitTest :app:lintDebug :app:lintLab :app:assembleDebug :app:assembleLab
 
       - name: Upload private-installation APK
         uses: actions/upload-artifact@v4
