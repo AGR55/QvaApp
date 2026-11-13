@@ -10,6 +10,7 @@ services/
   trading-core/           # núcleo transaccional; aquí vive el dominio puro
     cmd/parity-sut/       # CLI de conformidad NDJSON para el runner
     internal/domain/      # reglas puras, sin I/O
+  db/                     # Postgres local, importador SQLite y esquema v1
   scripts/verify.sh       # gofmt + test -race + vet + paridad
 ```
 
@@ -78,6 +79,17 @@ node --import tsx parity/runner/run.ts \
   --command "services/trading-core/bin/parity-sut" \
   --suite pure --filter market-math
 ```
+
+## Persistencia F1
+
+- `services/db/` contiene el compose Postgres 16 aislado, el importador
+  SQLite→Postgres y el snapshot `schema/core-v1.sql`.
+- La importación se probó sobre una **copia** migrada a v31: **41 tablas,
+  16.533 filas, 0 mismatches**, 41 PKs, 40 índices y 6 FKs.
+- El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
+  están en [db/README.md](db/README.md).
+- Pendiente: traducir los 6 triggers SQLite, runner de migraciones versionadas
+  y fixture pequeño para CI.
 
 ## Calidad
 

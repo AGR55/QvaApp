@@ -1,0 +1,25 @@
+name: qvaapply-f1-db
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: qvaapply-f1-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qvaapply
+      POSTGRES_USER: qvaapply
+      POSTGRES_PASSWORD: qvaapply_dev_only
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - qvaapply-f1-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qvaapply -d qvaapply"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  qvaapply-f1-pgdata:

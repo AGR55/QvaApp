@@ -129,8 +129,10 @@ Gate F1:
 - [x] Property tests de invariantes financieros en verde (redondeo
       idempotente, presupuesto que no excede lo disponible y libro de reservas
       sin doble gasto/doble reserva).
-- [ ] Esquema Postgres reproducible desde cero y migrable desde un dump SQLite
-      de prueba con verificación de conteos.
+- [x] Esquema Postgres reproducible desde cero y migrable desde un dump SQLite
+      de prueba con verificación de conteos. Snapshot `core-v1.sql` validado en
+      PostgreSQL 16; importación de una copia v31: 41 tablas, 16.533 filas,
+      0 mismatches. Triggers SQLite aún pendientes.
 - [ ] CI completo en verde y con tiempos documentados. El job Go ya existe
       (`go test -race`, staticcheck y govulncheck); faltan tiempos y
       `golangci-lint` (sin release compatible con Go 1.27).
