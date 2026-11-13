@@ -124,12 +124,16 @@ Actividades:
 
 Gate F1:
 
-- [ ] Paridad 100 % en fixtures del dominio puro (`go test` + runner).
-- [ ] Property tests de invariantes financieros en verde (mínimo: reserva
-      única, no doble gasto, redondeo idempotente).
+- [x] Paridad 100 % en fixtures del dominio puro (`go test` + runner):
+      **159/159** casos de golden, 25 paquetes puros.
+- [x] Property tests de invariantes financieros en verde (redondeo
+      idempotente, presupuesto que no excede lo disponible y libro de reservas
+      sin doble gasto/doble reserva).
 - [ ] Esquema Postgres reproducible desde cero y migrable desde un dump SQLite
       de prueba con verificación de conteos.
-- [ ] CI completo en verde y con tiempos documentados.
+- [ ] CI completo en verde y con tiempos documentados. El job Go ya existe
+      (`go test -race`, staticcheck y govulncheck); faltan tiempos y
+      `golangci-lint` (sin release compatible con Go 1.27).
 
 ## 4. F2 — Prototipo de la ruta caliente (2–3 semanas)
 
