@@ -44,6 +44,8 @@ services/
 | `domain/telegrammenu` | ✅ **6/6** | Comandos, acciones, tasas y sesiones |
 | `domain/chatstream` | ✅ **3/3** | Framing SSE acotado y chat no bloqueante |
 | `domain/qusdcache` | ✅ **13/13** | Dedupe, prioridad, epoch/revisión, TTL y cierre |
+| `domain/telegramruntime` | ✅ **6/6** | Callback seguro, split, render guard y not-modified |
+| `domain/scheduler` | ✅ **2/2** | Tareas solapadas, start/stop y timers |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
@@ -86,8 +88,7 @@ node --import tsx parity/runner/run.ts \
 ## Siguiente corte
 
 1. Portar los lotes restantes de L1 (`market-hunting-*`, `dashboard-auth`,
-   `dashboard-controls`, `mobile-operator`, `telegram-runtime`, `scheduler`,
-   `hunting-balance`).
+   `dashboard-controls`, `mobile-operator`, `hunting-balance`).
 2. Añadir property tests de reserva única y no doble gasto al ledger cuando
    exista la persistencia Postgres.
 3. Incorporar `golangci-lint` cuando su release soporte Go 1.27.

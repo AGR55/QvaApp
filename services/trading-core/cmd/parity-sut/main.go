@@ -1071,6 +1071,49 @@ func dispatch(req request) (any, *opError) {
 		}
 		return qusdSequence(fields)
 
+	case "telegram.answer-callback":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return telegramRuntimeAnswer(fields)
+
+	case "telegram.split-callback":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		data, failure := stringField(fields, "data")
+		if failure != nil {
+			return nil, failure
+		}
+		return telegramRuntimeSplit(data), nil
+
+	case "telegram.render-guard":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return telegramRuntimeRenderGuard(fields)
+
+	case "telegram.not-modified":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		message, failure := stringField(fields, "message")
+		if failure != nil {
+			return nil, failure
+		}
+		return telegramRuntimeNotModified(message), nil
+
+	case "scheduler.sequence":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return schedulerSequence(fields)
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",
