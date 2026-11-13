@@ -21,3 +21,4 @@ scripts/__pycache__/
 artifacts/git-archive/
 android/local.properties
 artifacts/android/
+services/trading-core/bin/

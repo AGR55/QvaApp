@@ -27,6 +27,12 @@ jobs:
         with:
           node-version-file: .node-version
 
+      - name: Set up Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: '1.27'
+          cache-dependency-path: services/go.work
+
       - name: Enable pnpm from packageManager
         run: corepack enable
 
@@ -40,6 +46,9 @@ jobs:
         run: pnpm parity:gate
         env:
           PARITY_REPORT_DIR: ${{ runner.temp }}/parity
+
+      - name: Verify Go workspace (F1)
+        run: bash services/scripts/verify.sh
 
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
