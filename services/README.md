@@ -97,8 +97,8 @@ node --import tsx parity/runner/run.ts \
   `0003_outbox_inbox.sql`, con constraints probados en Postgres.
 - El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
   están en [db/README.md](db/README.md).
-- Referencia local: `verify.sh` ~22,7 s; `lint.sh` ~65,7 s; tests Postgres
-  ~0,25 s y ~0,57 s. CI imprime los tiempos de cada job.
+- Referencia local: `verify.sh` ~18-23 s; `lint.sh` ~65-130 s según caché;
+  tests Postgres ~0,4 s y ~0,6 s. CI imprime los tiempos de cada job.
 
 ## Calidad
 
