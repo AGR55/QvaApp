@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/marketmath"
 )
 
@@ -182,6 +183,114 @@ func dispatch(req request) (any, *opError) {
 		}
 		return map[string]any{"value": value.Format(places)}, nil
 
+	case "budget.proportionalPlan":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawOffers, failure := objectArrayField(fields, "offers")
+		if failure != nil {
+			return nil, failure
+		}
+		offers := make([]budget.Offer, 0, len(rawOffers))
+		for _, raw := range rawOffers {
+			uuid, failure := stringField(raw, "uuid")
+			if failure != nil {
+				return nil, failure
+			}
+			coin, failure := stringField(raw, "coin")
+			if failure != nil {
+				return nil, failure
+			}
+			side, failure := stringField(raw, "type")
+			if failure != nil {
+				return nil, failure
+			}
+			status, failure := stringField(raw, "status")
+			if failure != nil {
+				return nil, failure
+			}
+			amount, _, failure := numberField(raw, "amount")
+			if failure != nil {
+				return nil, failure
+			}
+			rate, _, failure := numberField(raw, "rate")
+			if failure != nil {
+				return nil, failure
+			}
+			var receive *decimal.Value
+			if raw["receive"] != nil {
+				value, _, failure := numberField(raw, "receive")
+				if failure != nil {
+					return nil, failure
+				}
+				receive = &value
+			}
+			offers = append(offers, budget.Offer{
+				UUID:    uuid,
+				Coin:    coin,
+				Type:    side,
+				Status:  status,
+				Amount:  amount,
+				Rate:    rate,
+				Receive: receive,
+			})
+		}
+		coin, failure := stringField(fields, "coin")
+		if failure != nil {
+			return nil, failure
+		}
+		available, _, failure := numberField(fields, "available")
+		if failure != nil {
+			return nil, failure
+		}
+		maximumRate, _, failure := numberField(fields, "maximumRate")
+		if failure != nil {
+			return nil, failure
+		}
+		outgoingTransferFee, failure := optionalNumberField(fields, "outgoingTransferFee", decimal.Zero())
+		if failure != nil {
+			return nil, failure
+		}
+		currency, failure := optionalStringField(fields, "currency", "")
+		if failure != nil {
+			return nil, failure
+		}
+		plan, err := budget.ProportionalPlan(
+			offers,
+			coin,
+			available,
+			maximumRate,
+			outgoingTransferFee,
+			currency,
+		)
+		if err != nil {
+			return nil, validation(err.Error())
+		}
+		scale := budget.FiatScale(currency)
+		adjustments := make([]any, 0, len(plan.Adjustments))
+		for _, adjustment := range plan.Adjustments {
+			adjustments = append(adjustments, map[string]any{
+				"uuid":         adjustment.UUID,
+				"coin":         adjustment.Coin,
+				"rate":         adjustment.Rate.Format(8),
+				"currentQusd":  adjustment.CurrentQusd.Format(8),
+				"proposedQusd": adjustment.ProposedQusd.Format(8),
+				"currentFiat":  adjustment.CurrentFiat.Format(scale),
+				"proposedFiat": adjustment.ProposedFiat.Format(scale),
+				"releasedFiat": adjustment.ReleasedFiat.Format(scale),
+				"action":       adjustment.Action,
+			})
+		}
+		return map[string]any{
+			"coin":        plan.Coin,
+			"available":   plan.Available.Format(scale),
+			"committed":   plan.Committed.Format(scale),
+			"deficit":     plan.Deficit.Format(scale),
+			"invalid":     plan.Invalid,
+			"adjustments": adjustments,
+		}, nil
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",
@@ -253,6 +362,41 @@ func stringField(fields map[string]any, key string) (string, *opError) {
 		return "", validation(fmt.Sprintf("El campo %s debe ser texto.", key))
 	}
 	return text, nil
+}
+
+func optionalNumberField(fields map[string]any, key string, fallback decimal.Value) (decimal.Value, *opError) {
+	if fields[key] == nil {
+		return fallback, nil
+	}
+	value, _, failure := numberField(fields, key)
+	return value, failure
+}
+
+func optionalStringField(fields map[string]any, key string, fallback string) (string, *opError) {
+	if fields[key] == nil {
+		return fallback, nil
+	}
+	return stringField(fields, key)
+}
+
+func objectArrayField(fields map[string]any, key string) ([]map[string]any, *opError) {
+	value, ok := fields[key]
+	if !ok {
+		return nil, validation(fmt.Sprintf("El campo %s debe ser un array.", key))
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil, validation(fmt.Sprintf("El campo %s debe ser un array.", key))
+	}
+	objects := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			return nil, validation(fmt.Sprintf("El campo %s debe ser un array de objetos.", key))
+		}
+		objects = append(objects, object)
+	}
+	return objects, nil
 }
 
 func offerTypeField(fields map[string]any, key string) (marketmath.OfferType, *opError) {

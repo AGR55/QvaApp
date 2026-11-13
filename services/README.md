@@ -30,6 +30,7 @@ services/
 | --- | --- | --- |
 | `shared/decimal` | — | Aritmética exacta, redondeo y formato de escala fija |
 | `domain/marketmath` | ✅ **18/18** | `market-math` + `rate-rounding` del lote `market-math` |
+| `domain/budget` | ✅ **6/6** | Plan proporcional, recorte/cancelación y mínimos |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -40,6 +41,7 @@ bash services/scripts/verify.sh
 
 # Solo un filtro del runner
 bash services/scripts/verify.sh --filter market-math
+bash services/scripts/verify.sh --filter pure/budget/
 
 # Tests y vet por módulo
 (cd services/shared && go test -race ./...)
@@ -55,7 +57,7 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar `risk-policy`, `liquidity-plan`, `budget`/`apply-budget` y
+1. Portar `risk-policy`, `liquidity-plan`, `apply-budget` y
    `hunting-requirements` con sus goldens.
 2. Añadir property tests de redondeo idempotente, reserva única y no doble
    gasto.

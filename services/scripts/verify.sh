@@ -14,9 +14,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-filter="${1:-market-math}"
 if [[ "${1:-}" == "--filter" ]]; then
-  filter="${2:-market-math}"
+  filters=("${2:-market-math}")
+else
+  filters=("market-math" "pure/budget/")
 fi
 
 pending="$(gofmt -l shared trading-core)"
@@ -39,10 +40,12 @@ fi
 )
 
 cd ..
-node --import tsx parity/runner/run.ts \
-  --sut cli \
-  --command "services/trading-core/bin/parity-sut" \
-  --suite pure \
-  --filter "$filter"
+for filter in "${filters[@]}"; do
+  node --import tsx parity/runner/run.ts \
+    --sut cli \
+    --command "services/trading-core/bin/parity-sut" \
+    --suite pure \
+    --filter "$filter"
+done
 
-printf '\nservices: verificación Go + paridad (%s) en verde.\n' "$filter"
+printf '\nservices: verificación Go + paridad (%s) en verde.\n' "${filters[*]}"
