@@ -50,6 +50,7 @@ services/
 | `domain/dashboardauth` | ✅ **4/4** | Sesión, CSRF, origen y rate-limit |
 | `domain/huntingbalance` | ✅ **1/1** | Cierre ordenado de bucles y caché |
 | `domain/dashboardcontrol` | ✅ **3/3** | Pausa, cacería y refresco del panel |
+| `domain/markethunting` | ✅ **13/13** | Cola, supersesión, generaciones, pausa y stop |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
@@ -91,8 +92,9 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar el último lote L1 pendiente: `market-hunting-*` (13 casos).
-2. Añadir property tests de reserva única y no doble gasto al ledger cuando
+1. Cerrar F1 con Postgres local, migraciones versionadas y esquema consolidado.
+2. Implementar `outbox`/`inbox`, idempotencia durable y el auditor de
+   invariantes contra Postgres.
+3. Añadir property tests de reserva única y no doble gasto al ledger cuando
    exista la persistencia Postgres.
-3. Incorporar `golangci-lint` cuando su release soporte Go 1.27.
-   `price-simulation` es L4 (integración), no entra en el lote puro de F1.
+4. Incorporar `golangci-lint` cuando su release soporte Go 1.27.

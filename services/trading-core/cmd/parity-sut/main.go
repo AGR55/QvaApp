@@ -1188,6 +1188,45 @@ func dispatch(req request) (any, *opError) {
 	case "dashboard.controls.refresh":
 		return dashboardControlRefresh()
 
+	case "market-hunting.polling-progress":
+		return mhPollingProgress()
+
+	case "market-hunting.feed-progress":
+		return mhFeedProgress()
+
+	case "market-hunting.latest-page":
+		return mhLatestPage()
+
+	case "market-hunting.ingest-error":
+		return mhIngestError()
+
+	case "market-hunting.pause-stop":
+		return mhPauseStop()
+
+	case "market-hunting.generation-invalidate":
+		return mhGenerationInvalidate()
+
+	case "market-hunting.stop-waits":
+		return mhStopWaits()
+
+	case "market-hunting.timing":
+		return mhTiming()
+
+	case "market-hunting.generation-replaces":
+		return mhGenerationReplaces()
+
+	case "market-hunting.dispatch-sequence":
+		return mhDispatchSequence()
+
+	case "market-hunting.slow-read":
+		return mhSlowRead()
+
+	case "market-hunting.discard-reasons":
+		return mhDiscardReasons()
+
+	case "market-hunting.queue-limit":
+		return mhQueueLimit()
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",
