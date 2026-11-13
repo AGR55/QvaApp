@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/applybudget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/liquidity"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/marketmath"
@@ -379,6 +380,36 @@ func dispatch(req request) (any, *opError) {
 		}
 		return liquidityResult(plan), nil
 
+	case "apply.budget":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		now, failure := integerField(fields, "now")
+		if failure != nil {
+			return nil, failure
+		}
+		var attempts []int64
+		if fields["attempts"] != nil {
+			attempts, failure = integerArrayField(fields, "attempts")
+			if failure != nil {
+				return nil, failure
+			}
+		}
+		legacyApplyAt, failure := optionalIntegerField(fields, "legacyApplyAt")
+		if failure != nil {
+			return nil, failure
+		}
+		retryAt, failure := optionalIntegerField(fields, "retryAt")
+		if failure != nil {
+			return nil, failure
+		}
+		normalized := applybudget.Attempts(attempts, legacyApplyAt)
+		return map[string]any{
+			"attempts": normalized,
+			"readyAt":  applybudget.ReadyAt(normalized, retryAt, now),
+		}, nil
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",
@@ -436,6 +467,67 @@ func numberArrayField(fields map[string]any, key string) ([]decimal.Value, *opEr
 			return nil, validation(fmt.Sprintf("El campo %s debe ser un array de números.", key))
 		}
 		values = append(values, parsed)
+	}
+	return values, nil
+}
+
+const maxSafeInteger = int64(1<<53 - 1)
+
+func integerField(fields map[string]any, key string) (int64, *opError) {
+	value, ok := fields[key]
+	if !ok {
+		return 0, validation(fmt.Sprintf("El campo %s debe ser un entero.", key))
+	}
+	number, ok := value.(json.Number)
+	if !ok {
+		return 0, validation(fmt.Sprintf("El campo %s debe ser un entero.", key))
+	}
+	parsed, err := decimal.Parse(number.String())
+	if err != nil {
+		return 0, validation(fmt.Sprintf("El campo %s debe ser un entero.", key))
+	}
+	integer, ok := parsed.Int64()
+	if !ok || integer < -maxSafeInteger || integer > maxSafeInteger {
+		return 0, validation(fmt.Sprintf("El campo %s debe ser un entero.", key))
+	}
+	return integer, nil
+}
+
+func optionalIntegerField(fields map[string]any, key string) (*int64, *opError) {
+	if fields[key] == nil {
+		return nil, nil
+	}
+	value, failure := integerField(fields, key)
+	if failure != nil {
+		return nil, failure
+	}
+	return &value, nil
+}
+
+func integerArrayField(fields map[string]any, key string) ([]int64, *opError) {
+	value, ok := fields[key]
+	if !ok {
+		return nil, validation(fmt.Sprintf("El campo %s debe ser un array.", key))
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil, validation(fmt.Sprintf("El campo %s debe ser un array.", key))
+	}
+	values := make([]int64, 0, len(items))
+	for _, item := range items {
+		number, ok := item.(json.Number)
+		if !ok {
+			return nil, validation(fmt.Sprintf("El campo %s debe ser un array de enteros.", key))
+		}
+		parsed, err := decimal.Parse(number.String())
+		if err != nil {
+			return nil, validation(fmt.Sprintf("El campo %s debe ser un array de enteros.", key))
+		}
+		integer, ok := parsed.Int64()
+		if !ok || integer < -maxSafeInteger || integer > maxSafeInteger {
+			return nil, validation(fmt.Sprintf("El campo %s debe ser un array de enteros.", key))
+		}
+		values = append(values, integer)
 	}
 	return values, nil
 }

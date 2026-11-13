@@ -33,6 +33,7 @@ services/
 | `domain/budget` | ✅ **6/6** | Plan proporcional, recorte/cancelación y mínimos |
 | `domain/riskpolicy` | ✅ **8/8** | Límites, slippage, cooldowns, capital y decisión final |
 | `domain/liquidity` | ✅ **9/9** | Liberación QUSD, orden por rentabilidad y snapshot |
+| `domain/applybudget` | ✅ **9/9** | Ventana de dos apply, legado y `Retry-After` |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -59,7 +60,7 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar `apply-budget`, `hunting-requirements` y `price-simulation` con sus
+1. Portar `hunting-requirements`, `flexible-order` y `price-simulation` con sus
    goldens.
 2. Añadir property tests de redondeo idempotente, reserva única y no doble
    gasto.

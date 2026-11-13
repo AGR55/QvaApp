@@ -102,6 +102,15 @@ func (value Value) IsZero() bool {
 	return value.Sign() == 0
 }
 
+// Int64 devuelve el entero exacto si el valor lo es y cabe en int64.
+func (value Value) Int64() (int64, bool) {
+	rat := value.ratOrZero()
+	if !rat.IsInt() || !rat.Num().IsInt64() {
+		return 0, false
+	}
+	return rat.Num().Int64(), true
+}
+
 // Round redondea a `scale` decimales con mitad hacia fuera de cero. Para los
 // importes del dominio (siempre no negativos) coincide con Math.round de JS.
 func (value Value) Round(scale int) Value {
