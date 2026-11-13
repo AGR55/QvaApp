@@ -13,6 +13,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+started_ms="$(date +%s%3N)"
 
 if [[ "${1:-}" == "--filter" ]]; then
   filters=("${2:-market-math}")
@@ -48,4 +49,4 @@ for filter in "${filters[@]}"; do
     --filter "$filter"
 done
 
-printf '\nservices: verificación Go + paridad (%s) en verde.\n' "${filters[*]}"
+printf '\nservices: verificación Go + paridad (%s) en verde (%d ms).\n' "${filters[*]}" "$(( $(date +%s%3N) - started_ms ))"

@@ -92,7 +92,8 @@ node --import tsx parity/runner/run.ts \
   `verify-money.mjs` (saldos/ledger/operaciones a 8 dp) están en verde.
 - El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
   están en [db/README.md](db/README.md).
-- Pendiente: tiempos de CI documentados y `golangci-lint`.
+- Referencia local: `verify.sh` ~22,7 s; `lint.sh` ~65,7 s; tests Postgres
+  ~0,25 s y ~0,57 s. CI imprime los tiempos de cada job.
 
 ## Calidad
 
@@ -101,15 +102,11 @@ node --import tsx parity/runner/run.ts \
   - redondeo QUSD idempotente y totales CUP múltiplos de 10,
   - plan presupuestario que nunca supera el disponible,
   - libro de reservas sin doble reserva ni doble gasto.
-- `go vet`, `staticcheck` v0.8.2 y `govulncheck` v1.9.0.
-- `golangci-lint` queda pendiente: la release v1.64 no soporta el export data
-  de Go 1.27.
+- `go vet`, `staticcheck` v0.8.2, `golangci-lint` v2.15 y
+  `govulncheck` v1.9.0.
 
 ## Siguiente corte
 
-1. Cerrar F1 con Postgres local, migraciones versionadas y esquema consolidado.
-2. Implementar `outbox`/`inbox`, idempotencia durable y el auditor de
-   invariantes contra Postgres.
-3. Añadir property tests de reserva única y no doble gasto al ledger cuando
-   exista la persistencia Postgres.
-4. Incorporar `golangci-lint` cuando su release soporte Go 1.27.
+1. Implementar `outbox`/`inbox` e idempotencia durable en `trading-core`.
+2. Primera ejecución real de CI y registro de tiempos por job.
+3. Preparar el prototipo F2 de la ruta caliente sobre el replay.

@@ -376,7 +376,7 @@ func (service *Service) Act(operatorID, uuid, action, reference string) error {
 	}
 	service.storage.Audit("mobile_"+action+"_requested", fmt.Sprintf("Acción %s solicitada desde app móvil por operador %s.", action, operatorID), uuid)
 	started := time.Now()
-	outcome := "not_confirmed"
+	var outcome string
 	var err error
 	switch action {
 	case "paid":

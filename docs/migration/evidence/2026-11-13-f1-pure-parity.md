@@ -48,7 +48,6 @@ parity-gate: OK — goldens, manifiesto, pura, contratos, HTTP y replay en verde
 
 ## Pendiente para cerrar F1
 
-1. Postgres local, migraciones versionadas y esquema consolidado v1.
-2. `outbox`/`inbox`, idempotencia durable y auditor de invariantes SQL.
-3. Tiempos de CI documentados e incorporación de `golangci-lint` cuando exista
-   una release compatible con Go 1.27.
+1. `outbox`/`inbox` e idempotencia durable en `trading-core`.
+2. Primera ejecución real del workflow de CI y tiempos por job.
+3. Preparar el prototipo F2 de la ruta caliente sobre el replay.

@@ -136,10 +136,10 @@ Gate F1:
 - [x] Auditor de invariantes SQL: reservas huérfanas/terminales, doble asiento,
       saldos negativos, límites y cadena de configuración. Sin violaciones en la
       copia v31; `verify-money.mjs` valida saldos, ledger y operaciones a 8 dp.
-- [ ] CI completo en verde y con tiempos documentados. El job Go ya existe
-      (`go test -race`, staticcheck y govulncheck) y el job `postgres-f1`
-      prueba esquema, triggers, importación, auditor e importes; faltan tiempos
-      y `golangci-lint` (sin release compatible con Go 1.27).
+- [ ] CI completo en verde y con tiempos documentados. Los jobs `verify` y
+      `postgres-f1` ya incluyen `go test -race`, staticcheck, golangci-lint,
+      govulncheck, esquema, triggers, importación, auditor e importes; falta la
+      primera ejecución real del workflow y sus tiempos de runner.
 
 ## 4. F2 — Prototipo de la ruta caliente (2–3 semanas)
 

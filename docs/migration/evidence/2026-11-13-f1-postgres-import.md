@@ -50,6 +50,8 @@ vacía: 41 tablas, 40 índices y 6 FKs.
   idénticos entre SQLite v31 y Postgres a 8 decimales.
 - El workflow de CI `postgres-f1` ejecuta ambas pruebas; el deploy depende de
   ese job.
+- Tiempos locales de referencia: esquema+triggers+auditor **248 ms**;
+  importación+importes+triggers **574 ms**.
 
 ## Pendiente
 

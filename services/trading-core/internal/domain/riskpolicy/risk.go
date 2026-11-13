@@ -174,7 +174,7 @@ func Evaluate(context Context) (Decision, error) {
 		capitalCheck(context),
 	}
 
-	priceStatus := Pass
+	var priceStatus CheckStatus
 	switch context.PriceDecision {
 	case Eligible:
 		priceStatus = Pass

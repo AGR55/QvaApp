@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Verifica importación SQLite→Postgres y triggers con un fixture mínimo.
 set -euo pipefail
+started_ms="$(date +%s%3N)"
 
 here="$(cd "$(dirname "$0")" && pwd)"
 : "${PGHOST:=127.0.0.1}"
@@ -24,4 +25,4 @@ PGDATABASE="$name" node "$here/import-sqlite-to-postgres.mjs" \
 PGDATABASE="$name" node "$here/verify-money.mjs" --source "$tmp/minimal-v31.sqlite"
 psql -d "$name" -v ON_ERROR_STOP=1 -f "$here/triggers/core-v1.sql"
 psql -d "$name" -v ON_ERROR_STOP=1 -f "$here/fixtures/import-triggers.sql"
-printf 'postgres-f1-import: importación y triggers OK (%s)\n' "$name"
+printf 'postgres-f1-import: importación y triggers OK (%s, %d ms)\n' "$name" "$(( $(date +%s%3N) - started_ms ))"
