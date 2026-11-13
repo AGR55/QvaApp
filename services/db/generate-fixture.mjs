@@ -79,6 +79,39 @@ db.exec(`
     kind TEXT,
     created_at INTEGER
   );
+
+  CREATE TABLE fiat_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_uuid TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    amount REAL NOT NULL,
+    source TEXT,
+    created_at INTEGER,
+    coin TEXT
+  );
+  INSERT INTO fiat_ledger(operation_uuid, direction, amount, source, created_at, coin)
+    VALUES ('op-1', 'credit', 100, 'fixture', 1, 'CUP'),
+           ('op-1', 'debit', 40, 'fixture', 2, 'CUP');
+
+  CREATE TABLE operations (
+    uuid TEXT PRIMARY KEY,
+    offer_type TEXT,
+    amount REAL,
+    receive REAL,
+    rate REAL,
+    state TEXT,
+    auto_applied INTEGER,
+    cancel_at INTEGER,
+    created_at INTEGER,
+    updated_at INTEGER,
+    coin TEXT,
+    counterparty_id TEXT,
+    reference_rate REAL,
+    order_uuid TEXT
+  );
+  INSERT INTO operations(uuid, offer_type, amount, receive, rate, state, created_at, coin)
+    VALUES ('op-1', 'buy', 20, 2000, 100, 'applied', 1, 'BANK_CUP'),
+           ('op-2', 'sell', 5, 500, 100, 'completed', 2, 'BANK_CUP');
 `);
 db.close();
 console.log(out);

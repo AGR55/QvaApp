@@ -35,19 +35,23 @@ vacía: 41 tablas, 40 índices y 6 FKs.
 - `--replace` es obligatorio para recrear el schema.
 - No se versionan datos ni secretos; solo DDL, conteos y digests agregados.
 
-## Triggers y migraciones
+## Triggers, migraciones, auditor e importes
 
 - Los **6 triggers** se tradujeron a funciones/triggers PL/pgSQL y se aplican
   después de la carga.
 - `services/db/migrate.sh` aplica migraciones versionadas y registra cada
   versión en `public.qvaapply_schema_migrations` dentro de una transacción.
-- `test-postgres.sh` valida esquema + triggers; `test-postgres-import.sh` valida
-  la importación desde un fixture SQLite mínimo. Ambos pasan en PostgreSQL 16.
+- `test-postgres.sh` valida esquema + triggers + auditor; `test-postgres-import.sh`
+  valida importación desde un fixture SQLite mínimo, importes y triggers.
+- El auditor SQL cubre reservas huérfanas/terminales/confirmadas, doble asiento
+  de ledger, saldos negativos, tasas/límites incoherentes y cadena de
+  configuración/epoch. **0 violaciones** en la copia v31.
+- `verify-money.mjs`: 5 saldos fiat, 7 grupos de ledger y 10 operaciones
+  idénticos entre SQLite v31 y Postgres a 8 decimales.
 - El workflow de CI `postgres-f1` ejecuta ambas pruebas; el deploy depende de
   ese job.
 
 ## Pendiente
 
-1. Verificación de importes/redondeo en Postgres y auditor SQL de invariantes.
-2. Fixture SQLite más amplio para cubrir todas las tablas financieras en CI.
-3. Tiempos de CI documentados y `golangci-lint` cuando haya release para Go 1.27.
+1. Fixture SQLite más amplio para cubrir todas las tablas financieras en CI.
+2. Tiempos de CI documentados y `golangci-lint` cuando haya release para Go 1.27.

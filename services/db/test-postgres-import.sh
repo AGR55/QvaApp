@@ -21,6 +21,7 @@ psql -d "$PGADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$name\""
 PGDATABASE="$name" node "$here/import-sqlite-to-postgres.mjs" \
   --source "$tmp/minimal-v31.sqlite" \
   --database "$name" --schema core --replace
+PGDATABASE="$name" node "$here/verify-money.mjs" --source "$tmp/minimal-v31.sqlite"
 psql -d "$name" -v ON_ERROR_STOP=1 -f "$here/triggers/core-v1.sql"
 psql -d "$name" -v ON_ERROR_STOP=1 -f "$here/fixtures/import-triggers.sql"
 printf 'postgres-f1-import: importación y triggers OK (%s)\n' "$name"

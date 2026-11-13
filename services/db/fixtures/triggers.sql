@@ -5,7 +5,7 @@ INSERT INTO core.config_integrity_epoch (id, version) VALUES (1, 0);
 
 -- Inserción normal: no incrementa epoch.
 INSERT INTO core.config_revisions (id, created_at, source, reason, config_json, previous_hash, hash)
-VALUES (5, 1, 'test', 'normal', '{}', '', 'h5');
+VALUES (5, 1, 'test', 'normal', '{}', 'h3', 'h5');
 
 -- Inserción fuera de orden: incrementa epoch (1).
 INSERT INTO core.config_revisions (id, created_at, source, reason, config_json, previous_hash, hash)
@@ -13,7 +13,7 @@ VALUES (3, 2, 'test', 'reordered', '{}', '', 'h3');
 
 -- Inserción al final: no incrementa epoch.
 INSERT INTO core.config_revisions (id, created_at, source, reason, config_json, previous_hash, hash)
-VALUES (10, 3, 'test', 'append', '{}', '', 'h10');
+VALUES (10, 3, 'test', 'append', '{}', 'h5', 'h10');
 
 UPDATE core.config_revisions SET reason = 'updated' WHERE id = 3;
 DELETE FROM core.config_revisions WHERE id = 10;

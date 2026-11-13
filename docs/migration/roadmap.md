@@ -133,10 +133,13 @@ Gate F1:
       de prueba con verificación de conteos. Snapshot `core-v1.sql` validado en
       PostgreSQL 16; importación de una copia v31: 41 tablas, 16.533 filas,
       0 mismatches. Triggers traducidos y verificados.
+- [x] Auditor de invariantes SQL: reservas huérfanas/terminales, doble asiento,
+      saldos negativos, límites y cadena de configuración. Sin violaciones en la
+      copia v31; `verify-money.mjs` valida saldos, ledger y operaciones a 8 dp.
 - [ ] CI completo en verde y con tiempos documentados. El job Go ya existe
       (`go test -race`, staticcheck y govulncheck) y el job `postgres-f1`
-      prueba esquema, triggers e importación; faltan tiempos y
-      `golangci-lint` (sin release compatible con Go 1.27).
+      prueba esquema, triggers, importación, auditor e importes; faltan tiempos
+      y `golangci-lint` (sin release compatible con Go 1.27).
 
 ## 4. F2 — Prototipo de la ruta caliente (2–3 semanas)
 

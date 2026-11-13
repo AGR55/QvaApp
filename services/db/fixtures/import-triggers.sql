@@ -14,7 +14,7 @@ BEGIN
   SELECT count(*) INTO revisions_count FROM core.config_revisions;
   SELECT count(*) INTO reservations_count FROM core.application_capital_reservations;
   SELECT count(*) INTO history_count FROM core.fiat_balance_history;
-  IF import_rows <> 8 THEN RAISE EXCEPTION 'filas importadas esperadas 8, real %', import_rows; END IF;
+  IF import_rows <> 12 THEN RAISE EXCEPTION 'filas importadas esperadas 12, real %', import_rows; END IF;
   IF settings_count <> 2 OR revisions_count <> 2 OR reservations_count <> 1 OR history_count <> 0 THEN
     RAISE EXCEPTION 'conteos importados inesperados: settings=% revisions=% reservations=% history=%',
       settings_count, revisions_count, reservations_count, history_count;
@@ -28,7 +28,7 @@ VALUES ('TEST', 1, 0, 'fixture', 'test', 1);
 
 -- Integridad de configuración: max inicial 2; id 5 no incrementa, id 3 sí.
 INSERT INTO core.config_revisions (id, created_at, source, reason, config_json, previous_hash, hash)
-VALUES (5, 3, 'fixture', 'append', '{}', 'h2', 'h5');
+VALUES (5, 3, 'fixture', 'append', '{}', 'h3', 'h5');
 INSERT INTO core.config_revisions (id, created_at, source, reason, config_json, previous_hash, hash)
 VALUES (3, 4, 'fixture', 'reordered', '{}', 'h2', 'h3');
 UPDATE core.config_revisions SET reason = 'updated' WHERE id = 3;

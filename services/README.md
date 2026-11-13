@@ -88,10 +88,11 @@ node --import tsx parity/runner/run.ts \
   16.533 filas, 0 mismatches**, 41 PKs, 40 índices y 6 FKs.
 - Los 6 triggers SQLite están traducidos y verificados; el workflow
   `postgres-f1` prueba esquema, triggers e importación desde un fixture mínimo.
+- El auditor SQL de invariantes (reservas, ledger, configuración y límites) y
+  `verify-money.mjs` (saldos/ledger/operaciones a 8 dp) están en verde.
 - El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
   están en [db/README.md](db/README.md).
-- Pendiente: verificación de importes/redondeo en Postgres y auditor SQL de
-  invariantes.
+- Pendiente: tiempos de CI documentados y `golangci-lint`.
 
 ## Calidad
 
