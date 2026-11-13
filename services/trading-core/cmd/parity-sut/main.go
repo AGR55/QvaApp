@@ -1114,6 +1114,80 @@ func dispatch(req request) (any, *opError) {
 		}
 		return schedulerSequence(fields)
 
+	case "mobile.operator.credentials":
+		return mobileCredentials()
+
+	case "mobile.operator.action-uncertain":
+		return mobileActionUncertain()
+
+	case "mobile.operator.action-audit-failure":
+		return mobileActionAuditFailure()
+
+	case "mobile.operator.operations":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return mobileOperationsList(fields)
+
+	case "mobile.operator.threads":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return mobileThreadsList(fields)
+
+	case "auth.login":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return authLogin(fields)
+
+	case "auth.origins":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return authOriginsResult(fields)
+
+	case "auth.origins-rate-limit":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return authOriginsRateLimit(fields)
+
+	case "auth.rate-limit":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return authRateLimit(fields)
+
+	case "auth.session":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return authSessionResult(fields)
+
+	case "hunting-balance.stop":
+		return huntingBalanceStop()
+
+	case "dashboard.controls.pause":
+		return dashboardControlPause()
+
+	case "dashboard.controls.hunting":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return dashboardControlHunting(fields)
+
+	case "dashboard.controls.refresh":
+		return dashboardControlRefresh()
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",

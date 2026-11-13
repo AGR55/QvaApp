@@ -46,6 +46,10 @@ services/
 | `domain/qusdcache` | ✅ **13/13** | Dedupe, prioridad, epoch/revisión, TTL y cierre |
 | `domain/telegramruntime` | ✅ **6/6** | Callback seguro, split, render guard y not-modified |
 | `domain/scheduler` | ✅ **2/2** | Tareas solapadas, start/stop y timers |
+| `domain/mobileoperator` | ✅ **5/5** | Tokens, cupos, acciones y composición móvil |
+| `domain/dashboardauth` | ✅ **4/4** | Sesión, CSRF, origen y rate-limit |
+| `domain/huntingbalance` | ✅ **1/1** | Cierre ordenado de bucles y caché |
+| `domain/dashboardcontrol` | ✅ **3/3** | Pausa, cacería y refresco del panel |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
@@ -87,8 +91,7 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar los lotes restantes de L1 (`market-hunting-*`, `dashboard-auth`,
-   `dashboard-controls`, `mobile-operator`, `hunting-balance`).
+1. Portar el último lote L1 pendiente: `market-hunting-*` (13 casos).
 2. Añadir property tests de reserva única y no doble gasto al ledger cuando
    exista la persistencia Postgres.
 3. Incorporar `golangci-lint` cuando su release soporte Go 1.27.
