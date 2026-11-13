@@ -1,0 +1,270 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/market-math.ts",
+  "sourceTests": [
+    "test/market-math.test.ts",
+    "test/rate-rounding.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Primer lote del arnés: prueba el bucle runner→adaptador→canonización. Los importes/tasas viajan como string decimal de escala fija; una diferencia de tipo (number vs string) es un fallo, no una tolerancia. · goldenHash=e957bc5b5aad0fb07f88e60f7e7a3d5d0c3569af34bf07aaa2d81a6dae5e7a5b",
+  "cases": [
+    {
+      "caseId": "pure/market-math/median/0001",
+      "op": "market.median",
+      "source": "test/market-math.test.ts:7",
+      "input": {
+        "values": [
+          1.03,
+          1.04,
+          8,
+          1.02,
+          1.05
+        ]
+      },
+      "expect": {
+        "value": "1.04000000"
+      }
+    },
+    {
+      "caseId": "pure/market-math/median/0002",
+      "op": "market.median",
+      "source": "test/market-math.test.ts:8",
+      "input": {
+        "values": [
+          930,
+          910,
+          940,
+          920
+        ]
+      },
+      "expect": {
+        "value": "925.00000000"
+      }
+    },
+    {
+      "caseId": "pure/market-math/median/0003",
+      "op": "market.median",
+      "source": "test/market-math.test.ts:12",
+      "input": {
+        "values": [
+          0,
+          -1
+        ]
+      },
+      "expect": {
+        "value": null
+      }
+    },
+    {
+      "caseId": "pure/market-math/outgoing-fiat-cost/0001",
+      "op": "market.outgoingFiatCost",
+      "source": "test/market-math.test.ts:16",
+      "input": {
+        "qusdAmount": 10,
+        "fiatPerQusd": 1.04,
+        "fixedFee": 0.08
+      },
+      "expect": {
+        "nominal": "10.40000000",
+        "fee": "0.08000000",
+        "total": "10.48000000",
+        "effectiveRate": "1.04800000"
+      }
+    },
+    {
+      "caseId": "pure/market-math/outgoing-fiat-cost/0002",
+      "op": "market.outgoingFiatCost",
+      "source": "test/market-math.test.ts:22",
+      "input": {
+        "qusdAmount": 10,
+        "fiatPerQusd": 1.04,
+        "fixedFee": 0
+      },
+      "expect": {
+        "nominal": "10.40000000",
+        "fee": "0.00000000",
+        "total": "10.40000000",
+        "effectiveRate": "1.04000000"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/CUP-buy/0001",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:26",
+      "input": {
+        "qusdAmount": 9,
+        "fiatPerQusd": 973.7,
+        "type": "buy",
+        "currency": "CUP"
+      },
+      "expect": {
+        "value": "8760"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/CUP-buy/0002",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:27",
+      "input": {
+        "qusdAmount": 10,
+        "fiatPerQusd": 920,
+        "type": "buy",
+        "currency": "CUP"
+      },
+      "expect": {
+        "value": "9200"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/CUP-sell/0001",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:31",
+      "input": {
+        "qusdAmount": 9,
+        "fiatPerQusd": 973.7,
+        "type": "sell",
+        "currency": "CUP"
+      },
+      "expect": {
+        "value": "8770"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/CUP-sell/0002",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:32",
+      "input": {
+        "qusdAmount": 10,
+        "fiatPerQusd": 920,
+        "type": "sell",
+        "currency": "CUP"
+      },
+      "expect": {
+        "value": "9200"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/USD-buy/0001",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:36",
+      "input": {
+        "qusdAmount": 2,
+        "fiatPerQusd": 1.06,
+        "type": "buy",
+        "currency": "USD"
+      },
+      "expect": {
+        "value": "2.12000000"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/USD-sell/0001",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:37",
+      "input": {
+        "qusdAmount": 3,
+        "fiatPerQusd": 1.123456789,
+        "type": "sell",
+        "currency": "USD"
+      },
+      "expect": {
+        "value": "3.37037037"
+      }
+    },
+    {
+      "caseId": "pure/market-math/own-offer-fiat/CUP-invalid/0001",
+      "op": "market.ownOfferFiatTotal",
+      "source": "test/market-math.test.ts:41",
+      "input": {
+        "qusdAmount": 0.1,
+        "fiatPerQusd": 1.06,
+        "type": "buy",
+        "currency": "CUP"
+      },
+      "expectError": {
+        "class": "validation",
+        "messageIncludes": "total fiat"
+      }
+    },
+    {
+      "caseId": "pure/market-math/round-rate/buy/0001",
+      "op": "market.roundRateForIndex",
+      "source": "test/rate-rounding.test.ts:4",
+      "input": {
+        "effectiveRate": 1.051,
+        "type": "buy",
+        "configuredIndex": 1.06
+      },
+      "expect": {
+        "value": "1.06"
+      }
+    },
+    {
+      "caseId": "pure/market-math/round-rate/buy/0002",
+      "op": "market.roundRateForIndex",
+      "source": "test/rate-rounding.test.ts:5",
+      "input": {
+        "effectiveRate": 924.01,
+        "type": "buy",
+        "configuredIndex": 925
+      },
+      "expect": {
+        "value": "925"
+      }
+    },
+    {
+      "caseId": "pure/market-math/round-rate/sell/0001",
+      "op": "market.roundRateForIndex",
+      "source": "test/rate-rounding.test.ts:9",
+      "input": {
+        "effectiveRate": 1.1249,
+        "type": "sell",
+        "configuredIndex": 1.12
+      },
+      "expect": {
+        "value": "1.12"
+      }
+    },
+    {
+      "caseId": "pure/market-math/round-rate/sell/0002",
+      "op": "market.roundRateForIndex",
+      "source": "test/rate-rounding.test.ts:10",
+      "input": {
+        "effectiveRate": 1025.99,
+        "type": "sell",
+        "configuredIndex": 1025
+      },
+      "expect": {
+        "value": "1025"
+      }
+    },
+    {
+      "caseId": "pure/market-math/round-qusd/0001",
+      "op": "market.roundQusd",
+      "source": "test/market-math.test.ts",
+      "input": {
+        "value": 1.234567891
+      },
+      "expect": {
+        "value": "1.23456789"
+      }
+    },
+    {
+      "caseId": "pure/market-math/round-qusd/0002",
+      "op": "market.roundQusd",
+      "source": "test/market-math.test.ts",
+      "input": {
+        "value": 1.234567895
+      },
+      "expect": {
+        "value": "1.23456790"
+      }
+    }
+  ]
+}

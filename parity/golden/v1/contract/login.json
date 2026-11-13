@@ -1,0 +1,407 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/login.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (11 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=6c8cc4b5aa3aea0b8f2aee7ebc1a88692570df82822a993cd87027e5977e4a32",
+  "cases": [
+    {
+      "caseId": "contract/login/05-connect-timeout-actionable",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:108",
+      "input": {
+        "scenario": "login/05-connect-timeout-actionable"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "login",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "cause": {
+                    "code": "UND_ERR_CONNECT_TIMEOUT",
+                    "message": "Connect Timeout Error",
+                    "name": "Error"
+                  },
+                  "message": "fetch failed",
+                  "name": "TypeError"
+                },
+                "message": "QvaPay no respondió dentro del tiempo esperado. Comprueba tu conexión e inténtalo de nuevo.",
+                "name": "Error",
+                "reason": "timeout"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "attempts",
+            "value": 3
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/06-no-retry-http-rejection",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:131",
+      "input": {
+        "scenario": "login/06-no-retry-http-rejection"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "login",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "OTP incorrecto",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 401
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "attempts",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/07-validate-format-and-token",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:150",
+      "input": {
+        "scenario": "login/07-validate-format-and-token"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "authenticate:invalid-code",
+            "outcome": {
+              "error": {
+                "message": "El código de la aplicación autenticadora debe tener exactamente seis dígitos.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "authenticate:valid",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "calls",
+            "value": [
+              "login:first",
+              "login:first",
+              "login:654321",
+              "verify:token-candidato"
+            ]
+          },
+          {
+            "effect": "saved",
+            "value": [
+              "token-candidato"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/08-no-persist-on-verify-failure",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:192",
+      "input": {
+        "scenario": "login/08-no-persist-on-verify-failure"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "authenticate",
+            "outcome": {
+              "error": {
+                "message": "token rechazado",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "saved",
+            "outcome": {
+              "ok": true,
+              "value": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/login/09-qusd-balance-profile",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:215",
+      "input": {
+        "scenario": "login/09-qusd-balance-profile"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "qusdBalance",
+            "outcome": {
+              "ok": true,
+              "value": 34.25
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "paths",
+            "value": [
+              "https://api.qvapay.com/user"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/10-p2p-paged-data",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:234",
+      "input": {
+        "scenario": "login/10-p2p-paged-data"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "listOffersPage",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "offers": [
+                  {
+                    "amount": 10,
+                    "receive": 9700,
+                    "uuid": "offer-1"
+                  }
+                ],
+                "total": 1
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/login/11-public-p2p-averages",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:270",
+      "input": {
+        "scenario": "login/11-public-p2p-averages"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "p2pAverages",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "BANK_CUP": {
+                  "average_buy": 1000,
+                  "average_sell": 990
+                }
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "paths",
+            "value": [
+              "https://api.qvapay.com/p2p/averages"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/02-no-pin-when-otp",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:39",
+      "input": {
+        "scenario": "login/02-no-pin-when-otp"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "login",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "hasOtp": true,
+                "requiresTwoFactor": true
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "paths",
+            "value": [
+              "https://api.qvapay.com/auth/login"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/03-totp-second-login",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:66",
+      "input": {
+        "scenario": "login/03-totp-second-login"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "login:first",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "hasOtp": true,
+                "requiresTwoFactor": true
+              }
+            }
+          },
+          {
+            "label": "login:totp",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "requiresTwoFactor": false,
+                "token": "token-validado"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "bodies",
+            "value": [
+              {
+                "email": "user@example.com",
+                "password": "password",
+                "remember": true
+              },
+              {
+                "email": "user@example.com",
+                "password": "password",
+                "remember": true,
+                "two_factor_code": "123456"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/04-retry-transient-connection",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:85",
+      "input": {
+        "scenario": "login/04-retry-transient-connection"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "login",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "hasOtp": true,
+                "requiresTwoFactor": true
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "attempts",
+            "value": 3
+          },
+          {
+            "effect": "waits",
+            "value": [
+              750,
+              1500
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/login/01-request-pin-when-not-notified",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/login.test.ts:9",
+      "input": {
+        "scenario": "login/01-request-pin-when-not-notified"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "login",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "hasOtp": false,
+                "pinRequested": true,
+                "requiresTwoFactor": true
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "paths",
+            "value": [
+              "https://api.qvapay.com/auth/login",
+              "https://api.qvapay.com/auth/request-pin"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

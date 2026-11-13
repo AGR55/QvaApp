@@ -1,0 +1,306 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qvapay-operation-timing.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (5 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=46b99f9bd6208073094c62540c2d3993ba219b506154016f6d57cd1219388c45",
+  "cases": [
+    {
+      "caseId": "contract/qvapay-operation-timing/02-failure-stages",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-operation-timing.test.ts:32",
+      "input": {
+        "scenario": "qvapay-operation-timing/02-failure-stages"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "cancel:before-dispatch",
+            "outcome": {
+              "error": {
+                "code": "LOCAL_CONDITIONS_CHANGED",
+                "message": "Las condiciones cambiaron antes de la mutación; no se envió.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 409
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "markPaid:network",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "network",
+                  "name": "TypeError"
+                },
+                "kind": "paid",
+                "message": "No se recibió confirmación de QvaPay para paid; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "trace",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "timings",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "action": "paid",
+                  "hasQueue": true,
+                  "hasRequestId": true,
+                  "hasThrottle": false,
+                  "hasUpstream": false,
+                  "leaksPrivate": false,
+                  "method": "POST",
+                  "operationUuid": "operation",
+                  "outcome": "failed",
+                  "policy": "cancel",
+                  "sumOk": null,
+                  "traceId": "trace"
+                },
+                {
+                  "action": "paid",
+                  "hasQueue": true,
+                  "hasRequestId": true,
+                  "hasThrottle": true,
+                  "hasUpstream": true,
+                  "leaksPrivate": false,
+                  "method": "POST",
+                  "operationUuid": "operation",
+                  "outcome": "failed",
+                  "policy": "paid",
+                  "sumOk": true,
+                  "traceId": "trace"
+                }
+              ]
+            }
+          },
+          {
+            "label": "sends",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-operation-timing/03-observer-failure-safe",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-operation-timing.test.ts:52",
+      "input": {
+        "scenario": "qvapay-operation-timing/03-observer-failure-safe"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "trace",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-operation-timing/04-slow-queued-action",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-operation-timing.test.ts:57",
+      "input": {
+        "scenario": "qvapay-operation-timing/04-slow-queued-action"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "markPaid:outside",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "trace",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "timing",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "action": "paid",
+                "hasQueue": true,
+                "hasRequestId": true,
+                "hasThrottle": true,
+                "hasUpstream": true,
+                "leaksPrivate": false,
+                "method": "POST",
+                "operationUuid": "operation",
+                "outcome": "success",
+                "policy": "received",
+                "sumOk": true,
+                "traceId": "trace"
+              }
+            }
+          },
+          {
+            "label": "thresholds",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "queueGte10": true,
+                "throttleGte10": true,
+                "upstreamGte10": true
+              }
+            }
+          },
+          {
+            "label": "requests",
+            "outcome": {
+              "ok": true,
+              "value": 2
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-operation-timing/01-separates-stages",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-operation-timing.test.ts:8",
+      "input": {
+        "scenario": "qvapay-operation-timing/01-separates-stages"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "markPaid:outside",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "trace",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "timings",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "action": "paid",
+                  "hasQueue": true,
+                  "hasRequestId": true,
+                  "hasThrottle": true,
+                  "hasUpstream": true,
+                  "leaksPrivate": false,
+                  "method": "POST",
+                  "operationUuid": "operation",
+                  "outcome": "success",
+                  "policy": "paid",
+                  "sumOk": true,
+                  "traceId": "trace"
+                },
+                {
+                  "action": "paid",
+                  "hasQueue": true,
+                  "hasRequestId": true,
+                  "hasThrottle": true,
+                  "hasUpstream": true,
+                  "leaksPrivate": false,
+                  "method": "POST",
+                  "operationUuid": "operation",
+                  "outcome": "success",
+                  "policy": "received",
+                  "sumOk": true,
+                  "traceId": "trace"
+                }
+              ]
+            }
+          },
+          {
+            "label": "distinctRequestIds",
+            "outcome": {
+              "ok": true,
+              "value": true
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-operation-timing/05-concurrent-contexts",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-operation-timing.test.ts:94",
+      "input": {
+        "scenario": "qvapay-operation-timing/05-concurrent-contexts"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "concurrent",
+            "outcome": {
+              "ok": true,
+              "value": [
+                null,
+                null
+              ]
+            }
+          },
+          {
+            "label": "contexts",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "operationUuid": "first",
+                  "traceId": "first"
+                },
+                {
+                  "operationUuid": "second",
+                  "traceId": "second"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    }
+  ]
+}

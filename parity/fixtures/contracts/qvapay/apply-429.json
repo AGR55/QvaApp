@@ -1,0 +1,134 @@
+{
+  "cassetteVersion": 1,
+  "name": "apply-429",
+  "description": "K3: 429 de apply con Retry-After en segundos, sin cabecera y en fecha HTTP; y dos aplicaciones confirmadas dentro de la ventana durable 2/60 s (el SUT nunca debe enviar la tercera, LOCAL_APPLY_QUOTA).",
+  "contract": "K3",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": { "uuid": "user-owner-0001" },
+    "offers": [
+      {
+        "uuid": "offer-429-retry",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "10.00000000",
+        "receive": "10.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-429-0001" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-429-noretry",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "10.00000000",
+        "receive": "10.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-429-0002" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-429-date",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "10.00000000",
+        "receive": "10.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-429-0003" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-window-a",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "10.00000000",
+        "receive": "10.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-429-0004" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-window-b",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "10.00000000",
+        "receive": "10.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-429-0005" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-window-c",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "10.00000000",
+        "receive": "10.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-429-0006" },
+        "Peer": {},
+        "details": []
+      }
+    ]
+  },
+  "exchanges": [
+    {
+      "id": "apply-429-with-retry-after",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-429-retry/apply" },
+      "response": {
+        "status": 429,
+        "headers": { "retry-after": "7" },
+        "body": { "error": "Límite de aplicaciones alcanzado", "code": "HTTP_429" }
+      },
+      "logAssertions": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-429-retry/apply"
+      }
+    },
+    {
+      "id": "apply-429-without-retry-after",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-429-noretry/apply" },
+      "response": {
+        "status": 429,
+        "body": { "error": "Límite de aplicaciones alcanzado", "code": "HTTP_429" }
+      }
+    },
+    {
+      "id": "apply-429-http-date",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-429-date/apply" },
+      "response": {
+        "status": 429,
+        "headers": { "retry-after": "Thu, 01 Jan 2026 00:00:07 GMT" },
+        "body": { "error": "Límite de aplicaciones alcanzado", "code": "HTTP_429" }
+      }
+    },
+    {
+      "id": "apply-window-first",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-window-a/apply" },
+      "effects": [{ "op": "apply", "uuid": "offer-window-a", "order": "order-window-0001" }],
+      "response": { "status": 200, "body": {} }
+    },
+    {
+      "id": "apply-window-second",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-window-b/apply" },
+      "effects": [{ "op": "apply", "uuid": "offer-window-b", "order": "order-window-0002" }],
+      "response": { "status": 200, "body": {} }
+    },
+    {
+      "id": "apply-window-third-no-debe-llegar",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-window-c/apply" },
+      "effects": [{ "op": "apply", "uuid": "offer-window-c", "order": "order-window-0003" }],
+      "response": { "status": 200, "body": {} }
+    }
+  ]
+}

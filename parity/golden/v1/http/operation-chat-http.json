@@ -1,0 +1,833 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/operation-chat-http.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (3 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=58f20aca88097d73b7d7738f050967a578d64249b256e5dfdaed317184951223",
+  "cases": [
+    {
+      "caseId": "http/operation-chat/02-web-session-csrf",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/operation-chat-http.test.ts:110",
+      "input": {
+        "scenario": "operation-chat/02-web-session-csrf"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/operations/offer/chat",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "clave-muy-larga-y-segura"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/operations/foreign/chat",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Operación ajena."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/operations/chats/unread",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "offer": 1
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/offer/chat",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "message": "Hola"
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/offer/chat",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "message": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/message must NOT have more than 599 characters"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/offer/chat",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "message": "Hola"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "chat": {
+                  "messages": []
+                },
+                "id": "sent"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/offer/chat/read",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "messages": [],
+                "unreadCount": 0,
+                "uuid": "offer"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "operationChat.sent",
+            "value": [
+              "Hola"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/operation-chat/03-android-order-scope",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/operation-chat-http.test.ts:155",
+      "input": {
+        "scenario": "operation-chat/03-android-order-scope"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations/parent/chat?order=order",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Operador móvil no autorizado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations/parent/chat?order=order",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "messages": []
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/parent/chat?order=order",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "message": "Hola"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "chat": {
+                  "messages": []
+                }
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/parent/chat/read?order=order",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "ids": [
+                  "visible"
+                ]
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "messages": []
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations/chats",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": [
+                {
+                  "id": "parent:order",
+                  "orderUuid": "order",
+                  "uuid": "parent"
+                }
+              ]
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/push-device",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "token": "test-firebase-token-123456789"
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "ok": true,
+              "operatorId": "device"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "operationChat.calls",
+            "value": [
+              [
+                "read",
+                "parent",
+                "order"
+              ],
+              [
+                "send",
+                "parent",
+                "order",
+                "Hola"
+              ],
+              [
+                "seen",
+                "parent",
+                "order",
+                [
+                  "visible"
+                ]
+              ],
+              [
+                "push",
+                "device",
+                "test-firebase-token-123456789"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/operation-chat/01-image-http-contract",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/operation-chat-http.test.ts:9",
+      "input": {
+        "scenario": "operation-chat/01-image-http-contract"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Operador móvil no autorizado."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Operador móvil no autorizado."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "chat": {
+                  "messages": []
+                },
+                "id": "remote"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 1064961
+              }
+            },
+            "status": 413,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Request body is too large"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 7
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Imagen inválida: multipart JPEG/PNG, máximo 1 MiB y 1000×1000 píxeles."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/foreign/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Operación ajena."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations/offer/chat/images/remote?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "image/png",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec",
+              "bytes": 68
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations/offer/chat/images/foreign?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": null
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Imagen ajena."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations/offer/chat/sends/attempt-0000000010?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "id": "remote",
+                "state": "confirmed"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "clave-muy-larga-y-segura"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>",
+                "cookie": "qvaapply_session=<redacted>",
+                "origin": "http://127.0.0.1:3000"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>",
+                "cookie": "qvaapply_session=<redacted>",
+                "origin": "http://127.0.0.1:3000",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "chat": {
+                  "messages": []
+                },
+                "id": "remote"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/offer/chat/images?order=child",
+              "headers": {
+                "authorization": "<redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>",
+                "cookie": "qvaapply_session=<redacted>",
+                "origin": "http://127.0.0.1:3000",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "chat": {
+                  "messages": []
+                },
+                "id": "remote"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/offer/chat",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "multipart/form-data; boundary=<boundary>",
+                "cookie": "qvaapply_session=<redacted>",
+                "origin": "http://127.0.0.1:3000",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "multipart": true,
+                "bytes": 442
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body must have required property 'message'"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "operationChat.calls",
+            "value": [
+              {
+                "attemptId": "attempt-0000000010",
+                "imageBytes": 68,
+                "message": "Recibo",
+                "order": "child",
+                "uuid": "offer"
+              },
+              {
+                "attemptId": "attempt-0000000010",
+                "imageBytes": null,
+                "message": null,
+                "order": "child",
+                "uuid": "offer"
+              },
+              {
+                "attemptId": "attempt-0000000010",
+                "imageBytes": 68,
+                "message": "Recibo",
+                "order": "child",
+                "uuid": "offer"
+              },
+              {
+                "attemptId": "attempt-0000000010",
+                "imageBytes": 68,
+                "message": "Recibo",
+                "order": "child",
+                "uuid": "offer"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

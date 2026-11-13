@@ -1,0 +1,158 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "notifier",
+  "sourceTests": [
+    "test/telegram-recovery.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (1 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=61c51affd69c76082cb14a15b1dca0308c79ebcc4982361e43f1cb211a7af552",
+  "cases": [
+    {
+      "caseId": "contract/telegram-recovery/01-evidence-ack-confirmation",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/telegram-recovery.test.ts:6",
+      "input": {
+        "scenario": "telegram-recovery/01-evidence-ack-confirmation"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "callback:evidence",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "message:evidence",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:ack",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:list",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:archived",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:resolve",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:outcome",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "message:reason",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "message:evidence-2",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:confirm-obsolete",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "callback:confirm",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "confirmation",
+            "outcome": {
+              "ok": true,
+              "value": "<token>"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "recovery.calls",
+            "value": [
+              {
+                "evidence": "Comprobé la orden en QvaPay.",
+                "id": "intent"
+              },
+              {
+                "acknowledge": "intent"
+              },
+              {
+                "confirmed": true,
+                "evidence": "No existe aplicación para la oferta.",
+                "expectedUpdatedAt": 123,
+                "intentId": "intent",
+                "outcome": "not_applied",
+                "reason": "Revisé las operaciones de mi cuenta."
+              }
+            ]
+          },
+          {
+            "effect": "telegram.sent",
+            "value": [
+              "{\"callback_query_id\":\"1\"}",
+              "{\"chat_id\":1,\"text\":\"<b>📝 Registrar evidencia</b>\\n\\nDescribe lo que comprobaste en QvaPay. Se guardará sin declarar resuelta la operación.\\n\\nUsa /cancel para salir.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"force_reply\":true}}",
+              "{\"chat_id\":1,\"text\":\"<b>🔎 Conciliar operación</b>\\n\\n🆔 <code>offer</code>\\nAcción: <b>apply</b>\\n\\nPuedes registrar el resultado de tu revisión en QvaPay.\\n\\n📌 Evidencia guardada. La comprobación sigue pendiente.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"🔄 Comprobar\",\"callback_data\":\"recovery:check:intent\"}],[{\"text\":\"📝 Registrar evidencia\",\"callback_data\":\"recovery:evidence:intent\"}],[{\"text\":\"✅ Resolver con evidencia\",\"callback_data\":\"recovery:resolve:intent\"}],[{\"text\":\"🔕 Reconocer aviso\",\"callback_data\":\"recovery:ack:intent\"}],[{\"text\":\"‹ Conciliaciones\",\"callback_data\":\"recovery:list\"}]]}}",
+              "{\"callback_query_id\":\"3\"}",
+              "{\"chat_id\":1,\"message_id\":1,\"text\":\"<b>🔎 Conciliar operación</b>\\n\\n🆔 <code>offer</code>\\nAcción: <b>apply</b>\\n\\nPuedes registrar el resultado de tu revisión en QvaPay.\\n\\n📌 Aviso archivado en Reconocidos; la conciliación continúa.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"🔄 Comprobar\",\"callback_data\":\"recovery:check:intent\"}],[{\"text\":\"📝 Registrar evidencia\",\"callback_data\":\"recovery:evidence:intent\"}],[{\"text\":\"✅ Resolver con evidencia\",\"callback_data\":\"recovery:resolve:intent\"}],[{\"text\":\"‹ Conciliaciones\",\"callback_data\":\"recovery:list\"}]]}}",
+              "{\"callback_query_id\":\"4\"}",
+              "{\"chat_id\":1,\"message_id\":1,\"text\":\"<b>🔎 Conciliaciones</b>\\n\\nLas demás cacerías continúan mientras se comprueban estas operaciones.\\n\\n✅ No hay conciliaciones pendientes.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[],[{\"text\":\"📁 Avisos reconocidos\",\"callback_data\":\"recovery:archived\"}],[{\"text\":\"‹ Panel\",\"callback_data\":\"panel:home\"}]]}}",
+              "{\"callback_query_id\":\"5\"}",
+              "{\"chat_id\":1,\"message_id\":1,\"text\":\"<b>🔎 Conciliaciones</b>\\n\\nLas demás cacerías continúan mientras se comprueban estas operaciones.\\n\\n<b>1. apply</b> · aviso reconocido\\n🆔 <code>offer</code>\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"🔎 Ver #1\",\"callback_data\":\"recovery:view:intent\"}],[],[{\"text\":\"‹ Pendientes\",\"callback_data\":\"recovery:list\"}],[{\"text\":\"‹ Panel\",\"callback_data\":\"panel:home\"}]]}}",
+              "{\"callback_query_id\":\"6\"}",
+              "{\"chat_id\":1,\"message_id\":1,\"text\":\"<b>🔎 Resultado de tu revisión</b>\\n\\nSelecciona lo que verificaste en QvaPay.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"No se aplicó\",\"callback_data\":\"recovery:outcome:0\"}],[]]}}",
+              "{\"callback_query_id\":\"7\"}",
+              "{\"chat_id\":1,\"text\":\"<b>📝 Motivo de la resolución</b>\\n\\nExplica por qué corresponde ese resultado.\\n\\nUsa /cancel para salir.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"force_reply\":true}}",
+              "{\"chat_id\":1,\"text\":\"<b>📝 Evidencia revisada</b>\\n\\nDescribe el estado y los identificadores que comprobaste en QvaPay.\\n\\nUsa /cancel para salir.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"force_reply\":true}}",
+              "{\"chat_id\":1,\"text\":\"<b>✅ Confirmar conciliación manual</b>\\n\\nResultado: <b>No se aplicó</b>\\n\\nRevisé las operaciones de mi cuenta.\\n\\n📝 No existe aplicación para la oferta.\\n\\nConfirma que verificaste QvaPay y que no tienes obligaciones pendientes.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"✅ Confirmo mi revisión\",\"callback_data\":\"recovery:confirm:<token>\"}],[{\"text\":\"✖ Cancelar\",\"callback_data\":\"recovery:list\"}]]}}",
+              "{\"callback_query_id\":\"10\"}",
+              "{\"callback_query_id\":\"11\"}",
+              "{\"chat_id\":1,\"message_id\":1,\"text\":\"<b>🔎 Conciliar operación</b>\\n\\n🆔 <code>offer</code>\\nAcción: <b>apply</b>\\n\\nPuedes registrar el resultado de tu revisión en QvaPay.\",\"parse_mode\":\"HTML\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"🔄 Comprobar\",\"callback_data\":\"recovery:check:intent\"}],[{\"text\":\"📝 Registrar evidencia\",\"callback_data\":\"recovery:evidence:intent\"}],[{\"text\":\"✅ Resolver con evidencia\",\"callback_data\":\"recovery:resolve:intent\"}],[{\"text\":\"‹ Conciliaciones\",\"callback_data\":\"recovery:list\"}]]}}"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,511 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "qvapay-adapter",
+  "module": "src/market-list-budget.ts",
+  "sourceTests": [
+    "test/market-list-budget.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Cuota de listados por titular con reloj y almacén virtuales: intervalo por titular tras reinicio, esperas concurrentes, 429 por titular/global, revalidación de identidad y bloqueo tras fallo de persistencia. · goldenHash=c481bb5fad07c9d5040680557fc8b50012907e07af9ecf02c12dfe6f7c9d5057",
+  "cases": [
+    {
+      "caseId": "pure/market-list-budget/owners/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:14",
+      "input": {
+        "steps": [
+          {
+            "op": "setOwner",
+            "owner": " Owner-A "
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "setOwner",
+            "owner": "owner-b"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "recreate"
+          },
+          {
+            "op": "setOwner",
+            "owner": "OWNER-A"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "sleeps"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "owner": "owner-a"
+          },
+          null,
+          {
+            "owner": "owner-b"
+          },
+          10000,
+          null,
+          null,
+          {
+            "owner": "owner-a"
+          },
+          [
+            2401
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/independent-waits/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:23",
+      "input": {
+        "steps": [
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "holdNextSleep"
+          },
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "beginWait",
+            "label": "waiting",
+            "owner": "a"
+          },
+          {
+            "op": "setOwner",
+            "owner": "b"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "releaseSleep"
+          },
+          {
+            "op": "joinWait",
+            "label": "waiting"
+          },
+          {
+            "op": "sleeps"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "owner": "a"
+          },
+          null,
+          null,
+          null,
+          null,
+          {
+            "owner": "b"
+          },
+          null,
+          {
+            "owner": "a"
+          },
+          [
+            2401
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/unknown-owner/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:36",
+      "input": {
+        "steps": [
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "advance",
+            "ms": 1000
+          },
+          {
+            "op": "setOwner",
+            "owner": "b"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "setOwner",
+            "owner": null
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "setOwner",
+            "owner": "c"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "sleeps"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "owner": "a"
+          },
+          null,
+          null,
+          {
+            "owner": "b"
+          },
+          null,
+          {},
+          13401,
+          null,
+          {
+            "owner": "c"
+          },
+          15802,
+          [
+            2401,
+            2401
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/rate-limit/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:47",
+      "input": {
+        "steps": [
+          {
+            "op": "note",
+            "owner": "Owner-A",
+            "retryAfterMs": 10000
+          },
+          {
+            "op": "setOwner",
+            "owner": "b"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "recreate"
+          },
+          {
+            "op": "setOwner",
+            "owner": "owner-a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "note",
+            "owner": null,
+            "retryAfterMs": 8000
+          },
+          {
+            "op": "setOwner",
+            "owner": "c"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "sleeps"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          {
+            "owner": "b"
+          },
+          10000,
+          null,
+          null,
+          {
+            "owner": "owner-a"
+          },
+          20000,
+          null,
+          null,
+          {
+            "owner": "c"
+          },
+          28000,
+          [
+            10000,
+            8000
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/known-429-no-identity/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:59",
+      "input": {
+        "steps": [
+          {
+            "op": "note",
+            "owner": "a",
+            "retryAfterMs": 10000
+          },
+          {
+            "op": "setOwner",
+            "owner": null
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "sleeps"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          {},
+          20000,
+          [
+            10000
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/revalidate-identity/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:66",
+      "input": {
+        "sleepSetsOwner": "b",
+        "steps": [
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "wait",
+            "dynamicOwner": true
+          },
+          {
+            "op": "now"
+          },
+          {
+            "op": "sleeps"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "owner": "a"
+          },
+          {
+            "owner": "b"
+          },
+          12401,
+          [
+            2401
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/persist-failure/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:76",
+      "input": {
+        "failFirstWrite": true,
+        "steps": [
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "wait"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "error": "disco"
+          },
+          {
+            "owner": "a"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/rate-limit-persist-failure/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:87",
+      "input": {
+        "failFirstWrite": true,
+        "steps": [
+          {
+            "op": "note",
+            "owner": "a",
+            "retryAfterMs": 5000
+          },
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "setOwner",
+            "owner": "b"
+          },
+          {
+            "op": "wait"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "error": "disco"
+          },
+          null,
+          {
+            "error": "No se pudo guardar el límite de consultas; despachos bloqueados."
+          },
+          null,
+          {
+            "error": "No se pudo guardar el límite de consultas; despachos bloqueados."
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-list-budget/prune/0001",
+      "op": "market-list-budget.sequence",
+      "source": "test/market-list-budget.test.ts:99",
+      "input": {
+        "steps": [
+          {
+            "op": "setOwner",
+            "owner": "a"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "writes"
+          },
+          {
+            "op": "advance",
+            "ms": 3000
+          },
+          {
+            "op": "setOwner",
+            "owner": "b"
+          },
+          {
+            "op": "wait"
+          },
+          {
+            "op": "writes"
+          },
+          {
+            "op": "stored"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          {
+            "owner": "a"
+          },
+          1,
+          null,
+          null,
+          {
+            "owner": "b"
+          },
+          2,
+          {
+            "universal": 0,
+            "lastAny": 15401,
+            "ownerCount": 1
+          }
+        ]
+      }
+    }
+  ]
+}

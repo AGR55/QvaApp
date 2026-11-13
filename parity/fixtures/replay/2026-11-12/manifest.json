@@ -1,0 +1,50 @@
+{
+  "schema": "qvaapply.replay-manifest/v1",
+  "corpus": "2026-11-12",
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02"
+  },
+  "clock": {
+    "start": 1788744000000,
+    "stepMs": 1
+  },
+  "sanitization": {
+    "included": [
+      "market feed events",
+      "market observations",
+      "decision traces"
+    ],
+    "excluded": [
+      "tokens",
+      "cookies",
+      "VAPID keys",
+      "encrypted tokens",
+      "payment data",
+      "user/peer PII"
+    ],
+    "note": "Corpus sintético derivado del oráculo TS congelado; sin datos de producción."
+  },
+  "counts": {
+    "events": 10,
+    "scenarios": 4,
+    "steps": 14,
+    "decisions": 18
+  },
+  "files": {
+    "events": {
+      "sha256": "sha256:aaa5b20ef80fec564be649d98c6ce13461a58670782afb06d30298f344067cd2",
+      "bytes": 3366,
+      "lines": 10
+    },
+    "scenarios": {
+      "sha256": "sha256:c6f89bf3f2b5aef992a5db72783b8732bc51dd4ddf097026957522af3edbd6e2",
+      "bytes": 9521
+    },
+    "decisions": {
+      "sha256": "sha256:01f50f926964c11221df28aa2bb1e7b8373bfa64ab69940970f243370c1b7865",
+      "bytes": 17157,
+      "lines": 18
+    }
+  }
+}

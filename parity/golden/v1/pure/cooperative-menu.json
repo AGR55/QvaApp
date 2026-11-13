@@ -1,0 +1,276 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "notifier",
+  "module": "src/cooperative-menu.ts",
+  "sourceTests": [
+    "test/cooperative-menu.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Menú cooperativo: codificación dentro de 64 bytes, flujo precio → mínimo → confirmación con token fijo y rechazo de importes ambiguos. · goldenHash=2197f28893e51567dee68d39538032de4470dd75bc5c8daffa1d90bda84fcd8d",
+  "cases": [
+    {
+      "caseId": "pure/cooperative-menu/roundtrip/0001",
+      "op": "coop.roundtrip",
+      "source": "test/cooperative-menu.test.ts:10",
+      "input": {
+        "actions": [
+          {
+            "type": "home"
+          },
+          {
+            "type": "refresh"
+          },
+          {
+            "type": "edit",
+            "coin": "BANK_CUP"
+          },
+          {
+            "type": "withdraw",
+            "coin": "BANDECPREPAGO"
+          },
+          {
+            "type": "withdraw-confirm",
+            "coin": "CLASICA"
+          },
+          {
+            "type": "confirm",
+            "token": "token1"
+          },
+          {
+            "type": "cancel",
+            "token": "token1"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "encoded": "coop:home",
+            "bytes": 9,
+            "decoded": {
+              "type": "home"
+            }
+          },
+          {
+            "encoded": "coop:refresh",
+            "bytes": 12,
+            "decoded": {
+              "type": "refresh"
+            }
+          },
+          {
+            "encoded": "coop:e:BANK_CUP",
+            "bytes": 15,
+            "decoded": {
+              "type": "edit",
+              "coin": "BANK_CUP"
+            }
+          },
+          {
+            "encoded": "coop:w:BANDECPREPAGO",
+            "bytes": 20,
+            "decoded": {
+              "type": "withdraw",
+              "coin": "BANDECPREPAGO"
+            }
+          },
+          {
+            "encoded": "coop:x:CLASICA",
+            "bytes": 14,
+            "decoded": {
+              "type": "withdraw-confirm",
+              "coin": "CLASICA"
+            }
+          },
+          {
+            "encoded": "coop:y:token1",
+            "bytes": 13,
+            "decoded": {
+              "type": "confirm",
+              "token": "token1"
+            }
+          },
+          {
+            "encoded": "coop:n:token1",
+            "bytes": 13,
+            "decoded": {
+              "type": "cancel",
+              "token": "token1"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/cooperative-menu/sessions/0001",
+      "op": "coop.sessions",
+      "source": "test/cooperative-menu.test.ts:29",
+      "input": {
+        "steps": [
+          {
+            "op": "begin",
+            "chatId": "admin",
+            "coin": "BANK_CUP"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "390,5"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "1000"
+          },
+          {
+            "op": "confirm",
+            "chatId": "admin",
+            "token": "otro-token"
+          },
+          {
+            "op": "confirm",
+            "chatId": "admin",
+            "token": "token1"
+          },
+          {
+            "op": "current",
+            "chatId": "admin"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "stage": "price",
+            "token": "token1",
+            "coin": "BANK_CUP"
+          },
+          {
+            "stage": "minimal",
+            "token": "token1",
+            "coin": "BANK_CUP",
+            "price": 390.5
+          },
+          {
+            "stage": "confirm",
+            "token": "token1",
+            "coin": "BANK_CUP",
+            "price": 390.5,
+            "minimal": 1000
+          },
+          {
+            "error": "Esta confirmación cooperativa ya no está vigente."
+          },
+          {
+            "coin": "BANK_CUP",
+            "price": 390.5,
+            "minimal": 1000
+          },
+          null
+        ]
+      }
+    },
+    {
+      "caseId": "pure/cooperative-menu/invalid-amounts/0001",
+      "op": "coop.sessions",
+      "source": "test/cooperative-menu.test.ts:45",
+      "input": {
+        "steps": [
+          {
+            "op": "begin",
+            "chatId": "admin",
+            "coin": "CLASICA"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": ""
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "0"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "-1"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "1e3"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "1,2,3"
+          },
+          {
+            "op": "accept",
+            "chatId": "admin",
+            "text": "Infinity"
+          },
+          {
+            "op": "cancel",
+            "chatId": "admin"
+          },
+          {
+            "op": "current",
+            "chatId": "admin"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "stage": "price",
+            "token": "token1",
+            "coin": "CLASICA"
+          },
+          {
+            "error": "Escribe un importe positivo usando solo números."
+          },
+          {
+            "error": "El importe debe ser mayor que cero."
+          },
+          {
+            "error": "Escribe un importe positivo usando solo números."
+          },
+          {
+            "error": "Escribe un importe positivo usando solo números."
+          },
+          {
+            "error": "Escribe un importe positivo usando solo números."
+          },
+          {
+            "error": "Escribe un importe positivo usando solo números."
+          },
+          {
+            "stage": "price",
+            "token": "token1",
+            "coin": "CLASICA"
+          },
+          null
+        ]
+      }
+    },
+    {
+      "caseId": "pure/cooperative-menu/decode-invalid/0001",
+      "op": "coop.decode",
+      "source": "test/cooperative-menu.test.ts:24",
+      "input": {
+        "data": "coop:e:moneda inválida"
+      },
+      "expectError": {
+        "class": "validation",
+        "messageIncludes": "inválido"
+      }
+    }
+  ]
+}

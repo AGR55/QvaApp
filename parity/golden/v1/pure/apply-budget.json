@@ -1,0 +1,169 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/core/apply-budget.ts",
+  "sourceTests": [
+    "test/qvapay-gateway.test.ts",
+    "test/manual-cancel-race.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Presupuesto de aplicaciones (ventana de dos intentos + Retry-After). Estado inyectado por input; epoch ms como number, sin importes monetarios. Derivado de los escenarios de cuota del gateway. · goldenHash=99eaf5179fdbc52a473b39a5a84bec2fc0607a42eab00502e02bacd705b9b0ba",
+  "cases": [
+    {
+      "caseId": "pure/apply-budget/empty/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:214",
+      "input": {
+        "now": 1000
+      },
+      "expect": {
+        "attempts": [],
+        "readyAt": 1000
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/one-attempt/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:218",
+      "input": {
+        "attempts": [
+          1000
+        ],
+        "now": 1000
+      },
+      "expect": {
+        "attempts": [
+          1000
+        ],
+        "readyAt": 1000
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/two-attempts/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:219",
+      "input": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "now": 1000
+      },
+      "expect": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "readyAt": 61001
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/window-open/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:219",
+      "input": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "now": 60000
+      },
+      "expect": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "readyAt": 61001
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/window-last-ms/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:220",
+      "input": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "now": 61000
+      },
+      "expect": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "readyAt": 61001
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/window-expired/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:220",
+      "input": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "now": 61001
+      },
+      "expect": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "readyAt": 61001
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/reset/0001",
+      "op": "apply.budget",
+      "source": "test/manual-cancel-race.test.ts:30",
+      "input": {
+        "attempts": [],
+        "now": 5000
+      },
+      "expect": {
+        "attempts": [],
+        "readyAt": 5000
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/retry-after/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:246",
+      "input": {
+        "retryAt": 91000,
+        "now": 1000
+      },
+      "expect": {
+        "attempts": [],
+        "readyAt": 91000
+      }
+    },
+    {
+      "caseId": "pure/apply-budget/retry-after-dominates/0001",
+      "op": "apply.budget",
+      "source": "test/qvapay-gateway.test.ts:252",
+      "input": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "retryAt": 91000,
+        "now": 61000
+      },
+      "expect": {
+        "attempts": [
+          1000,
+          1000
+        ],
+        "readyAt": 91000
+      }
+    }
+  ]
+}

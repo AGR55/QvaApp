@@ -1,0 +1,74 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "dashboard-bff",
+  "module": "src/dashboard.ts",
+  "sourceTests": [
+    "test/dashboard-controls.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Controles del panel sobre DashboardReadModel con dependencias falsas: pausa local vs reanudación validada, delegación de cacería y refresco periódico que reutiliza mercados. · goldenHash=a39412dcb0449f13ac2267f900051607eb78120f4b78c675a22b3d5658ea8f51",
+  "cases": [
+    {
+      "caseId": "pure/dashboard-controls/pause/0001",
+      "op": "dashboard.controls.pause",
+      "source": "test/dashboard-controls.test.ts:5",
+      "expect": {
+        "calls": [
+          "pause:true:panel web",
+          "activate"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/dashboard-controls/hunting/0001",
+      "op": "dashboard.controls.hunting",
+      "source": "test/dashboard-controls.test.ts:25",
+      "input": {
+        "value": {
+          "sellRunning": false,
+          "market": {
+            "code": "CLASICA",
+            "huntBuyEnabled": true,
+            "buyMaxRate": 1.04
+          }
+        }
+      },
+      "expect": {
+        "calls": [
+          {
+            "sellRunning": false,
+            "market": {
+              "code": "CLASICA",
+              "huntBuyEnabled": true,
+              "buyMaxRate": 1.04
+            }
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/dashboard-controls/refresh/0001",
+      "op": "dashboard.controls.refresh",
+      "source": "test/dashboard-controls.test.ts:45",
+      "expect": {
+        "first": [
+          "balance",
+          "own",
+          "transactions"
+        ],
+        "second": [
+          "balance",
+          "own",
+          "transactions",
+          "CUP",
+          "CLASICA"
+        ]
+      }
+    }
+  ]
+}

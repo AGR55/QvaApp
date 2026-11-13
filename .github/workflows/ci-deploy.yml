@@ -36,6 +36,11 @@ jobs:
       - name: Verify application
         run: pnpm check
 
+      - name: Parity gate (F0)
+        run: pnpm parity:gate
+        env:
+          PARITY_REPORT_DIR: ${{ runner.temp }}/parity
+
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: verify

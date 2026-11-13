@@ -1,0 +1,113 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/mobile-action-http-budget.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (1 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=0c60d80acf6cf7f368eef285f6a95e21c65e11147b6fcb03232663650951abee",
+  "cases": [
+    {
+      "caseId": "http/mobile-action-budget/01-authorized-action-extends-budget",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/mobile-action-http-budget.test.ts:5",
+      "input": {
+        "scenario": "mobile-action-budget/01-authorized-action-extends-budget"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/paid",
+              "headers": {},
+              "payload": {
+                "reference": "reference"
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o revocada."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/paid",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": {}
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "La referencia del pago es obligatoria."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/offer/paid",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": {
+                "reference": "reference"
+              }
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "value:budgets",
+            "value": [
+              60000
+            ]
+          },
+          {
+            "effect": "value:actions",
+            "value": [
+              "paid"
+            ]
+          },
+          {
+            "effect": "value:requestTimeout",
+            "value": 60000
+          },
+          {
+            "effect": "value:connectionTimeout",
+            "value": 10000
+          }
+        ]
+      }
+    }
+  ]
+}

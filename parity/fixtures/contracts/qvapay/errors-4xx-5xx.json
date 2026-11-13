@@ -1,0 +1,225 @@
+{
+  "cassetteVersion": 1,
+  "name": "errors-4xx-5xx",
+  "description": "Clasificación de errores de la frontera (K2/K4/K11): 400/401/403/404, 5xx incierta, 503 con Retry-After, 2xx con cuerpo no-JSON (error de parseo, sin reintento) y éxito de /user.",
+  "contract": "K11",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": {
+      "uuid": "user-owner-0001",
+      "email": "owner@fake.qvapay",
+      "username": "owner",
+      "balance": "99.50000000",
+      "available": "99.50000000"
+    },
+    "offers": []
+  },
+  "exchanges": [
+    {
+      "id": "user-401",
+      "contract": "K1",
+      "match": {
+        "method": "GET",
+        "path": "/v2/user",
+        "query": {
+          "case": "401"
+        }
+      },
+      "response": {
+        "status": 401,
+        "body": {
+          "error": "No autorizado",
+          "code": "HTTP_401"
+        }
+      }
+    },
+    {
+      "id": "user-403",
+      "contract": "K1",
+      "match": {
+        "method": "GET",
+        "path": "/v2/user",
+        "query": {
+          "case": "403"
+        }
+      },
+      "response": {
+        "status": 403,
+        "body": {
+          "error": "Cuenta bloqueada",
+          "code": "HTTP_403"
+        }
+      }
+    },
+    {
+      "id": "user-500",
+      "contract": "K4",
+      "match": {
+        "method": "GET",
+        "path": "/v2/user",
+        "query": {
+          "case": "500"
+        }
+      },
+      "response": {
+        "status": 500,
+        "body": {
+          "error": "Internal Server Error"
+        }
+      }
+    },
+    {
+      "id": "user-2xx-garbage",
+      "contract": "K2",
+      "match": {
+        "method": "GET",
+        "path": "/v2/user",
+        "query": {
+          "case": "garbage"
+        }
+      },
+      "response": {
+        "status": 200,
+        "bodyRaw": "<html>esto no es JSON</html>"
+      }
+    },
+    {
+      "id": "user-success",
+      "contract": "K1",
+      "match": {
+        "method": "GET",
+        "path": "/v2/user",
+        "query": {
+          "case": "success"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "uuid": "user-owner-0001",
+          "email": "owner@fake.qvapay",
+          "username": "owner",
+          "balance": "99.50000000",
+          "available": "99.50000000"
+        }
+      }
+    },
+    {
+      "id": "create-400",
+      "contract": "K4",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/create"
+      },
+      "response": {
+        "status": 400,
+        "body": {
+          "error": "El mensaje público no puede superar 79 caracteres",
+          "code": "HTTP_400"
+        }
+      }
+    },
+    {
+      "id": "offer-404",
+      "contract": "K2",
+      "match": {
+        "method": "GET",
+        "path": "/v2/p2p/offer-missing-1"
+      },
+      "response": {
+        "status": 404,
+        "body": {
+          "error": "Oferta no encontrada",
+          "code": "HTTP_404"
+        }
+      }
+    },
+    {
+      "id": "transaction-500",
+      "contract": "K4",
+      "match": {
+        "method": "GET",
+        "path": "/v2/transaction",
+        "query": {
+          "case": "500"
+        }
+      },
+      "response": {
+        "status": 500,
+        "body": {
+          "error": "Internal Server Error"
+        }
+      }
+    },
+    {
+      "id": "transaction-502",
+      "contract": "K4",
+      "match": {
+        "method": "GET",
+        "path": "/v2/transaction",
+        "query": {
+          "case": "502"
+        }
+      },
+      "response": {
+        "status": 502,
+        "body": {
+          "error": "Bad Gateway"
+        }
+      }
+    },
+    {
+      "id": "transaction-503-retry-after",
+      "contract": "K4",
+      "match": {
+        "method": "GET",
+        "path": "/v2/transaction",
+        "query": {
+          "case": "503"
+        }
+      },
+      "response": {
+        "status": 503,
+        "headers": {
+          "retry-after": "30"
+        },
+        "body": {
+          "error": "Servicio temporalmente no disponible"
+        }
+      }
+    },
+    {
+      "id": "transaction-success",
+      "contract": "K12",
+      "match": {
+        "method": "GET",
+        "path": "/v2/transaction",
+        "query": {
+          "case": "success"
+        }
+      },
+      "response": {
+        "status": 200,
+        "body": {
+          "transactions": [
+            {
+              "uuid": "tx-fiat-0001",
+              "amount": "20.00000000",
+              "status": "paid",
+              "description": "Pago P2P",
+              "created_at": "2026-01-01T00:00:00.000Z",
+              "P2P": {
+                "uuid": "offer-success-1",
+                "coin": "QUSD",
+                "amount": "20.00000000",
+                "receive": "20.00000000",
+                "status": "paid"
+              }
+            }
+          ],
+          "total": 1
+        }
+      }
+    }
+  ]
+}

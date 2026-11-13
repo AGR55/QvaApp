@@ -1,0 +1,217 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qvapay-feed-stream.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (5 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=073ea8691d5cd33ab8d6961e80a818c03dcd93991e6e653fc1739ab9e5012685",
+  "cases": [
+    {
+      "caseId": "contract/qvapay-feed-stream/02-headers-state-stop",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-feed-stream.test.ts:24",
+      "input": {
+        "scenario": "qvapay-feed-stream/02-headers-state-stop"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "headers",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "appId": "app-id",
+                "appSecret": "secret-value"
+              }
+            }
+          },
+          {
+            "label": "payloads",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "data": {},
+                  "event": "p2p.created",
+                  "sent_at": "2026-09-28T12:00:00Z"
+                }
+              ]
+            }
+          },
+          {
+            "label": "states",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "phase": "idle"
+                },
+                {
+                  "phase": "connecting"
+                },
+                {
+                  "phase": "connected"
+                },
+                {
+                  "expiresAt": "2026-10-20T18:00:00Z",
+                  "phase": "connected"
+                },
+                {
+                  "phase": "backoff"
+                },
+                {
+                  "phase": "idle"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-feed-stream/03-unauthorized-safe",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-feed-stream.test.ts:50",
+      "input": {
+        "scenario": "qvapay-feed-stream/03-unauthorized-safe"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "states",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "phase": "idle"
+                },
+                {
+                  "phase": "connecting"
+                },
+                {
+                  "error": "QvaPay respondió HTTP 401 al abrir el stream.",
+                  "phase": "unauthorized"
+                },
+                {
+                  "phase": "idle"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-feed-stream/04-reconnect-backoff",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-feed-stream.test.ts:67",
+      "input": {
+        "scenario": "qvapay-feed-stream/04-reconnect-backoff"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "delay:1000",
+            "outcome": {
+              "ok": true,
+              "value": 1000
+            }
+          },
+          {
+            "label": "delay:120000",
+            "outcome": {
+              "ok": true,
+              "value": 120000
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-feed-stream/01-sse-fragmented",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-feed-stream.test.ts:8",
+      "input": {
+        "scenario": "qvapay-feed-stream/01-sse-fragmented"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "consumeSse",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "retries",
+            "outcome": {
+              "ok": true,
+              "value": [
+                10000
+              ]
+            }
+          },
+          {
+            "label": "events",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "data": "{\"ok\":true}",
+                  "event": "init"
+                },
+                {
+                  "data": "{\"event\":\"p2p.created\",\n\"data\":{}}",
+                  "event": "p2p.created"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-feed-stream/05-retry-after-backoff",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-feed-stream.test.ts:83",
+      "input": {
+        "scenario": "qvapay-feed-stream/05-retry-after-backoff"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "delay:75000",
+            "outcome": {
+              "ok": true,
+              "value": 75000
+            }
+          },
+          {
+            "label": "delay:10000",
+            "outcome": {
+              "ok": true,
+              "value": 10000
+            }
+          }
+        ],
+        "effects": []
+      }
+    }
+  ]
+}
