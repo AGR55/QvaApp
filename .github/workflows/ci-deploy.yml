@@ -53,9 +53,46 @@ jobs:
       - name: Go static analysis and vulnerabilities (F1)
         run: bash services/scripts/lint.sh
 
+  postgres-f1:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version-file: .node-version
+
+      - name: Verify Postgres schema and triggers
+        run: |
+          bash services/db/test-postgres.sh
+          bash services/db/test-postgres-import.sh
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGADMIN_DB: postgres
+
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: verify
+    needs: [verify, postgres-f1]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: production

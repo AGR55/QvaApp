@@ -35,10 +35,19 @@ vacía: 41 tablas, 40 índices y 6 FKs.
 - `--replace` es obligatorio para recrear el schema.
 - No se versionan datos ni secretos; solo DDL, conteos y digests agregados.
 
+## Triggers y migraciones
+
+- Los **6 triggers** se tradujeron a funciones/triggers PL/pgSQL y se aplican
+  después de la carga.
+- `services/db/migrate.sh` aplica migraciones versionadas y registra cada
+  versión en `public.qvaapply_schema_migrations` dentro de una transacción.
+- `test-postgres.sh` valida esquema + triggers; `test-postgres-import.sh` valida
+  la importación desde un fixture SQLite mínimo. Ambos pasan en PostgreSQL 16.
+- El workflow de CI `postgres-f1` ejecuta ambas pruebas; el deploy depende de
+  ese job.
+
 ## Pendiente
 
-1. Traducir los 6 triggers SQLite (integridad de configuración e histórico fiat)
-   y aplicarlos después de la carga.
-2. Añadir un runner de migraciones versionadas y un fixture SQLite pequeño para
-   CI.
-3. Verificación de importes/redondeo en Postgres y auditor de invariantes SQL.
+1. Verificación de importes/redondeo en Postgres y auditor SQL de invariantes.
+2. Fixture SQLite más amplio para cubrir todas las tablas financieras en CI.
+3. Tiempos de CI documentados y `golangci-lint` cuando haya release para Go 1.27.

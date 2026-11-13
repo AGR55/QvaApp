@@ -132,9 +132,10 @@ Gate F1:
 - [x] Esquema Postgres reproducible desde cero y migrable desde un dump SQLite
       de prueba con verificación de conteos. Snapshot `core-v1.sql` validado en
       PostgreSQL 16; importación de una copia v31: 41 tablas, 16.533 filas,
-      0 mismatches. Triggers SQLite aún pendientes.
+      0 mismatches. Triggers traducidos y verificados.
 - [ ] CI completo en verde y con tiempos documentados. El job Go ya existe
-      (`go test -race`, staticcheck y govulncheck); faltan tiempos y
+      (`go test -race`, staticcheck y govulncheck) y el job `postgres-f1`
+      prueba esquema, triggers e importación; faltan tiempos y
       `golangci-lint` (sin release compatible con Go 1.27).
 
 ## 4. F2 — Prototipo de la ruta caliente (2–3 semanas)

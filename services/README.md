@@ -83,13 +83,15 @@ node --import tsx parity/runner/run.ts \
 ## Persistencia F1
 
 - `services/db/` contiene el compose Postgres 16 aislado, el importador
-  SQLite→Postgres y el snapshot `schema/core-v1.sql`.
+  SQLite→Postgres, el runner de migraciones y el snapshot `schema/core-v1.sql`.
 - La importación se probó sobre una **copia** migrada a v31: **41 tablas,
   16.533 filas, 0 mismatches**, 41 PKs, 40 índices y 6 FKs.
+- Los 6 triggers SQLite están traducidos y verificados; el workflow
+  `postgres-f1` prueba esquema, triggers e importación desde un fixture mínimo.
 - El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
   están en [db/README.md](db/README.md).
-- Pendiente: traducir los 6 triggers SQLite, runner de migraciones versionadas
-  y fixture pequeño para CI.
+- Pendiente: verificación de importes/redondeo en Postgres y auditor SQL de
+  invariantes.
 
 ## Calidad
 
