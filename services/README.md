@@ -56,6 +56,7 @@ services/
 | `platform/outbox` | — | Mensajes, lease, reintento y estados |
 | `platform/inbox` | — | Dedupe por consumidor/mensaje |
 | `platform/idempotency` | — | Claim, replay, conflicto y expiración |
+| `platform/postgres` | — | Repositorios pgx + tests de integración |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -93,8 +94,8 @@ node --import tsx parity/runner/run.ts \
   `postgres-f1` prueba esquema, triggers e importación desde un fixture mínimo.
 - El auditor SQL de invariantes (reservas, ledger, configuración y límites) y
   `verify-money.mjs` (saldos/ledger/operaciones a 8 dp) están en verde.
-- `outbox`/`inbox`/idempotencia están definidos en Go y en la migración
-  `0003_outbox_inbox.sql`, con constraints probados en Postgres.
+- `outbox`/`inbox`/idempotencia están definidos en Go, con repositorios pgx y
+  tests de integración contra la migración `0003_outbox_inbox.sql`.
 - El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
   están en [db/README.md](db/README.md).
 - Referencia local: `verify.sh` ~18-23 s; `lint.sh` ~65-130 s según caché;
@@ -112,7 +113,6 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Cablear outbox/inbox/idempotencia a los repositorios Postgres de
-   `trading-core`.
+1. Cablear el worker de outbox y las transacciones de negocio al repositorio.
 2. Primera ejecución real de CI y registro de tiempos por job.
 3. Preparar el prototipo F2 de la ruta caliente sobre el replay.

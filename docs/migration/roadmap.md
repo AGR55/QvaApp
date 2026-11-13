@@ -137,7 +137,8 @@ Gate F1:
       saldos negativos, límites y cadena de configuración. Sin violaciones en la
       copia v31; `verify-money.mjs` valida saldos, ledger y operaciones a 8 dp.
 - [x] Primitivas transversales iniciales: outbox, inbox e idempotencia durable
-      con constraints Postgres (`0003_outbox_inbox.sql`).
+      con constraints Postgres (`0003_outbox_inbox.sql`) y repositorios pgx
+      con tests de integración.
 - [ ] CI completo en verde y con tiempos documentados. Los jobs `verify` y
       `postgres-f1` ya incluyen `go test -race`, staticcheck, golangci-lint,
       govulncheck, esquema, triggers, importación, auditor e importes; falta la

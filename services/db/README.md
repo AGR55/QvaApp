@@ -111,6 +111,9 @@ bash services/db/test-postgres.sh
 
 # importación desde un fixture SQLite mínimo + triggers
 bash services/db/test-postgres-import.sh
+
+# repositorios Go (outbox/inbox/idempotencia) con pgx
+bash services/db/test-postgres-go.sh
 ```
 
 Ambos scripts crean una base única, ejecutan las comprobaciones y la borran.
