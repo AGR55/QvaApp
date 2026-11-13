@@ -34,6 +34,8 @@ services/
 | `domain/riskpolicy` | ✅ **8/8** | Límites, slippage, cooldowns, capital y decisión final |
 | `domain/liquidity` | ✅ **9/9** | Liberación QUSD, orden por rentabilidad y snapshot |
 | `domain/applybudget` | ✅ **9/9** | Ventana de dos apply, legado y `Retry-After` |
+| `domain/hunting` | ✅ **6/6** | Elegibilidad, frescura y requisitos faltantes |
+| `domain/flexible` | ✅ **21/21** | Dimensionado, orden hija y recuperación inequívoca |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -60,8 +62,9 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar `hunting-requirements`, `flexible-order` y `price-simulation` con sus
-   goldens.
+1. Portar los lotes restantes de L1 (`dashboard`, `monetary-intents`,
+   `market-list-budget`, `telegram-*`, `coop-*`) y los bucles stateful.
 2. Añadir property tests de redondeo idempotente, reserva única y no doble
    gasto.
 3. Incorporar `staticcheck`, `golangci-lint` y `govulncheck` al job de CI.
+   `price-simulation` es L4 (integración), no entra en el lote puro de F1.

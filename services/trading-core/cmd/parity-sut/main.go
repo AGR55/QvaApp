@@ -20,6 +20,8 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/applybudget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/flexible"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/hunting"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/liquidity"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/marketmath"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/riskpolicy"
@@ -409,6 +411,152 @@ func dispatch(req request) (any, *opError) {
 			"attempts": normalized,
 			"readyAt":  applybudget.ReadyAt(normalized, retryAt, now),
 		}, nil
+
+	case "hunt.requirements":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		offerFields, failure := objectField(fields, "offer")
+		if failure != nil {
+			return nil, failure
+		}
+		offer, failure := parseHuntingOffer(offerFields)
+		if failure != nil {
+			return nil, failure
+		}
+		now, _, failure := numberField(fields, "now")
+		if failure != nil {
+			return nil, failure
+		}
+		actions := []any{}
+		if fields["actions"] != nil {
+			list, ok := fields["actions"].([]any)
+			if !ok {
+				return nil, validation("El campo actions debe ser un array.")
+			}
+			actions = list
+		}
+		state := hunting.NewState()
+		for _, item := range actions {
+			action, ok := item.(map[string]any)
+			if !ok {
+				return nil, validation("Cada acción debe ser un objeto.")
+			}
+			kind, failure := huntingActionKind(action)
+			if failure != nil {
+				return nil, failure
+			}
+			at, _, failure := numberField(action, "at")
+			if failure != nil {
+				return nil, failure
+			}
+			switch kind {
+			case "eligibility":
+				value, ok := action["value"].(map[string]any)
+				if !ok {
+					return nil, validation("El campo value debe ser un objeto.")
+				}
+				state.RecordEligibility(parseHuntingEligibility(value, at), at)
+			case "missing":
+				state.RecordMissing(parseHuntingMissing(action["value"]), at)
+			}
+		}
+		reason, found := state.Reason(offer, now)
+		return huntingResult(reason, found), nil
+
+	case "flexible.size":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		offerFields, failure := objectField(fields, "offer")
+		if failure != nil {
+			return nil, failure
+		}
+		offer, failure := parseFlexibleOffer(offerFields)
+		if failure != nil {
+			return nil, failure
+		}
+		capacity, _, failure := numberField(fields, "capacity")
+		if failure != nil {
+			return nil, failure
+		}
+		var limit *decimal.Value
+		if fields["limit"] != nil {
+			value, _, failure := numberField(fields, "limit")
+			if failure != nil {
+				return nil, failure
+			}
+			limit = &value
+		}
+		sized := flexible.Size(offer, capacity, limit)
+		if sized == nil {
+			return json.RawMessage("null"), nil
+		}
+		return flexibleSizeResult(*sized), nil
+
+	case "flexible.orderForOperation":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		offerFields, failure := objectField(fields, "offer")
+		if failure != nil {
+			return nil, failure
+		}
+		offer, failure := parseFlexibleOffer(offerFields)
+		if failure != nil {
+			return nil, failure
+		}
+		var orderUUID *string
+		if fields["orderUuid"] != nil {
+			value, failure := stringField(fields, "orderUuid")
+			if failure != nil {
+				return nil, failure
+			}
+			orderUUID = &value
+		}
+		result, err := flexible.OrderForOperation(offer, orderUUID)
+		if err != nil {
+			return nil, flexibleFailure(err)
+		}
+		return flexibleProjection(result), nil
+
+	case "flexible.matchingRecoveryOrder":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		offerFields, failure := objectField(fields, "offer")
+		if failure != nil {
+			return nil, failure
+		}
+		offer, failure := parseFlexibleOffer(offerFields)
+		if failure != nil {
+			return nil, failure
+		}
+		amount, _, failure := numberField(fields, "amount")
+		if failure != nil {
+			return nil, failure
+		}
+		since, _, failure := numberField(fields, "since")
+		if failure != nil {
+			return nil, failure
+		}
+		var account *string
+		if fields["account"] != nil {
+			value, failure := stringField(fields, "account")
+			if failure != nil {
+				return nil, failure
+			}
+			account = &value
+		}
+		order := flexible.MatchingRecoveryOrder(offer, amount, since, account)
+		if order == nil {
+			return json.RawMessage("null"), nil
+		}
+		return flexibleOrderResult(*order), nil
 
 	default:
 		return nil, &opError{
