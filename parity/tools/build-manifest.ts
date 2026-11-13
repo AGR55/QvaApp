@@ -17,7 +17,8 @@
  * (2026-11-12, 718 casos / 95 archivos, documentado en 04-tests.md §0.1) y valida que
  * el inventario declarado cuadre exactamente con él. Si la suite cambia, el baseline
  * debe actualizarse de forma revisada (es un acto consciente, no una regeneración
- * automática para que pase el gate).
+ * automática para que pase el gate). El commit del oráculo es el commit congelado
+ * (`ORACLE_COMMIT`), no `HEAD`, para que `--check` sea estable entre commits.
  *
  * Sale con código 1 si:
  *   - existe un archivo test/*.test.ts sin clasificar (o una clasificación sin archivo real),
@@ -30,7 +31,6 @@
  * Mapeo a servicios E1: docs/migration/verification.md §2 y docs/migration/target-architecture.md §3.1.
  */
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
 import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -176,6 +176,8 @@ const EXPECTED = {
 } as const;
 
 /** Baseline verificado del oráculo el 2026-11-12 (04-tests.md §0.1). */
+const ORACLE_COMMIT = "02bb5afc04b5eb95f5ac3996ef7634dedf073d02";
+
 const BASELINE = {
   command: "node --import tsx --test test/*.test.ts",
   measuredAt: "2026-11-12",
@@ -465,12 +467,8 @@ function computeSrcHash(): string {
   return `sha256:${hash.digest("hex")}`;
 }
 
-function gitCommit(): string {
-  const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT, encoding: "utf8" });
-  if (result.status === 0 && typeof result.stdout === "string" && result.stdout.trim()) {
-    return result.stdout.trim();
-  }
-  return "unknown";
+function oracleCommit(): string {
+  return ORACLE_COMMIT;
 }
 
 /** Estado derivado de categoría + reutilización (verification.md §L0). */
@@ -1183,7 +1181,7 @@ function main(): void {
     process.exit(1);
   }
 
-  const commit = gitCommit();
+  const commit = oracleCommit();
   const srcHash = computeSrcHash();
   const manifest = buildManifest(totals, commit, srcHash);
   const manifestJson = `${JSON.stringify(manifest, null, 2)}\n`;
