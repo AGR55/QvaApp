@@ -32,6 +32,7 @@ services/
 | `domain/marketmath` | ✅ **18/18** | `market-math` + `rate-rounding` del lote `market-math` |
 | `domain/budget` | ✅ **6/6** | Plan proporcional, recorte/cancelación y mínimos |
 | `domain/riskpolicy` | ✅ **8/8** | Límites, slippage, cooldowns, capital y decisión final |
+| `domain/liquidity` | ✅ **9/9** | Liberación QUSD, orden por rentabilidad y snapshot |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -58,7 +59,7 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar `liquidity-plan`, `apply-budget` y `hunting-requirements` con sus
+1. Portar `apply-budget`, `hunting-requirements` y `price-simulation` con sus
    goldens.
 2. Añadir property tests de redondeo idempotente, reserva única y no doble
    gasto.

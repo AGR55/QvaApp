@@ -19,6 +19,7 @@ import (
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/liquidity"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/marketmath"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/riskpolicy"
 )
@@ -306,6 +307,77 @@ func dispatch(req request) (any, *opError) {
 			return nil, validation(err.Error())
 		}
 		return riskResult(decision), nil
+
+	case "liquidity.plan":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		targetFields, failure := objectField(fields, "target")
+		if failure != nil {
+			return nil, failure
+		}
+		targetUUID, failure := optionalStringField(targetFields, "uuid", "")
+		if failure != nil {
+			return nil, failure
+		}
+		targetCoin, failure := stringField(targetFields, "coin")
+		if failure != nil {
+			return nil, failure
+		}
+		targetType, failure := stringField(targetFields, "type")
+		if failure != nil {
+			return nil, failure
+		}
+		targetAmount, _, failure := numberField(targetFields, "amount")
+		if failure != nil {
+			return nil, failure
+		}
+		targetReceive, _, failure := numberField(targetFields, "receive")
+		if failure != nil {
+			return nil, failure
+		}
+		availableQusd, _, failure := numberField(fields, "availableQusd")
+		if failure != nil {
+			return nil, failure
+		}
+		reserveQusd, _, failure := numberField(fields, "reserveQusd")
+		if failure != nil {
+			return nil, failure
+		}
+		rawOffers, failure := objectArrayField(fields, "ownOffers")
+		if failure != nil {
+			return nil, failure
+		}
+		offers := make([]liquidity.Offer, 0, len(rawOffers))
+		for _, raw := range rawOffers {
+			offer, failure := parseLiquidityOffer(raw)
+			if failure != nil {
+				return nil, failure
+			}
+			offers = append(offers, offer)
+		}
+		economics, failure := parseMarketEconomics(fields)
+		if failure != nil {
+			return nil, failure
+		}
+		plan, err := liquidity.PlanLiquidity(liquidity.Input{
+			Target: liquidity.Target{
+				UUID:    targetUUID,
+				Coin:    targetCoin,
+				Type:    targetType,
+				Amount:  targetAmount,
+				Receive: targetReceive,
+			},
+			AvailableQusd: availableQusd,
+			ReserveQusd:   reserveQusd,
+			OwnOffers:     offers,
+			Economics:     economics,
+		})
+		if err != nil {
+			return nil, validation(err.Error())
+		}
+		return liquidityResult(plan), nil
 
 	default:
 		return nil, &opError{

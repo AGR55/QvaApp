@@ -41,6 +41,21 @@ func TestRoundAndIntegralOps(t *testing.T) {
 	}
 }
 
+func TestCompact(t *testing.T) {
+	cases := map[string]string{
+		"30":           "30",
+		"30.00000000":  "30",
+		"41.37000000":  "41.37",
+		"106.51000000": "106.51",
+		"0":            "0",
+	}
+	for input, want := range cases {
+		if got := MustParse(input).Compact(); got != want {
+			t.Fatalf("Compact(%s) = %q, quiero %q", input, got, want)
+		}
+	}
+}
+
 func TestPlaces(t *testing.T) {
 	cases := map[string]int{
 		"1.06":     2,

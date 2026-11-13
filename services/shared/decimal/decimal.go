@@ -153,6 +153,18 @@ func (value Value) Format(scale int) string {
 	return sign + digits[:point] + "." + digits[point:]
 }
 
+// Compact devuelve la representación con hasta 8 decimales, sin ceros finales.
+// Se usa para mensajes legibles; la evidencia canónica sigue usando Format(8).
+func (value Value) Compact() string {
+	text := value.Format(8)
+	text = strings.TrimRight(text, "0")
+	text = strings.TrimRight(text, ".")
+	if text == "" || text == "-" {
+		return "0"
+	}
+	return text
+}
+
 // Places devuelve los decimales significativos de un número JSON según la
 // representación canónica de JS (`Number.toString`). Solo se usa para replicar
 // la precisión configurada del índice; la aritmética sigue siendo exacta.
