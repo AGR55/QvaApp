@@ -9,7 +9,9 @@ services/
   shared/                 # primitivas transversales mínimas (decimal exacto)
   trading-core/           # núcleo transaccional; aquí vive el dominio puro
     cmd/parity-sut/       # CLI de conformidad NDJSON para el runner
+    cmd/replay-probe/     # valida el corpus de replay para F2
     internal/domain/      # reglas puras, sin I/O
+    internal/replay/      # cargador estricto del corpus F0/F2
   db/                     # Postgres local, importador SQLite y esquema v1
   scripts/verify.sh       # gofmt + test -race + vet + paridad
 ```
@@ -68,6 +70,9 @@ bash services/scripts/verify.sh
 # Análisis estático + vulnerabilidades (lo usa CI)
 bash services/scripts/lint.sh
 
+# Valida el corpus de replay para F2
+(cd services/trading-core && go run ./cmd/replay-probe --corpus ../../parity/fixtures/replay/2026-11-12)
+
 # Solo un filtro del runner
 bash services/scripts/verify.sh --filter market-math
 bash services/scripts/verify.sh --filter pure/budget/
@@ -85,7 +90,6 @@ node --import tsx parity/runner/run.ts \
 ```
 
 ## Persistencia F1
-
 - `services/db/` contiene el compose Postgres 16 aislado, el importador
   SQLite→Postgres, el runner de migraciones y el snapshot `schema/core-v1.sql`.
 - La importación se probó sobre una **copia** migrada a v31: **41 tablas,
@@ -111,6 +115,12 @@ node --import tsx parity/runner/run.ts \
   - libro de reservas sin doble reserva ni doble gasto.
 - `go vet`, `staticcheck` v0.8.2, `golangci-lint` v2.15 y
   `govulncheck` v1.9.0.
+
+## F2
+
+El cargador `internal/replay/corpus` valida hashes, conteos y estructura del
+corpus congelado. El plan del prototipo y sus métricas están en
+[docs/migration/2026-11-13-f2-plan.md](../../docs/migration/2026-11-13-f2-plan.md).
 
 ## Siguiente corte
 
