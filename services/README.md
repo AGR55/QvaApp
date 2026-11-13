@@ -119,7 +119,9 @@ node --import tsx parity/runner/run.ts \
 ## F2
 
 El cargador `internal/replay/corpus` valida hashes, conteos y estructura del
-corpus congelado. El plan del prototipo y sus métricas están en
+corpus congelado. `internal/replay/marketsession` reproduce el escenario
+`market.ingest` con **4/4 resultados** idénticos. El plan del prototipo y sus
+métricas están en
 [docs/migration/2026-11-13-f2-plan.md](../../docs/migration/2026-11-13-f2-plan.md).
 
 ## Siguiente corte
