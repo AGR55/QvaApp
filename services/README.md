@@ -31,6 +31,7 @@ services/
 | `shared/decimal` | — | Aritmética exacta, redondeo y formato de escala fija |
 | `domain/marketmath` | ✅ **18/18** | `market-math` + `rate-rounding` del lote `market-math` |
 | `domain/budget` | ✅ **6/6** | Plan proporcional, recorte/cancelación y mínimos |
+| `domain/riskpolicy` | ✅ **8/8** | Límites, slippage, cooldowns, capital y decisión final |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -57,8 +58,8 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar `risk-policy`, `liquidity-plan`, `apply-budget` y
-   `hunting-requirements` con sus goldens.
+1. Portar `liquidity-plan`, `apply-budget` y `hunting-requirements` con sus
+   goldens.
 2. Añadir property tests de redondeo idempotente, reserva única y no doble
    gasto.
 3. Incorporar `staticcheck`, `golangci-lint` y `govulncheck` al job de CI.

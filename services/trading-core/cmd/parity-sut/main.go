@@ -20,6 +20,7 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/marketmath"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/riskpolicy"
 )
 
 type request struct {
@@ -291,6 +292,21 @@ func dispatch(req request) (any, *opError) {
 			"adjustments": adjustments,
 		}, nil
 
+	case "risk.evaluate":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		context, failure := decodeRiskContext(fields)
+		if failure != nil {
+			return nil, failure
+		}
+		decision, err := riskpolicy.Evaluate(context)
+		if err != nil {
+			return nil, validation(err.Error())
+		}
+		return riskResult(decision), nil
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",
@@ -377,6 +393,30 @@ func optionalStringField(fields map[string]any, key string, fallback string) (st
 		return fallback, nil
 	}
 	return stringField(fields, key)
+}
+
+func boolField(fields map[string]any, key string) (bool, *opError) {
+	value, ok := fields[key]
+	if !ok {
+		return false, validation(fmt.Sprintf("El campo %s debe ser booleano.", key))
+	}
+	boolean, ok := value.(bool)
+	if !ok {
+		return false, validation(fmt.Sprintf("El campo %s debe ser booleano.", key))
+	}
+	return boolean, nil
+}
+
+func objectField(fields map[string]any, key string) (map[string]any, *opError) {
+	value, ok := fields[key]
+	if !ok {
+		return nil, validation(fmt.Sprintf("El campo %s debe ser un objeto.", key))
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return nil, validation(fmt.Sprintf("El campo %s debe ser un objeto.", key))
+	}
+	return object, nil
 }
 
 func objectArrayField(fields map[string]any, key string) ([]map[string]any, *opError) {
