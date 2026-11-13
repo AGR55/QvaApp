@@ -19,5 +19,6 @@ trap cleanup EXIT
 psql -d "$PGADMIN_DB" -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$name\""
 PGDATABASE="$name" bash "$here/migrate.sh"
 psql -d "$name" -v ON_ERROR_STOP=1 -f "$here/fixtures/triggers.sql"
+psql -d "$name" -v ON_ERROR_STOP=1 -f "$here/fixtures/outbox-inbox.sql"
 PGDATABASE="$name" bash "$here/audit-invariants.sh"
 printf 'postgres-f1: migraciones y triggers OK (%s, %d ms)\n' "$name" "$(( $(date +%s%3N) - started_ms ))"
