@@ -21,6 +21,8 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/applybudget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/chatstream"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/coop"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/dashboard"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/flexible"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/hunting"
@@ -29,6 +31,7 @@ import (
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/monetary"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/reconciliation"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/riskpolicy"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/telegrammenu"
 )
 
 type request struct {
@@ -828,6 +831,238 @@ func dispatch(req request) (any, *opError) {
 			}
 		}
 		return map[string]any{"results": monetaryOutcomes(kinds)}, nil
+
+	case "market-list-budget.sequence":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return budgetSequence(fields)
+
+	case "chat.consume":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		chunks, failure := stringArrayField(fields, "chunks")
+		if failure != nil {
+			return nil, failure
+		}
+		changes := 0
+		if err := chatstream.Consume(chunks, func() { changes++ }); err != nil {
+			return nil, chatFailure(err)
+		}
+		return map[string]any{"changes": changes}, nil
+
+	case "chat.order-read":
+		return chatOrderRead(), nil
+
+	case "coop.encode":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawAction, ok := fields["action"].(map[string]any)
+		if !ok {
+			return nil, validation("El campo action debe ser un objeto.")
+		}
+		action, failure := coopAction(rawAction)
+		if failure != nil {
+			return nil, failure
+		}
+		encoded, err := coop.Encode(action)
+		if err != nil {
+			return nil, coopFailure(err)
+		}
+		return map[string]any{"encoded": encoded, "bytes": len([]byte(encoded)), "prefix": coop.CallbackPrefix}, nil
+
+	case "coop.decode":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		data, failure := stringField(fields, "data")
+		if failure != nil {
+			return nil, failure
+		}
+		action, err := coop.Decode(data)
+		if err != nil {
+			return nil, coopFailure(err)
+		}
+		return map[string]any{"action": coopActionView(action)}, nil
+
+	case "coop.roundtrip":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawActions, ok := fields["actions"].([]any)
+		if !ok {
+			return nil, validation("El campo actions debe ser un array.")
+		}
+		results := make([]any, 0, len(rawActions))
+		for _, item := range rawActions {
+			object, ok := item.(map[string]any)
+			if !ok {
+				return nil, validation("Cada acción debe ser un objeto.")
+			}
+			action, failure := coopAction(object)
+			if failure != nil {
+				return nil, failure
+			}
+			encoded, err := coop.Encode(action)
+			if err != nil {
+				return nil, coopFailure(err)
+			}
+			decoded, err := coop.Decode(encoded)
+			if err != nil {
+				return nil, coopFailure(err)
+			}
+			results = append(results, map[string]any{
+				"encoded": encoded,
+				"bytes":   len([]byte(encoded)),
+				"decoded": coopActionView(decoded),
+			})
+		}
+		return map[string]any{"results": results}, nil
+
+	case "coop.sessions":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return coopSessions(fields)
+
+	case "telegram.commands":
+		commands := make([]string, 0, len(telegrammenu.Commands))
+		descriptions := make([]string, 0, len(telegrammenu.Commands))
+		unique := map[string]bool{}
+		allDescribed := true
+		for _, command := range telegrammenu.Commands {
+			commands = append(commands, command.Command)
+			descriptions = append(descriptions, command.Description)
+			unique[command.Command] = true
+			if command.Description == "" {
+				allDescribed = false
+			}
+		}
+		return map[string]any{
+			"commands":     commands,
+			"descriptions": descriptions,
+			"unique":       len(unique) == len(commands),
+			"allDescribed": allDescribed,
+		}, nil
+
+	case "telegram.encode":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawAction, ok := fields["action"].(map[string]any)
+		if !ok {
+			return nil, validation("El campo action debe ser un objeto.")
+		}
+		action, failure := telegramAction(rawAction)
+		if failure != nil {
+			return nil, failure
+		}
+		encoded, err := telegrammenu.Encode(action)
+		if err != nil {
+			return nil, telegramFailure(err)
+		}
+		return map[string]any{"encoded": encoded, "bytes": len([]byte(encoded)), "prefix": telegrammenu.CallbackPrefix}, nil
+
+	case "telegram.decode":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		data, failure := stringField(fields, "data")
+		if failure != nil {
+			return nil, failure
+		}
+		action, err := telegrammenu.Decode(data)
+		if err != nil {
+			return nil, telegramFailure(err)
+		}
+		return map[string]any{"action": telegramActionView(action)}, nil
+
+	case "telegram.roundtrip":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawActions, ok := fields["actions"].([]any)
+		if !ok {
+			return nil, validation("El campo actions debe ser un array.")
+		}
+		results := make([]any, 0, len(rawActions))
+		for _, item := range rawActions {
+			object, ok := item.(map[string]any)
+			if !ok {
+				return nil, validation("Cada acción debe ser un objeto.")
+			}
+			action, failure := telegramAction(object)
+			if failure != nil {
+				return nil, failure
+			}
+			encoded, err := telegrammenu.Encode(action)
+			if err != nil {
+				return nil, telegramFailure(err)
+			}
+			decoded, err := telegrammenu.Decode(encoded)
+			if err != nil {
+				return nil, telegramFailure(err)
+			}
+			results = append(results, map[string]any{
+				"encoded": encoded,
+				"bytes":   len([]byte(encoded)),
+				"decoded": telegramActionView(decoded),
+			})
+		}
+		return map[string]any{"results": results}, nil
+
+	case "telegram.parse-rates":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		texts, failure := stringArrayField(fields, "texts")
+		if failure != nil {
+			return nil, failure
+		}
+		results := make([]any, 0, len(texts))
+		for _, text := range texts {
+			value, err := telegrammenu.ParseExactRate(text)
+			if err != nil {
+				results = append(results, map[string]any{"error": err.Error()})
+			} else {
+				results = append(results, map[string]any{"value": json.Number(value.Compact())})
+			}
+		}
+		return map[string]any{"results": results}, nil
+
+	case "telegram.parse-rate":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		text, failure := stringField(fields, "text")
+		if failure != nil {
+			return nil, failure
+		}
+		value, err := telegrammenu.ParseExactRate(text)
+		if err != nil {
+			return nil, telegramFailure(err)
+		}
+		return map[string]any{"value": json.Number(value.Compact())}, nil
+
+	case "telegram.rate-sessions":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return telegramRateSessions(fields)
 
 	default:
 		return nil, &opError{

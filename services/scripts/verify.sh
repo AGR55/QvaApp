@@ -17,7 +17,7 @@ cd "$(dirname "$0")/.."
 if [[ "${1:-}" == "--filter" ]]; then
   filters=("${2:-market-math}")
 else
-  filters=("market-math" "pure/budget/" "risk-policy" "liquidity-plan" "apply-budget" "hunting-requirements" "flexible-order" "pure/dashboard/" "reconciliation-scheduler" "monetary-intents")
+  filters=("market-math" "pure/budget/" "risk-policy" "liquidity-plan" "apply-budget" "hunting-requirements" "flexible-order" "pure/dashboard/" "reconciliation-scheduler" "monetary-intents" "market-list-budget" "cooperative-menu" "telegram-menu" "chat-stream")
 fi
 
 pending="$(gofmt -l shared trading-core)"

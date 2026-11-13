@@ -39,6 +39,10 @@ services/
 | `domain/dashboard` | ✅ **4/4** | Margen, reparto de presupuesto y compactación |
 | `domain/reconciliation` | ✅ **4/4** | Backoff persistido por intención |
 | `domain/monetary` | ✅ **5/5** | Intención antes de despachar y clasificación de fallos |
+| `domain/marketlistbudget` | ✅ **9/9** | Cuota durable por owner, 429 y poisoned |
+| `domain/coop` | ✅ **4/4** | Acciones y sesiones de aporte cooperativo |
+| `domain/telegrammenu` | ✅ **6/6** | Comandos, acciones, tasas y sesiones |
+| `domain/chatstream` | ✅ **3/3** | Framing SSE acotado y chat no bloqueante |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
@@ -80,10 +84,9 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar los lotes restantes de L1 (`market-list-budget`,
-   `qusd-balance-cache`, `market-hunting-*`, `telegram-*`, `coop-*`,
-   `mobile-operator`, `auth`, `chat-stream`, `scheduler`) y los bucles
-   stateful.
+1. Portar los lotes restantes de L1 (`qusd-balance-cache`,
+   `market-hunting-*`, `dashboard-auth`, `dashboard-controls`,
+   `mobile-operator`, `telegram-runtime`, `scheduler`, `hunting-balance`).
 2. Añadir property tests de reserva única y no doble gasto al ledger cuando
    exista la persistencia Postgres.
 3. Incorporar `golangci-lint` cuando su release soporte Go 1.27.
