@@ -13,6 +13,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -20,10 +21,13 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/applybudget"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/budget"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/dashboard"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/flexible"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/hunting"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/liquidity"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/marketmath"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/monetary"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/reconciliation"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/riskpolicy"
 )
 
@@ -557,6 +561,273 @@ func dispatch(req request) (any, *opError) {
 			return json.RawMessage("null"), nil
 		}
 		return flexibleOrderResult(*order), nil
+
+	case "dashboard.margin":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		buyRate, _, failure := numberField(fields, "buyRate")
+		if failure != nil {
+			return nil, failure
+		}
+		sellRate, _, failure := numberField(fields, "sellRate")
+		if failure != nil {
+			return nil, failure
+		}
+		amount, _, failure := numberField(fields, "amount")
+		if failure != nil {
+			return nil, failure
+		}
+		sellFeePercent, _, failure := numberField(fields, "sellFeePercent")
+		if failure != nil {
+			return nil, failure
+		}
+		outgoingTransferFee, failure := optionalNumberField(fields, "outgoingTransferFee", decimal.Zero())
+		if failure != nil {
+			return nil, failure
+		}
+		margin := dashboard.CalculateMargin(buyRate, sellRate, amount, sellFeePercent, outgoingTransferFee)
+		return dashboardMarginResult(margin), nil
+
+	case "dashboard.allocate":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		budgetAmount, _, failure := numberField(fields, "budget")
+		if failure != nil {
+			return nil, failure
+		}
+		reserve, _, failure := numberField(fields, "reserve")
+		if failure != nil {
+			return nil, failure
+		}
+		maximumPerOffer, _, failure := numberField(fields, "maximumPerOffer")
+		if failure != nil {
+			return nil, failure
+		}
+		rawOpportunities, ok := fields["opportunities"].([]any)
+		if !ok {
+			return nil, validation("El campo opportunities debe ser un array.")
+		}
+		opportunities := make([]dashboard.Opportunity, 0, len(rawOpportunities))
+		for _, item := range rawOpportunities {
+			object, ok := item.(map[string]any)
+			if !ok {
+				return nil, validation("Cada oportunidad debe ser un objeto.")
+			}
+			rate, _, failure := numberField(object, "rate")
+			if failure != nil {
+				return nil, failure
+			}
+			amount, _, failure := numberField(object, "amount")
+			if failure != nil {
+				return nil, failure
+			}
+			opportunities = append(opportunities, dashboard.Opportunity{Rate: rate, Amount: amount})
+		}
+		return dashboardAllocationResult(dashboard.AllocateBudget(budgetAmount, reserve, maximumPerOffer, opportunities)), nil
+
+	case "dashboard.compact-history":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawHistory, ok := fields["history"].([]any)
+		if !ok {
+			return nil, validation("El campo history debe ser un array.")
+		}
+		points, originals, failure := dashboardHistoryPoints(rawHistory)
+		if failure != nil {
+			return nil, failure
+		}
+		maxPerMarket, failure := integerField(fields, "maxPerMarket")
+		if failure != nil {
+			return nil, failure
+		}
+		selected, err := dashboard.CompactHistory(points, int(maxPerMarket))
+		if err != nil {
+			return nil, validation(err.Error())
+		}
+		return dashboardHistoryResult(selected, originals), nil
+
+	case "reconciliation.sequence":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		rawSteps, ok := fields["steps"].([]any)
+		if !ok {
+			return nil, validation("El campo steps debe ser un array.")
+		}
+		state := mapState{}
+		scheduler := reconciliation.New(state)
+		results := make([]any, 0, len(rawSteps))
+		for _, item := range rawSteps {
+			step, ok := item.(map[string]any)
+			if !ok {
+				return nil, validation("Cada paso debe ser un objeto.")
+			}
+			operation, failure := stringField(step, "op")
+			if failure != nil {
+				return nil, failure
+			}
+			intentID, failure := stringField(step, "intentId")
+			if failure != nil {
+				return nil, failure
+			}
+			switch operation {
+			case "canAttempt":
+				at, failure := integerField(step, "at")
+				if failure != nil {
+					return nil, failure
+				}
+				can, err := scheduler.CanAttempt(intentID, at)
+				if err != nil {
+					return nil, validation(err.Error())
+				}
+				results = append(results, map[string]any{"can": can})
+			case "recordFailure":
+				at, failure := integerField(step, "at")
+				if failure != nil {
+					return nil, failure
+				}
+				record, err := scheduler.RecordFailure(intentID, at)
+				if err != nil {
+					return nil, validation(err.Error())
+				}
+				results = append(results, reconciliationResult(record))
+			case "clear":
+				if err := scheduler.Clear(intentID); err != nil {
+					return nil, validation(err.Error())
+				}
+				results = append(results, nil)
+			default:
+				return nil, validation(fmt.Sprintf("Operación de conciliación desconocida: %s.", operation))
+			}
+		}
+		return map[string]any{"results": results}, nil
+
+	case "monetary.timing":
+		repository := newMemoryRepository()
+		phases := make([]string, 0, 3)
+		durations := make([]float64, 0, 3)
+		_, err := monetary.Execute(repository, func() string { return "timed" }, monetary.Mutation{
+			Kind:    "received",
+			Request: map[string]any{},
+			Action:  func(string) (any, error) { return nil, nil },
+			OnTiming: func(phase string, milliseconds float64) {
+				durations = append(durations, milliseconds)
+				phases = append(phases, phase)
+				panic("observer failed")
+			},
+		})
+		if err != nil {
+			return nil, validation(err.Error())
+		}
+		finite := true
+		for _, milliseconds := range durations {
+			if milliseconds < 0 {
+				finite = false
+			}
+		}
+		return map[string]any{
+			"phases":          phases,
+			"durationsFinite": finite,
+			"state":           repository.intents["timed"].state,
+		}, nil
+
+	case "monetary.persist-before-dispatch":
+		repository := newMemoryRepository()
+		result, err := monetary.Execute(repository, func() string { return "intent-1" }, monetary.Mutation{
+			Kind:          "apply",
+			OperationUUID: "offer-1",
+			Request:       map[string]any{"uuid": "offer-1"},
+			Action: func(string) (any, error) {
+				intent := repository.intents["intent-1"]
+				if intent == nil || intent.state != "submitted" {
+					return nil, errors.New("la intención no estaba submitted")
+				}
+				repository.events = append(repository.events, "remote:apply")
+				return map[string]any{"ok": true}, nil
+			},
+		})
+		if err != nil {
+			return nil, validation(err.Error())
+		}
+		return map[string]any{
+			"result": result,
+			"state":  repository.intents["intent-1"].state,
+			"events": repository.events,
+		}, nil
+
+	case "monetary.persist-failure":
+		repository := newMemoryRepository()
+		repository.failCreate = true
+		dispatched := false
+		_, err := monetary.Execute(repository, func() string { return "intent-2" }, monetary.Mutation{
+			Kind:    "cancel",
+			Request: map[string]any{},
+			Action: func(string) (any, error) {
+				dispatched = true
+				return nil, nil
+			},
+		})
+		message := ""
+		if err != nil {
+			message = err.Error()
+		}
+		return map[string]any{"dispatched": dispatched, "message": message}, nil
+
+	case "monetary.failure-classification":
+		fields, _ := object(req.Input)
+		kind := "unknown"
+		if fields != nil {
+			if value, ok := fields["kind"].(string); ok {
+				kind = value
+			}
+		}
+		results := monetaryClassification([]string{kind})
+		return results[0], nil
+
+	case "monetary.failure-classification-all":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		kinds := []string{}
+		if fields["kinds"] != nil {
+			kinds, failure = stringArrayField(fields, "kinds")
+			if failure != nil {
+				return nil, failure
+			}
+		}
+		return map[string]any{"results": monetaryClassification(kinds)}, nil
+
+	case "monetary.outcome":
+		fields, _ := object(req.Input)
+		kind := "unknown"
+		if fields != nil {
+			if value, ok := fields["kind"].(string); ok {
+				kind = value
+			}
+		}
+		return map[string]any{"outcome": monetary.Outcome(monetaryError(kind))}, nil
+
+	case "monetary.outcome-all":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		kinds := []string{}
+		if fields["kinds"] != nil {
+			kinds, failure = stringArrayField(fields, "kinds")
+			if failure != nil {
+				return nil, failure
+			}
+		}
+		return map[string]any{"results": monetaryOutcomes(kinds)}, nil
 
 	default:
 		return nil, &opError{

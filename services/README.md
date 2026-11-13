@@ -36,6 +36,9 @@ services/
 | `domain/applybudget` | ✅ **9/9** | Ventana de dos apply, legado y `Retry-After` |
 | `domain/hunting` | ✅ **6/6** | Elegibilidad, frescura y requisitos faltantes |
 | `domain/flexible` | ✅ **21/21** | Dimensionado, orden hija y recuperación inequívoca |
+| `domain/dashboard` | ✅ **4/4** | Margen, reparto de presupuesto y compactación |
+| `domain/reconciliation` | ✅ **4/4** | Backoff persistido por intención |
+| `domain/monetary` | ✅ **5/5** | Intención antes de despachar y clasificación de fallos |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
@@ -77,9 +80,11 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar los lotes restantes de L1 (`dashboard`, `monetary-intents`,
-   `market-list-budget`, `telegram-*`, `coop-*`) y los bucles stateful.
-2. Añadir property tests de redondeo idempotente, reserva única y no doble
-   gasto.
-3. Incorporar `staticcheck`, `golangci-lint` y `govulncheck` al job de CI.
+1. Portar los lotes restantes de L1 (`market-list-budget`,
+   `qusd-balance-cache`, `market-hunting-*`, `telegram-*`, `coop-*`,
+   `mobile-operator`, `auth`, `chat-stream`, `scheduler`) y los bucles
+   stateful.
+2. Añadir property tests de reserva única y no doble gasto al ledger cuando
+   exista la persistencia Postgres.
+3. Incorporar `golangci-lint` cuando su release soporte Go 1.27.
    `price-simulation` es L4 (integración), no entra en el lote puro de F1.
