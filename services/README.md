@@ -43,6 +43,7 @@ services/
 | `domain/coop` | ✅ **4/4** | Acciones y sesiones de aporte cooperativo |
 | `domain/telegrammenu` | ✅ **6/6** | Comandos, acciones, tasas y sesiones |
 | `domain/chatstream` | ✅ **3/3** | Framing SSE acotado y chat no bloqueante |
+| `domain/qusdcache` | ✅ **13/13** | Dedupe, prioridad, epoch/revisión, TTL y cierre |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
@@ -84,9 +85,9 @@ node --import tsx parity/runner/run.ts \
 
 ## Siguiente corte
 
-1. Portar los lotes restantes de L1 (`qusd-balance-cache`,
-   `market-hunting-*`, `dashboard-auth`, `dashboard-controls`,
-   `mobile-operator`, `telegram-runtime`, `scheduler`, `hunting-balance`).
+1. Portar los lotes restantes de L1 (`market-hunting-*`, `dashboard-auth`,
+   `dashboard-controls`, `mobile-operator`, `telegram-runtime`, `scheduler`,
+   `hunting-balance`).
 2. Añadir property tests de reserva única y no doble gasto al ledger cuando
    exista la persistencia Postgres.
 3. Incorporar `golangci-lint` cuando su release soporte Go 1.27.

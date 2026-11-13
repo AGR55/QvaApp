@@ -1064,6 +1064,13 @@ func dispatch(req request) (any, *opError) {
 		}
 		return telegramRateSessions(fields)
 
+	case "qusd.sequence":
+		fields, failure := object(req.Input)
+		if failure != nil {
+			return nil, failure
+		}
+		return qusdSequence(fields)
+
 	default:
 		return nil, &opError{
 			Class:   "protocol",
