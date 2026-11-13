@@ -53,10 +53,10 @@ services/
 | `domain/dashboardcontrol` | ✅ **3/3** | Pausa, cacería y refresco del panel |
 | `domain/markethunting` | ✅ **13/13** | Cola, supersesión, generaciones, pausa y stop |
 | `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
-| `platform/outbox` | — | Mensajes, lease, reintento y estados |
+| `platform/outbox` | — | Mensajes, worker, lease, reintento y transacciones |
 | `platform/inbox` | — | Dedupe por consumidor/mensaje |
 | `platform/idempotency` | — | Claim, replay, conflicto y expiración |
-| `platform/postgres` | — | Repositorios pgx + tests de integración |
+| `platform/postgres` | — | Repositorios pgx, enqueue transaccional y tests |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -94,8 +94,9 @@ node --import tsx parity/runner/run.ts \
   `postgres-f1` prueba esquema, triggers e importación desde un fixture mínimo.
 - El auditor SQL de invariantes (reservas, ledger, configuración y límites) y
   `verify-money.mjs` (saldos/ledger/operaciones a 8 dp) están en verde.
-- `outbox`/`inbox`/idempotencia están definidos en Go, con repositorios pgx y
-  tests de integración contra la migración `0003_outbox_inbox.sql`.
+- `outbox`/`inbox`/idempotencia están definidos en Go, con worker de outbox,
+  enqueue transaccional y repositorios pgx probados contra
+  `0003_outbox_inbox.sql`.
 - El `sha256` de `data/qvaapply.sqlite` no cambió. Los detalles y garantías
   están en [db/README.md](db/README.md).
 - Referencia local: `verify.sh` ~18-23 s; `lint.sh` ~65-130 s según caché;

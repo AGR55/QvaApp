@@ -23,7 +23,7 @@ func setup(t *testing.T) *pgxpool.Pool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(context.Background(), "TRUNCATE core.outbox, core.inbox, core.idempotency_keys"); err != nil {
+	if _, err := pool.Exec(context.Background(), "TRUNCATE core.outbox, core.inbox, core.idempotency_keys, core.audit_log"); err != nil {
 		pool.Close()
 		t.Fatal(err)
 	}
@@ -146,5 +146,94 @@ func TestIdempotencyRepository(t *testing.T) {
 	}
 	if _, status, _ := repository.Claim(ctx, "apply", "key-2", "hash-a", 300, 1000); status != idempotency.Claimed {
 		t.Fatalf("reintento = %s", status)
+	}
+}
+
+type capturePublisher struct {
+	ids []string
+}
+
+func (publisher *capturePublisher) Publish(_ context.Context, message outbox.Message) error {
+	publisher.ids = append(publisher.ids, message.ID)
+	return nil
+}
+
+func TestTransactionalEnqueueAndWorker(t *testing.T) {
+	pool := setup(t)
+	repository := postgres.NewOutboxRepository(pool)
+	ctx := context.Background()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO core.audit_log (created_at, action, detail) VALUES (1, 'tx-test', 'detail')"); err != nil {
+		t.Fatal(err)
+	}
+	message, _ := outbox.New("tx-1", "core.events", `{"ok":true}`, "tx-key-1", 100)
+	if inserted, err := repository.InsertTx(ctx, tx, message); err != nil || !inserted {
+		t.Fatalf("InsertTx = %v, %v", inserted, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var auditCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM core.audit_log WHERE action = 'tx-test'").Scan(&auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("audit count = %d", auditCount)
+	}
+
+	worker, err := outbox.NewWorker(repository, &capturePublisher{}, outbox.WorkerConfig{
+		WorkerID: "worker", Batch: 10, Lease: 1000 * 1000 * 1000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := worker.RunOnce(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Published != 1 {
+		t.Fatalf("published = %d", result.Published)
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT state FROM core.outbox WHERE id = 'tx-1'").Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "published" {
+		t.Fatalf("state = %s", state)
+	}
+}
+
+func TestTransactionalEnqueueRollback(t *testing.T) {
+	pool := setup(t)
+	repository := postgres.NewOutboxRepository(pool)
+	ctx := context.Background()
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, "INSERT INTO core.audit_log (created_at, action, detail) VALUES (1, 'rollback-test', 'detail')"); err != nil {
+		t.Fatal(err)
+	}
+	message, _ := outbox.New("rollback-1", "core.events", "{}", "rollback-key-1", 100)
+	if _, err := repository.InsertTx(ctx, tx, message); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var auditCount, outboxCount int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM core.audit_log WHERE action = 'rollback-test'").Scan(&auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM core.outbox WHERE id = 'rollback-1'").Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 0 || outboxCount != 0 {
+		t.Fatalf("rollback incompleto: audit=%d outbox=%d", auditCount, outboxCount)
 	}
 }

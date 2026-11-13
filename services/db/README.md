@@ -112,7 +112,7 @@ bash services/db/test-postgres.sh
 # importación desde un fixture SQLite mínimo + triggers
 bash services/db/test-postgres-import.sh
 
-# repositorios Go (outbox/inbox/idempotencia) con pgx
+# repositorios Go + worker + enqueue transaccional con pgx
 bash services/db/test-postgres-go.sh
 ```
 

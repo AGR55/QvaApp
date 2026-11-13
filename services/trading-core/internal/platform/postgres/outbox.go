@@ -3,10 +3,16 @@ package postgres
 import (
 	"context"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/outbox"
 )
+
+type execer interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
 
 // OutboxRepository persiste el outbox transaccional.
 type OutboxRepository struct {
@@ -20,11 +26,20 @@ func NewOutboxRepository(pool *pgxpool.Pool) *OutboxRepository {
 
 // Insert añade un mensaje; devuelve false si la idempotency_key ya existía.
 func (repository *OutboxRepository) Insert(ctx context.Context, message outbox.Message) (bool, error) {
+	return insertOutbox(ctx, repository.pool, message)
+}
+
+// InsertTx añade un mensaje dentro de una transacción de negocio.
+func (repository *OutboxRepository) InsertTx(ctx context.Context, tx pgx.Tx, message outbox.Message) (bool, error) {
+	return insertOutbox(ctx, tx, message)
+}
+
+func insertOutbox(ctx context.Context, executor execer, message outbox.Message) (bool, error) {
 	state := message.State
 	if state == "" {
 		state = outbox.Pending
 	}
-	tag, err := repository.pool.Exec(ctx, `
+	tag, err := executor.Exec(ctx, `
 		INSERT INTO core.outbox
 			(id, topic, payload_json, idempotency_key, state, attempts, available_at, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

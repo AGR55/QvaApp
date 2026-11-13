@@ -52,8 +52,9 @@ vacía: 41 tablas, 40 índices y 6 FKs.
   ese job.
 - `0003_outbox_inbox.sql` añade outbox, inbox e idempotencia con constraints e
   índices; el fixture verifica uniqueness, CHECKs y transiciones.
-- Repositorios `pgx` de outbox/inbox/idempotencia probados contra PostgreSQL 16
-  (`go test -race` con `TEST_POSTGRES_URL`).
+- Repositorios `pgx` de outbox/inbox/idempotencia, worker de outbox y enqueue
+  transaccional probados contra PostgreSQL 16 (`go test -race` con
+  `TEST_POSTGRES_URL`).
 - Tiempos locales de referencia: esquema+triggers+auditor **248 ms**;
   importación+importes+triggers **574 ms**.
 
