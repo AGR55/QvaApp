@@ -88,6 +88,7 @@ func Size(offer Offer, capacity decimal.Value, limit *decimal.Value) *Offer {
 func OrderForOperation(offer Offer, orderUUID *string) (Offer, error) {
 	if orderUUID == nil || *orderUUID == "" {
 		if offer.OfferKind == "flexible" {
+			//lint:ignore ST1005 el mensaje es contractual y debe coincidir con el oráculo
 			return Offer{}, errors.New("La operación flexible requiere identificar su orden.")
 		}
 		return offer, nil
@@ -100,6 +101,7 @@ func OrderForOperation(offer Offer, orderUUID *string) (Offer, error) {
 		}
 	}
 	if order == nil {
+		//lint:ignore ST1005 el mensaje es contractual y debe coincidir con el oráculo
 		return Offer{}, errors.New("QvaPay no devolvió la orden de esta operación; se conserva el estado local.")
 	}
 	var updatedAt *string

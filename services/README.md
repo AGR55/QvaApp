@@ -36,6 +36,7 @@ services/
 | `domain/applybudget` | ✅ **9/9** | Ventana de dos apply, legado y `Retry-After` |
 | `domain/hunting` | ✅ **6/6** | Elegibilidad, frescura y requisitos faltantes |
 | `domain/flexible` | ✅ **21/21** | Dimensionado, orden hija y recuperación inequívoca |
+| `domain/ledger` | — | Reservas puras: sin doble gasto ni doble reserva |
 | `cmd/parity-sut` | ✅ | Protocolo NDJSON v1 (`stdin`/`stdout`) |
 
 ## Comandos
@@ -43,6 +44,9 @@ services/
 ```bash
 # Verificación completa (lo usa CI)
 bash services/scripts/verify.sh
+
+# Análisis estático + vulnerabilidades (lo usa CI)
+bash services/scripts/lint.sh
 
 # Solo un filtro del runner
 bash services/scripts/verify.sh --filter market-math
@@ -59,6 +63,17 @@ node --import tsx parity/runner/run.ts \
   --command "services/trading-core/bin/parity-sut" \
   --suite pure --filter market-math
 ```
+
+## Calidad
+
+- `go test -race ./...` en ambos módulos.
+- Property tests con `testing/quick`:
+  - redondeo QUSD idempotente y totales CUP múltiplos de 10,
+  - plan presupuestario que nunca supera el disponible,
+  - libro de reservas sin doble reserva ni doble gasto.
+- `go vet`, `staticcheck` v0.8.2 y `govulncheck` v1.9.0.
+- `golangci-lint` queda pendiente: la release v1.64 no soporta el export data
+  de Go 1.27.
 
 ## Siguiente corte
 

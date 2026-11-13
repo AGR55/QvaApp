@@ -50,6 +50,9 @@ jobs:
       - name: Verify Go workspace (F1)
         run: bash services/scripts/verify.sh
 
+      - name: Go static analysis and vulnerabilities (F1)
+        run: bash services/scripts/lint.sh
+
   deploy:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: verify

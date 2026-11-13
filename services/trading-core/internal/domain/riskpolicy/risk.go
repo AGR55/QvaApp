@@ -133,13 +133,7 @@ func Evaluate(context Context) (Decision, error) {
 	opportunity := context.Opportunity
 	limits := context.Limits
 
-	slippageCheck := advisoryMaximumCheck(
-		"slippage",
-		"Deslizamiento frente a referencia",
-		decimal.Zero(),
-		limits.MaxSlippagePercent,
-		"El precio se aleja demasiado de la referencia.",
-	)
+	var slippageCheck Check
 	if opportunity.ReferenceRate.Sign() <= 0 {
 		slippageCheck = Check{
 			Code:   "slippage",
