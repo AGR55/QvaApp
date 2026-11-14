@@ -13,6 +13,7 @@ services/
     internal/domain/      # reglas puras, sin I/O
     internal/replay/      # cargador estricto del corpus F0/F2
   db/                     # Postgres local, importador SQLite y esquema v1
+  f2/                     # benchmark y recuperación del prototipo F2
   scripts/verify.sh       # gofmt + test -race + vet + paridad
 ```
 
@@ -134,6 +135,18 @@ go run ./cmd/replay-bench --iterations 1000
 ```
 
 Informe: [2026-11-13-f2-prototype-report.md](../../docs/migration/2026-11-13-f2-prototype-report.md).
+
+## F3 shadow
+
+El servicio `cmd/trading-core` expone `/healthz`, `/readyz` y `/metrics` en
+`127.0.0.1:8090`. Se despliega aislado en `/opt/qvaapply-f3-shadow` con
+Postgres propio y sin tocar producción:
+
+```bash
+scripts/package-f3-shadow.sh
+```
+
+Guía: [docs/migration/2026-11-13-f3-shadow-deploy.md](../../docs/migration/2026-11-13-f3-shadow-deploy.md).
 
 ## Siguiente corte
 

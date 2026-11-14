@@ -22,3 +22,4 @@ artifacts/git-archive/
 android/local.properties
 artifacts/android/
 services/trading-core/bin/
+services/trading-core/trading-core

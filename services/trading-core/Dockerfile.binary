@@ -1,0 +1,11 @@
+# Runtime mínimo: recibe un binario estático ya compilado para linux/amd64.
+# El contexto de build es la raíz del repositorio.
+FROM scratch
+
+COPY services/trading-core/trading-core /trading-core
+
+EXPOSE 8090
+
+USER 65532:65532
+
+ENTRYPOINT ["/trading-core"]

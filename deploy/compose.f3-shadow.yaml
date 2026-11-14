@@ -1,0 +1,79 @@
+# Despliegue F3 en modo shadow, aislado de producción.
+#
+# - Proyecto, red y volúmenes propios (qvaapply-f3-shadow).
+# - Postgres 16 sin puerto publicado: solo accesible desde esta red.
+# - trading-core se publica únicamente en loopback y nunca comparte datos con
+#   el contenedor Node `qvaapply` ni con /opt/qvaapply.
+#
+# Uso local:
+#   F3_POSTGRES_PASSWORD=... docker compose -f deploy/compose.f3-shadow.yaml config
+# En la VPS lo orquesta scripts/deploy-f3-shadow.sh (lee /opt/qvaapply-f3-shadow/.env).
+name: qvaapply-f3-shadow
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: qvaapply-f3-shadow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qvaapply
+      POSTGRES_USER: qvaapply
+      POSTGRES_PASSWORD: ${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}
+    # Sin `ports`: la base de datos no se expone fuera de la red del proyecto.
+    volumes:
+      - qvaapply-f3-shadow-pgdata:/var/lib/postgresql/data
+    networks:
+      - shadow
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U qvaapply -d qvaapply
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  trading-core:
+    build:
+      context: ..
+      dockerfile: services/trading-core/Dockerfile.binary
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    container_name: qvaapply-f3-shadow-trading-core
+    restart: unless-stopped
+    stop_grace_period: 15s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8090"
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      SHADOW_MODE: "true"
+      SERVICE_NAME: trading-core-shadow
+    ports:
+      # Solo loopback: no se publica en el firewall ni en Nginx.
+      - "127.0.0.1:8090:8090"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/trading-core", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+networks:
+  shadow:
+    name: qvaapply-f3-shadow
+
+volumes:
+  qvaapply-f3-shadow-pgdata:
+    name: qvaapply-f3-shadow-pgdata
