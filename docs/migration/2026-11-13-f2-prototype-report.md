@@ -45,8 +45,10 @@ TS  replay-bench-ts: iterations=100 p50=35-39ms p95=52-57ms p99=58-75ms
 - p99 de un replay completo de 4 casos: **1,8–3,0 ms** (< 10 ms objetivo local).
 - El prototipo Go es ~**20–32×** más rápido y usa ~**8×** menos RSS en este
   escenario, sin contar la persistencia que TS sí incluye.
-- No se midió CPU ni p99 de recepción→despacho aislado; el replay completo es
-  una cota superior local.
+- CPU local (shell `time`): Go ~1,20 s de CPU para 1000 iteraciones
+  (~1,2 ms/iteración); TS ~1,03 s para 20 (~51 ms/iteración).
+- No se midió p99 de recepción→despacho aislado; el replay completo es una cota
+  superior local.
 
 ## Recuperación tras kill -9
 
