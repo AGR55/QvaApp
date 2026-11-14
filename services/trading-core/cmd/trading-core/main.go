@@ -20,6 +20,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/shadow"
 )
 
 const (
@@ -89,6 +92,7 @@ func run(logger *slog.Logger) error {
 	defer stop()
 
 	var readyCheck func(context.Context) error
+	var shadowStats shadowStatsFunc
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -100,12 +104,13 @@ func run(logger *slog.Logger) error {
 		} else {
 			defer pool.Close()
 			readyCheck = pool.Ping
+			shadowStats = postgres.NewShadowRepository(pool).Stats
 		}
 	}
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           newHandler(cfg, readyCheck),
+		Handler:           newHandler(cfg, readyCheck, shadowStats),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -146,16 +151,19 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
+type shadowStatsFunc func(context.Context) (shadow.Stats, error)
+
 type app struct {
-	cfg        config
-	readyCheck func(context.Context) error
-	requests   atomic.Uint64
+	cfg         config
+	readyCheck  func(context.Context) error
+	shadowStats shadowStatsFunc
+	requests    atomic.Uint64
 }
 
 // newHandler construye el router HTTP. readyCheck nil significa que no hay
 // base de datos configurada y /readyz responde listo.
-func newHandler(cfg config, readyCheck func(context.Context) error) http.Handler {
-	a := &app{cfg: cfg, readyCheck: readyCheck}
+func newHandler(cfg config, readyCheck func(context.Context) error, shadowStats shadowStatsFunc) http.Handler {
+	a := &app{cfg: cfg, readyCheck: readyCheck, shadowStats: shadowStats}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.handleHealthz)
@@ -190,7 +198,7 @@ func (a *app) handleReadyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (a *app) handleMetrics(w http.ResponseWriter, _ *http.Request) {
+func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	shadowMode := 0
 	if a.cfg.ShadowMode {
 		shadowMode = 1
@@ -207,6 +215,34 @@ func (a *app) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP trading_core_http_requests_total Total de peticiones HTTP recibidas.\n")
 	fmt.Fprintf(w, "# TYPE trading_core_http_requests_total counter\n")
 	fmt.Fprintf(w, "trading_core_http_requests_total %d\n", a.requests.Load())
+
+	stats := shadow.Stats{}
+	statsErr := 0
+	if a.shadowStats != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		value, err := a.shadowStats(ctx)
+		cancel()
+		if err != nil {
+			statsErr = 1
+		} else {
+			stats = value
+		}
+	}
+	fmt.Fprintf(w, "# HELP trading_core_shadow_runs_total Runs shadow persistidos.\n")
+	fmt.Fprintf(w, "# TYPE trading_core_shadow_runs_total gauge\n")
+	fmt.Fprintf(w, "trading_core_shadow_runs_total %d\n", stats.Runs)
+	fmt.Fprintf(w, "# HELP trading_core_shadow_decisions_total Decisiones shadow evaluadas.\n")
+	fmt.Fprintf(w, "# TYPE trading_core_shadow_decisions_total gauge\n")
+	fmt.Fprintf(w, "trading_core_shadow_decisions_total %d\n", stats.Decisions)
+	fmt.Fprintf(w, "# HELP trading_core_shadow_mismatches_total Divergencias shadow detectadas.\n")
+	fmt.Fprintf(w, "# TYPE trading_core_shadow_mismatches_total gauge\n")
+	fmt.Fprintf(w, "trading_core_shadow_mismatches_total %d\n", stats.Mismatches)
+	fmt.Fprintf(w, "# HELP trading_core_shadow_last_run_timestamp_seconds Último run shadow (Unix).\n")
+	fmt.Fprintf(w, "# TYPE trading_core_shadow_last_run_timestamp_seconds gauge\n")
+	fmt.Fprintf(w, "trading_core_shadow_last_run_timestamp_seconds %d\n", stats.LastRunAt)
+	fmt.Fprintf(w, "# HELP trading_core_shadow_stats_error Error consultando estadísticas shadow.\n")
+	fmt.Fprintf(w, "# TYPE trading_core_shadow_stats_error gauge\n")
+	fmt.Fprintf(w, "trading_core_shadow_stats_error %d\n", statsErr)
 }
 
 func (a *app) handleNotFound(w http.ResponseWriter, _ *http.Request) {

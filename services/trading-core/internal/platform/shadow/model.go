@@ -33,3 +33,11 @@ type Summary struct {
 	Matched    int
 	Mismatches int
 }
+
+// Stats agrega el estado global de los runs shadow.
+type Stats struct {
+	Runs       int64
+	Decisions  int64
+	Mismatches int64
+	LastRunAt  int64
+}

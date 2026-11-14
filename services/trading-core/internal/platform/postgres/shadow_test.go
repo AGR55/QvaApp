@@ -82,6 +82,14 @@ func TestShadowRepository(t *testing.T) {
 	if err := repository.FinishRun(ctx, "no-existe", 0, 0, 0); err == nil {
 		t.Fatal("FinishRun aceptó un run inexistente")
 	}
+
+	stats, err := repository.Stats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Runs != 1 || stats.Decisions != 2 || stats.Mismatches != 1 || stats.LastRunAt != 100 {
+		t.Fatalf("stats = %+v", stats)
+	}
 }
 
 func TestShadowRecordRunAtomic(t *testing.T) {

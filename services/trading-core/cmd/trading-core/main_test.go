@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/shadow"
 )
 
 func testConfig() config {
@@ -19,7 +21,7 @@ func testConfig() config {
 }
 
 func TestHealthz(t *testing.T) {
-	handler := newHandler(testConfig(), nil)
+	handler := newHandler(testConfig(), nil, nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/healthz", nil))
@@ -41,7 +43,7 @@ func TestHealthz(t *testing.T) {
 }
 
 func TestReadyzSinBaseDeDatos(t *testing.T) {
-	handler := newHandler(testConfig(), nil)
+	handler := newHandler(testConfig(), nil, nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -63,7 +65,7 @@ func TestReadyzConFalloDeBaseDeDatos(t *testing.T) {
 	readyCheck := func(context.Context) error {
 		return errors.New("ping fallido")
 	}
-	handler := newHandler(testConfig(), readyCheck)
+	handler := newHandler(testConfig(), readyCheck, nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -98,7 +100,7 @@ func TestMetrics(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := testConfig()
 			cfg.ShadowMode = tt.shadowMode
-			handler := newHandler(cfg, nil)
+			handler := newHandler(cfg, nil, nil)
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
@@ -125,7 +127,7 @@ func TestMetrics(t *testing.T) {
 }
 
 func TestNotFound(t *testing.T) {
-	handler := newHandler(testConfig(), nil)
+	handler := newHandler(testConfig(), nil, nil)
 
 	for _, path := range []string{"/", "/desconocido"} {
 		t.Run(path, func(t *testing.T) {
@@ -147,5 +149,38 @@ func TestNotFound(t *testing.T) {
 				t.Fatalf("status = %q, quiero not_found", body["status"])
 			}
 		})
+	}
+}
+
+func TestMetricsShadowStats(t *testing.T) {
+	stats := func(context.Context) (shadow.Stats, error) {
+		return shadow.Stats{Runs: 3, Decisions: 19, Mismatches: 2, LastRunAt: 1234}, nil
+	}
+	handler := newHandler(testConfig(), nil, stats)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	body := recorder.Body.String()
+	for _, expected := range []string{
+		"trading_core_shadow_runs_total 3",
+		"trading_core_shadow_decisions_total 19",
+		"trading_core_shadow_mismatches_total 2",
+		"trading_core_shadow_last_run_timestamp_seconds 1234",
+		"trading_core_shadow_stats_error 0",
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("métricas sin %q:\n%s", expected, body)
+		}
+	}
+}
+
+func TestMetricsShadowStatsError(t *testing.T) {
+	stats := func(context.Context) (shadow.Stats, error) {
+		return shadow.Stats{}, errors.New("db caída")
+	}
+	handler := newHandler(testConfig(), nil, stats)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if !strings.Contains(recorder.Body.String(), "trading_core_shadow_stats_error 1") {
+		t.Fatalf("no se expuso el error de métricas: %s", recorder.Body.String())
 	}
 }

@@ -37,6 +37,7 @@ required_paths=(
   scripts/deploy-f3-shadow.sh
   scripts/f3-shadow-replay.sh
   scripts/f3-shadow-audit.sh
+  scripts/install-f3-shadow-timer.sh
 )
 
 # Ambos binarios: servicio HTTP y ejecutor one-shot del corpus replay.
@@ -103,7 +104,8 @@ for required_member in \
   deploy/compose.f3-shadow.yaml \
   scripts/deploy-f3-shadow.sh \
   scripts/f3-shadow-replay.sh \
-  scripts/f3-shadow-audit.sh; do
+  scripts/f3-shadow-audit.sh \
+  scripts/install-f3-shadow-timer.sh; do
   if ! grep -Fqx -- "$required_member" <<<"$listing"; then
     echo "El paquete no contiene $required_member" >&2
     exit 1
