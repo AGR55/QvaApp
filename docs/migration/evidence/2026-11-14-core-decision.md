@@ -44,7 +44,9 @@ failed    = 0
 
 - El snapshot de configuración/balances se regenera en cada deploy; no es un
   lector vivo de la SQLite de producción.
-- No hay ejecución de apply, ledger ni escritura de dinero.
+- Las decisiones allowed generan una **simulación ledger** en
+  `shadow.core_executions` (`core.SimulateExecution`): movimientos, reserva y
+  saldo restante. No hay apply ni escritura de dinero real.
 - La cobertura de configuraciones/decisiones reales debe compararse con TS
   antes del corte.
 

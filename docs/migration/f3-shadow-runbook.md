@@ -12,6 +12,12 @@ producción**:
 - Jobs: replay, auditoría de decisiones, tail incremental e invariantes.
 - Nunca escribe en `/opt/qvaapply`, en la SQLite de producción ni en QvaPay.
 
+## Edge
+
+- `qvaapply-f3-shadow-edge`, puerto `127.0.0.1:8093`.
+- Sirve `public/` y `/api/edge/summary`; no sustituye el dashboard TS todavía.
+- Documento: [2026-11-14-edge-service.md](2026-11-14-edge-service.md).
+
 ## Notifier
 
 - `qvaapply-f3-shadow-notifier`, puerto `127.0.0.1:8092`.
