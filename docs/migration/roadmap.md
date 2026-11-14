@@ -192,9 +192,9 @@ Estado (2026-11-13): bootstrap shadow desplegado por SSH en
 loopback), sin tocar producción. Comparador persistente, replay del corpus y
 auditoría de decisiones reales operativos en la VPS: **4/4 casos · 14/14 pasos
 · 14/14 JSON idénticos** y **5/5 decisiones reales comparables**. Soak
-continuo iniciado con tail cada 5 min, auditoría horaria, replay diario e
-invariantes diarios. Caos (6 escenarios), benchmark y runbook completados.
-Pendiente completar 7 días/72 h y pasar a ingesta shadow en vivo.
+continuo iniciado con tail y muestreo de soak cada 5 min, auditoría horaria,
+replay y invariantes diarios. Caos (6 escenarios), benchmark y runbook
+completados. Pendiente completar 7 días/72 h y pasar a ingesta shadow en vivo.
 
 Actividades:
 

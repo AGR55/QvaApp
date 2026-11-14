@@ -47,8 +47,11 @@ El CPU del servicio es una muestra puntual; el soak de 72 h sigue pendiente.
 
 ## Estado de jobs
 
-- 4 timers activos: tail (5 min), audit (1 h), replay (diario), invariants
-  (diario).
+- 5 timers activos: tail (5 min), soak (5 min), audit (1 h), replay (diario),
+  invariants (diario).
+- Muestras iniciales de soak:
+  `rss=2352 KB`, luego `rss=2259 KB`; Postgres ~29.2-29.6 MB; 0 divergencias;
+  0 violaciones.
 - Métricas: runs, decisiones, divergencias, último run, violaciones de
   invariantes, último invariantes y error de estadísticas.
 - Runbook: `docs/migration/f3-shadow-runbook.md`.
@@ -61,5 +64,5 @@ El CPU del servicio es una muestra puntual; el soak de 72 h sigue pendiente.
 | 7 días de decisiones idénticas | En curso |
 | Invariantes limpios diarios | Mecanismo listo; 1 día limpio |
 | Caos documentado | ✅ |
-| RSS/CPU medidos | ✅; falta confirmar 72 h sin fugas |
+| RSS/CPU medidos | ✅; muestreador activo, falta confirmar 72 h sin fugas |
 | Runbook | ✅ |

@@ -47,7 +47,7 @@ bash /tmp/f3-deploy/scripts/deploy-f3-shadow.sh \
 
 El script crea una contraseña aleatoria en `/opt/qvaapply-f3-shadow/.env` la
 primera vez, construye la imagen y, **antes de mover el symlink `current`**,
-aplica la migración con:
+aplica las migraciones shadow (`0004`, `0005`, `0006`) con:
 
 ```bash
 docker compose --env-file /opt/qvaapply-f3-shadow/.env \
@@ -111,6 +111,8 @@ Los timers se instalan una sola vez en la VPS:
 - `qvaapply-f3-audit.timer`: cada hora; auditoría completa.
 - `qvaapply-f3-replay.timer`: diario; corpus replay.
 - `qvaapply-f3-invariants.timer`: diario; invariantes SQLite read-only.
+- `qvaapply-f3-soak.timer`: cada 5 min; RSS/CPU y contadores en
+  `shadow.soak_samples`.
 - `Persistent=true`; sobreviven reinicios.
 - No tocan `/opt/qvaapply`; se desinstalan con `... uninstall`.
 

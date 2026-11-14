@@ -71,6 +71,7 @@ El script:
 | `qvaapply-f3-audit.timer` | 1 h | auditoría completa de `decision_events` |
 | `qvaapply-f3-replay.timer` | 1 día | corpus replay |
 | `qvaapply-f3-invariants.timer` | 1 día | invariantes SQLite |
+| `qvaapply-f3-soak.timer` | 5 min | muestra RSS/CPU y contadores |
 
 Todos son `Persistent=true`, con `Nice=10` e IO idle. Solo administran
 unidades `qvaapply-f3-*`.
@@ -84,6 +85,19 @@ Archivo: `/opt/qvaapply-f3-shadow/data/decision-events.cursor` (permisos 600).
 - El límite superior se fija antes de exportar; las filas nuevas durante la
   ejecución quedan para la siguiente.
 - Si el contenedor o la base fallan, el cursor no avanza y se reintenta.
+
+## Soak
+
+`qvaapply-f3-soak.timer` guarda cada 5 min en `shadow.soak_samples`:
+RSS del servicio y de Postgres, CPU del servicio, runs, decisiones,
+divergencias y violaciones de invariantes. El informe:
+
+```bash
+/opt/qvaapply-f3-shadow/current/scripts/f3-shadow-soak-report.sh
+```
+
+Falla si hay divergencias o violaciones. La tabla permite comparar el RSS
+inicial y final para detectar fugas durante las 72 h.
 
 ## Métricas
 
@@ -210,7 +224,7 @@ no queden runs parciales.
 | Decisiones idénticas 7 días | En curso con tail cada 5 min |
 | Invariantes limpios diarios | Mecanismo listo; 1 ejecución limpia registrada |
 | Caos documentado | ✅ 6 escenarios |
-| RSS/CPU medidos; 72 h sin fugas | Medición hecha; soak pendiente |
+| RSS/CPU medidos; 72 h sin fugas | Muestreador activo; soak pendiente |
 | Runbook | ✅ este documento |
 
 Siguiente fase: completar 7 días/72 h, conectar la ingesta shadow en vivo y
