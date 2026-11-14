@@ -54,6 +54,10 @@ replay unit:  CPU 1.01957 s
 
 El CPU del servicio es una muestra puntual; el soak de 72 h sigue pendiente.
 
+## Release
+
+- Release activa en la VPS: `b6124d7c136cfa820d68ce307665538a5e773b52`.
+
 ## Estado de jobs
 
 - 6 timers activos: tail (5 min), soak (5 min), audit (1 h), replay (diario),
