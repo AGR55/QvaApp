@@ -22,8 +22,11 @@ mutaciones de QvaPay y puede escalarse o reiniciarse sin tocar `core`.
 ## Implementación
 
 - Binario `cmd/hunter`, puerto `127.0.0.1:8091`.
-- Poll QvaPay cada 3 s (20/min, por debajo del límite de 25/min).
-- Promedios `/p2p/averages` cacheados 60 s.
+- **Feed SSE real** `/v2/p2p/stream` con `app-id`/`app-secret` cifrados; evalúa
+  cada `p2p.created/reopened/resumed/range_*` al recibirlo.
+- Poll fallback cada 5 s; promedios cacheados 60 s. El feed es la vía rápida y
+  el polling solo cubre caídas del stream.
+- Credenciales SSE en `hunter.env` (600), nunca en el repo.
 - Config de mercados generada desde SQLite de producción en cada deploy.
 - Token descifrado en memoria; secretos en `/opt/qvaapply-f3-shadow/hunter.env`
   (600), fuera del repositorio.
@@ -38,20 +41,36 @@ mutaciones de QvaPay y puede escalarse o reiniciarse sin tocar `core`.
   - `shadow.hunter_events` (cola durable candidato → core, idempotente).
 - Retención de polls: 24 h.
 - `/healthz`, `/readyz`, `/metrics`, `/candidates`.
+- Métricas SSE: conexión, eventos crudos/oportunidad, errores, lag y decisión.
 - Healthcheck del contenedor sin shell.
 
 ## Resultado en VPS
 
+### SSE (camino rápido)
+
 ```text
-polls       = 551
-latencia    = avg 107,5 ms · p95 202 ms · max 518 ms
-candidatos  = 148 auto_buy (evaluaciones) · 1 evento durable único pending
-mercados    = 5 (BANDECPREPAGO, BANK_CUP, CLASICA, ETECSA, ZELLE)
-errores     = 0 en la última ventana
+conexión    = 1
+eventos SSE = 11 crudos · 7 oportunidades (10 s)
+lag         = 39 ms
+decisión+persistencia = 12,2 ms
+errores SSE = 0
 ```
 
-El evento durable se deduplica por oferta/decisión/tasa; por eso 148
-evaluaciones repetidas producen un único evento para core.
+El feed entrega `p2p.range_updated` de ofertas vivas cada pocos segundos. La
+evaluación local pura medida es **21,7 µs para 20 ofertas**; el resto del
+tiempo es red/entrega y persistencia.
+
+### Polling fallback
+
+```text
+polls       = 551 históricos
+latencia    = avg 107,5 ms · p95 202 ms · max 518 ms
+fallback    = 5 s (12/min), 0 errores tras el ajuste
+mercados    = 5 (BANDECPREPAGO, BANK_CUP, CLASICA, ETECSA, ZELLE)
+```
+
+El evento durable se deduplica por oferta/decisión/tasa; por eso las
+evaluaciones repetidas no generan eventos duplicados para core.
 
 ## Tests y verificación
 
@@ -62,6 +81,13 @@ lint/staticcheck/govuln     OK
 E2E local fake QvaPay       OK, evento persistido
 deploy VPS                  OK, hunter healthy
 ```
+
+## Por qué antes parecía lento
+
+`hunter_last_latency_ms` medía el **fetch HTTP completo**, no la evaluación. El
+round-trip a QvaPay desde la VPS es de 100–180 ms (TLS + Cloudflare + API). La
+evaluación Go es de microsegundos. Con SSE el coste dominante baja a la entrega
+del feed (~39 ms) y desaparece la espera de hasta 3 s del polling.
 
 ## Seguridad
 
