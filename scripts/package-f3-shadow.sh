@@ -130,7 +130,6 @@ for required_member in \
   services/trading-core/hunter \
   services/trading-core/notifier \
   services/trading-core/edge \
-  public \
   services/trading-core/cmd/trading-core/main.go \
   services/trading-core/cmd/shadow-replay/main.go \
   services/trading-core/cmd/shadow-audit/main.go \
