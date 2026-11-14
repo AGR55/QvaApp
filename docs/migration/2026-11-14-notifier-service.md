@@ -37,6 +37,13 @@ El webhook `POST /telegram/update` ya procesa mensajes/callbacks con
 `ParseUpdate` + `HandleUpdate`, autorización por `TELEGRAM_ADMIN_CHAT_ID` y
 respuesta dry-run. No hay long-polling ni token real usado en shadow.
 
+## Webhook de Telegram
+
+`internal/notifier/webhook.go` añade `SetWebhook`, `DeleteWebhook` y
+`WebhookInfo` con tests de URL/secret/allowed_updates y sin long-polling.
+Todavía no se registra automáticamente en Telegram; falta decidir la URL
+pública y la ventana de corte.
+
 ## Qué no incluye todavía
 
 - Comandos, menús, callbacks y sesiones del bot TS.

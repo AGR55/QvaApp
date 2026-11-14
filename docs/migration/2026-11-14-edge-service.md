@@ -45,6 +45,18 @@ post-logout= 401
 
 No se imprime ni se devuelve la contraseña/token.
 
+## API móvil autenticada
+
+Rutas nuevas, protegidas por la cookie de sesión:
+
+- `GET /api/mobile/overview`
+- `GET /api/mobile/markets`
+- `GET /api/mobile/alerts?limit=20`
+- `GET /api/mobile/operations?limit=20`
+
+Verificado en VPS: sin sesión 401; con login 200 en las cuatro rutas. El store
+Postgres es solo lectura y no expone token/CSRF.
+
 ## Limitación actual
 
 El edge ya sirve un shell HTML mínimo que carga `/dashboard/app.js` y assets

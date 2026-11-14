@@ -16,10 +16,11 @@ Incluye:
 - health/ready de 8090/8091/8092/8093;
 - SSE conectado, **0 polls `/p2p`**, **0 errores SSE**;
 - cola hunter 0 pendientes/fallidos;
-- **14 decisiones core**, **13 ejecuciones ledger**, **7 operaciones
+- **19 decisiones core**, **18 ejecuciones ledger**, **12 operaciones
   confirmadas**;
 - invariantes sin violaciones;
-- producción TS intacta en `02bb5af`, API 200.
+- producción TS intacta en `02bb5af`, API 200;
+- API móvil autenticada: overview/markets/alerts/operations 200.
 
 ## Módulos integrados
 

@@ -148,7 +148,8 @@ persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
 defecto), evaluación de ofertas y cola durable; `trading-core` consume esa cola,
 evalúa `riskpolicy` con snapshot de producción y persiste
 `shadow.core_decisions` sin mutar dinero. `scripts/f3-compare.sh` compara las métricas TS y Go; `scripts/f3-cutover-check.sh`
-valida el estado pre-cutover. `cmd/notifier` es el
+valida el estado pre-cutover. `internal/notifier/webhook.go` registra el webhook
+de Telegram y `internal/edge/mobile_api.go` sirve la API móvil autenticada. `cmd/notifier` es el
 servicio send-only de Telegram (dry-run por defecto, sin long-polling);
 `cmd/edge` sirve shell, assets y resumen shadow sin proxy al monolito.
 `internal/notifier/commands.go` y `update.go` contienen parser y webhook de
