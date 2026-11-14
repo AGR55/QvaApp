@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/shadow"
 )
 
@@ -133,4 +134,16 @@ func (repository *ShadowRepository) Stats(ctx context.Context) (shadow.Stats, er
 		return shadow.Stats{}, err
 	}
 	return stats, nil
+}
+
+// LatestQvapayBalance devuelve el último saldo QUSD observado por el shadow.
+func (repository *ShadowRepository) LatestQvapayBalance(ctx context.Context) (decimal.Value, error) {
+	var balance string
+	err := repository.pool.QueryRow(ctx, `
+		SELECT balance FROM shadow.qvapay_snapshots
+		ORDER BY captured_at DESC LIMIT 1`).Scan(&balance)
+	if err != nil {
+		return decimal.Zero(), err
+	}
+	return decimal.Parse(balance)
 }

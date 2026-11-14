@@ -94,12 +94,13 @@ offers_migration_file="$release_dir/services/db/migrations/0008_qvapay_offers.sq
 hunter_migration_file="$release_dir/services/db/migrations/0009_hunter.sql"
 hunter_events_migration_file="$release_dir/services/db/migrations/0010_hunter_events.sql"
 hunter_source_migration_file="$release_dir/services/db/migrations/0011_hunter_source.sql"
+core_decisions_migration_file="$release_dir/services/db/migrations/0012_core_decisions.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012." >&2
   exit 2
 fi
 
@@ -160,6 +161,19 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     printf '{"price_guard_percent":15,"markets":%s}\n' "$markets" > "$temporary_config"
     chmod 644 "$temporary_config"
     mv -f "$temporary_config" "$hunter_data_dir/hunter-config.json"
+    risk=$(sqlite3 -readonly -json "file:${prod_db}?mode=ro" \
+      "SELECT max_qusd_per_operation, max_concurrent_qusd_exposure, max_daily_applied_qusd, max_concurrent_operations, min_qusd_reserve, max_quote_age_seconds, min_expected_margin_percent, max_slippage_percent, max_consecutive_errors, market_cooldown_seconds, counterparty_cooldown_seconds FROM risk_config WHERE id = 1;")
+    core_markets=$(sqlite3 -readonly -json "file:${prod_db}?mode=ro" \
+      "SELECT code, active, buy_max_rate, sell_min_rate, purchase_max_qusd, sell_fee_percent, outgoing_transfer_fee, hunt_buy_enabled, hunt_sell_enabled FROM market_config ORDER BY code;")
+    core_fiat=$(sqlite3 -readonly -json "file:${prod_db}?mode=ro" \
+      "SELECT key, value FROM settings WHERE key LIKE 'fiat_balance:%' ORDER BY key;")
+    [[ -n $risk ]] || risk='{}'
+    [[ -n $core_markets ]] || core_markets='[]'
+    [[ -n $core_fiat ]] || core_fiat='[]'
+    temporary_core_config=$(mktemp "$hunter_data_dir/core-config.XXXXXX")
+    printf '{"risk":%s,"markets":%s,"fiat":%s}\n' "$risk" "$core_markets" "$core_fiat" > "$temporary_core_config"
+    chmod 644 "$temporary_core_config"
+    mv -f "$temporary_core_config" "$hunter_data_dir/core-config.json"
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret
   fi
@@ -167,6 +181,7 @@ fi
 export F3_HUNTER_ENV="$hunter_env"
 export F3_HUNTER_DATA_DIR="$hunter_data_dir"
 export F3_HUNTER_CONFIG_FILE="$hunter_data_dir/hunter-config.json"
+export F3_CORE_CONFIG_FILE="$hunter_data_dir/core-config.json"
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"

@@ -131,3 +131,66 @@ func truncate(value string, max int) string {
 
 // NowMS facilita pruebas deterministas.
 func NowMS() int64 { return time.Now().UnixMilli() }
+
+// CoreDecision es el resultado persistido del shadow core.
+type CoreDecision struct {
+	EventID        string
+	OfferUUID      string
+	Coin           string
+	Side           string
+	HunterDecision string
+	CoreKind       string
+	Allowed        bool
+	Amount         string
+	Receive        string
+	Rate           string
+	Reason         string
+	ChecksJSON     string
+	CreatedAt      int64
+}
+
+// CompleteWithDecision guarda la decisión y marca el evento como procesado en
+// la misma transacción.
+func (repository *HunterEventRepository) CompleteWithDecision(
+	ctx context.Context,
+	decision CoreDecision,
+	processedAt int64,
+) error {
+	tx, err := repository.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+	_, err = tx.Exec(ctx, `
+		INSERT INTO shadow.core_decisions
+			(event_id, offer_uuid, coin, side, hunter_decision, core_kind,
+			 allowed, amount, receive, rate, reason, checks_json, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		ON CONFLICT (event_id) DO UPDATE SET
+			core_kind = excluded.core_kind,
+			allowed = excluded.allowed,
+			reason = excluded.reason,
+			checks_json = excluded.checks_json,
+			created_at = excluded.created_at`,
+		decision.EventID, decision.OfferUUID, decision.Coin, decision.Side,
+		decision.HunterDecision, decision.CoreKind, decision.Allowed,
+		decision.Amount, decision.Receive, decision.Rate, decision.Reason,
+		decision.ChecksJSON, decision.CreatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `
+		UPDATE shadow.hunter_events
+		SET state = 'processed', processed_at = $2, last_error = NULL
+		WHERE event_id = $1 AND state = 'claimed'`,
+		decision.EventID, processedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("evento hunter %s no está reclamado", decision.EventID)
+	}
+	return tx.Commit(ctx)
+}

@@ -58,6 +58,9 @@ services:
       DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
       SHADOW_MODE: "true"
       SERVICE_NAME: trading-core-shadow
+      CORE_CONFIG_FILE: /config/core-config.json
+    volumes:
+      - ${F3_CORE_CONFIG_FILE:-../data/core-config.json}:/config/core-config.json:ro
     ports:
       # Solo loopback: no se publica en el firewall ni en Nginx.
       - "127.0.0.1:8090:8090"
@@ -151,6 +154,8 @@ services:
       - /migrations/0010_hunter_events.sql
       - -f
       - /migrations/0011_hunter_source.sql
+      - -f
+      - /migrations/0012_core_decisions.sql
     networks:
       - shadow
     read_only: true

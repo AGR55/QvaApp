@@ -92,6 +92,8 @@ type Evaluation struct {
 	OfferUUID string
 	Coin      string
 	Side      string
+	Amount    decimal.Value
+	Receive   decimal.Value
 	Rate      decimal.Value
 	Median    decimal.Value
 	Decision  string
@@ -104,12 +106,15 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		OfferUUID string `json:"offerUuid"`
 		Coin      string `json:"coin"`
 		Side      string `json:"side"`
+		Amount    string `json:"amount"`
+		Receive   string `json:"receive"`
 		Rate      string `json:"rate"`
 		Median    string `json:"median"`
 		Decision  string `json:"decision"`
 		Reason    string `json:"reason"`
 	}{
 		OfferUUID: e.OfferUUID, Coin: e.Coin, Side: e.Side,
+		Amount: e.Amount.Format(8), Receive: e.Receive.Format(8),
 		Rate: e.Rate.Format(8), Median: e.Median.Format(8),
 		Decision: e.Decision, Reason: e.Reason,
 	})
@@ -121,6 +126,8 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 	evaluation := Evaluation{
 		OfferUUID: offer.UUID,
 		Coin:      offer.Coin,
+		Amount:    offer.Amount,
+		Receive:   offer.Receive,
 		Rate:      decimal.Zero(),
 		Median:    decimal.Zero(),
 		Decision:  "ignored",

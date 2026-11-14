@@ -13,16 +13,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 )
 
 type hunterConsumer struct {
-	pool      *pgxpool.Pool
-	logger    *slog.Logger
-	worker    string
-	processed atomic.Uint64
-	failed    atomic.Uint64
-	pending   atomic.Int64
+	pool       *pgxpool.Pool
+	logger     *slog.Logger
+	worker     string
+	config     core.Config
+	configErr  error
+	shadowRepo *postgres.ShadowRepository
+	processed  atomic.Uint64
+	allowed    atomic.Uint64
+	blocked    atomic.Uint64
+	failed     atomic.Uint64
+	pending    atomic.Int64
 }
 
 type hunterPayload struct {
@@ -30,6 +36,8 @@ type hunterPayload struct {
 	Coin      string `json:"coin"`
 	Side      string `json:"side"`
 	Decision  string `json:"decision"`
+	Amount    string `json:"amount"`
+	Receive   string `json:"receive"`
 	Rate      string `json:"rate"`
 }
 
@@ -38,7 +46,14 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	if worker == "" {
 		worker = "trading-core"
 	}
-	return &hunterConsumer{pool: pool, logger: logger, worker: worker}
+	config, configErr := core.LoadConfig(envOrDefault("CORE_CONFIG_FILE", "/config/core-config.json"))
+	if configErr != nil {
+		logger.Warn("configuración core no disponible; el consumidor fallará eventos", "error", configErr)
+	}
+	return &hunterConsumer{
+		pool: pool, logger: logger, worker: worker, config: config,
+		configErr: configErr, shadowRepo: postgres.NewShadowRepository(pool),
+	}
 }
 
 func (consumer *hunterConsumer) run(ctx context.Context) {
@@ -53,19 +68,7 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 			}
 		} else {
 			for _, event := range events {
-				if err := validateHunterPayload(event.PayloadJSON); err != nil {
-					consumer.failed.Add(1)
-					_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
-					consumer.logger.Warn("evento hunter inválido", "event_id", event.EventID, "error", err)
-					continue
-				}
-				if err := repository.Complete(ctx, event.EventID, postgres.NowMS()); err != nil {
-					consumer.failed.Add(1)
-					_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
-					consumer.logger.Warn("completar evento hunter falló", "event_id", event.EventID, "error", err)
-					continue
-				}
-				consumer.processed.Add(1)
+				consumer.consume(ctx, repository, event)
 			}
 		}
 		if pending, err := repository.Pending(ctx); err == nil {
@@ -79,23 +82,92 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 	}
 }
 
+func (consumer *hunterConsumer) consume(
+	ctx context.Context,
+	repository *postgres.HunterEventRepository,
+	event postgres.HunterEvent,
+) {
+	payload, err := parseHunterPayload(event.PayloadJSON)
+	if err != nil {
+		consumer.failed.Add(1)
+		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
+		consumer.logger.Warn("evento hunter inválido", "event_id", event.EventID, "error", err)
+		return
+	}
+	if consumer.configErr != nil {
+		consumer.failed.Add(1)
+		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), "configuración core no disponible")
+		return
+	}
+	amount, _ := decimal.Parse(payload.Amount)
+	receive, _ := decimal.Parse(payload.Receive)
+	rate, _ := decimal.Parse(payload.Rate)
+	balance, err := consumer.shadowRepo.LatestQvapayBalance(ctx)
+	if err != nil {
+		balance = decimal.Zero()
+	}
+	result, err := core.Decide(core.Event{
+		OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
+		Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
+	}, consumer.config, balance, postgres.NowMS())
+	if err != nil {
+		consumer.failed.Add(1)
+		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
+		consumer.logger.Warn("decisión core falló", "event_id", event.EventID, "error", err)
+		return
+	}
+	checksJSON, _ := json.Marshal(result.Checks)
+	reason := strings.Join(result.Reasons, " · ")
+	if err := repository.CompleteWithDecision(ctx, postgres.CoreDecision{
+		EventID: event.EventID, OfferUUID: payload.OfferUUID, Coin: payload.Coin,
+		Side: payload.Side, HunterDecision: payload.Decision, CoreKind: result.Kind,
+		Allowed: result.Allowed, Amount: amount.Format(8), Receive: receive.Format(8),
+		Rate: rate.Format(8), Reason: reason, ChecksJSON: string(checksJSON),
+		CreatedAt: postgres.NowMS(),
+	}, postgres.NowMS()); err != nil {
+		consumer.failed.Add(1)
+		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
+		consumer.logger.Warn("persistir decisión core falló", "event_id", event.EventID, "error", err)
+		return
+	}
+	consumer.processed.Add(1)
+	if result.Allowed {
+		consumer.allowed.Add(1)
+	} else {
+		consumer.blocked.Add(1)
+	}
+}
+
 func validateHunterPayload(payload string) error {
+	_, err := parseHunterPayload(payload)
+	return err
+}
+
+func parseHunterPayload(payload string) (hunterPayload, error) {
 	var event hunterPayload
 	if err := json.Unmarshal([]byte(payload), &event); err != nil {
-		return fmt.Errorf("payload inválido: %w", err)
+		return hunterPayload{}, fmt.Errorf("payload inválido: %w", err)
 	}
 	if strings.TrimSpace(event.OfferUUID) == "" || strings.TrimSpace(event.Coin) == "" {
-		return fmt.Errorf("payload sin oferta o mercado")
+		return hunterPayload{}, fmt.Errorf("payload sin oferta o mercado")
 	}
 	if event.Side != "buy" && event.Side != "sell" {
-		return fmt.Errorf("side inválido: %q", event.Side)
+		return hunterPayload{}, fmt.Errorf("side inválido: %q", event.Side)
 	}
 	if event.Decision != "auto_buy" && event.Decision != "manual_sell" {
-		return fmt.Errorf("decision inválida: %q", event.Decision)
+		return hunterPayload{}, fmt.Errorf("decision inválida: %q", event.Decision)
+	}
+	amount, err := decimal.Parse(strings.TrimSpace(event.Amount))
+	if err != nil || amount.Sign() <= 0 {
+		return hunterPayload{}, fmt.Errorf("amount inválido: %q", event.Amount)
+	}
+	receive, err := decimal.Parse(strings.TrimSpace(event.Receive))
+	if err != nil || receive.Sign() < 0 {
+		return hunterPayload{}, fmt.Errorf("receive inválido: %q", event.Receive)
 	}
 	rate, err := decimal.Parse(strings.TrimSpace(event.Rate))
 	if err != nil || rate.Sign() <= 0 {
-		return fmt.Errorf("rate inválida: %q", event.Rate)
+		return hunterPayload{}, fmt.Errorf("rate inválida: %q", event.Rate)
 	}
-	return nil
+	return event, nil
 }
