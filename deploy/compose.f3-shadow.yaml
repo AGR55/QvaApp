@@ -4,7 +4,8 @@
 # - Postgres 16 sin puerto publicado: solo accesible desde esta red.
 # - trading-core se publica únicamente en loopback y nunca comparte datos con
 #   el contenedor Node `qvaapply` ni con /opt/qvaapply.
-# - Los servicios `shadow-migrate`, `shadow-replay` y `shadow-audit` son
+# - Los servicios `shadow-migrate`, `shadow-replay`, `shadow-audit` e
+#   `shadow-invariants` son
 #   one-shot y solo se ejecutan explícitamente con `docker compose run`
 #   (perfil `tools`).
 #
@@ -91,13 +92,15 @@ services:
       PGDATABASE: qvaapply
       PGPASSWORD: ${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}
     volumes:
-      - ../services/db/migrations/0004_shadow.sql:/migrations/0004_shadow.sql:ro
+      - ../services/db/migrations:/migrations:ro
     command:
       - psql
       - -v
       - ON_ERROR_STOP=1
       - -f
       - /migrations/0004_shadow.sql
+      - -f
+      - /migrations/0005_invariants.sql
     networks:
       - shadow
     read_only: true

@@ -87,12 +87,13 @@ tar -xzf "$archive" -C "$release_dir"
 
 compose_file="$release_dir/$compose_rel"
 migration_file="$release_dir/services/db/migrations/0004_shadow.sql"
+invariants_migration_file="$release_dir/services/db/migrations/0005_invariants.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file ]]; then
-  echo "El release no contiene services/db/migrations/0004_shadow.sql." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005." >&2
   exit 2
 fi
 

@@ -32,12 +32,15 @@ required_paths=(
   services/shared
   services/go.work
   services/db/migrations/0004_shadow.sql
+  services/db/migrations/0005_invariants.sql
+  services/db/audit-invariants.sqlite.sql
   parity/fixtures/replay/2026-11-12
   deploy/compose.f3-shadow.yaml
   scripts/deploy-f3-shadow.sh
   scripts/f3-shadow-replay.sh
   scripts/f3-shadow-audit.sh
   scripts/f3-shadow-tail.sh
+  scripts/f3-shadow-invariants.sh
   scripts/install-f3-shadow-timer.sh
 )
 
@@ -96,6 +99,8 @@ for required_member in \
   services/trading-core/cmd/shadow-replay/main.go \
   services/trading-core/cmd/shadow-audit/main.go \
   services/db/migrations/0004_shadow.sql \
+  services/db/migrations/0005_invariants.sql \
+  services/db/audit-invariants.sqlite.sql \
   parity/fixtures/replay/2026-11-12/events.ndjson \
   parity/fixtures/replay/2026-11-12/scenarios.json \
   parity/fixtures/replay/2026-11-12/decisions.ndjson \
@@ -107,6 +112,7 @@ for required_member in \
   scripts/f3-shadow-replay.sh \
   scripts/f3-shadow-audit.sh \
   scripts/f3-shadow-tail.sh \
+  scripts/f3-shadow-invariants.sh \
   scripts/install-f3-shadow-timer.sh; do
   if ! grep -Fqx -- "$required_member" <<<"$listing"; then
     echo "El paquete no contiene $required_member" >&2

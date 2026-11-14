@@ -154,7 +154,10 @@ func TestNotFound(t *testing.T) {
 
 func TestMetricsShadowStats(t *testing.T) {
 	stats := func(context.Context) (shadow.Stats, error) {
-		return shadow.Stats{Runs: 3, Decisions: 19, Mismatches: 2, LastRunAt: 1234}, nil
+		return shadow.Stats{
+			Runs: 3, Decisions: 19, Mismatches: 2, LastRunAt: 1234,
+			InvariantViolations: 1, LastInvariantAt: 5678,
+		}, nil
 	}
 	handler := newHandler(testConfig(), nil, stats)
 	recorder := httptest.NewRecorder()
@@ -165,6 +168,8 @@ func TestMetricsShadowStats(t *testing.T) {
 		"trading_core_shadow_decisions_total 19",
 		"trading_core_shadow_mismatches_total 2",
 		"trading_core_shadow_last_run_timestamp_seconds 1234",
+		"trading_core_shadow_invariant_violations_total 1",
+		"trading_core_shadow_last_invariant_timestamp_seconds 5678",
 		"trading_core_shadow_stats_error 0",
 	} {
 		if !strings.Contains(body, expected) {

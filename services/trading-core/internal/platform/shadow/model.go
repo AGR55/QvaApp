@@ -36,8 +36,10 @@ type Summary struct {
 
 // Stats agrega el estado global de los runs shadow.
 type Stats struct {
-	Runs       int64
-	Decisions  int64
-	Mismatches int64
-	LastRunAt  int64
+	Runs                int64
+	Decisions           int64
+	Mismatches          int64
+	LastRunAt           int64
+	InvariantViolations int64
+	LastInvariantAt     int64
 }

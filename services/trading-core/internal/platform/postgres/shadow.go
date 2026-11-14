@@ -117,12 +117,17 @@ func (repository *ShadowRepository) Summary(ctx context.Context, runID string) (
 func (repository *ShadowRepository) Stats(ctx context.Context) (shadow.Stats, error) {
 	var stats shadow.Stats
 	err := repository.pool.QueryRow(ctx, `
-		SELECT count(*),
-			coalesce(sum(steps), 0),
-			coalesce(sum(steps - matched), 0),
-			coalesce(max(created_at), 0)
-		FROM shadow.runs`,
-	).Scan(&stats.Runs, &stats.Decisions, &stats.Mismatches, &stats.LastRunAt)
+		SELECT
+			(SELECT count(*) FROM shadow.runs),
+			(SELECT coalesce(sum(steps), 0) FROM shadow.runs),
+			(SELECT coalesce(sum(steps - matched), 0) FROM shadow.runs),
+			(SELECT coalesce(max(created_at), 0) FROM shadow.runs),
+			(SELECT coalesce(sum(violations), 0) FROM shadow.invariant_runs),
+			(SELECT coalesce(max(created_at), 0) FROM shadow.invariant_runs)`,
+	).Scan(
+		&stats.Runs, &stats.Decisions, &stats.Mismatches, &stats.LastRunAt,
+		&stats.InvariantViolations, &stats.LastInvariantAt,
+	)
 	if err != nil {
 		return shadow.Stats{}, err
 	}
