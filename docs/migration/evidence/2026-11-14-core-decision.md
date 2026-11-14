@@ -48,6 +48,25 @@ failed    = 0
 - La cobertura de configuraciones/decisiones reales debe compararse con TS
   antes del corte.
 
+## Comparativa rápida TS vs Go
+
+Ejecutada con `scripts/f3-compare.sh` (ventanas distintas; tendencia, no
+benchmark formal):
+
+```text
+métrica             TS          Go
+fuente              hybrid      SSE-only
+decisión            6 ms        5,9 ms
+delivery lag        15 ms       9 ms
+polls /p2p          2 cuentas   0
+eventos/errores     n/a         24 / 0
+core pendientes     n/a         0
+```
+
+El core shadow tiene además una decisión `apply` persistida en
+`shadow.core_decisions`; los contadores en memoria se reiniciaron al recrear el
+contenedor.
+
 ## Tests
 
 ```text

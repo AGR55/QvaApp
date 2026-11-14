@@ -117,6 +117,15 @@ Archivo: `/opt/qvaapply-f3-shadow/data/decision-events.cursor` (permisos 600).
   ejecución quedan para la siguiente.
 - Si el contenedor o la base fallan, el cursor no avanza y se reintenta.
 
+## Comparativa TS vs Go
+
+```bash
+/opt/qvaapply-f3-shadow/current/scripts/f3-compare.sh
+```
+
+El script lee solo métricas no sensibles de `settings` y de `/metrics`; no
+imprime token, clave ni saldos.
+
 ## Soak
 
 `qvaapply-f3-soak.timer` guarda cada 5 min en `shadow.soak_samples`:
