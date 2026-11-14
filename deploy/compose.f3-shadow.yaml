@@ -101,6 +101,8 @@ services:
       - /migrations/0004_shadow.sql
       - -f
       - /migrations/0005_invariants.sql
+      - -f
+      - /migrations/0006_soak.sql
     networks:
       - shadow
     read_only: true
