@@ -81,3 +81,20 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatalf("mercado inesperado: %+v", item)
 	}
 }
+
+func BenchmarkEvaluate(b *testing.B) {
+	offers := make([]qvapay.Offer, 0, 20)
+	for index := 0; index < 20; index++ {
+		item := offer("sell", "10", "18000")
+		item.UUID = string(rune('a' + index))
+		offers = append(offers, item)
+	}
+	average := qvapay.Average{MedianSell: decimal.MustParse("2000")}
+	configMarket := market()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		for _, item := range offers {
+			_ = Evaluate(item, average, configMarket, decimal.FromInt(15))
+		}
+	}
+}
