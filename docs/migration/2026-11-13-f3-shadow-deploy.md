@@ -114,6 +114,8 @@ Los timers se instalan una sola vez en la VPS:
 - `qvaapply-f3-soak.timer`: cada 5 min; RSS/CPU y contadores en
   `shadow.soak_samples`.
 - `qvaapply-f3-workflows.timer`: diario; `risk_decision_json` de workflows.
+- `qvaapply-f3-qvapay.timer`: cada hora; GET read-only a QvaPay y snapshot en
+  `shadow.qvapay_snapshots`.
 - `Persistent=true`; sobreviven reinicios.
 - No tocan `/opt/qvaapply`; se desinstalan con `... uninstall`.
 
@@ -149,7 +151,7 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 
 ## Estado desplegado (2026-11-13)
 
-- Release activa `3c4e72ad22db34ae10b19e78296c528fde1bd565` en
+- Release activa `66b97167950f6b5bbf3c28ecacbc60594a9ecc8d` en
   `/opt/qvaapply-f3-shadow`.
 - Migración `0004_shadow.sql` aplicada; replay y auditoría persistentes.
 - Run `f3-vps-20261114T021952Z`: **4/4 casos, 14/14 pasos, 14/14 JSON
@@ -164,7 +166,8 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
   [replay](evidence/2026-11-13-f3-shadow-replay.md) ·
   [decision-audit](evidence/2026-11-13-f3-decision-audit.md) ·
   [soak-start](evidence/2026-11-13-f3-soak-start.md) ·
-  [gate-controls](evidence/2026-11-13-f3-gate-controls.md).
+  [gate-controls](evidence/2026-11-13-f3-gate-controls.md) ·
+  [qvapay-live](evidence/2026-11-13-f3-qvapay-live.md).
 
 ## Límites de esta entrega
 

@@ -74,6 +74,7 @@ El script:
 | `qvaapply-f3-invariants.timer` | 1 día | invariantes SQLite |
 | `qvaapply-f3-soak.timer` | 5 min | muestra RSS/CPU y contadores |
 | `qvaapply-f3-workflows.timer` | 1 día | `risk_decision_json` de workflows |
+| `qvaapply-f3-qvapay.timer` | 1 hora | snapshot QvaPay read-only |
 
 Todos son `Persistent=true`, con `Nice=10` e IO idle. Solo administran
 unidades `qvaapply-f3-*`.
@@ -160,6 +161,18 @@ journalctl -u qvaapply-f3-tail.service -n 80 --no-pager
   `docker compose ... run --rm shadow-migrate`.
 - Si hay divergencias, el run queda persistido y `/metrics` lo refleja.
 
+### QvaPay no responde o el token falla
+
+```bash
+systemctl status qvaapply-f3-qvapay.service --no-pager -n 50
+journalctl -u qvaapply-f3-qvapay.service -n 80 --no-pager
+```
+
+El error es genérico: no imprime token ni clave. Si el token está revirado,
+renovarlo con el flujo de login existente; este servicio no hace login ni
+mutaciones. Si falla TLS, comprobar que la imagen incluye
+`/etc/ssl/certs/ca-certificates.crt`.
+
 ### Workflows con divergencias
 
 ```bash
@@ -228,6 +241,9 @@ no queden runs parciales.
   `no-new-privileges`.
 - No hay puerto público ni Nginx para F3.
 - No se guardan secretos en el repositorio.
+- El token QvaPay se descifra en memoria desde `settings.qvapay_token`; la
+  clave y el token solo se pasan al contenedor con `docker compose run -e`.
+  No se persisten en claro ni se registran.
 
 ## Estado del gate F3
 
@@ -239,5 +255,5 @@ no queden runs parciales.
 | RSS/CPU medidos; 72 h sin fugas | Muestreador activo; soak pendiente |
 | Runbook | ✅ este documento |
 
-Siguiente fase: completar 7 días/72 h, conectar la ingesta shadow en vivo y
-portar los casos de uso restantes.
+Siguiente fase: completar 7 días/72 h, conectar el snapshot QvaPay a decisiones
+shadow y portar los casos de uso restantes.

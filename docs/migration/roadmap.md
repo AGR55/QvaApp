@@ -196,9 +196,10 @@ continuo iniciado con tail y muestreo de soak cada 5 min, auditoría horaria,
 replay, invariantes y workflows diarios. Caos (6 escenarios), benchmark y
 runbook completados. También se auditan **17/17 workflows reales** con
 `risk_decision_json`, invariantes de continuidad fiat/operaciones/intenciones y
-existe un cliente QvaPay **read-only** con tests. Pendiente completar 7 días/72
-h, portar el resto de casos de uso y conectar el cliente QvaPay a la ingesta
-shadow en vivo.
+existe un cliente QvaPay **read-only** con tests y ya se ejecutan snapshots
+reales horarios (`/user`, `/p2p`, `/p2p/averages`). Pendiente completar 7
+días/72 h, conectar esos datos a decisiones shadow y portar el resto de casos
+de uso.
 
 Actividades:
 
