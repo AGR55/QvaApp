@@ -91,12 +91,13 @@ invariants_migration_file="$release_dir/services/db/migrations/0005_invariants.s
 soak_migration_file="$release_dir/services/db/migrations/0006_soak.sql"
 qvapay_migration_file="$release_dir/services/db/migrations/0007_qvapay.sql"
 offers_migration_file="$release_dir/services/db/migrations/0008_qvapay_offers.sql"
+hunter_migration_file="$release_dir/services/db/migrations/0009_hunter.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009." >&2
   exit 2
 fi
 
@@ -121,12 +122,54 @@ if ! compose_for "$compose_file" run --rm -T shadow-migrate; then
   exit 1
 fi
 
+# Prepara el hunter long-running con secretos y config fuera del repositorio.
+hunter_enabled=false
+hunter_env="$app_root/hunter.env"
+hunter_data_dir="$app_root/data"
+prod_env="/opt/qvaapply/config/env"
+prod_db="/opt/qvaapply/data/qvaapply.sqlite"
+if [[ -r $prod_env && -r $prod_db ]]; then
+  local_key=$(sed -n 's/^[[:space:]]*LOCAL_ENCRYPTION_KEY=//p' "$prod_env" | tail -n 1 | tr -d '\r')
+  local_key=${local_key#\"}
+  local_key=${local_key%\"}
+  encrypted_token=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+    "SELECT value FROM settings WHERE key = 'qvapay_token';" | tr -d '\r')
+  if [[ $local_key =~ ^[a-fA-F0-9]{64}$ && -n $encrypted_token ]]; then
+    install -d -m 700 "$hunter_data_dir"
+    temporary_env=$(mktemp "$app_root/hunter.env.XXXXXX")
+    {
+      printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
+      printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
+    } > "$temporary_env"
+    chmod 600 "$temporary_env"
+    mv -f "$temporary_env" "$hunter_env"
+    markets=$(sqlite3 -readonly -json "file:${prod_db}?mode=ro" \
+      "SELECT code, active, buy_max_rate, sell_min_rate, purchase_max_qusd, outgoing_transfer_fee, hunt_buy_enabled, hunt_sell_enabled FROM market_config ORDER BY code;")
+    [[ -n $markets ]] || markets='[]'
+    temporary_config=$(mktemp "$hunter_data_dir/hunter-config.XXXXXX")
+    printf '{"price_guard_percent":15,"markets":%s}\n' "$markets" > "$temporary_config"
+    chmod 644 "$temporary_config"
+    mv -f "$temporary_config" "$hunter_data_dir/hunter-config.json"
+    hunter_enabled=true
+    unset local_key encrypted_token
+  fi
+fi
+export F3_HUNTER_ENV="$hunter_env"
+export F3_HUNTER_DATA_DIR="$hunter_data_dir"
+
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"
 
 started=true
-if ! compose_for "$compose_file" up -d --remove-orphans; then
-  started=false
+if [[ $hunter_enabled == true ]]; then
+  if ! compose_for "$compose_file" --profile hunter up -d --remove-orphans; then
+    started=false
+  fi
+else
+  echo "Hunter deshabilitado: no hay token QvaPay utilizable." >&2
+  if ! compose_for "$compose_file" up -d --remove-orphans; then
+    started=false
+  fi
 fi
 
 healthy=false
@@ -136,6 +179,12 @@ for _ in {1..60}; do
       "http://127.0.0.1:${shadow_port}/healthz" >/dev/null \
     && curl --fail --silent --show-error --max-time 3 \
       "http://127.0.0.1:${shadow_port}/readyz" >/dev/null; then
+    if [[ $hunter_enabled == true ]]; then
+      curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8091/healthz" >/dev/null \
+        && curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8091/readyz" >/dev/null || break
+    fi
     healthy=true
     break
   fi
@@ -151,7 +200,7 @@ if [[ $healthy != true ]]; then
     mv -Tf "$app_root/current.next" "$app_root/current"
     F3_REVISION=$(basename "$previous_release")
     export F3_REVISION
-    if compose_for "$previous_release/$compose_rel" up -d --build --remove-orphans; then
+    if compose_for "$previous_release/$compose_rel" --profile hunter up -d --build --remove-orphans; then
       echo "Se restauró la release anterior: $previous_release" >&2
     else
       echo "No se pudo restaurar la release anterior: $previous_release" >&2
@@ -169,3 +218,6 @@ echo "trading-core shadow desplegado en $release_dir"
 echo "  healthz: http://127.0.0.1:${shadow_port}/healthz"
 echo "  readyz:  http://127.0.0.1:${shadow_port}/readyz"
 echo "  metrics: http://127.0.0.1:${shadow_port}/metrics"
+if [[ $hunter_enabled == true ]]; then
+  echo "  hunter:  http://127.0.0.1:8091/metrics"
+fi

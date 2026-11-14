@@ -10,6 +10,7 @@ COPY services/trading-core/shadow-replay /shadow-replay
 COPY services/trading-core/shadow-audit /shadow-audit
 COPY services/trading-core/shadow-workflows /shadow-workflows
 COPY services/trading-core/shadow-qvapay /shadow-qvapay
+COPY services/trading-core/hunter /hunter
 
 EXPOSE 8090
 

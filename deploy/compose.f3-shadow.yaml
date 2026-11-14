@@ -77,6 +77,43 @@ services:
       retries: 6
       start_period: 10s
 
+  # Servicio de cacerías: polling QvaPay read-only cada segundo. No escribe
+  # dinero ni llama a mutaciones. Se activa con el perfil `hunter`.
+  hunter:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["hunter"]
+    container_name: qvaapply-f3-shadow-hunter
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${F3_HUNTER_ENV:-/dev/null}
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      HUNTER_CONFIG_FILE: /config/hunter-config.json
+      HUNTER_POLL_MS: ${HUNTER_POLL_MS:-2500}
+      PORT: "8091"
+    volumes:
+      - ${F3_HUNTER_DATA_DIR:-../data}:/config:ro
+    ports:
+      - "127.0.0.1:8091:8091"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/hunter", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   # Aplica services/db/migrations/0004_shadow.sql con psql, sin runner.
   # Se lanza desde scripts/deploy-f3-shadow.sh antes de activar la release.
   shadow-migrate:
@@ -107,6 +144,8 @@ services:
       - /migrations/0007_qvapay.sql
       - -f
       - /migrations/0008_qvapay_offers.sql
+      - -f
+      - /migrations/0009_hunter.sql
     networks:
       - shadow
     read_only: true
