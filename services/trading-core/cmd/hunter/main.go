@@ -29,7 +29,7 @@ import (
 
 const (
 	defaultPort     = "8091"
-	defaultPollMS   = 5000
+	defaultPollMS   = 0
 	defaultConfig   = "/config/hunter-config.json"
 	shutdownTimeout = 10 * time.Second
 )
@@ -82,7 +82,7 @@ func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[stri
 func (source *qvapaySource) Averages(ctx context.Context) (map[string]qvapay.Average, error) {
 	source.mu.Lock()
 	defer source.mu.Unlock()
-	if len(source.averages) > 0 && time.Since(source.averagesAt) < time.Minute {
+	if len(source.averages) > 0 && time.Since(source.averagesAt) < 5*time.Minute {
 		return source.averages, nil
 	}
 	averages, err := source.client.Averages(ctx)
@@ -189,8 +189,8 @@ func loadConfig() (config, error) {
 		return config{}, errors.New("falta LOCAL_ENCRYPTION_KEY")
 	}
 	pollMS, err := strconv.Atoi(envOrDefault("HUNTER_POLL_MS", strconv.Itoa(defaultPollMS)))
-	if err != nil || pollMS < 100 || pollMS > 60_000 {
-		return config{}, errors.New("HUNTER_POLL_MS debe estar entre 100 y 60000")
+	if err != nil || pollMS < 0 || pollMS > 60_000 || (pollMS > 0 && pollMS < 1000) {
+		return config{}, errors.New("HUNTER_POLL_MS debe ser 0 (SSE-only) o estar entre 1000 y 60000")
 	}
 	cfg.PollMS = pollMS
 	port, err := strconv.Atoi(cfg.Port)
@@ -250,6 +250,15 @@ func (service *service) startStream(ctx context.Context, logger *slog.Logger) {
 		return
 	}
 	stream := qvapay.NewStream()
+	// Con SSE-only no hay poll que llene la caché de medianas: se carga una
+	// vez y se refresca cada 5 min.
+	go func() {
+		seedCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if _, err := service.source.Averages(seedCtx); err != nil {
+			logger.Warn("promedios QvaPay iniciales no disponibles", "error", err)
+		}
+	}()
 	go func() {
 		err := stream.Run(ctx, qvapay.StreamCredentials{AppID: appID, AppSecret: appSecret}, service.handleStreamEvent, service.handleStreamState)
 		if err != nil && ctx.Err() == nil {
@@ -341,6 +350,10 @@ func maxInt64(left, right int64) int64 {
 }
 
 func (service *service) loop(ctx context.Context) {
+	if service.cfg.PollMS <= 0 {
+		<-ctx.Done()
+		return
+	}
 	interval := time.Duration(service.cfg.PollMS) * time.Millisecond
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -510,9 +523,17 @@ func (service *service) readyz(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "Postgres"})
 		return
 	}
+	if service.streamConnected.Load() {
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+	maxAge := int64(15)
+	if service.cfg.PollMS > 0 {
+		maxAge = int64(3*service.cfg.PollMS/1000 + 5)
+	}
 	last := service.lastPollAt.Load()
-	if last == 0 || time.Now().Unix()-last > int64(3*service.cfg.PollMS/1000+5) {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "sin poll reciente"})
+	if last == 0 || time.Now().Unix()-last > maxAge {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "sin feed ni poll reciente"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
