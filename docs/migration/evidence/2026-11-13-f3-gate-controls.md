@@ -7,6 +7,9 @@
 - Ejecución en producción read-only: **0 violaciones**.
 - Persistencia: `shadow.invariant_runs`.
 - Run VPS: `inv-vps-20261114T032428Z`, `violations=0`.
+- Cobertura ampliada: continuidad y aritmética de `fiat_balance_history`,
+  operaciones no positivas, tipos/estados de intenciones, fechas incoherentes y
+  estados de reservas. Nuevos runs `inv-fiat-...` e `inv-ops-...`: 0.
 - Timer diario `qvaapply-f3-invariants.timer` activo.
 
 ## Workflows reales
@@ -17,6 +20,14 @@
 - El comparador reutiliza la reconstrucción de riesgo desde
   `risk_decision_json.checks`.
 - Local (copia antigua): **11/11**.
+
+## Cliente QvaPay read-only
+
+- `internal/platform/qvapay`: solo GET (`/user`, `/p2p`, `/p2p/{uuid}`,
+  `/p2p/averages`, `/transaction`).
+- Sin login ni mutaciones; allowlist de rutas, timeout 5 s, 8 MiB y
+  redirecciones solo al mismo host.
+- Tests con `httptest` en verde; no se usaron credenciales reales.
 
 ## Caos
 
@@ -56,7 +67,7 @@ El CPU del servicio es una muestra puntual; el soak de 72 h sigue pendiente.
 
 ## Release
 
-- Release activa en la VPS: `b6124d7c136cfa820d68ce307665538a5e773b52`.
+- Release activa en la VPS: `3c4e72ad22db34ae10b19e78296c528fde1bd565`.
 
 ## Estado de jobs
 

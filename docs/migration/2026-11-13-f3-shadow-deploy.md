@@ -149,7 +149,7 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 
 ## Estado desplegado (2026-11-13)
 
-- Release activa `b6124d7c136cfa820d68ce307665538a5e773b52` en
+- Release activa `3c4e72ad22db34ae10b19e78296c528fde1bd565` en
   `/opt/qvaapply-f3-shadow`.
 - Migración `0004_shadow.sql` aplicada; replay y auditoría persistentes.
 - Run `f3-vps-20261114T021952Z`: **4/4 casos, 14/14 pasos, 14/14 JSON

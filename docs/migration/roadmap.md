@@ -195,8 +195,10 @@ auditoría de decisiones reales operativos en la VPS: **4/4 casos · 14/14 pasos
 continuo iniciado con tail y muestreo de soak cada 5 min, auditoría horaria,
 replay, invariantes y workflows diarios. Caos (6 escenarios), benchmark y
 runbook completados. También se auditan **17/17 workflows reales** con
-`risk_decision_json`. Pendiente completar 7 días/72 h, portar el resto de casos
-de uso y pasar a ingesta shadow en vivo.
+`risk_decision_json`, invariantes de continuidad fiat/operaciones/intenciones y
+existe un cliente QvaPay **read-only** con tests. Pendiente completar 7 días/72
+h, portar el resto de casos de uso y conectar el cliente QvaPay a la ingesta
+shadow en vivo.
 
 Actividades:
 
