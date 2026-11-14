@@ -188,12 +188,12 @@ mv -Tf "$app_root/current.next" "$app_root/current"
 
 started=true
 if [[ $hunter_enabled == true ]]; then
-  if ! compose_for "$compose_file" --profile hunter up -d --remove-orphans; then
+  if ! compose_for "$compose_file" --profile hunter --profile notifier up -d --remove-orphans; then
     started=false
   fi
 else
   echo "Hunter deshabilitado: no hay token QvaPay utilizable." >&2
-  if ! compose_for "$compose_file" up -d --remove-orphans; then
+  if ! compose_for "$compose_file" --profile notifier up -d --remove-orphans; then
     started=false
   fi
 fi
@@ -212,7 +212,9 @@ for _ in {1..60}; do
     if curl --fail --silent --show-error --max-time 3 \
         "http://127.0.0.1:8091/healthz" >/dev/null \
       && curl --fail --silent --show-error --max-time 3 \
-        "http://127.0.0.1:8091/readyz" >/dev/null; then
+        "http://127.0.0.1:8091/readyz" >/dev/null \
+      && curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8092/healthz" >/dev/null; then
       healthy=true
       break
     fi
@@ -230,7 +232,7 @@ if [[ $healthy != true ]]; then
     mv -Tf "$app_root/current.next" "$app_root/current"
     F3_REVISION=$(basename "$previous_release")
     export F3_REVISION
-    if compose_for "$previous_release/$compose_rel" --profile hunter up -d --build --remove-orphans; then
+    if compose_for "$previous_release/$compose_rel" --profile hunter --profile notifier up -d --build --remove-orphans; then
       echo "Se restauró la release anterior: $previous_release" >&2
     else
       echo "No se pudo restaurar la release anterior: $previous_release" >&2
@@ -250,4 +252,5 @@ echo "  readyz:  http://127.0.0.1:${shadow_port}/readyz"
 echo "  metrics: http://127.0.0.1:${shadow_port}/metrics"
 if [[ $hunter_enabled == true ]]; then
   echo "  hunter:  http://127.0.0.1:8091/metrics"
+  echo "  notifier: http://127.0.0.1:8092/metrics"
 fi

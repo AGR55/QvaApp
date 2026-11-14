@@ -28,3 +28,4 @@ services/trading-core/shadow-audit
 services/trading-core/shadow-workflows
 services/trading-core/shadow-qvapay
 services/trading-core/hunter
+services/trading-core/notifier

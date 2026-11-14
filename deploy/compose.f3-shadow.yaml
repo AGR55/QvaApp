@@ -118,6 +118,35 @@ services:
       retries: 6
       start_period: 10s
 
+  notifier:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["notifier"]
+    container_name: qvaapply-f3-shadow-notifier
+    restart: unless-stopped
+    environment:
+      PORT: "8092"
+      NOTIFIER_DRY_RUN: ${NOTIFIER_DRY_RUN:-true}
+      NOTIFIER_INTERNAL_TOKEN: ${NOTIFIER_INTERNAL_TOKEN:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - "127.0.0.1:8092:8092"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/notifier", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
   # Aplica services/db/migrations/0004_shadow.sql con psql, sin runner.
   # Se lanza desde scripts/deploy-f3-shadow.sh antes de activar la release.
   shadow-migrate:
