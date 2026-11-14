@@ -20,15 +20,15 @@ healthz = ok
 readyz  = ok
 summary = {"hunterEvents":18,"coreAllowed":1,"coreBlocked":0,"corePending":0}
 asset /dashboard/app.js = 200, 380147 bytes
+/ (shell SPA)           = 200
 ```
 
 ## Limitación actual
 
-El monolito TS genera el HTML del dashboard dinámicamente; `public/dashboard`
-contiene los assets, no un `index.html`. El edge ya sirve assets y API de
-resumen, pero **todavía no sustituye el dashboard completo**. Falta:
+El edge ya sirve un shell HTML mínimo que carga `/dashboard/app.js` y assets
+reales. El monolito TS sigue generando el HTML/SSR completo y las rutas de API.
+**Todavía no sustituye el dashboard completo**. Falta:
 
-- plantilla HTML/SSR o build estático con índice;
 - rutas `/api/*` completas con auth/sesión/CSRF/origen;
 - contratos móviles y estáticos PWA;
 - canary Nginx.

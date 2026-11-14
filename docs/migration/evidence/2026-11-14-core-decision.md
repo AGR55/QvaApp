@@ -50,6 +50,14 @@ failed    = 0
 - La cobertura de configuraciones/decisiones reales debe compararse con TS
   antes del corte.
 
+## Máquina de estados
+
+`internal/core/operations.go` define el ciclo shadow
+`created → reserved → submitted → confirmed/rejected/uncertain` y
+`uncertain → reconciled/rejected`, con transiciones puras, terminales,
+idempotencia por ID y tests de matriz completa. Aún no se persiste ni ejecuta
+dinero.
+
 ## Comparativa rápida TS vs Go
 
 Ejecutada con `scripts/f3-compare.sh` (ventanas distintas; tendencia, no

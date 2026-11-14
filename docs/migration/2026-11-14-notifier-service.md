@@ -27,6 +27,13 @@ deduped  = 1
 errors   = 0
 ```
 
+## Comandos puros
+
+`internal/notifier/commands.go` añade parser/dispatcher de `/start`, `/help`,
+`/status`, `/pause` y `/resume`, con autorización por chat y textos estables.
+Los comandos de mutación no se conectan aún a Telegram; el parser está probado
+sin red.
+
 ## Qué no incluye todavía
 
 - Comandos, menús, callbacks y sesiones del bot TS.
