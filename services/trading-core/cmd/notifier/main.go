@@ -34,6 +34,8 @@ type config struct {
 	AdminChatID    int64
 	InternalKey    string
 	TelegramSecret string
+	WebhookURL     string
+	WebhookEnabled bool
 	DryRun         bool
 }
 
@@ -45,6 +47,7 @@ func loadConfig() (config, error) {
 		ChatID:         strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
 		InternalKey:    strings.TrimSpace(os.Getenv("NOTIFIER_INTERNAL_TOKEN")),
 		TelegramSecret: strings.TrimSpace(os.Getenv("NOTIFIER_TELEGRAM_SECRET")),
+		WebhookURL:     strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
 		DryRun:         true,
 	}
 	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_ADMIN_CHAT_ID")); raw != "" {
@@ -53,6 +56,13 @@ func loadConfig() (config, error) {
 			return config{}, fmt.Errorf("TELEGRAM_ADMIN_CHAT_ID inválido")
 		}
 		cfg.AdminChatID = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_ENABLED")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return config{}, fmt.Errorf("TELEGRAM_WEBHOOK_ENABLED inválido")
+		}
+		cfg.WebhookEnabled = value
 	}
 	if raw := strings.TrimSpace(os.Getenv("NOTIFIER_DRY_RUN")); raw != "" {
 		value, err := strconv.ParseBool(raw)
@@ -85,7 +95,17 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	client := notifier.NewClient(cfg.Token, cfg.BaseURL)
-	service := &service{cfg: cfg, client: client, dedupe: notifier.NewDeduper(10 * time.Minute), logger: logger}
+	service := &service{
+		cfg: cfg, client: client, dedupe: notifier.NewDeduper(10 * time.Minute),
+		logger: logger, webhookAdmin: &notifier.WebhookAdmin{
+			Client: client, InternalToken: cfg.InternalKey,
+			Registration: notifier.WebhookRegistration{
+				PublicURL: cfg.WebhookURL, Secret: cfg.TelegramSecret,
+				AllowedUpdates: []string{"message", "callback_query"},
+				Enabled:        cfg.WebhookEnabled,
+			},
+		},
+	}
 	server := &http.Server{
 		Addr: ":" + cfg.Port, Handler: service,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
@@ -115,10 +135,11 @@ type service struct {
 	dedupe *notifier.Deduper
 	logger *slog.Logger
 
-	requests atomic.Uint64
-	sent     atomic.Uint64
-	deduped  atomic.Uint64
-	errors   atomic.Uint64
+	webhookAdmin *notifier.WebhookAdmin
+	requests     atomic.Uint64
+	sent         atomic.Uint64
+	deduped      atomic.Uint64
+	errors       atomic.Uint64
 }
 
 type notifyRequest struct {
@@ -140,6 +161,8 @@ func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		service.notify(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/telegram/update":
 		service.telegramUpdate(w, r)
+	case strings.HasPrefix(r.URL.Path, "/admin/telegram"):
+		service.webhookAdmin.ServeHTTP(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 	}
