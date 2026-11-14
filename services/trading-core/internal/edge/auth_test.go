@@ -178,8 +178,8 @@ func TestVerifyRejectsTamperedToken(t *testing.T) {
 		"vacío":              "",
 		"sin separador":      encoded + signature,
 		"segmento extra":     token + ".extra",
-		"payload alterado":   flipLastChar(encoded) + "." + signature,
-		"firma alterada":     encoded + "." + flipLastChar(signature),
+		"payload alterado":   flipFirstChar(encoded) + "." + signature,
+		"firma alterada":     encoded + "." + flipFirstChar(signature),
 		"firma recortada":    encoded + "." + signature[:len(signature)-1],
 		"payload vacío":      "." + signature,
 		"firma vacía":        encoded + ".",
@@ -271,7 +271,7 @@ func TestValidateCSRF(t *testing.T) {
 	}
 
 	encoded, signature, _ := strings.Cut(token, ".")
-	if m.ValidateCSRF(flipLastChar(encoded)+"."+signature, csrf, now) {
+	if m.ValidateCSRF(flipFirstChar(encoded)+"."+signature, csrf, now) {
 		t.Fatal("ValidateCSRF aceptó un token manipulado")
 	}
 }
@@ -372,7 +372,7 @@ func TestAuthDoesNotLeakSecrets(t *testing.T) {
 	var errs []error
 	_, err = m.Verify(token, now.Add(time.Hour))
 	errs = append(errs, err)
-	_, err = m.Verify(flipLastChar(token), now)
+	_, err = m.Verify(flipFirstChar(token), now)
 	errs = append(errs, err)
 	_, err = NewSessionManager(make([]byte, 3), time.Minute)
 	errs = append(errs, err)
@@ -455,13 +455,16 @@ func TestNilSessionManager(t *testing.T) {
 	}
 }
 
-func flipLastChar(s string) string {
+// flipFirstChar altera el primer carácter base64url. Se cambia el primero y no
+// el último porque los bits sobrantes del último carácter pueden no afectar a
+// los bytes decodificados y harían el test intermitente.
+func flipFirstChar(s string) string {
 	if s == "" {
 		return "x"
 	}
-	last := s[len(s)-1]
-	if last == 'a' {
-		return s[:len(s)-1] + "b"
+	first := s[0]
+	if first == 'a' {
+		return "b" + s[1:]
 	}
-	return s[:len(s)-1] + "a"
+	return "a" + s[1:]
 }

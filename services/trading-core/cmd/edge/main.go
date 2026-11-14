@@ -32,6 +32,8 @@ type config struct {
 	AdminPassword string
 	SessionSecret string
 	SecureCookies bool
+	OperatorsFile string
+	PublicPushKey string
 }
 
 func main() {
@@ -80,6 +82,8 @@ func run(logger *slog.Logger) error {
 	var dashboard *edge.DashboardAPI
 	var observability *edge.ObservabilityAPI
 	var live *edge.LiveAPI
+	var configAPI *edge.ConfigAPI
+	var operators *edge.OperatorsAPI
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
 		if err != nil {
@@ -89,7 +93,16 @@ func run(logger *slog.Logger) error {
 				Manager: manager, Password: cfg.AdminPassword,
 				SecureCookies: cfg.SecureCookies, TTL: 12 * time.Hour,
 			}
+			operators = &edge.OperatorsAPI{
+				Sessions: manager,
+				File:     cfg.OperatorsFile,
+			}
+			configAPI = &edge.ConfigAPI{
+				Sessions:      manager,
+				PublicPushKey: cfg.PublicPushKey,
+			}
 			if pool != nil {
+				configAPI.Store = &edge.PostgresConfigStore{Pool: pool}
 				mobile = &edge.MobileAPI{
 					Sessions: manager,
 					Store:    &edge.PostgresMobileStore{Pool: pool},
@@ -113,6 +126,19 @@ func run(logger *slog.Logger) error {
 		if session != nil && r.URL.Path == "/api/session" {
 			session.ServeHTTP(w, r)
 			return
+		}
+		if operators != nil && r.URL.Path == "/api/mobile/operators" {
+			operators.ServeHTTP(w, r)
+			return
+		}
+		if configAPI != nil {
+			switch r.URL.Path {
+			case "/api/config", "/api/config-revisions", "/api/market-source",
+				"/api/audit", "/api/notifications", "/api/logs", "/api/recovery",
+				"/api/openapi.json", "/api/push/public-key":
+				configAPI.ServeHTTP(w, r)
+				return
+			}
 		}
 		if mobile != nil && (r.URL.Path == "/api/mobile" || strings.HasPrefix(r.URL.Path, "/api/mobile/")) {
 			mobile.ServeHTTP(w, r)
@@ -177,6 +203,8 @@ func loadConfig() (config, error) {
 		DatabaseURL:   strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		AdminPassword: strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
 		SessionSecret: strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
+		OperatorsFile: strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
+		PublicPushKey: strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),
 	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {

@@ -191,6 +191,15 @@ if [[ -r $prod_env && -r $prod_db ]]; then
       chmod 600 "$temporary_edge_env"
       mv -f "$temporary_edge_env" "$app_root/edge.env"
     fi
+    # Snapshot público de operadores móviles: solo campos que el panel puede
+    # mostrar. tokenHash y las ventanas de rate limit nunca salen de producción.
+    operators=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+      "SELECT json_group_array(json_object('id', json_extract(value,'\$.id'), 'label', json_extract(value,'\$.label'), 'scopes', json(json_extract(value,'\$.scopes')), 'createdAt', json_extract(value,'\$.createdAt'), 'revokedAt', json_extract(value,'\$.revokedAt'))) FROM json_each((SELECT value FROM settings WHERE key = 'mobile_operators_v1'));")
+    [[ -n $operators ]] || operators='[]'
+    temporary_operators=$(mktemp "$app_root/operators.XXXXXX")
+    printf '%s\n' "$operators" > "$temporary_operators"
+    chmod 644 "$temporary_operators"
+    mv -f "$temporary_operators" "$app_root/operators.json"
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password
   fi
@@ -200,6 +209,9 @@ export F3_HUNTER_DATA_DIR="$hunter_data_dir"
 export F3_HUNTER_CONFIG_FILE="$hunter_data_dir/hunter-config.json"
 export F3_CORE_CONFIG_FILE="$hunter_data_dir/core-config.json"
 export F3_EDGE_ENV="$app_root/edge.env"
+if [[ -s "$app_root/operators.json" ]]; then
+  export F3_OPERATORS_FILE="$app_root/operators.json"
+fi
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"

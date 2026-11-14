@@ -163,10 +163,12 @@ services:
     environment:
       PORT: "8093"
       STATIC_DIR: /static
+      EDGE_OPERATORS_FILE: /data/operators.json
       DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
     entrypoint: ["/edge"]
     volumes:
       - ../public:/static:ro
+      - ${F3_OPERATORS_FILE:-/dev/null}:/data/operators.json:ro
     ports:
       - "127.0.0.1:8093:8093"
     networks:
