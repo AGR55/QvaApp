@@ -76,6 +76,7 @@ func run(logger *slog.Logger) error {
 	shell := edge.NewShellHandler(cfg.StaticDir)
 	var session *edge.SessionHandler
 	var mobile *edge.MobileAPI
+	var dashboard *edge.DashboardAPI
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
 		if err != nil {
@@ -90,6 +91,10 @@ func run(logger *slog.Logger) error {
 					Sessions: manager,
 					Store:    &edge.PostgresMobileStore{Pool: pool},
 				}
+				dashboard = &edge.DashboardAPI{
+					Sessions: manager,
+					Store:    &edge.PostgresDashboardStore{Pool: pool},
+				}
 			}
 		}
 	}
@@ -100,6 +105,10 @@ func run(logger *slog.Logger) error {
 		}
 		if mobile != nil && (r.URL.Path == "/api/mobile" || strings.HasPrefix(r.URL.Path, "/api/mobile/")) {
 			mobile.ServeHTTP(w, r)
+			return
+		}
+		if dashboard != nil && (r.URL.Path == "/api/dashboard" || strings.HasPrefix(r.URL.Path, "/api/live/")) {
+			dashboard.ServeHTTP(w, r)
 			return
 		}
 		switch r.URL.Path {
