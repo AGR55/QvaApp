@@ -86,8 +86,13 @@ install -d -m 755 "$release_dir"
 tar -xzf "$archive" -C "$release_dir"
 
 compose_file="$release_dir/$compose_rel"
-if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile ]]; then
+migration_file="$release_dir/services/db/migrations/0004_shadow.sql"
+if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
+  exit 2
+fi
+if [[ ! -f $migration_file ]]; then
+  echo "El release no contiene services/db/migrations/0004_shadow.sql." >&2
   exit 2
 fi
 
@@ -101,6 +106,14 @@ fi
 
 if ! compose_for "$compose_file" build; then
   echo "Falló la construcción de la imagen shadow; se conserva la release activa." >&2
+  exit 1
+fi
+
+# Aplica la migración (idempotente) antes de activar la release. Si falla,
+# /opt/qvaapply-f3-shadow/current sigue apuntando a la release anterior y no
+# se levanta ningún contenedor nuevo.
+if ! compose_for "$compose_file" run --rm -T shadow-migrate; then
+  echo "Falló la migración shadow; se conserva la release activa." >&2
   exit 1
 fi
 

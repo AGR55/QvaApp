@@ -1,8 +1,9 @@
-# Runtime mínimo: recibe un binario estático ya compilado para linux/amd64.
+# Runtime mínimo: recibe binarios estáticos ya compilados para linux/amd64.
 # El contexto de build es la raíz del repositorio.
 FROM scratch
 
 COPY services/trading-core/trading-core /trading-core
+COPY services/trading-core/shadow-replay /shadow-replay
 
 EXPOSE 8090
 

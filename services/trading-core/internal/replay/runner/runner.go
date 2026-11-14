@@ -19,6 +19,27 @@ type Report struct {
 	Failures []string
 }
 
+// StepRecord es el resultado detallado y persistible de un paso.
+type StepRecord struct {
+	CaseID         string
+	Step           int
+	Source         string
+	ActualJSON     string
+	ActualDigest   string
+	ExpectedJSON   string
+	ExpectedDigest string
+	Matched        bool
+}
+
+// DetailedReport resume la ejecución e incluye cada paso comparado.
+type DetailedReport struct {
+	Cases    int
+	Steps    int
+	Matched  int
+	Records  []StepRecord
+	Failures []string
+}
+
 // RunCorpus carga y ejecuta el corpus.
 func RunCorpus(dir string) (Report, error) {
 	loaded, err := corpus.Load(dir)
@@ -30,6 +51,95 @@ func RunCorpus(dir string) (Report, error) {
 
 // RunLoaded ejecuta un corpus ya cargado.
 func RunLoaded(loaded *corpus.Corpus) (Report, error) {
+	report := Report{}
+	if err := runLoaded(loaded, reportRecorder{report: &report}); err != nil {
+		return report, err
+	}
+	return report, nil
+}
+
+// RunCorpusDetailed carga y ejecuta el corpus registrando cada paso.
+func RunCorpusDetailed(dir string) (DetailedReport, error) {
+	loaded, err := corpus.Load(dir)
+	if err != nil {
+		return DetailedReport{}, err
+	}
+	return RunLoadedDetailed(loaded)
+}
+
+// RunLoadedDetailed ejecuta un corpus ya cargado registrando cada paso.
+func RunLoadedDetailed(loaded *corpus.Corpus) (DetailedReport, error) {
+	report := DetailedReport{}
+	if err := runLoaded(loaded, &detailedRecorder{report: &report}); err != nil {
+		return report, err
+	}
+	return report, nil
+}
+
+// recorder recibe la comparación de cada paso. Un error aborta la ejecución.
+type recorder interface {
+	startCase()
+	record(caseID string, index int, expected corpus.Decision, result, upstream any, digest string) error
+}
+
+type reportRecorder struct {
+	report *Report
+}
+
+func (recorder reportRecorder) startCase() {
+	recorder.report.Cases++
+}
+
+func (recorder reportRecorder) record(caseID string, index int, expected corpus.Decision, result, upstream any, digest string) error {
+	return compare(caseID, index, expected, result, upstream, digest, recorder.report)
+}
+
+type detailedRecorder struct {
+	report *DetailedReport
+}
+
+func (recorder *detailedRecorder) startCase() {
+	recorder.report.Cases++
+}
+
+func (recorder *detailedRecorder) record(caseID string, index int, expected corpus.Decision, result, upstream any, digest string) error {
+	expectedJSON, actualJSON, err := canonicalStep(expected, result, upstream, digest)
+	if err != nil {
+		return err
+	}
+	resultMatched := jsonEqual(expected.Result, result)
+	upstreamMatched := jsonEqual(expected.Upstream, upstream)
+	digestMatched := expected.StateDigest == digest
+	matched := resultMatched && upstreamMatched && digestMatched
+
+	recorder.report.Steps++
+	if matched {
+		recorder.report.Matched++
+	} else {
+		if !resultMatched {
+			recorder.report.Failures = append(recorder.report.Failures, fmt.Sprintf("%s paso %d resultado", caseID, index+1))
+		}
+		if !upstreamMatched {
+			recorder.report.Failures = append(recorder.report.Failures, fmt.Sprintf("%s paso %d upstream", caseID, index+1))
+		}
+		if !digestMatched {
+			recorder.report.Failures = append(recorder.report.Failures, fmt.Sprintf("%s paso %d digest", caseID, index+1))
+		}
+	}
+	recorder.report.Records = append(recorder.report.Records, StepRecord{
+		CaseID:         caseID,
+		Step:           index + 1,
+		Source:         caseSource(caseID),
+		ActualJSON:     actualJSON,
+		ActualDigest:   digest,
+		ExpectedJSON:   expectedJSON,
+		ExpectedDigest: expected.StateDigest,
+		Matched:        matched,
+	})
+	return nil
+}
+
+func runLoaded(loaded *corpus.Corpus, sink recorder) error {
 	decisions := map[string][]corpus.Decision{}
 	for _, decision := range loaded.Decisions {
 		if decision.Op == "trading.final" {
@@ -46,31 +156,30 @@ func RunLoaded(loaded *corpus.Corpus) (Report, error) {
 		} `json:"session"`
 	}
 	if err := json.Unmarshal(loaded.Scenarios.Defaults, &defaults); err != nil {
-		return Report{}, err
+		return err
 	}
 	start = defaults.Session.Clock.Start
 
-	report := Report{}
 	for _, replayCase := range loaded.Scenarios.Cases {
 		expected := decisions[replayCase.CaseID]
 		if len(expected) == 0 {
-			return Report{}, fmt.Errorf("sin decisiones para %s", replayCase.CaseID)
+			return fmt.Errorf("sin decisiones para %s", replayCase.CaseID)
 		}
-		report.Cases++
+		sink.startCase()
 		if strings.HasPrefix(replayCase.CaseID, "replay/market-ingest/") {
-			if err := runMarket(replayCase, expected, loaded.Events, &report); err != nil {
-				return report, err
+			if err := runMarketRecord(replayCase, expected, loaded.Events, sink); err != nil {
+				return err
 			}
 		} else {
-			if err := runMoney(replayCase, expected, start, &report); err != nil {
-				return report, err
+			if err := runMoneyRecord(replayCase, expected, start, sink); err != nil {
+				return err
 			}
 		}
 	}
-	return report, nil
+	return nil
 }
 
-func runMarket(replayCase corpus.Case, expected []corpus.Decision, events []corpus.Event, report *Report) error {
+func runMarketRecord(replayCase corpus.Case, expected []corpus.Decision, events []corpus.Event, sink recorder) error {
 	session := marketsession.New()
 	for index, step := range replayCase.Steps {
 		var result any
@@ -99,14 +208,14 @@ func runMarket(replayCase corpus.Case, expected []corpus.Decision, events []corp
 		default:
 			return fmt.Errorf("%s: operación desconocida %s", replayCase.CaseID, step.Op)
 		}
-		if err := compare(replayCase.CaseID, index, expected[index], result, upstream, digest, report); err != nil {
+		if err := sink.record(replayCase.CaseID, index, expected[index], result, upstream, digest); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func runMoney(replayCase corpus.Case, expected []corpus.Decision, start int64, report *Report) error {
+func runMoneyRecord(replayCase corpus.Case, expected []corpus.Decision, start int64, sink recorder) error {
 	session := moneycore.New(start)
 	for index, step := range replayCase.Steps {
 		var input map[string]any
@@ -130,7 +239,7 @@ func runMoney(replayCase corpus.Case, expected []corpus.Decision, start int64, r
 		if err != nil {
 			return err
 		}
-		if err := compare(replayCase.CaseID, index, expected[index], result, upstream, digest, report); err != nil {
+		if err := sink.record(replayCase.CaseID, index, expected[index], result, upstream, digest); err != nil {
 			return err
 		}
 	}
@@ -153,6 +262,79 @@ func compare(caseID string, index int, expected corpus.Decision, result, upstrea
 	}
 	report.Matched++
 	return nil
+}
+
+// stepPayload fija el orden y el conjunto exacto de campos canónicos.
+type stepPayload struct {
+	Result      any    `json:"result"`
+	Upstream    any    `json:"upstream"`
+	StateDigest string `json:"stateDigest"`
+}
+
+func canonicalStep(expected corpus.Decision, result, upstream any, digest string) (string, string, error) {
+	expectedResult, err := normalizeRawJSON(expected.Result)
+	if err != nil {
+		return "", "", fmt.Errorf("result esperado: %w", err)
+	}
+	expectedUpstream, err := normalizeRawJSON(expected.Upstream)
+	if err != nil {
+		return "", "", fmt.Errorf("upstream esperado: %w", err)
+	}
+	actualResult, err := normalizeValue(result)
+	if err != nil {
+		return "", "", fmt.Errorf("result actual: %w", err)
+	}
+	actualUpstream, err := normalizeValue(upstream)
+	if err != nil {
+		return "", "", fmt.Errorf("upstream actual: %w", err)
+	}
+	expectedBytes, err := json.Marshal(stepPayload{
+		Result:      expectedResult,
+		Upstream:    expectedUpstream,
+		StateDigest: expected.StateDigest,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	actualBytes, err := json.Marshal(stepPayload{
+		Result:      actualResult,
+		Upstream:    actualUpstream,
+		StateDigest: digest,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return string(expectedBytes), string(actualBytes), nil
+}
+
+// normalizeRawJSON convierte JSON en valores Go normales para que mapas y
+// structs se serialicen con el mismo orden de claves. Los números se tratan
+// como float64, igual que en jsonEqual.
+func normalizeRawJSON(raw json.RawMessage) (any, error) {
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, err
+	}
+	return normalizeValue(value)
+}
+
+func normalizeValue(value any) (any, error) {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	var normalized any
+	if err := json.Unmarshal(encoded, &normalized); err != nil {
+		return nil, err
+	}
+	return normalized, nil
+}
+
+func caseSource(caseID string) string {
+	if strings.HasPrefix(caseID, "replay/market-ingest/") {
+		return "marketsession"
+	}
+	return "moneycore"
 }
 
 func jsonEqual(expectedRaw json.RawMessage, actual any) bool {
