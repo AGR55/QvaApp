@@ -111,6 +111,11 @@ func run(logger *slog.Logger) error {
 				go consumer.run(ctx)
 				logger.Info("consumidor hunter_events iniciado", "worker", consumer.worker)
 			}
+			if envOrDefault("CORE_OPERATION_WORKER", "true") != "false" {
+				worker := newOperationWorker(pool, logger)
+				go worker.run(ctx)
+				logger.Info("worker shadow de operaciones iniciado")
+			}
 		}
 	}
 

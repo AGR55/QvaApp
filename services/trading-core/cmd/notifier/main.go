@@ -219,10 +219,11 @@ func (service *service) telegramUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := notifier.HandleUpdate(update, notifier.Authorization{AdminChatID: service.cfg.AdminChatID})
+	menu := notifier.MenuForAction(result.Decision.Action, result.Decision.Mutation)
 	payload := map[string]any{
 		"updateId": result.UpdateID, "chatId": result.ChatID,
 		"action": result.Decision.Action, "mutation": result.Decision.Mutation,
-		"reply": result.Reply,
+		"reply": result.Reply, "menu": menu,
 	}
 	if service.cfg.DryRun {
 		service.sent.Add(1)
@@ -231,7 +232,8 @@ func (service *service) telegramUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	if err := service.client.SendMessage(ctx, strconv.FormatInt(result.ChatID, 10), result.Reply); err != nil {
+	if err := service.client.SendMenu(ctx, strconv.FormatInt(result.ChatID, 10), result.Reply,
+		notifier.KeyboardFromMenu(menu)); err != nil {
 		service.errors.Add(1)
 		service.logger.Warn("respuesta Telegram falló", "error", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"status": "telegram_error"})
