@@ -284,7 +284,6 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 		return
 	}
 	service.streamEvents.Add(1)
-	started := time.Now()
 	var payload struct {
 		Data   json.RawMessage `json:"data"`
 		SentAt string          `json:"sent_at"`
@@ -313,7 +312,7 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	if !ok {
 		return
 	}
-	started = time.Now()
+	started := time.Now()
 	decision := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
 	lag := int64(0)
 	if sentAt, err := time.Parse(time.RFC3339, payload.SentAt); err == nil {
