@@ -12,6 +12,14 @@ producción**:
 - Jobs: replay, auditoría de decisiones, tail incremental e invariantes.
 - Nunca escribe en `/opt/qvaapply`, en la SQLite de producción ni en QvaPay.
 
+## Notifier
+
+- `qvaapply-f3-shadow-notifier`, puerto `127.0.0.1:8092`.
+- Send-only, dry-run por defecto, sin long-polling; no compite con el bot TS.
+- `POST /notify`, dedupe TTL 10 min, métricas `notifier_*`.
+- Para envío real: `NOTIFIER_DRY_RUN=false` + token/chat + token interno.
+- Documento: [2026-11-14-notifier-service.md](2026-11-14-notifier-service.md).
+
 ## Hunter (microservicio de cacerías)
 
 - Servicio separado: `qvaapply-f3-shadow-hunter`, puerto `127.0.0.1:8091`.

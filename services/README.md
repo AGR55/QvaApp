@@ -147,7 +147,8 @@ persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
 4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `cmd/hunter` es el microservicio de cacerías: feed SSE QvaPay (SSE-only por
 defecto), evaluación de ofertas y cola durable; `trading-core` consume esa cola,
 evalúa `riskpolicy` con snapshot de producción y persiste
-`shadow.core_decisions` sin mutar dinero. `scripts/f3-compare.sh` compara las métricas TS y Go. `shadow.hunter_events` para core. No
+`shadow.core_decisions` sin mutar dinero. `scripts/f3-compare.sh` compara las métricas TS y Go. `cmd/notifier` es el
+servicio send-only de Telegram (dry-run por defecto, sin long-polling). `shadow.hunter_events` para core. No
 escribe dinero. `platform/qvapay` implementa el cliente de lectura de QvaPay
 sin login ni mutaciones. `cmd/shadow-qvapay` descifra en memoria el token de producción y
 guarda snapshots horarios (balance, ofertas y promedios) en
