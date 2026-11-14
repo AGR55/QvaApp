@@ -612,3 +612,32 @@ func TestDecimalFrom(t *testing.T) {
 		}
 	}
 }
+
+func TestOffersAcceptsObjectCoinAndGroupedList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/p2p" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"data":[{"coin":{"tick":"BANK_CUP"},"offers":[`+
+			`{"uuid":"grouped-1","type":{"tick":"sell"},"coin":{"tick":"BANK_CUP"},`+
+			`"amount":"1.25","receive":100,"rate":80,"status":"open"}]}]}`)
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := New(server.URL, "test-token")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	offers, err := client.Offers(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Offers: %v", err)
+	}
+	if len(offers) != 1 {
+		t.Fatalf("ofertas = %d, quiero 1", len(offers))
+	}
+	if offers[0].UUID != "grouped-1" || offers[0].Coin != "BANK_CUP" || offers[0].Type != "sell" {
+		t.Fatalf("oferta inesperada: %+v", offers[0])
+	}
+}

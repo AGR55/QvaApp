@@ -164,13 +164,13 @@ type Offer struct {
 // decimales ausentes quedan en cero; los presentes pero inválidos son error.
 func (o *Offer) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		UUID            string          `json:"uuid"`
-		Type            string          `json:"type"`
-		Coin            string          `json:"coin"`
+		UUID            any             `json:"uuid"`
+		Type            any             `json:"type"`
+		Coin            any             `json:"coin"`
 		Amount          any             `json:"amount"`
 		Receive         any             `json:"receive"`
 		Rate            any             `json:"rate"`
-		Status          string          `json:"status"`
+		Status          any             `json:"status"`
 		AvailableAmount any             `json:"available_amount"`
 		ReservedAmount  any             `json:"reserved_amount"`
 		User            json.RawMessage `json:"User"`
@@ -202,13 +202,13 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 	}
 
 	*o = Offer{
-		UUID:            raw.UUID,
-		Type:            raw.Type,
-		Coin:            raw.Coin,
+		UUID:            scalarString(raw.UUID),
+		Type:            scalarString(raw.Type),
+		Coin:            scalarString(raw.Coin),
 		Amount:          amount,
 		Receive:         receive,
 		Rate:            rate,
-		Status:          raw.Status,
+		Status:          scalarString(raw.Status),
 		AvailableAmount: available,
 		ReservedAmount:  reserved,
 		User:            raw.User,
@@ -665,16 +665,75 @@ func decodeOfferArray(candidates ...json.RawMessage) ([]Offer, error) {
 		if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 			continue
 		}
-		if trimmed[0] != '[' {
-			continue
+		if trimmed[0] == '[' {
+			return decodeOfferItems(trimmed, 0)
 		}
-		var offers []Offer
-		if err := decodeJSON(trimmed, &offers); err != nil {
-			return nil, fmt.Errorf("lista de ofertas de QvaPay inválida: %w", err)
+		if trimmed[0] == '{' {
+			var envelope struct {
+				Data   json.RawMessage `json:"data"`
+				Offers json.RawMessage `json:"offers"`
+			}
+			if err := decodeJSON(trimmed, &envelope); err != nil {
+				return nil, fmt.Errorf("lista de ofertas de QvaPay inválida: %w", err)
+			}
+			if offers, err := decodeOfferArray(envelope.Data, envelope.Offers); err == nil && len(offers) > 0 {
+				return offers, nil
+			}
 		}
-		return offers, nil
 	}
 	return []Offer{}, nil
+}
+
+func decodeOfferItems(raw json.RawMessage, depth int) ([]Offer, error) {
+	if depth > 3 {
+		return nil, fmt.Errorf("lista de ofertas de QvaPay anidada demasiado")
+	}
+	var items []json.RawMessage
+	if err := decodeJSON(raw, &items); err != nil {
+		return nil, fmt.Errorf("lista de ofertas de QvaPay inválida: %w", err)
+	}
+	offers := make([]Offer, 0, len(items))
+	for _, item := range items {
+		trimmed := bytes.TrimSpace(item)
+		if len(trimmed) == 0 {
+			continue
+		}
+		var object map[string]json.RawMessage
+		if err := decodeJSON(trimmed, &object); err != nil {
+			return nil, fmt.Errorf("oferta de QvaPay inválida: %w", err)
+		}
+		if nested, ok := object["offers"]; ok {
+			values, err := decodeOfferItems(nested, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			offers = append(offers, values...)
+			continue
+		}
+		var offer Offer
+		if err := decodeJSON(trimmed, &offer); err != nil {
+			return nil, fmt.Errorf("oferta de QvaPay inválida: %w", err)
+		}
+		offers = append(offers, offer)
+	}
+	return offers, nil
+}
+
+// scalarString acepta un texto o un objeto con tick/code/currency/name. La API
+// real ha devuelto `coin` como objeto en algunas respuestas; el oráculo TS
+// normaliza el tick.
+func scalarString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case map[string]any:
+		for _, key := range []string{"tick", "code", "currency", "name", "uuid"} {
+			if text, ok := typed[key].(string); ok && strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+	}
+	return ""
 }
 
 func parseTransactionPage(raw json.RawMessage) (TransactionPage, error) {
