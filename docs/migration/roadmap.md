@@ -189,9 +189,10 @@ producción.
 
 Estado (2026-11-13): bootstrap shadow desplegado por SSH en
 `/opt/qvaapply-f3-shadow` (health/ready/metrics, Postgres propio, puerto
-loopback), sin tocar producción. Comparador persistente y replay del corpus
-operativos en la VPS: **4/4 casos · 14/14 pasos · 14/14 JSON idénticos**.
-Pendiente la ingesta shadow de producción en vivo y el soak continuo.
+loopback), sin tocar producción. Comparador persistente, replay del corpus y
+auditoría de decisiones reales operativos en la VPS: **4/4 casos · 14/14 pasos
+· 14/14 JSON idénticos** y **5/5 decisiones reales comparables**. Pendiente la
+ingesta shadow de producción en vivo y el soak continuo.
 
 Actividades:
 

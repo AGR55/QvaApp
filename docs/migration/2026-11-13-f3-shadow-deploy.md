@@ -83,6 +83,22 @@ con `cap_drop: ALL`. Al terminar consulta `shadow.runs` y `shadow.decisions`
 mediante `docker compose exec -T postgres psql` y muestra el resumen. Si el
 replay falla, el script sale con código 1.
 
+## Auditoría de decisiones reales
+
+La auditoría tampoco se ejecuta sola. Exporta `decision_events` de la SQLite de
+producción en modo read-only, lo monta en el contenedor one-shot
+`shadow-audit` y persiste la comparación:
+
+```bash
+/opt/qvaapply-f3-shadow/current/scripts/f3-shadow-audit.sh [run-id]
+```
+
+El script nunca escribe en `/opt/qvaapply/data`; el JSON temporal se borra al
+terminar. En la última ejecución de la VPS: **1138 eventos, 5 comparables,
+5/5 coincidencias, 1133 sin checks históricos**. Localmente, con la copia v16:
+**237 eventos, 221 comparables, 221/221**. Evidencia:
+[decision-audit](evidence/2026-11-13-f3-decision-audit.md).
+
 ## Verificación
 
 ```bash
@@ -104,21 +120,24 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 
 ## Estado desplegado (2026-11-13)
 
-- Release activa `a86654695ea7cf10515e7e89bb2405670c361cba` en
+- Release activa `2df77638e149e7acab12bd196b4a3a29e6e0f03b` en
   `/opt/qvaapply-f3-shadow`.
-- Migración `0004_shadow.sql` aplicada; replay persistente operativo.
+- Migración `0004_shadow.sql` aplicada; replay y auditoría persistentes.
 - Run `f3-vps-20261114T021952Z`: **4/4 casos, 14/14 pasos, 14/14 JSON
   idénticos**, 0 divergencias.
+- Auditoría real `f3-decisions-20261114T024256Z`: **5/5 comparables**, 0
+  divergencias (1133 históricos sin checks).
 - `healthz` y `readyz` en verde; contenedores healthy.
 - `127.0.0.1:8090` únicamente; Postgres sin puerto publicado.
 - Producción sigue en `02bb5afc...` y `/api/session` responde 200.
 - Evidencias:
   [bootstrap](evidence/2026-11-13-f3-shadow-bootstrap.md) ·
-  [replay](evidence/2026-11-13-f3-shadow-replay.md).
+  [replay](evidence/2026-11-13-f3-shadow-replay.md) ·
+  [decision-audit](evidence/2026-11-13-f3-decision-audit.md).
 
 ## Límites de esta entrega
 
-- El replay se lanza manualmente; no hay scheduler ni ejecución automática.
-- Sigue siendo replay del corpus, no ingesta shadow de producción en vivo.
-- El servicio no consume datos de producción ni escribe en `core`.
+- Replay y auditoría se lanzan manualmente; no hay scheduler continuo.
+- Sigue siendo replay/auditoría batch, no ingesta shadow en vivo.
+- El servicio no escribe en `core` ni en la SQLite de producción.
 - No se ha modificado Nginx, el contenedor Node ni `main`.

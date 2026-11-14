@@ -142,7 +142,9 @@ El servicio `cmd/trading-core` está desplegado en la VPS en
 `/opt/qvaapply-f3-shadow`, con Postgres propio, `127.0.0.1:8090` y sin tocar
 producción. Expone `/healthz`, `/readyz` y `/metrics`. `cmd/shadow-replay`
 persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
-4/4 casos, 14/14 pasos y 14/14 JSON idénticos.
+4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `cmd/shadow-audit` reconstruye
+riesgo desde `decision_events` reales y ya validó 221/221 eventos con evidencia
+en la copia local y 5/5 en la VPS.
 
 ```bash
 scripts/package-f3-shadow.sh
