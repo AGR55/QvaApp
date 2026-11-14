@@ -59,6 +59,7 @@ required_paths=(
   scripts/f3-shadow-soak.sh
   scripts/f3-shadow-soak-report.sh
   scripts/install-f3-shadow-timer.sh
+  public
 )
 
 # Ambos binarios: servicio HTTP y ejecutor one-shot del corpus replay.
