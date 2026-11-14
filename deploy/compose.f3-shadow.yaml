@@ -92,7 +92,7 @@ services:
     environment:
       DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
       HUNTER_CONFIG_FILE: /config/hunter-config.json
-      HUNTER_POLL_MS: ${HUNTER_POLL_MS:-2500}
+      HUNTER_POLL_MS: ${HUNTER_POLL_MS:-3000}
       PORT: "8091"
     entrypoint: ["/hunter"]
     volumes:

@@ -29,7 +29,7 @@ import (
 
 const (
 	defaultPort     = "8091"
-	defaultPollMS   = 2500
+	defaultPollMS   = 3000
 	defaultConfig   = "/config/hunter-config.json"
 	shutdownTimeout = 10 * time.Second
 )
