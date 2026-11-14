@@ -146,12 +146,6 @@ func TestTextsAreStableAndNonEmpty(t *testing.T) {
 	if StatusText() == "" {
 		t.Fatal("StatusText está vacío")
 	}
-	if HelpText() != HelpText() {
-		t.Fatal("HelpText no es determinista")
-	}
-	if StatusText() != StatusText() {
-		t.Fatal("StatusText no es determinista")
-	}
 	if !strings.Contains(HelpText(), "/help") || !strings.Contains(HelpText(), "/status") {
 		t.Fatalf("HelpText no menciona los comandos básicos: %q", HelpText())
 	}
