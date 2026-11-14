@@ -200,6 +200,26 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     printf '%s\n' "$operators" > "$temporary_operators"
     chmod 644 "$temporary_operators"
     mv -f "$temporary_operators" "$app_root/operators.json"
+    # Metadatos de hilos de chat (sin mensajes): solo lectura para el panel.
+    threads=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+      "SELECT json_group_array(json(payload_json)) FROM (SELECT payload_json FROM chat_threads ORDER BY updated_at DESC LIMIT 500);")
+    [[ -n $threads ]] || threads='[]'
+    temporary_threads=$(mktemp "$app_root/chat-threads.XXXXXX")
+    printf '%s\n' "$threads" > "$temporary_threads"
+    chmod 644 "$temporary_threads"
+    mv -f "$temporary_threads" "$app_root/chat-threads.json"
+    # Hashes de credenciales móviles. El archivo es privado (600) y el edge solo
+    # compara sha256(token); nunca publica ni registra estos valores.
+    mobile_auth=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+      "SELECT json_object('devices', (SELECT json_group_array(json_object('tokenHash', token_hash, 'revokedAt', revoked_at)) FROM sms_devices), 'operators', (SELECT json_group_array(json_object('id', json_extract(value,'\$.id'), 'tokenHash', json_extract(value,'\$.tokenHash'), 'scopes', json(json_extract(value,'\$.scopes')), 'revokedAt', json_extract(value,'\$.revokedAt'))) FROM json_each((SELECT value FROM settings WHERE key = 'mobile_operators_v1'))));")
+    [[ -n $mobile_auth ]] || mobile_auth='{"devices":[],"operators":[]}'
+    temporary_mobile_auth=$(mktemp "$app_root/mobile-auth.XXXXXX")
+    printf '%s\n' "$mobile_auth" > "$temporary_mobile_auth"
+    # El edge corre como UID 65532 en una imagen distroless; el archivo debe
+    # pertenecerle para poder leerlo sin abrirlo al resto de usuarios.
+    chown 65532:65532 "$temporary_mobile_auth"
+    chmod 600 "$temporary_mobile_auth"
+    mv -f "$temporary_mobile_auth" "$app_root/mobile-auth.json"
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password
   fi
@@ -211,6 +231,12 @@ export F3_CORE_CONFIG_FILE="$hunter_data_dir/core-config.json"
 export F3_EDGE_ENV="$app_root/edge.env"
 if [[ -s "$app_root/operators.json" ]]; then
   export F3_OPERATORS_FILE="$app_root/operators.json"
+fi
+if [[ -s "$app_root/chat-threads.json" ]]; then
+  export F3_CHAT_THREADS_FILE="$app_root/chat-threads.json"
+fi
+if [[ -s "$app_root/mobile-auth.json" ]]; then
+  export F3_MOBILE_AUTH_FILE="$app_root/mobile-auth.json"
 fi
 
 ln -sfn "$release_dir" "$app_root/current.next"

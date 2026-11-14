@@ -230,9 +230,10 @@ route_is_interesting() {
     /healthz|/readyz|/metrics|/api/edge/summary|/api/session|/api/dashboard)
       return 0
       ;;
-    /api/mobile/*|/api/live/*)
-      # Descarta los prefijos de dispatch "/api/mobile/" y "/api/live/".
-      [[ "$1" != "/api/mobile/" && "$1" != "/api/live/" ]]
+    /api/*)
+      # Cualquier ruta /api/... declarada es relevante. Se descartan los
+      # prefijos de dispatch que terminan en "/" para no inventar rutas.
+      [[ "$1" != */ ]]
       return
       ;;
     *)

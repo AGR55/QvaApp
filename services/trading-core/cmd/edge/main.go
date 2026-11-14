@@ -26,14 +26,16 @@ const (
 )
 
 type config struct {
-	Port          string
-	StaticDir     string
-	DatabaseURL   string
-	AdminPassword string
-	SessionSecret string
-	SecureCookies bool
-	OperatorsFile string
-	PublicPushKey string
+	Port            string
+	StaticDir       string
+	DatabaseURL     string
+	AdminPassword   string
+	SessionSecret   string
+	SecureCookies   bool
+	OperatorsFile   string
+	PublicPushKey   string
+	ChatThreadsFile string
+	MobileAuthFile  string
 }
 
 func main() {
@@ -84,6 +86,8 @@ func run(logger *slog.Logger) error {
 	var live *edge.LiveAPI
 	var configAPI *edge.ConfigAPI
 	var operators *edge.OperatorsAPI
+	var operations *edge.OperationsAPI
+	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
 		if err != nil {
@@ -96,6 +100,10 @@ func run(logger *slog.Logger) error {
 			operators = &edge.OperatorsAPI{
 				Sessions: manager,
 				File:     cfg.OperatorsFile,
+			}
+			operations = &edge.OperationsAPI{
+				Sessions: manager,
+				File:     cfg.ChatThreadsFile,
 			}
 			configAPI = &edge.ConfigAPI{
 				Sessions:      manager,
@@ -127,8 +135,16 @@ func run(logger *slog.Logger) error {
 			session.ServeHTTP(w, r)
 			return
 		}
+		if r.URL.Path == "/api/mobile/device-check" || r.URL.Path == "/api/mobile/operator-check" {
+			mobileAuth.ServeHTTP(w, r)
+			return
+		}
 		if operators != nil && r.URL.Path == "/api/mobile/operators" {
 			operators.ServeHTTP(w, r)
+			return
+		}
+		if operations != nil && (r.URL.Path == "/api/operations/chats" || r.URL.Path == "/api/mobile/operations/chats") {
+			operations.ServeHTTP(w, r)
 			return
 		}
 		if configAPI != nil {
@@ -198,13 +214,15 @@ func run(logger *slog.Logger) error {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Port:          envOrDefault("PORT", defaultPort),
-		StaticDir:     envOrDefault("STATIC_DIR", defaultStatic),
-		DatabaseURL:   strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		AdminPassword: strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
-		SessionSecret: strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
-		OperatorsFile: strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
-		PublicPushKey: strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),
+		Port:            envOrDefault("PORT", defaultPort),
+		StaticDir:       envOrDefault("STATIC_DIR", defaultStatic),
+		DatabaseURL:     strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		AdminPassword:   strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
+		SessionSecret:   strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
+		OperatorsFile:   strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
+		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),
+		ChatThreadsFile: strings.TrimSpace(os.Getenv("EDGE_CHAT_THREADS_FILE")),
+		MobileAuthFile:  strings.TrimSpace(os.Getenv("EDGE_MOBILE_AUTH_FILE")),
 	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {
