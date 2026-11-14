@@ -14,7 +14,8 @@ Incluye:
 - 5 contenedores shadow healthy (`trading-core`, `hunter`, `notifier`, `edge`,
   `postgres`);
 - health/ready de 8090/8091/8092/8093;
-- SSE conectado, **0 polls `/p2p`**, **0 errores SSE**;
+- SSE conectado, **0 polls `/p2p`**, **0 errores consecutivos** (el acumulado
+  por reconexiones transitorias es un aviso);
 - cola hunter 0 pendientes/fallidos;
 - **21 decisiones core**, **20 ejecuciones ledger**, **14 operaciones
   confirmadas**;

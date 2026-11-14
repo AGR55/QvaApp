@@ -49,7 +49,8 @@ producción**:
   a las rutas HTTP.
 - Métricas SSE: `hunter_stream_connected`, `hunter_stream_raw_events_total`,
   `hunter_stream_events_total`, `hunter_stream_errors_total`,
-  `hunter_stream_last_lag_ms`, `hunter_stream_last_decision_us`.
+  `hunter_stream_consecutive_errors`, `hunter_stream_last_lag_ms`,
+  `hunter_stream_last_decision_us`.
 
 ```bash
 curl -sS http://127.0.0.1:8091/healthz
