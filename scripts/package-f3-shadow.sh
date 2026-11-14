@@ -96,6 +96,7 @@ tar \
   --exclude='services/trading-core/bin/*' \
   "${required_paths[@]}" \
   services/trading-core/Dockerfile.binary \
+  services/trading-core/ca-certificates.crt \
   services/trading-core/trading-core \
   services/trading-core/shadow-replay \
   services/trading-core/shadow-audit
@@ -104,6 +105,7 @@ listing=$(tar -tzf "$temporary_archive")
 
 for required_member in \
   services/trading-core/Dockerfile.binary \
+  services/trading-core/ca-certificates.crt \
   services/trading-core/trading-core \
   services/trading-core/shadow-replay \
   services/trading-core/shadow-audit \

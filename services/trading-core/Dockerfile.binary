@@ -2,6 +2,9 @@
 # El contexto de build es la raíz del repositorio.
 FROM scratch
 
+# Bundle de CAs para las lecturas HTTPS de QvaPay desde el runtime scratch.
+COPY services/trading-core/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
 COPY services/trading-core/trading-core /trading-core
 COPY services/trading-core/shadow-replay /shadow-replay
 COPY services/trading-core/shadow-audit /shadow-audit
