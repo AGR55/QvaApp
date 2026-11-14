@@ -176,6 +176,8 @@ func loadConfig() (config, error) {
 		BaseURL:     envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"),
 		ConfigFile:  envOrDefault("HUNTER_CONFIG_FILE", defaultConfig),
 		Token:       strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT")),
+		AppID:       strings.TrimSpace(os.Getenv("QVA_APP_ID_CIPHERTEXT")),
+		AppSecret:   strings.TrimSpace(os.Getenv("QVA_APP_SECRET_CIPHERTEXT")),
 	}
 	if cfg.DatabaseURL == "" {
 		return config{}, errors.New("falta DATABASE_URL")
