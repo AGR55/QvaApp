@@ -69,6 +69,15 @@ Rutas autenticadas por cookie:
 Verificado en VPS: sin sesión 401; con login 200 en las cuatro rutas. El store
 es Postgres read-only y no expone credenciales.
 
+## Observabilidad
+
+Rutas autenticadas:
+
+- `GET /api/operational-health`
+- `GET /api/decision-events?limit=20`
+
+Verificado en VPS: 401 sin sesión y 200 con login.
+
 ## Limitación actual
 
 El edge sirve shell HTML, assets, `/service-worker.js`, `/auth/*`, `/icons/*`,

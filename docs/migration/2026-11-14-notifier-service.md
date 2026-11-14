@@ -52,8 +52,9 @@ registrado el webhook de producción porque TS sigue en long-polling.
 `push_http.go` expone `POST/DELETE/GET /push/subscriptions` y
 `push_sender.go` implementa envío Web Push VAPID real, deshabilitado por defecto.
 `shadow.push_subscriptions` persiste endpoint/claves con TTL 24 h y dedupe.
-Verificado en VPS: alta 202, conteo 1, baja 204, conteo 0. Todavía no se ha habilitado el sender ni se usa FCM; falta configurar VAPID y
-la ventana de envío.
+Verificado en VPS: alta 202, conteo 1, baja 204, conteo 0. `POST /push/send` está integrado y protegido; con el sender apagado responde
+`{"sent":0,"failed":0,"disabled":true}` sin red. Falta configurar VAPID,
+habilitar `PUSH_SEND_ENABLED` y FCM.
 
 ## Qué no incluye todavía
 
