@@ -72,7 +72,7 @@ echo "Exportando decision_events en modo read-only..." >&2
 sqlite3 -readonly "file:${prod_db}?mode=ro" -json \
   "SELECT version, coin, offer_type, amount, receive, rate, decision, reason, checks_json, reference_rate, created_at, updated_at FROM decision_events ORDER BY id" \
   > "$events_file"
-chmod 600 "$events_file"
+chmod 644 "$events_file"
 
 events=$(sqlite3 -readonly "file:${prod_db}?mode=ro" "SELECT count(*) FROM decision_events;")
 if [[ -z ${events:-} || $events == 0 ]]; then
