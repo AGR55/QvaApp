@@ -104,15 +104,21 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 
 ## Estado desplegado (2026-11-13)
 
-- Release `cac53dc2f71968b0e8d58c0679294281252e7dba` en
+- Release activa `a86654695ea7cf10515e7e89bb2405670c361cba` en
   `/opt/qvaapply-f3-shadow`.
+- Migración `0004_shadow.sql` aplicada; replay persistente operativo.
+- Run `f3-vps-20261114T021952Z`: **4/4 casos, 14/14 pasos, 14/14 JSON
+  idénticos**, 0 divergencias.
 - `healthz` y `readyz` en verde; contenedores healthy.
 - `127.0.0.1:8090` únicamente; Postgres sin puerto publicado.
 - Producción sigue en `02bb5afc...` y `/api/session` responde 200.
-- Evidencia: [evidence/2026-11-13-f3-shadow-bootstrap.md](evidence/2026-11-13-f3-shadow-bootstrap.md).
+- Evidencias:
+  [bootstrap](evidence/2026-11-13-f3-shadow-bootstrap.md) ·
+  [replay](evidence/2026-11-13-f3-shadow-replay.md).
 
 ## Límites de esta entrega
 
 - El replay se lanza manualmente; no hay scheduler ni ejecución automática.
+- Sigue siendo replay del corpus, no ingesta shadow de producción en vivo.
 - El servicio no consume datos de producción ni escribe en `core`.
 - No se ha modificado Nginx, el contenedor Node ni `main`.

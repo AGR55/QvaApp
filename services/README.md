@@ -140,7 +140,9 @@ Informe: [2026-11-13-f2-prototype-report.md](../../docs/migration/2026-11-13-f2-
 
 El servicio `cmd/trading-core` está desplegado en la VPS en
 `/opt/qvaapply-f3-shadow`, con Postgres propio, `127.0.0.1:8090` y sin tocar
-producción. Expone `/healthz`, `/readyz` y `/metrics`.
+producción. Expone `/healthz`, `/readyz` y `/metrics`. `cmd/shadow-replay`
+persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
+4/4 casos, 14/14 pasos y 14/14 JSON idénticos.
 
 ```bash
 scripts/package-f3-shadow.sh
