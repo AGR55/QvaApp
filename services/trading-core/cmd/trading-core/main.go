@@ -93,6 +93,7 @@ func run(logger *slog.Logger) error {
 
 	var readyCheck func(context.Context) error
 	var shadowStats shadowStatsFunc
+	var consumer *hunterConsumer
 	if cfg.DatabaseURL != "" {
 		pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -105,12 +106,17 @@ func run(logger *slog.Logger) error {
 			defer pool.Close()
 			readyCheck = pool.Ping
 			shadowStats = postgres.NewShadowRepository(pool).Stats
+			if envOrDefault("HUNTER_EVENTS_CONSUMER", "true") != "false" {
+				consumer = newHunterConsumer(pool, logger)
+				go consumer.run(ctx)
+				logger.Info("consumidor hunter_events iniciado", "worker", consumer.worker)
+			}
 		}
 	}
 
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           newHandler(cfg, readyCheck, shadowStats),
+		Handler:           newHandler(cfg, readyCheck, shadowStats, consumer),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -157,13 +163,23 @@ type app struct {
 	cfg         config
 	readyCheck  func(context.Context) error
 	shadowStats shadowStatsFunc
+	consumer    *hunterConsumer
 	requests    atomic.Uint64
 }
 
 // newHandler construye el router HTTP. readyCheck nil significa que no hay
 // base de datos configurada y /readyz responde listo.
-func newHandler(cfg config, readyCheck func(context.Context) error, shadowStats shadowStatsFunc) http.Handler {
-	a := &app{cfg: cfg, readyCheck: readyCheck, shadowStats: shadowStats}
+func newHandler(
+	cfg config,
+	readyCheck func(context.Context) error,
+	shadowStats shadowStatsFunc,
+	consumers ...*hunterConsumer,
+) http.Handler {
+	var consumer *hunterConsumer
+	if len(consumers) > 0 {
+		consumer = consumers[0]
+	}
+	a := &app{cfg: cfg, readyCheck: readyCheck, shadowStats: shadowStats, consumer: consumer}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.handleHealthz)
@@ -249,6 +265,17 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "# HELP trading_core_shadow_last_qvapay_timestamp_seconds Último snapshot QvaPay read-only (Unix).\n")
 	fmt.Fprintf(w, "# TYPE trading_core_shadow_last_qvapay_timestamp_seconds gauge\n")
 	fmt.Fprintf(w, "trading_core_shadow_last_qvapay_timestamp_seconds %d\n", stats.LastQvaPayAt)
+	if a.consumer != nil {
+		fmt.Fprintf(w, "# HELP trading_core_hunter_events_processed_total Eventos hunter consumidos.\n")
+		fmt.Fprintf(w, "# TYPE trading_core_hunter_events_processed_total counter\n")
+		fmt.Fprintf(w, "trading_core_hunter_events_processed_total %d\n", a.consumer.processed.Load())
+		fmt.Fprintf(w, "# HELP trading_core_hunter_events_failed_total Eventos hunter fallidos.\n")
+		fmt.Fprintf(w, "# TYPE trading_core_hunter_events_failed_total counter\n")
+		fmt.Fprintf(w, "trading_core_hunter_events_failed_total %d\n", a.consumer.failed.Load())
+		fmt.Fprintf(w, "# HELP trading_core_hunter_events_pending Eventos hunter pendientes.\n")
+		fmt.Fprintf(w, "# TYPE trading_core_hunter_events_pending gauge\n")
+		fmt.Fprintf(w, "trading_core_hunter_events_pending %d\n", a.consumer.pending.Load())
+	}
 	fmt.Fprintf(w, "# HELP trading_core_shadow_stats_error Error consultando estadísticas shadow.\n")
 	fmt.Fprintf(w, "# TYPE trading_core_shadow_stats_error gauge\n")
 	fmt.Fprintf(w, "trading_core_shadow_stats_error %d\n", statsErr)
