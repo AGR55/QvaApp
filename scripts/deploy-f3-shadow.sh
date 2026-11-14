@@ -156,6 +156,7 @@ if [[ -r $prod_env && -r $prod_db ]]; then
 fi
 export F3_HUNTER_ENV="$hunter_env"
 export F3_HUNTER_DATA_DIR="$hunter_data_dir"
+export F3_HUNTER_CONFIG_FILE="$hunter_data_dir/hunter-config.json"
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"
