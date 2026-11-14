@@ -24,8 +24,10 @@ mutaciones de QvaPay y puede escalarse o reiniciarse sin tocar `core`.
 - Binario `cmd/hunter`, puerto `127.0.0.1:8091`.
 - **Feed SSE real** `/v2/p2p/stream` con `app-id`/`app-secret` cifrados; evalúa
   cada `p2p.created/reopened/resumed/range_*` al recibirlo.
-- Poll fallback cada 5 s; promedios cacheados 60 s. El feed es la vía rápida y
-  el polling solo cubre caídas del stream.
+- **SSE-only por defecto**: ningún poll `/p2p` compite con las dos cuentas de
+  TS. `HUNTER_POLL_MS=0`; el polling queda como fallback explícito.
+- Promedios `/p2p/averages` cacheados 5 min, una petición esporádica, no un
+  listado en bucle.
 - Credenciales SSE en `hunter.env` (600), nunca en el repo.
 - Config de mercados generada desde SQLite de producción en cada deploy.
 - Token descifrado en memoria; secretos en `/opt/qvaapply-f3-shadow/hunter.env`
@@ -50,9 +52,10 @@ mutaciones de QvaPay y puede escalarse o reiniciarse sin tocar `core`.
 
 ```text
 conexión    = 1
-eventos SSE = 11 crudos · 7 oportunidades (10 s)
-lag         = 39 ms
-decisión+persistencia = 12,2 ms
+polls /p2p  = 0
+eventos SSE = 5 crudos · 4 oportunidades (12 s)
+lag         = 10 ms
+decisión+persistencia = 3,7 ms
 errores SSE = 0
 ```
 
@@ -71,6 +74,11 @@ mercados    = 5 (BANDECPREPAGO, BANK_CUP, CLASICA, ETECSA, ZELLE)
 
 El evento durable se deduplica por oferta/decisión/tasa; por eso las
 evaluaciones repetidas no generan eventos duplicados para core.
+
+La comparación con TS en el mismo periodo es favorable al hunter: TS tenía
+`delivery_lag=69 ms` y `decision=5 ms`; el hunter SSE midió `lag=10 ms` y
+`decisión+persistencia=3,7 ms` en la muestra anotada. La diferencia no es
+todavía un benchmark formal, pero confirma que el camino SSE es el correcto.
 
 ## Tests y verificación
 

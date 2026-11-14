@@ -15,7 +15,9 @@ producción**:
 ## Hunter (microservicio de cacerías)
 
 - Servicio separado: `qvaapply-f3-shadow-hunter`, puerto `127.0.0.1:8091`.
-- Perfil Compose `hunter`; feed SSE QvaPay + polling fallback cada 5 s.
+- Prioridad: SSE; no competir con las dos cuentas TS que rotan el listado.
+- Perfil Compose `hunter`; **SSE-only por defecto**, sin polling `/p2p`.
+  `HUNTER_POLL_MS=0`; un valor >=1000 activa fallback explícito.
 - Persiste `shadow.hunter_polls`, `shadow.hunter_candidates` y
   `shadow.hunter_events` (cola durable para core).
 - Config: `/opt/qvaapply-f3-shadow/data/hunter-config.json`.

@@ -277,6 +277,7 @@ func (service *service) handleStreamState(state qvapay.StreamState) {
 
 func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	service.streamRaw.Add(1)
+	service.offers.Add(1)
 	switch event.Event {
 	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
 	default:
@@ -553,7 +554,7 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_last_event_timestamp_seconds Último evento SSE (Unix).\n# TYPE hunter_stream_last_event_timestamp_seconds gauge\nhunter_stream_last_event_timestamp_seconds %d\n", service.streamLastAt.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_lag_ms Delivery lag del último evento SSE.\n# TYPE hunter_stream_last_lag_ms gauge\nhunter_stream_last_lag_ms %d\n", service.streamLastLagMS.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_decision_us Decisión local del último evento SSE (µs).\n# TYPE hunter_stream_last_decision_us gauge\nhunter_stream_last_decision_us %d\n", service.streamLastDecision.Load())
-	fmt.Fprintf(w, "# HELP hunter_last_latency_ms Latencia del último poll.\n# TYPE hunter_last_latency_ms gauge\nhunter_last_latency_ms %d\n", service.lastLatency.Load())
+	fmt.Fprintf(w, "# HELP hunter_last_latency_ms Latencia del último fetch o delivery lag SSE.\n# TYPE hunter_last_latency_ms gauge\nhunter_last_latency_ms %d\n", service.lastLatency.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_poll_timestamp_seconds Último poll (Unix).\n# TYPE hunter_last_poll_timestamp_seconds gauge\nhunter_last_poll_timestamp_seconds %d\n", service.lastPollAt.Load())
 }
 
