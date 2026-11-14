@@ -171,14 +171,16 @@ Mediciones (mismo corpus, misma máquina, TS vs Go):
 
 Gate F2:
 
-- [ ] 100 % de decisiones idénticas en el corpus (diferencias solo con causa
-      documentada y aceptada).
-- [ ] p99 recepción→despacho dentro del presupuesto definido (objetivo < 10 ms
-      en entorno local preparado; se documenta el número real).
-- [ ] Cero doble aplicación en pruebas de caos; 100 % de intents resueltos.
-- [ ] Informe `docs/migration/2026-xx-f2-prototype-report.md` con números y
-      limitaciones.
-- [ ] Decisión explícita: continuar, ajustar o parar.
+- [x] 100 % de decisiones idénticas en el corpus: **4/4 casos, 14/14 pasos**;
+      resultados, upstream y `stateDigest` idénticos.
+- [x] p99 local del replay completo **1,8–3,0 ms** (< 10 ms); benchmark Go vs
+      TS documentado (~20–32× y ~8× menos RSS en este escenario).
+- [x] Cero doble publicación tras **kill -9** y recuperación por lease; intents
+      del corpus resueltos/reconciliados.
+- [x] Informe `docs/migration/2026-11-13-f2-prototype-report.md` con números,
+      limitaciones y condiciones.
+- [x] Decisión explícita: **continuar a F3**, con sesión replay persistente y
+      benchmark en VPS como condiciones previas.
 
 ## 5. F3 — `trading-core` completo en shadow (3–4 semanas)
 

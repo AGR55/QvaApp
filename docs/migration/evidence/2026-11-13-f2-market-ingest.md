@@ -16,8 +16,8 @@ cd services/trading-core
 go test ./internal/replay/marketsession -run TestMarketIngestResultsParity -v
 ```
 
-## Limitación actual
+## Actualización
 
-El `stateDigest` del oráculo incluye estado interno del `Store` y no coincide
-con el hash del resultado público. Se comparará al portar la sesión persistente
-completa (Store + orquestador + gateway guionizado).
+El runner F2 completo reproduce también `stateDigest` (incluido el orden exacto
+del snapshot) para los 4 casos y 14 pasos, además de `money-core`. Ver
+[2026-11-13-f2-prototype-report.md](../2026-11-13-f2-prototype-report.md).

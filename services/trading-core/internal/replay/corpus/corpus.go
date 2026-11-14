@@ -38,9 +38,10 @@ type FileInfo struct {
 
 // Scenarios es el archivo de escenarios.
 type Scenarios struct {
-	Schema string `json:"schema"`
-	Corpus string `json:"corpus"`
-	Cases  []Case `json:"cases"`
+	Schema   string          `json:"schema"`
+	Corpus   string          `json:"corpus"`
+	Defaults json.RawMessage `json:"defaults"`
+	Cases    []Case          `json:"cases"`
 }
 
 // Case es un escenario replay.

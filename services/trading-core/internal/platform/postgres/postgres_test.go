@@ -237,3 +237,35 @@ func TestTransactionalEnqueueRollback(t *testing.T) {
 		t.Fatalf("rollback incompleto: audit=%d outbox=%d", auditCount, outboxCount)
 	}
 }
+
+func TestOutboxRecoveryAfterAbandonedClaim(t *testing.T) {
+	pool := setup(t)
+	repository := postgres.NewOutboxRepository(pool)
+	ctx := context.Background()
+	message, _ := outbox.New("crash-1", "core.events", "{}", "crash-key-1", 100)
+	if inserted, err := repository.Insert(ctx, message); err != nil || !inserted {
+		t.Fatalf("insert = %v, %v", inserted, err)
+	}
+	claimed, err := repository.ClaimDue(ctx, "worker-a", 100, 1000, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim a = %v, %v", claimed, err)
+	}
+	// El worker A muere sin completar; el lease debe permitir reclamar.
+	if again, err := repository.ClaimDue(ctx, "worker-b", 500, 1000, 10); err != nil || len(again) != 0 {
+		t.Fatalf("claim dentro del lease = %v, %v", again, err)
+	}
+	recovered, err := repository.ClaimDue(ctx, "worker-b", 1101, 1000, 10)
+	if err != nil || len(recovered) != 1 || recovered[0].ID != "crash-1" {
+		t.Fatalf("claim tras lease = %v, %v", recovered, err)
+	}
+	if ok, err := repository.Complete(ctx, "crash-1", "worker-b", 1200); err != nil || !ok {
+		t.Fatalf("complete = %v, %v", ok, err)
+	}
+	var state string
+	if err := pool.QueryRow(ctx, "SELECT state FROM core.outbox WHERE id = 'crash-1'").Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "published" {
+		t.Fatalf("state = %s", state)
+	}
+}

@@ -90,6 +90,7 @@ jobs:
           bash services/db/test-postgres.sh
           bash services/db/test-postgres-import.sh
           bash services/db/test-postgres-go.sh
+          bash services/f2/recovery-kill9.sh
         env:
           PGHOST: 127.0.0.1
           PGPORT: 5432

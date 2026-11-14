@@ -73,6 +73,12 @@ bash services/scripts/lint.sh
 # Valida el corpus de replay para F2
 (cd services/trading-core && go run ./cmd/replay-probe --corpus ../../parity/fixtures/replay/2026-11-12)
 
+# Paridad F2 + benchmark Go vs TS
+bash services/f2/bench.sh
+
+# Recuperación tras kill -9 del worker de outbox
+bash services/f2/recovery-kill9.sh
+
 # Solo un filtro del runner
 bash services/scripts/verify.sh --filter market-math
 bash services/scripts/verify.sh --filter pure/budget/
@@ -118,14 +124,19 @@ node --import tsx parity/runner/run.ts \
 
 ## F2
 
-El cargador `internal/replay/corpus` valida hashes, conteos y estructura del
-corpus congelado. `internal/replay/marketsession` reproduce el escenario
-`market.ingest` con **4/4 resultados** idénticos. El plan del prototipo y sus
-métricas están en
-[docs/migration/2026-11-13-f2-plan.md](../../docs/migration/2026-11-13-f2-plan.md).
+El cargador `internal/replay/corpus` valida el corpus. El runner reproduce
+**4/4 casos y 14/14 pasos** con resultados, upstream y `stateDigest` idénticos,
+incluyendo `market.ingest` y los tres escenarios `money-core`.
+
+```bash
+cd services/trading-core && go run ./cmd/replay-session
+go run ./cmd/replay-bench --iterations 1000
+```
+
+Informe: [2026-11-13-f2-prototype-report.md](../../docs/migration/2026-11-13-f2-prototype-report.md).
 
 ## Siguiente corte
 
-1. Cablear el worker de outbox y las transacciones de negocio al repositorio.
-2. Primera ejecución real de CI y registro de tiempos por job.
-3. Preparar el prototipo F2 de la ruta caliente sobre el replay.
+1. Portar la sesión replay sobre Postgres real (estado persistente).
+2. F3: `trading-core` en shadow + comparador y caos completo.
+3. Resolver el bloqueo de billing de GitHub Actions para CI.

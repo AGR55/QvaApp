@@ -48,7 +48,7 @@ func TestMarketIngestResultsParity(t *testing.T) {
 		case "trading.state":
 			state = session.State()
 			result = state
-			digest = Hash(state)
+			digest = session.Digest()
 		default:
 			t.Fatalf("operación inesperada: %s", step.Op)
 		}
@@ -75,7 +75,15 @@ func jsonEqual(t *testing.T, expectedRaw json.RawMessage, actual any) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actualJSON, err := json.Marshal(actual)
+	actualBytes, err := json.Marshal(actual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var normalized any
+	if err := json.Unmarshal(actualBytes, &normalized); err != nil {
+		t.Fatal(err)
+	}
+	actualJSON, err := json.Marshal(normalized)
 	if err != nil {
 		t.Fatal(err)
 	}

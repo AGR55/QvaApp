@@ -7,15 +7,37 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/replay/corpus"
 )
 
+// FeedEntry es un evento aceptado en el feed.
+type FeedEntry struct {
+	Key        string `json:"key"`
+	Event      string `json:"event"`
+	State      string `json:"state"`
+	ReceivedAt int64  `json:"receivedAt"`
+}
+
+// Observation es una observación normalizada.
+type Observation struct {
+	Coin        string `json:"coin"`
+	OpenOffers  int    `json:"openOffers"`
+	Eligible    int    `json:"eligible"`
+	AverageBuy  string `json:"averageBuy,omitempty"`
+	AverageSell string `json:"averageSell,omitempty"`
+	MedianBuy   string `json:"medianBuy,omitempty"`
+	MedianSell  string `json:"medianSell,omitempty"`
+	BestBuy     string `json:"bestBuy,omitempty"`
+	BestSell    string `json:"bestSell,omitempty"`
+}
+
 // Session es el estado mínimo del escenario de ingesta.
 type Session struct {
-	feed         []map[string]any
+	feed         []FeedEntry
 	seen         map[string]bool
-	observations []map[string]any
+	observations []Observation
 }
 
 // New crea una sesión vacía.
@@ -51,20 +73,20 @@ func (session *Session) Ingest(events []corpus.Event, indexes []int, observation
 			continue
 		}
 		session.seen[key] = true
-		session.feed = append(session.feed, map[string]any{
-			"event":      payload.Event,
-			"key":        key,
-			"receivedAt": events[index].ReceivedAt,
-			"state":      "pending",
+		session.feed = append(session.feed, FeedEntry{
+			Key:        key,
+			Event:      payload.Event,
+			State:      "pending",
+			ReceivedAt: events[index].ReceivedAt,
 		})
 		accepted++
 	}
 	if observation != nil {
-		copy := make(map[string]any, len(observation))
-		for key, value := range observation {
-			copy[key] = value
+		normalized, err := normalizeObservation(observation)
+		if err != nil {
+			return nil, nil, "", err
 		}
-		session.observations = append(session.observations, copy)
+		session.observations = append(session.observations, normalized)
 	}
 	state := session.State()
 	return map[string]any{
@@ -72,15 +94,13 @@ func (session *Session) Ingest(events []corpus.Event, indexes []int, observation
 		"duplicates":   duplicates,
 		"observations": len(session.observations),
 		"pending":      len(session.feed),
-	}, state, Hash(state), nil
+	}, state, session.Digest(), nil
 }
 
 // State devuelve el estado canónico observable.
 func (session *Session) State() map[string]any {
-	ordered := append([]map[string]any(nil), session.feed...)
-	sort.Slice(ordered, func(left, right int) bool {
-		return ordered[left]["key"].(string) < ordered[right]["key"].(string)
-	})
+	ordered := append([]FeedEntry(nil), session.feed...)
+	sort.Slice(ordered, func(left, right int) bool { return ordered[left].Key < ordered[right].Key })
 	feed := make([]any, 0, len(ordered))
 	for _, entry := range ordered {
 		feed = append(feed, entry)
@@ -100,11 +120,81 @@ func (session *Session) State() map[string]any {
 	}
 }
 
-// Hash canoniza el estado y devuelve sha256:<hex>.
-func Hash(value any) string {
-	encoded, _ := json.Marshal(value)
+type digestSnapshot struct {
+	Operations   []any         `json:"operations"`
+	ReservedQusd string        `json:"reservedQusd"`
+	Workflows    []any         `json:"workflows"`
+	OwnOffers    []any         `json:"ownOffers"`
+	Intents      []any         `json:"intents"`
+	Feed         []FeedEntry   `json:"feed"`
+	Observations []Observation `json:"observations"`
+}
+
+// Digest reproduce el stateDigest del oráculo (orden de claves del snapshot).
+func (session *Session) Digest() string {
+	ordered := append([]FeedEntry(nil), session.feed...)
+	sort.Slice(ordered, func(left, right int) bool { return ordered[left].Key < ordered[right].Key })
+	observations := session.observations
+	if observations == nil {
+		observations = []Observation{}
+	}
+	snapshot := digestSnapshot{
+		Operations:   []any{},
+		ReservedQusd: "0.00000000",
+		Workflows:    []any{},
+		OwnOffers:    []any{},
+		Intents:      []any{},
+		Feed:         ordered,
+		Observations: observations,
+	}
+	encoded, _ := json.Marshal(snapshot)
 	sum := sha256.Sum256(encoded)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func normalizeObservation(input map[string]any) (Observation, error) {
+	coin, _ := input["coin"].(string)
+	if coin == "" {
+		return Observation{}, fmt.Errorf("observación sin coin")
+	}
+	return Observation{
+		Coin:        coin,
+		OpenOffers:  intValue(input["openOffers"]),
+		Eligible:    intValue(input["eligible"]),
+		AverageBuy:  textValue(input["averageBuy"]),
+		AverageSell: textValue(input["averageSell"]),
+		MedianBuy:   textValue(input["medianBuy"]),
+		MedianSell:  textValue(input["medianSell"]),
+		BestBuy:     textValue(input["bestBuy"]),
+		BestSell:    textValue(input["bestSell"]),
+	}, nil
+}
+
+func intValue(value any) int {
+	switch typed := value.(type) {
+	case float64:
+		return int(typed)
+	case int:
+		return typed
+	case json.Number:
+		parsed, _ := typed.Int64()
+		return int(parsed)
+	default:
+		return 0
+	}
+}
+
+func textValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case float64:
+		return strconv.FormatFloat(typed, 'f', 8, 64)
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 func feedKey(payload eventPayload) string {
