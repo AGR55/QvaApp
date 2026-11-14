@@ -229,6 +229,8 @@ services:
       - /migrations/0014_core_operations.sql
       - -f
       - /migrations/0015_push_subscriptions.sql
+      - -f
+      - /migrations/0016_qvapay_transactions.sql
     networks:
       - shadow
     read_only: true

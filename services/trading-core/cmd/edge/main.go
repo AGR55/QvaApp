@@ -79,6 +79,7 @@ func run(logger *slog.Logger) error {
 	var mobile *edge.MobileAPI
 	var dashboard *edge.DashboardAPI
 	var observability *edge.ObservabilityAPI
+	var live *edge.LiveAPI
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
 		if err != nil {
@@ -101,6 +102,10 @@ func run(logger *slog.Logger) error {
 					Sessions: manager,
 					Store:    &edge.PostgresObservabilityStore{Pool: pool},
 				}
+				live = &edge.LiveAPI{
+					Sessions: manager,
+					Store:    &edge.PostgresLiveStore{Pool: pool},
+				}
 			}
 		}
 	}
@@ -111,6 +116,10 @@ func run(logger *slog.Logger) error {
 		}
 		if mobile != nil && (r.URL.Path == "/api/mobile" || strings.HasPrefix(r.URL.Path, "/api/mobile/")) {
 			mobile.ServeHTTP(w, r)
+			return
+		}
+		if live != nil && (r.URL.Path == "/api/live/transactions" || strings.HasPrefix(r.URL.Path, "/api/live/markets/")) {
+			live.ServeHTTP(w, r)
 			return
 		}
 		if dashboard != nil && (r.URL.Path == "/api/dashboard" || strings.HasPrefix(r.URL.Path, "/api/live/")) {

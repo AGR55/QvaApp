@@ -18,12 +18,13 @@ import (
 )
 
 type output struct {
-	RunID      string `json:"runId"`
-	UserKnown  bool   `json:"userKnown"`
-	Balance    string `json:"balance"`
-	Offers     int    `json:"offers"`
-	Averages   int    `json:"averages"`
-	CapturedAt int64  `json:"capturedAt"`
+	RunID        string `json:"runId"`
+	UserKnown    bool   `json:"userKnown"`
+	Balance      string `json:"balance"`
+	Offers       int    `json:"offers"`
+	Averages     int    `json:"averages"`
+	Transactions int    `json:"transactions"`
+	CapturedAt   int64  `json:"capturedAt"`
 }
 
 func main() {
@@ -89,6 +90,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Decisión: /transaction es un extra sobre el snapshot. Si QvaPay falla o
+	// devuelve una página inválida, se registra el error sin token y se continúa
+	// con cero transacciones: perder balance/offers por un fallo del historial
+	// sería peor que servir el snapshot sin transacciones. El comando sigue
+	// siendo exitoso.
+	transactions := make([]qvapay.Transaction, 0, 20)
+	transactionPage, err := client.Transactions(ctx, 1, 20)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: leer /transaction (se continúa sin transacciones): %v\n", err)
+	} else {
+		transactions = transactionPage.Transactions
+	}
 	capturedAt := time.Now().Unix()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -147,6 +160,34 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	persistedTransactions := 0
+	for _, transaction := range transactions {
+		if transaction.UUID == "" {
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO shadow.qvapay_transactions
+				(run_id, transaction_uuid, amount, status, description, remote_id,
+				 created_at, updated_at, captured_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (run_id, transaction_uuid) DO UPDATE SET
+				amount = excluded.amount,
+				status = excluded.status,
+				description = excluded.description,
+				remote_id = excluded.remote_id,
+				created_at = excluded.created_at,
+				updated_at = excluded.updated_at,
+				captured_at = excluded.captured_at`,
+			id, transaction.UUID, transaction.Amount.Format(8), transaction.Status,
+			transaction.Description, transaction.RemoteID, transaction.CreatedAt,
+			transaction.UpdatedAt, capturedAt,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shadow-qvapay: persistir transacción: %v\n", err)
+			os.Exit(1)
+		}
+		persistedTransactions++
+	}
 	if err := tx.Commit(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "shadow-qvapay: confirmar snapshot: %v\n", err)
 		os.Exit(1)
@@ -155,12 +196,13 @@ func main() {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetEscapeHTML(false)
 	_ = encoder.Encode(output{
-		RunID:      id,
-		UserKnown:  user.UUID != "",
-		Balance:    user.Balance.Format(8),
-		Offers:     len(offers),
-		Averages:   len(averages),
-		CapturedAt: capturedAt,
+		RunID:        id,
+		UserKnown:    user.UUID != "",
+		Balance:      user.Balance.Format(8),
+		Offers:       len(offers),
+		Averages:     len(averages),
+		Transactions: persistedTransactions,
+		CapturedAt:   capturedAt,
 	})
 }
 
