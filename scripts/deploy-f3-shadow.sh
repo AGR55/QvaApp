@@ -92,12 +92,13 @@ soak_migration_file="$release_dir/services/db/migrations/0006_soak.sql"
 qvapay_migration_file="$release_dir/services/db/migrations/0007_qvapay.sql"
 offers_migration_file="$release_dir/services/db/migrations/0008_qvapay_offers.sql"
 hunter_migration_file="$release_dir/services/db/migrations/0009_hunter.sql"
+hunter_events_migration_file="$release_dir/services/db/migrations/0010_hunter_events.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010." >&2
   exit 2
 fi
 

@@ -147,6 +147,8 @@ services:
       - /migrations/0008_qvapay_offers.sql
       - -f
       - /migrations/0009_hunter.sql
+      - -f
+      - /migrations/0010_hunter_events.sql
     networks:
       - shadow
     read_only: true

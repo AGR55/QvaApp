@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,6 +201,7 @@ type service struct {
 	errors      atomic.Uint64
 	offers      atomic.Uint64
 	candidates  atomic.Uint64
+	events      atomic.Uint64
 	lastLatency atomic.Int64
 	lastPollAt  atomic.Int64
 }
@@ -316,6 +319,29 @@ func (service *service) persist(ctx context.Context, result *pollResult) error {
 		if err != nil {
 			return err
 		}
+		if evaluation.Decision != "auto_buy" && evaluation.Decision != "manual_sell" {
+			continue
+		}
+		payload, err := json.Marshal(evaluation)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256([]byte(evaluation.OfferUUID + "|" + evaluation.Decision + "|" + evaluation.Rate.Format(8)))
+		eventID := "hunter-" + hex.EncodeToString(sum[:16])
+		_, err = tx.Exec(ctx, `
+			INSERT INTO shadow.hunter_events
+				(event_id, offer_uuid, coin, side, decision, rate, payload_json,
+				 state, available_at, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+			ON CONFLICT (event_id) DO NOTHING`,
+			eventID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
+			evaluation.Decision, evaluation.Rate.Format(8), string(payload),
+			time.Now().UnixMilli(), result.PolledAt,
+		)
+		if err != nil {
+			return err
+		}
+		service.events.Add(1)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
