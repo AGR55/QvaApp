@@ -390,6 +390,7 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_errors_total Errores de poll o persistencia.\n# TYPE hunter_errors_total counter\nhunter_errors_total %d\n", service.errors.Load())
 	fmt.Fprintf(w, "# HELP hunter_offers_total Ofertas leídas.\n# TYPE hunter_offers_total counter\nhunter_offers_total %d\n", service.offers.Load())
 	fmt.Fprintf(w, "# HELP hunter_candidates_total Candidatos auto_buy/manual_sell.\n# TYPE hunter_candidates_total counter\nhunter_candidates_total %d\n", service.candidates.Load())
+	fmt.Fprintf(w, "# HELP hunter_events_total Eventos candidate encolados para core.\n# TYPE hunter_events_total counter\nhunter_events_total %d\n", service.events.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_latency_ms Latencia del último poll.\n# TYPE hunter_last_latency_ms gauge\nhunter_last_latency_ms %d\n", service.lastLatency.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_poll_timestamp_seconds Último poll (Unix).\n# TYPE hunter_last_poll_timestamp_seconds gauge\nhunter_last_poll_timestamp_seconds %d\n", service.lastPollAt.Load())
 }
