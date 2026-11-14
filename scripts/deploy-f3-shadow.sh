@@ -180,14 +180,18 @@ for _ in {1..60}; do
       "http://127.0.0.1:${shadow_port}/healthz" >/dev/null \
     && curl --fail --silent --show-error --max-time 3 \
       "http://127.0.0.1:${shadow_port}/readyz" >/dev/null; then
-    if [[ $hunter_enabled == true ]]; then
-      curl --fail --silent --show-error --max-time 3 \
-        "http://127.0.0.1:8091/healthz" >/dev/null \
-        && curl --fail --silent --show-error --max-time 3 \
-        "http://127.0.0.1:8091/readyz" >/dev/null || break
+    if [[ $hunter_enabled != true ]]; then
+      healthy=true
+      break
     fi
-    healthy=true
-    break
+    if curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8091/healthz" >/dev/null \
+      && curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8091/readyz" >/dev/null; then
+      healthy=true
+      break
+    fi
+    # Hunter aún arrancando: seguir esperando, no abortar el bucle.
   fi
   sleep 2
 done
