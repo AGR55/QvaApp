@@ -48,9 +48,11 @@ registrado el webhook de producción porque TS sigue en long-polling.
 
 ## Push
 
-`internal/notifier/push.go` añade validación de suscripciones Web Push,
-almacén en memoria con TTL/dedupe y validación VAPID, todo testeado. Aún no se
-envían notificaciones ni se persisten suscripciones en Postgres.
+`internal/notifier/push.go` valida suscripciones/VAPID y
+`push_http.go` expone `POST/DELETE/GET /push/subscriptions`.
+`shadow.push_subscriptions` persiste endpoint/claves con TTL 24 h y dedupe.
+Verificado en VPS: alta 202, conteo 1, baja 204, conteo 0. Aún no se envían
+push reales ni se usa FCM.
 
 ## Qué no incluye todavía
 
