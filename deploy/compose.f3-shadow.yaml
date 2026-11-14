@@ -4,8 +4,9 @@
 # - Postgres 16 sin puerto publicado: solo accesible desde esta red.
 # - trading-core se publica únicamente en loopback y nunca comparte datos con
 #   el contenedor Node `qvaapply` ni con /opt/qvaapply.
-# - Los servicios `shadow-migrate` y `shadow-replay` son one-shot y solo se
-#   ejecutan explícitamente con `docker compose run` (perfil `tools`).
+# - Los servicios `shadow-migrate`, `shadow-replay` y `shadow-audit` son
+#   one-shot y solo se ejecutan explícitamente con `docker compose run`
+#   (perfil `tools`).
 #
 # Rutas relativas: Compose las resuelve desde el directorio de este archivo
 # (deploy/), por eso los montajes usan `../`.
@@ -123,6 +124,30 @@ services:
     command: ["-corpus", "/corpus"]
     volumes:
       - ../parity/fixtures/replay/2026-11-12:/corpus:ro
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Audita decisiones reales exportadas de SQLite (`decision_events`) con el
+  # dominio Go y persiste la comparación en shadow.*. El JSON se monta desde
+  # el host; este contenedor no accede directamente a la SQLite de producción.
+  shadow-audit:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      SHADOW_MODE: "true"
+    entrypoint: ["/shadow-audit"]
     networks:
       - shadow
     read_only: true

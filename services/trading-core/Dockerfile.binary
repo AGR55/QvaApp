@@ -4,6 +4,7 @@ FROM scratch
 
 COPY services/trading-core/trading-core /trading-core
 COPY services/trading-core/shadow-replay /shadow-replay
+COPY services/trading-core/shadow-audit /shadow-audit
 
 EXPOSE 8090
 

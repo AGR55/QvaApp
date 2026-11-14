@@ -20,9 +20,10 @@ archive="/tmp/qvaapply-f3-shadow-${revision}.tar.gz"
 temporary_archive=$(mktemp "${archive}.XXXXXX")
 trading_core_binary="$repo_root/services/trading-core/trading-core"
 shadow_replay_binary="$repo_root/services/trading-core/shadow-replay"
+shadow_audit_binary="$repo_root/services/trading-core/shadow-audit"
 
 cleanup() {
-  rm -f "$temporary_archive" "$trading_core_binary" "$shadow_replay_binary"
+  rm -f "$temporary_archive" "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary"
 }
 trap cleanup EXIT
 
@@ -35,6 +36,7 @@ required_paths=(
   deploy/compose.f3-shadow.yaml
   scripts/deploy-f3-shadow.sh
   scripts/f3-shadow-replay.sh
+  scripts/f3-shadow-audit.sh
 )
 
 # Ambos binarios: servicio HTTP y ejecutor one-shot del corpus replay.
@@ -44,6 +46,8 @@ required_paths=(
     go build -trimpath -ldflags="-s -w" -o trading-core ./cmd/trading-core
   CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH:-amd64}" GOWORK=off \
     go build -trimpath -ldflags="-s -w" -o shadow-replay ./cmd/shadow-replay
+  CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH:-amd64}" GOWORK=off \
+    go build -trimpath -ldflags="-s -w" -o shadow-audit ./cmd/shadow-audit
 )
 
 for required_path in "${required_paths[@]}"; do
@@ -76,7 +80,8 @@ tar \
   "${required_paths[@]}" \
   services/trading-core/Dockerfile.binary \
   services/trading-core/trading-core \
-  services/trading-core/shadow-replay
+  services/trading-core/shadow-replay \
+  services/trading-core/shadow-audit
 
 listing=$(tar -tzf "$temporary_archive")
 
@@ -84,8 +89,10 @@ for required_member in \
   services/trading-core/Dockerfile.binary \
   services/trading-core/trading-core \
   services/trading-core/shadow-replay \
+  services/trading-core/shadow-audit \
   services/trading-core/cmd/trading-core/main.go \
   services/trading-core/cmd/shadow-replay/main.go \
+  services/trading-core/cmd/shadow-audit/main.go \
   services/db/migrations/0004_shadow.sql \
   parity/fixtures/replay/2026-11-12/events.ndjson \
   parity/fixtures/replay/2026-11-12/scenarios.json \
@@ -95,7 +102,8 @@ for required_member in \
   services/go.work \
   deploy/compose.f3-shadow.yaml \
   scripts/deploy-f3-shadow.sh \
-  scripts/f3-shadow-replay.sh; do
+  scripts/f3-shadow-replay.sh \
+  scripts/f3-shadow-audit.sh; do
   if ! grep -Fqx -- "$required_member" <<<"$listing"; then
     echo "El paquete no contiene $required_member" >&2
     exit 1
@@ -108,7 +116,7 @@ if grep -Eq '(^|/)\.env$|(^|/)node_modules/|^data/|\.sqlite|^services/trading-co
 fi
 
 mv -f "$temporary_archive" "$archive"
-rm -f "$trading_core_binary" "$shadow_replay_binary"
+rm -f "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary"
 trap - EXIT
 
 echo "Paquete creado: $archive"
