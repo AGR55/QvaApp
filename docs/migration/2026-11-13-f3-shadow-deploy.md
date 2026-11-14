@@ -113,6 +113,7 @@ Los timers se instalan una sola vez en la VPS:
 - `qvaapply-f3-invariants.timer`: diario; invariantes SQLite read-only.
 - `qvaapply-f3-soak.timer`: cada 5 min; RSS/CPU y contadores en
   `shadow.soak_samples`.
+- `qvaapply-f3-workflows.timer`: diario; `risk_decision_json` de workflows.
 - `Persistent=true`; sobreviven reinicios.
 - No tocan `/opt/qvaapply`; se desinstalan con `... uninstall`.
 

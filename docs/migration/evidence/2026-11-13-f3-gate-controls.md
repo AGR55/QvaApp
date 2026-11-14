@@ -9,6 +9,15 @@
 - Run VPS: `inv-vps-20261114T032428Z`, `violations=0`.
 - Timer diario `qvaapply-f3-invariants.timer` activo.
 
+## Workflows reales
+
+- Exportación read-only de `trade_workflows`.
+- Run VPS `wf-vps-20261114T033756Z`: **17/17 workflows comparables**, 0
+  divergencias.
+- El comparador reutiliza la reconstrucción de riesgo desde
+  `risk_decision_json.checks`.
+- Local (copia antigua): **11/11**.
+
 ## Caos
 
 `services/f3/chaos.sh` en verde con 6 escenarios:
@@ -47,8 +56,8 @@ El CPU del servicio es una muestra puntual; el soak de 72 h sigue pendiente.
 
 ## Estado de jobs
 
-- 5 timers activos: tail (5 min), soak (5 min), audit (1 h), replay (diario),
-  invariants (diario).
+- 6 timers activos: tail (5 min), soak (5 min), audit (1 h), replay (diario),
+  invariants (diario), workflows (diario).
 - Muestras iniciales de soak:
   `rss=2352 KB`, luego `rss=2259 KB`; Postgres ~29.2-29.6 MB; 0 divergencias;
   0 violaciones.

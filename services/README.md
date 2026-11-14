@@ -146,7 +146,8 @@ persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
 riesgo desde `decision_events` reales y ya validó 221/221 eventos con evidencia
 en la copia local y 5/5 en la VPS. Los timers `qvaapply-f3-tail.timer`,
 `qvaapply-f3-audit.timer`, `qvaapply-f3-replay.timer` y
-`qvaapply-f3-invariants.timer` y `qvaapply-f3-soak.timer` ejecutan el soak; `/metrics` publica runs,
+`qvaapply-f3-invariants.timer`, `qvaapply-f3-workflows.timer` y
+`qvaapply-f3-soak.timer` ejecutan el soak; `/metrics` publica runs,
 decisiones, divergencias, invariantes y último run. El tail es incremental
 mediante un cursor persistido y solo lee SQLite en modo read-only. Caos:
 `services/f3/chaos.sh`; benchmark: `services/f3/bench.sh`; runbook:

@@ -30,7 +30,8 @@ producción**:
 ```
 
 El replay del corpus no lee producción; usa
-`parity/fixtures/replay/2026-11-12`.
+`parity/fixtures/replay/2026-11-12`. La auditoría de workflows valida el
+`risk_decision_json` real con el mismo dominio de riesgo.
 
 ## Despliegue
 
@@ -72,6 +73,7 @@ El script:
 | `qvaapply-f3-replay.timer` | 1 día | corpus replay |
 | `qvaapply-f3-invariants.timer` | 1 día | invariantes SQLite |
 | `qvaapply-f3-soak.timer` | 5 min | muestra RSS/CPU y contadores |
+| `qvaapply-f3-workflows.timer` | 1 día | `risk_decision_json` de workflows |
 
 Todos son `Persistent=true`, con `Nice=10` e IO idle. Solo administran
 unidades `qvaapply-f3-*`.
@@ -157,6 +159,16 @@ journalctl -u qvaapply-f3-tail.service -n 80 --no-pager
 - Si falla por `shadow.*`, aplicar migraciones con
   `docker compose ... run --rm shadow-migrate`.
 - Si hay divergencias, el run queda persistido y `/metrics` lo refleja.
+
+### Workflows con divergencias
+
+```bash
+/opt/qvaapply-f3-shadow/current/scripts/f3-shadow-workflows.sh
+journalctl -u qvaapply-f3-workflows.service -n 80 --no-pager
+```
+
+El run queda en `shadow.runs` con `source='sqlite-workflows'` y las
+divergencias se pueden consultar en `shadow.decisions`.
 
 ### Invariantes con violaciones
 
