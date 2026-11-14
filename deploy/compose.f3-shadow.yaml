@@ -105,6 +105,8 @@ services:
       - /migrations/0006_soak.sql
       - -f
       - /migrations/0007_qvapay.sql
+      - -f
+      - /migrations/0008_qvapay_offers.sql
     networks:
       - shadow
     read_only: true

@@ -85,4 +85,5 @@ fi
 
 compose_for "$compose_file" exec -T postgres \
   psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 \
-  -c "SELECT run_id, balance, offers, averages, to_timestamp(captured_at) AS captured_at FROM shadow.qvapay_snapshots WHERE run_id = '$run_id';"
+  -c "SELECT run_id, balance, offers, averages, to_timestamp(captured_at) AS captured_at FROM shadow.qvapay_snapshots WHERE run_id = '$run_id';" \
+  -c "SELECT coin, type, count(*) AS offers FROM shadow.qvapay_offers WHERE run_id = '$run_id' GROUP BY coin, type ORDER BY coin, type;"

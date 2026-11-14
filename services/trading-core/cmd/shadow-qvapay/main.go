@@ -100,7 +100,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "shadow-qvapay: PostgreSQL no responde: %v\n", err)
 		os.Exit(1)
 	}
-	_, err = pool.Exec(ctx, `
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: iniciar transacción: %v\n", err)
+		os.Exit(1)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // el rollback tras commit es inocuo
+
+	_, err = tx.Exec(ctx, `
 		INSERT INTO shadow.qvapay_snapshots
 			(run_id, user_uuid, balance, offers, averages, captured_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -114,6 +121,34 @@ func main() {
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "shadow-qvapay: persistir snapshot: %v\n", err)
+		os.Exit(1)
+	}
+	for _, offer := range offers {
+		if offer.UUID == "" {
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO shadow.qvapay_offers
+				(run_id, offer_uuid, coin, type, amount, receive, rate, status, captured_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (run_id, offer_uuid) DO UPDATE SET
+				coin = excluded.coin,
+				type = excluded.type,
+				amount = excluded.amount,
+				receive = excluded.receive,
+				rate = excluded.rate,
+				status = excluded.status,
+				captured_at = excluded.captured_at`,
+			id, offer.UUID, offer.Coin, offer.Type, offer.Amount.Format(8),
+			offer.Receive.Format(8), offer.Rate.Format(8), offer.Status, capturedAt,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shadow-qvapay: persistir oferta: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: confirmar snapshot: %v\n", err)
 		os.Exit(1)
 	}
 
