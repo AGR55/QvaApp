@@ -78,6 +78,7 @@ func run(logger *slog.Logger) error {
 	var session *edge.SessionHandler
 	var mobile *edge.MobileAPI
 	var dashboard *edge.DashboardAPI
+	var observability *edge.ObservabilityAPI
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
 		if err != nil {
@@ -96,6 +97,10 @@ func run(logger *slog.Logger) error {
 					Sessions: manager,
 					Store:    &edge.PostgresDashboardStore{Pool: pool},
 				}
+				observability = &edge.ObservabilityAPI{
+					Sessions: manager,
+					Store:    &edge.PostgresObservabilityStore{Pool: pool},
+				}
 			}
 		}
 	}
@@ -110,6 +115,10 @@ func run(logger *slog.Logger) error {
 		}
 		if dashboard != nil && (r.URL.Path == "/api/dashboard" || strings.HasPrefix(r.URL.Path, "/api/live/")) {
 			dashboard.ServeHTTP(w, r)
+			return
+		}
+		if observability != nil && (r.URL.Path == "/api/decision-events" || r.URL.Path == "/api/operational-health") {
+			observability.ServeHTTP(w, r)
 			return
 		}
 		if r.URL.Path == "/service-worker.js" ||

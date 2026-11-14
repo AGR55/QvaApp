@@ -30,17 +30,21 @@ const (
 )
 
 type config struct {
-	Port           string
-	DatabaseURL    string
-	BaseURL        string
-	Token          string
-	ChatID         string
-	AdminChatID    int64
-	InternalKey    string
-	TelegramSecret string
-	WebhookURL     string
-	WebhookEnabled bool
-	DryRun         bool
+	Port            string
+	DatabaseURL     string
+	BaseURL         string
+	Token           string
+	ChatID          string
+	AdminChatID     int64
+	InternalKey     string
+	TelegramSecret  string
+	WebhookURL      string
+	WebhookEnabled  bool
+	WebPushPublic   string
+	WebPushPrivate  string
+	WebPushSubject  string
+	PushSendEnabled bool
+	DryRun          bool
 }
 
 func loadConfig() (config, error) {
@@ -53,6 +57,9 @@ func loadConfig() (config, error) {
 		InternalKey:    strings.TrimSpace(os.Getenv("NOTIFIER_INTERNAL_TOKEN")),
 		TelegramSecret: strings.TrimSpace(os.Getenv("NOTIFIER_TELEGRAM_SECRET")),
 		WebhookURL:     strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+		WebPushPublic:  strings.TrimSpace(os.Getenv("WEB_PUSH_PUBLIC_KEY")),
+		WebPushPrivate: strings.TrimSpace(os.Getenv("WEB_PUSH_PRIVATE_KEY")),
+		WebPushSubject: strings.TrimSpace(os.Getenv("WEB_PUSH_SUBJECT")),
 		DryRun:         true,
 	}
 	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_ADMIN_CHAT_ID")); raw != "" {
@@ -61,6 +68,13 @@ func loadConfig() (config, error) {
 			return config{}, fmt.Errorf("TELEGRAM_ADMIN_CHAT_ID inválido")
 		}
 		cfg.AdminChatID = value
+	}
+	if raw := strings.TrimSpace(os.Getenv("PUSH_SEND_ENABLED")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return config{}, fmt.Errorf("PUSH_SEND_ENABLED inválido")
+		}
+		cfg.PushSendEnabled = value
 	}
 	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_ENABLED")); raw != "" {
 		value, err := strconv.ParseBool(raw)
@@ -116,9 +130,24 @@ func run(logger *slog.Logger) error {
 	if pushStore == nil {
 		logger.Warn("push persistente deshabilitado: Postgres no configurado")
 	}
+	var pushSender notifier.PushSender
+	if cfg.WebPushPublic != "" && cfg.WebPushPrivate != "" {
+		sender, err := notifier.NewWebPushSender(notifier.VAPIDConfig{
+			PublicKey: cfg.WebPushPublic, PrivateKey: cfg.WebPushPrivate, Subject: cfg.WebPushSubject,
+		})
+		if err != nil {
+			logger.Warn("push sender deshabilitado: VAPID inválido", "error", err)
+		} else {
+			if cfg.PushSendEnabled {
+				sender.Enable()
+			}
+			pushSender = sender
+		}
+	}
 	service := &service{
 		cfg: cfg, client: client, dedupe: notifier.NewDeduper(10 * time.Minute),
 		logger: logger, pushAPI: &notifier.PushAPI{Store: pushStore, InternalToken: cfg.InternalKey},
+		pushService: &notifier.PushService{Sender: pushSender, Store: pushStore, InternalToken: cfg.InternalKey},
 		webhookAdmin: &notifier.WebhookAdmin{
 			Client: client, InternalToken: cfg.InternalKey,
 			Registration: notifier.WebhookRegistration{
@@ -156,6 +185,7 @@ type service struct {
 	logger *slog.Logger
 
 	pushAPI      *notifier.PushAPI
+	pushService  *notifier.PushService
 	webhookAdmin *notifier.WebhookAdmin
 	requests     atomic.Uint64
 	sent         atomic.Uint64
@@ -186,6 +216,8 @@ func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		service.webhookAdmin.ServeHTTP(w, r)
 	case r.URL.Path == "/push/subscriptions":
 		service.pushAPI.ServeHTTP(w, r)
+	case r.URL.Path == "/push/send":
+		service.pushService.ServeHTTP(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 	}
