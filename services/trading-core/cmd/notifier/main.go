@@ -27,22 +27,32 @@ const (
 )
 
 type config struct {
-	Port        string
-	BaseURL     string
-	Token       string
-	ChatID      string
-	InternalKey string
-	DryRun      bool
+	Port           string
+	BaseURL        string
+	Token          string
+	ChatID         string
+	AdminChatID    int64
+	InternalKey    string
+	TelegramSecret string
+	DryRun         bool
 }
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Port:        envOrDefault("PORT", defaultPort),
-		BaseURL:     envOrDefault("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
-		Token:       strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		ChatID:      strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
-		InternalKey: strings.TrimSpace(os.Getenv("NOTIFIER_INTERNAL_TOKEN")),
-		DryRun:      true,
+		Port:           envOrDefault("PORT", defaultPort),
+		BaseURL:        envOrDefault("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
+		Token:          strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
+		ChatID:         strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
+		InternalKey:    strings.TrimSpace(os.Getenv("NOTIFIER_INTERNAL_TOKEN")),
+		TelegramSecret: strings.TrimSpace(os.Getenv("NOTIFIER_TELEGRAM_SECRET")),
+		DryRun:         true,
+	}
+	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_ADMIN_CHAT_ID")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			return config{}, fmt.Errorf("TELEGRAM_ADMIN_CHAT_ID inválido")
+		}
+		cfg.AdminChatID = value
 	}
 	if raw := strings.TrimSpace(os.Getenv("NOTIFIER_DRY_RUN")); raw != "" {
 		value, err := strconv.ParseBool(raw)
@@ -128,6 +138,8 @@ func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		service.metrics(w)
 	case r.Method == http.MethodPost && r.URL.Path == "/notify":
 		service.notify(w, r)
+	case r.Method == http.MethodPost && r.URL.Path == "/telegram/update":
+		service.telegramUpdate(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 	}
@@ -189,6 +201,44 @@ func (service *service) notify(w http.ResponseWriter, r *http.Request) {
 	}
 	service.sent.Add(1)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "sent"})
+}
+
+func (service *service) telegramUpdate(w http.ResponseWriter, r *http.Request) {
+	if service.cfg.TelegramSecret != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != service.cfg.TelegramSecret {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthorized"})
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10+1))
+	if err != nil || len(body) > 64<<10 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "bad_request"})
+		return
+	}
+	update, ok := notifier.ParseUpdate(body)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "invalid_update"})
+		return
+	}
+	result := notifier.HandleUpdate(update, notifier.Authorization{AdminChatID: service.cfg.AdminChatID})
+	payload := map[string]any{
+		"updateId": result.UpdateID, "chatId": result.ChatID,
+		"action": result.Decision.Action, "mutation": result.Decision.Mutation,
+		"reply": result.Reply,
+	}
+	if service.cfg.DryRun {
+		service.sent.Add(1)
+		writeJSON(w, http.StatusAccepted, payload)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	if err := service.client.SendMessage(ctx, strconv.FormatInt(result.ChatID, 10), result.Reply); err != nil {
+		service.errors.Add(1)
+		service.logger.Warn("respuesta Telegram falló", "error", err)
+		writeJSON(w, http.StatusBadGateway, map[string]string{"status": "telegram_error"})
+		return
+	}
+	service.sent.Add(1)
+	writeJSON(w, http.StatusAccepted, payload)
 }
 
 func (service *service) metrics(w http.ResponseWriter) {

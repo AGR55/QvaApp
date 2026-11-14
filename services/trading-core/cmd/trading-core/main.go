@@ -284,6 +284,9 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# HELP trading_core_core_executions_total Ejecuciones ledger simuladas.\n")
 		fmt.Fprintf(w, "# TYPE trading_core_core_executions_total counter\n")
 		fmt.Fprintf(w, "trading_core_core_executions_total %d\n", a.consumer.executions.Load())
+		fmt.Fprintf(w, "# HELP trading_core_core_operations_reserved_total Operaciones shadow reservadas.\n")
+		fmt.Fprintf(w, "# TYPE trading_core_core_operations_reserved_total counter\n")
+		fmt.Fprintf(w, "trading_core_core_operations_reserved_total %d\n", a.consumer.operations.Load())
 	}
 	fmt.Fprintf(w, "# HELP trading_core_shadow_stats_error Error consultando estadísticas shadow.\n")
 	fmt.Fprintf(w, "# TYPE trading_core_shadow_stats_error gauge\n")

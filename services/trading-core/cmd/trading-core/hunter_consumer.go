@@ -18,18 +18,20 @@ import (
 )
 
 type hunterConsumer struct {
-	pool       *pgxpool.Pool
-	logger     *slog.Logger
-	worker     string
-	config     core.Config
-	configErr  error
-	shadowRepo *postgres.ShadowRepository
-	processed  atomic.Uint64
-	allowed    atomic.Uint64
-	blocked    atomic.Uint64
-	executions atomic.Uint64
-	failed     atomic.Uint64
-	pending    atomic.Int64
+	pool          *pgxpool.Pool
+	logger        *slog.Logger
+	worker        string
+	config        core.Config
+	configErr     error
+	shadowRepo    *postgres.ShadowRepository
+	operationRepo *postgres.CoreOperationRepository
+	processed     atomic.Uint64
+	allowed       atomic.Uint64
+	blocked       atomic.Uint64
+	executions    atomic.Uint64
+	operations    atomic.Uint64
+	failed        atomic.Uint64
+	pending       atomic.Int64
 }
 
 type hunterPayload struct {
@@ -54,6 +56,7 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	return &hunterConsumer{
 		pool: pool, logger: logger, worker: worker, config: config,
 		configErr: configErr, shadowRepo: postgres.NewShadowRepository(pool),
+		operationRepo: postgres.NewCoreOperationRepository(pool),
 	}
 }
 
@@ -161,6 +164,20 @@ func (consumer *hunterConsumer) consume(
 		consumer.allowed.Add(1)
 		if execution != nil {
 			consumer.executions.Add(1)
+		}
+		now := postgres.NowMS()
+		operation, operationErr := core.NewOperation(event.EventID, amount, receive, now)
+		if operationErr != nil {
+			consumer.logger.Warn("crear operación shadow falló", "event_id", event.EventID, "error", operationErr)
+		} else {
+			if err := consumer.operationRepo.Create(ctx, operation); err != nil {
+				consumer.logger.Debug("operación shadow ya existía", "event_id", event.EventID)
+			}
+			if _, err := consumer.operationRepo.Transition(ctx, event.EventID, core.StateReserved, now); err != nil {
+				consumer.logger.Warn("reservar operación shadow falló", "event_id", event.EventID, "error", err)
+			} else {
+				consumer.operations.Add(1)
+			}
 		}
 	} else {
 		consumer.blocked.Add(1)

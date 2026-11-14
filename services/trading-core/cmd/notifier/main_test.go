@@ -41,3 +41,28 @@ func TestNotifyRequiresInternalToken(t *testing.T) {
 		t.Fatalf("status = %d", recorder.Code)
 	}
 }
+
+func TestTelegramUpdateDryRun(t *testing.T) {
+	service := testService()
+	service.cfg.AdminChatID = 123
+	body := []byte(`{"update_id":1,"message":{"chat":{"id":123},"from":{"id":123,"is_bot":false},"text":"/status"}}`)
+	recorder := httptest.NewRecorder()
+	service.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/telegram/update", bytes.NewReader(body)))
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"action":"status"`)) {
+		t.Fatalf("respuesta inesperada: %s", recorder.Body.String())
+	}
+}
+
+func TestTelegramUpdateSecret(t *testing.T) {
+	service := testService()
+	service.cfg.TelegramSecret = "secreto"
+	body := []byte(`{"update_id":1,"message":{"chat":{"id":123},"from":{"id":123,"is_bot":false},"text":"/status"}}`)
+	recorder := httptest.NewRecorder()
+	service.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/telegram/update", bytes.NewReader(body)))
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+}

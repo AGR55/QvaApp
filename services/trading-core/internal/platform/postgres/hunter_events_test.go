@@ -21,7 +21,7 @@ func TestHunterEventRepository(t *testing.T) {
 	}
 	t.Cleanup(pool.Close)
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, "TRUNCATE shadow.hunter_events"); err != nil {
+	if _, err := pool.Exec(ctx, "TRUNCATE shadow.core_executions, shadow.core_decisions, shadow.hunter_events CASCADE"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `

@@ -129,6 +129,8 @@ services:
       NOTIFIER_INTERNAL_TOKEN: ${NOTIFIER_INTERNAL_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_ADMIN_CHAT_ID: ${TELEGRAM_ADMIN_CHAT_ID:-}
+      NOTIFIER_TELEGRAM_SECRET: ${NOTIFIER_TELEGRAM_SECRET:-}
     entrypoint: ["/notifier"]
     ports:
       - "127.0.0.1:8092:8092"
@@ -218,6 +220,8 @@ services:
       - /migrations/0012_core_decisions.sql
       - -f
       - /migrations/0013_core_executions.sql
+      - -f
+      - /migrations/0014_core_operations.sql
     networks:
       - shadow
     read_only: true

@@ -96,12 +96,13 @@ hunter_events_migration_file="$release_dir/services/db/migrations/0010_hunter_ev
 hunter_source_migration_file="$release_dir/services/db/migrations/0011_hunter_source.sql"
 core_decisions_migration_file="$release_dir/services/db/migrations/0012_core_decisions.sql"
 core_executions_migration_file="$release_dir/services/db/migrations/0013_core_executions.sql"
+core_operations_migration_file="$release_dir/services/db/migrations/0014_core_operations.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file || ! -f $core_executions_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012/0013." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file || ! -f $core_executions_migration_file || ! -f $core_operations_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012/0013/0014." >&2
   exit 2
 fi
 
