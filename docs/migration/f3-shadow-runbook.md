@@ -12,6 +12,23 @@ producción**:
 - Jobs: replay, auditoría de decisiones, tail incremental e invariantes.
 - Nunca escribe en `/opt/qvaapply`, en la SQLite de producción ni en QvaPay.
 
+## Hunter (microservicio de cacerías)
+
+- Servicio separado: `qvaapply-f3-shadow-hunter`, puerto `127.0.0.1:8091`.
+- Perfil Compose `hunter`; polling QvaPay cada 3 s con promedios cacheados.
+- Persiste `shadow.hunter_polls`, `shadow.hunter_candidates` y
+  `shadow.hunter_events` (cola durable para core).
+- Config: `/opt/qvaapply-f3-shadow/data/hunter-config.json`.
+- Secretos: `/opt/qvaapply-f3-shadow/hunter.env` (600).
+- Healthcheck: `/hunter healthcheck`; métricas en `/metrics`.
+
+```bash
+curl -sS http://127.0.0.1:8091/healthz
+curl -sS http://127.0.0.1:8091/readyz
+curl -sS http://127.0.0.1:8091/metrics
+systemctl status qvaapply-f3-qvapay.service --no-pager
+```
+
 ## Arquitectura
 
 ```text

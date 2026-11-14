@@ -182,6 +182,17 @@ Gate F2:
 - [x] Decisión explícita: **continuar a F3**, con sesión replay persistente y
       benchmark en VPS como condiciones previas.
 
+## 4.1 Decisión MVP microservicios (2026-11-14)
+
+El MVP no espera el gate de 7 días para desplegar: cada servicio se cierra con
+tests, lint, benchmark y despliegue shadow. La observación de 7 días/72 h queda
+como confianza operativa en paralelo.
+
+Topología en construcción: `hunter` (cacerías, vivo), `core` (dinero, shadow),
+`edge` (web/Android, pendiente), `notifier` (Telegram/push, pendiente). El
+detalle y los resultados están en
+[`2026-11-14-hunter-service.md`](2026-11-14-hunter-service.md).
+
 ## 5. F3 — `trading-core` completo en shadow (3–4 semanas)
 
 Objetivo: implementar el servicio real y ejecutarlo **sin poder mutar** junto a

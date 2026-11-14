@@ -10,6 +10,7 @@ services/
   trading-core/           # núcleo transaccional; aquí vive el dominio puro
     cmd/parity-sut/       # CLI de conformidad NDJSON para el runner
     cmd/replay-probe/     # valida el corpus de replay para F2
+    cmd/hunter/           # microservicio de cacerías (polling QvaPay)
     internal/domain/      # reglas puras, sin I/O
     internal/replay/      # cargador estricto del corpus F0/F2
   db/                     # Postgres local, importador SQLite y esquema v1
@@ -143,8 +144,10 @@ El servicio `cmd/trading-core` está desplegado en la VPS en
 `/opt/qvaapply-f3-shadow`, con Postgres propio, `127.0.0.1:8090` y sin tocar
 producción. Expone `/healthz`, `/readyz` y `/metrics`. `cmd/shadow-replay`
 persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
-4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `platform/qvapay` implementa el cliente de lectura de QvaPay sin login ni
-mutaciones. `cmd/shadow-qvapay` descifra en memoria el token de producción y
+4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `cmd/hunter` es el microservicio de cacerías: polling QvaPay read-only,
+evaluación de ofertas y cola durable `shadow.hunter_events` para core. No
+escribe dinero. `platform/qvapay` implementa el cliente de lectura de QvaPay
+sin login ni mutaciones. `cmd/shadow-qvapay` descifra en memoria el token de producción y
 guarda snapshots horarios (balance, ofertas y promedios) en
 `shadow.qvapay_snapshots` y el inventario en `shadow.qvapay_offers`. El auditor de invariantes SQLite cubre continuidad
 fiat, operaciones, intenciones y workflows. `cmd/shadow-audit` reconstruye
