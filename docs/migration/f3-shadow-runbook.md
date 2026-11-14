@@ -116,10 +116,11 @@ curl -sS http://127.0.0.1:8090/metrics
 | `trading_core_shadow_last_run_timestamp_seconds` | frescura |
 | `trading_core_shadow_invariant_violations_total` | violaciones |
 | `trading_core_shadow_last_invariant_timestamp_seconds` | frescura de invariantes |
+| `trading_core_shadow_last_qvapay_timestamp_seconds` | frescura del snapshot QvaPay |
 | `trading_core_shadow_stats_error` | error consultando shadow.* |
 
 Alertas recomendadas: `mismatches > 0`, `invariant_violations > 0`,
-`last_run` con más de 15 min, `stats_error = 1`.
+`last_run` con más de 15 min, `last_qvapay` con más de 2 h, `stats_error = 1`.
 
 ## Verificación diaria
 

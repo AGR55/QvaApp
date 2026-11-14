@@ -18,6 +18,7 @@ averages = 105
 
 - Persistido en `shadow.qvapay_snapshots`; no se guarda token ni payload
   sensible.
+- `/metrics` expone `trading_core_shadow_last_qvapay_timestamp_seconds`.
 - Timer `qvaapply-f3-qvapay.timer` cada hora. Ejecución manual del timer:
   `qvapay-20261114T042712Z`, mismo balance y conteos, `status=0/SUCCESS`.
 
