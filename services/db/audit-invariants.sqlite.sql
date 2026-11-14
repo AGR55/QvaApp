@@ -52,6 +52,31 @@ WITH checks AS (
   HAVING count(*) > 1
 
   UNION ALL
+  SELECT 'INV-01', 'critical', 'operación con importes no positivos', o.uuid
+  FROM operations o
+  WHERE o.amount <= 0 OR o.receive <= 0 OR o.rate <= 0
+
+  UNION ALL
+  SELECT 'INV-12', 'critical', 'intención con tipo desconocido', i.intent_id
+  FROM mutation_intents i
+  WHERE i.kind NOT IN ('apply', 'cancel', 'cancel_offer', 'paid', 'received')
+
+  UNION ALL
+  SELECT 'INV-12', 'critical', 'intención con fechas incoherentes', i.intent_id
+  FROM mutation_intents i
+  WHERE i.updated_at < i.created_at
+
+  UNION ALL
+  SELECT 'INV-20', 'critical', 'workflow con fechas incoherentes', w.id
+  FROM trade_workflows w
+  WHERE w.updated_at < w.created_at
+
+  UNION ALL
+  SELECT 'INV-02', 'critical', 'reserva de capital con estado desconocido', c.workflow_id
+  FROM capital_reservations c
+  WHERE c.state NOT IN ('active', 'released')
+
+  UNION ALL
   SELECT 'INV-12', 'critical', 'intención con estado desconocido', i.intent_id
   FROM mutation_intents i
   WHERE i.state NOT IN ('submitted', 'confirmed', 'rejected', 'uncertain', 'reconciled')
