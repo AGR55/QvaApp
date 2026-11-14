@@ -107,8 +107,9 @@ Los timers se instalan una sola vez en la VPS:
 /opt/qvaapply-f3-shadow/current/scripts/install-f3-shadow-timer.sh install
 ```
 
-- `qvaapply-f3-audit.timer`: cada hora.
-- `qvaapply-f3-replay.timer`: diario.
+- `qvaapply-f3-tail.timer`: cada 5 minutos; solo decisiones nuevas.
+- `qvaapply-f3-audit.timer`: cada hora; auditoría completa.
+- `qvaapply-f3-replay.timer`: diario; corpus replay.
 - `Persistent=true`; sobreviven reinicios.
 - No tocan `/opt/qvaapply`; se desinstalan con `... uninstall`.
 
@@ -116,7 +117,9 @@ Los timers se instalan una sola vez en la VPS:
 `trading_core_shadow_decisions_total`,
 `trading_core_shadow_mismatches_total`,
 `trading_core_shadow_last_run_timestamp_seconds` y
-`trading_core_shadow_stats_error`. Evidencia:
+`trading_core_shadow_stats_error`. El cursor incremental está en
+`/opt/qvaapply-f3-shadow/data/decision-events.cursor` (permisos 600) y solo
+avanza tras persistir correctamente. Evidencia:
 [soak-start](evidence/2026-11-13-f3-soak-start.md).
 
 ## Verificación
@@ -140,7 +143,7 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 
 ## Estado desplegado (2026-11-13)
 
-- Release activa `ad99fac9c17ea047a10d45afa41bd41004c6b1b2` en
+- Release activa `90b29089ccd24d22298465fe561817f24ec0cabf` en
   `/opt/qvaapply-f3-shadow`.
 - Migración `0004_shadow.sql` aplicada; replay y auditoría persistentes.
 - Run `f3-vps-20261114T021952Z`: **4/4 casos, 14/14 pasos, 14/14 JSON

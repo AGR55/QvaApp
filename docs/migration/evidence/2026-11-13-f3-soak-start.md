@@ -36,11 +36,12 @@ trading_core_shadow_stats_error 0
 
 ## Estado
 
-- Release activa: `ad99fac9c17ea047a10d45afa41bd41004c6b1b2`.
+- Release activa: `90b29089ccd24d22298465fe561817f24ec0cabf`.
 - `trading-core` healthy, solo `127.0.0.1:8090`.
 - Producción sigue en `02bb5afc...`; `/api/session` 200.
-- La release incorpora `shadow-audit` y las métricas agregadas de `shadow.*`.
-- El soak empieza con estos timers; falta acumular 72 h y revisar memoria,
+- La release incorpora `shadow-audit`, el tail incremental y las métricas
+  agregadas de `shadow.*`.
+- El soak empieza con estos tres timers; falta acumular 72 h y revisar memoria,
   divergencias y crecimiento de runs.
 
 ## Límites
