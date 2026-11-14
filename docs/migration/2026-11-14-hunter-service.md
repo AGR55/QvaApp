@@ -45,8 +45,8 @@ mutaciones de QvaPay y puede escalarse o reiniciarse sin tocar `core`.
 - `/healthz`, `/readyz`, `/metrics`, `/candidates`.
 - Métricas SSE: conexión, eventos crudos/oportunidad, errores, lag y decisión.
 - `core` consume `shadow.hunter_events` con claim idempotente
-  (`FOR UPDATE SKIP LOCKED`), validación/reintentos y métricas
-  `trading_core_hunter_events_*`. Es intake, todavía no muta dinero.
+  (`FOR UPDATE SKIP LOCKED`), evalúa `riskpolicy` con un snapshot de
+  riesgo/mercados/saldos y persiste `shadow.core_decisions`. No muta dinero.
 - Healthcheck del contenedor sin shell.
 
 ## Resultado en VPS
@@ -86,16 +86,18 @@ La comparación con TS en el mismo periodo es favorable al hunter: TS tenía
 `decisión+persistencia=6,3 ms` en la muestra anotada. La diferencia no es
 todavía un benchmark formal, pero confirma que el camino SSE es el correcto.
 
-### Core intake
+### Core shadow
 
 ```text
-eventos procesados = 14
+eventos procesados = 18
 pendientes         = 0
 fallidos           = 0
+decisión real      = apply
 ```
 
-La cola `shadow.hunter_events` queda drenada. El consumidor es idempotente y
-tolera reintentos; la escritura de dinero sigue fuera de este corte.
+La cola `shadow.hunter_events` queda drenada. `core` evalúa `riskpolicy` con
+configuración real de riesgo/mercados y guarda `shadow.core_decisions`; la
+escritura de dinero sigue fuera de este corte.
 
 ## Tests y verificación
 

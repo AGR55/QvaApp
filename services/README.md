@@ -145,8 +145,9 @@ El servicio `cmd/trading-core` está desplegado en la VPS en
 producción. Expone `/healthz`, `/readyz` y `/metrics`. `cmd/shadow-replay`
 persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
 4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `cmd/hunter` es el microservicio de cacerías: feed SSE QvaPay (SSE-only por
-defecto), evaluación de ofertas y cola durable; `trading-core` consume esa cola
-de forma idempotente. `shadow.hunter_events` para core. No
+defecto), evaluación de ofertas y cola durable; `trading-core` consume esa cola,
+evalúa `riskpolicy` con snapshot de producción y persiste
+`shadow.core_decisions` sin mutar dinero. `shadow.hunter_events` para core. No
 escribe dinero. `platform/qvapay` implementa el cliente de lectura de QvaPay
 sin login ni mutaciones. `cmd/shadow-qvapay` descifra en memoria el token de producción y
 guarda snapshots horarios (balance, ofertas y promedios) en
