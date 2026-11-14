@@ -78,6 +78,18 @@ Rutas autenticadas:
 
 Verificado en VPS: 401 sin sesión y 200 con login.
 
+## Live markets/transactions
+
+Rutas autenticadas:
+
+- `GET /api/live/markets/:coin`
+- `GET /api/live/transactions?limit=20`
+
+`shadow-qvapay` ahora persiste las últimas 20 transacciones read-only en
+`shadow.qvapay_transactions`. Verificado en VPS: 20 filas y ambas rutas 200.
+La auditoría estática actualiza a **12/109 rutas exactas**; siguen 97
+pendientes.
+
 ## Limitación actual
 
 El edge sirve shell HTML, assets, `/service-worker.js`, `/auth/*`, `/icons/*`,

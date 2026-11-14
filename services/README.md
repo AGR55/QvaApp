@@ -149,7 +149,8 @@ defecto), evaluación de ofertas y cola durable; `trading-core` consume esa cola
 evalúa `riskpolicy` con snapshot de producción y persiste
 `shadow.core_decisions` sin mutar dinero. `scripts/f3-compare.sh` compara las métricas TS y Go; `scripts/f3-cutover-check.sh`
 valida el estado pre-cutover. `internal/notifier/webhook.go` y `webhook_admin.go` gestionan el webhook de
-Telegram sin registro automático; `internal/edge/mobile_api.go` y `dashboard_api.go` sirven APIs autenticadas; `internal/platform/qvapay/mutations.go` mantiene las
+Telegram sin registro automático; `internal/edge/mobile_api.go`, `dashboard_api.go`, `live_api.go` y
+`observability_api.go` sirven APIs autenticadas; `internal/platform/qvapay/mutations.go` mantiene las
 mutaciones reales deshabilitadas; `internal/notifier/push.go` valida
 suscripciones/VAPID; `push_http.go`/`push_service.go` y `shadow.push_subscriptions` las persisten y
 exponen envío deshabilitado por defecto. `cmd/notifier` es el
