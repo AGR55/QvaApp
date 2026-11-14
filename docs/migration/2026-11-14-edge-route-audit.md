@@ -60,7 +60,8 @@ Rutas TS únicas:          109
 Rutas edge únicas:        16
 Cubiertas exactamente:    11
 Rutas TS no cubiertas:    98
-Rutas edge extra:         5
+Rutas edge extra:         5 (la auditoría estática no cuenta los prefijos
+estáticos P4 implementados en `static_routes.go`)
 ```
 
 ### Rutas cubiertas exactamente (11)

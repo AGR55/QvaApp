@@ -71,8 +71,9 @@ es Postgres read-only y no expone credenciales.
 
 ## Limitación actual
 
-El edge ya sirve un shell HTML mínimo que carga `/dashboard/app.js` y assets
-reales. El monolito TS sigue generando el HTML/SSR completo y las rutas de API.
+El edge sirve shell HTML, assets, `/service-worker.js`, `/auth/*`, `/icons/*`,
+`/logo/*` y `/market-icons/*` con caché/seguridad, además de las APIs de
+sesión, móvil y dashboard/live. El monolito TS sigue generando el HTML/SSR completo y las rutas de API.
 **Todavía no sustituye el dashboard completo**. Falta:
 
 - rutas `/api/*` completas con auth/sesión/CSRF/origen;
