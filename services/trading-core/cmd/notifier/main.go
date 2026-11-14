@@ -18,7 +18,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/AGR55/QvaApp/services/trading-core/internal/notifier"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 )
 
 const (
@@ -28,6 +31,7 @@ const (
 
 type config struct {
 	Port           string
+	DatabaseURL    string
 	BaseURL        string
 	Token          string
 	ChatID         string
@@ -42,6 +46,7 @@ type config struct {
 func loadConfig() (config, error) {
 	cfg := config{
 		Port:           envOrDefault("PORT", defaultPort),
+		DatabaseURL:    strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		BaseURL:        envOrDefault("TELEGRAM_API_BASE_URL", "https://api.telegram.org"),
 		Token:          strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
 		ChatID:         strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")),
@@ -94,10 +99,27 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	client := notifier.NewClient(cfg.Token, cfg.BaseURL)
+	var pushStore notifier.PushSubscriptionStore
+	var pool *pgxpool.Pool
+	if cfg.DatabaseURL != "" {
+		pool, err = pgxpool.New(ctx, cfg.DatabaseURL)
+		if err == nil {
+			defer pool.Close()
+			pushStore = postgres.NewPushSubscriptionRepository(pool)
+		} else {
+			logger.Warn("Postgres push no disponible; usando store en memoria", "error", err)
+		}
+	}
+	if pushStore == nil {
+		logger.Warn("push persistente deshabilitado: Postgres no configurado")
+	}
 	service := &service{
 		cfg: cfg, client: client, dedupe: notifier.NewDeduper(10 * time.Minute),
-		logger: logger, webhookAdmin: &notifier.WebhookAdmin{
+		logger: logger, pushAPI: &notifier.PushAPI{Store: pushStore, InternalToken: cfg.InternalKey},
+		webhookAdmin: &notifier.WebhookAdmin{
 			Client: client, InternalToken: cfg.InternalKey,
 			Registration: notifier.WebhookRegistration{
 				PublicURL: cfg.WebhookURL, Secret: cfg.TelegramSecret,
@@ -111,8 +133,6 @@ func run(logger *slog.Logger) error {
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
 		WriteTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
 	logger.Info("notifier iniciado", "port", cfg.Port, "dry_run", cfg.DryRun)
@@ -135,6 +155,7 @@ type service struct {
 	dedupe *notifier.Deduper
 	logger *slog.Logger
 
+	pushAPI      *notifier.PushAPI
 	webhookAdmin *notifier.WebhookAdmin
 	requests     atomic.Uint64
 	sent         atomic.Uint64
@@ -163,6 +184,8 @@ func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		service.telegramUpdate(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/telegram"):
 		service.webhookAdmin.ServeHTTP(w, r)
+	case r.URL.Path == "/push/subscriptions":
+		service.pushAPI.ServeHTTP(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 	}

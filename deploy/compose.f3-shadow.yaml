@@ -133,6 +133,7 @@ services:
       NOTIFIER_TELEGRAM_SECRET: ${NOTIFIER_TELEGRAM_SECRET:-}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
       TELEGRAM_WEBHOOK_ENABLED: ${TELEGRAM_WEBHOOK_ENABLED:-false}
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
     entrypoint: ["/notifier"]
     ports:
       - "127.0.0.1:8092:8092"
@@ -226,6 +227,8 @@ services:
       - /migrations/0013_core_executions.sql
       - -f
       - /migrations/0014_core_operations.sql
+      - -f
+      - /migrations/0015_push_subscriptions.sql
     networks:
       - shadow
     read_only: true
