@@ -70,9 +70,19 @@ func run(logger *slog.Logger) error {
 		logger.Warn("directorio estático no encontrado", "static_dir", cfg.StaticDir)
 	}
 
+	base := edge.NewHandler(cfg.StaticDir, stats)
+	shell := edge.NewShellHandler(cfg.StaticDir)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/healthz", "/readyz", "/metrics", "/api/edge/summary":
+			base.ServeHTTP(w, r)
+		default:
+			shell.ServeHTTP(w, r)
+		}
+	})
 	server := &http.Server{
 		Addr:              ":" + cfg.Port,
-		Handler:           edge.NewHandler(cfg.StaticDir, stats),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      15 * time.Second,
