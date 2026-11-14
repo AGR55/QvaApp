@@ -147,6 +147,18 @@ type CoreDecision struct {
 	Reason         string
 	ChecksJSON     string
 	CreatedAt      int64
+	Execution      *CoreExecution
+}
+
+// CoreExecution es la simulación ledger de una decisión allowed.
+type CoreExecution struct {
+	OperationID   string
+	QusdAmount    string
+	ReserveQusd   string
+	RemainingQusd string
+	LedgerJSON    string
+	Reason        string
+	CreatedAt     int64
 }
 
 // CompleteWithDecision guarda la decisión y marca el evento como procesado en
@@ -179,6 +191,29 @@ func (repository *HunterEventRepository) CompleteWithDecision(
 	)
 	if err != nil {
 		return err
+	}
+	if decision.Execution != nil {
+		_, err = tx.Exec(ctx, `
+			INSERT INTO shadow.core_executions
+				(event_id, operation_id, qusd_amount, reserve_qusd, remaining_qusd,
+				 ledger_json, reason, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (event_id) DO UPDATE SET
+				operation_id = excluded.operation_id,
+				qusd_amount = excluded.qusd_amount,
+				reserve_qusd = excluded.reserve_qusd,
+				remaining_qusd = excluded.remaining_qusd,
+				ledger_json = excluded.ledger_json,
+				reason = excluded.reason,
+				created_at = excluded.created_at`,
+			decision.EventID, decision.Execution.OperationID,
+			decision.Execution.QusdAmount, decision.Execution.ReserveQusd,
+			decision.Execution.RemainingQusd, decision.Execution.LedgerJSON,
+			decision.Execution.Reason, decision.Execution.CreatedAt,
+		)
+		if err != nil {
+			return err
+		}
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE shadow.hunter_events

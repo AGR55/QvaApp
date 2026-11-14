@@ -281,6 +281,9 @@ func (a *app) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "# HELP trading_core_core_decisions_blocked_total Decisiones core bloqueadas.\n")
 		fmt.Fprintf(w, "# TYPE trading_core_core_decisions_blocked_total counter\n")
 		fmt.Fprintf(w, "trading_core_core_decisions_blocked_total %d\n", a.consumer.blocked.Load())
+		fmt.Fprintf(w, "# HELP trading_core_core_executions_total Ejecuciones ledger simuladas.\n")
+		fmt.Fprintf(w, "# TYPE trading_core_core_executions_total counter\n")
+		fmt.Fprintf(w, "trading_core_core_executions_total %d\n", a.consumer.executions.Load())
 	}
 	fmt.Fprintf(w, "# HELP trading_core_shadow_stats_error Error consultando estadísticas shadow.\n")
 	fmt.Fprintf(w, "# TYPE trading_core_shadow_stats_error gauge\n")

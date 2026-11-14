@@ -186,6 +186,8 @@ services:
       - /migrations/0011_hunter_source.sql
       - -f
       - /migrations/0012_core_decisions.sql
+      - -f
+      - /migrations/0013_core_executions.sql
     networks:
       - shadow
     read_only: true

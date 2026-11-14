@@ -27,6 +27,7 @@ type hunterConsumer struct {
 	processed  atomic.Uint64
 	allowed    atomic.Uint64
 	blocked    atomic.Uint64
+	executions atomic.Uint64
 	failed     atomic.Uint64
 	pending    atomic.Int64
 }
@@ -118,12 +119,37 @@ func (consumer *hunterConsumer) consume(
 	}
 	checksJSON, _ := json.Marshal(result.Checks)
 	reason := strings.Join(result.Reasons, " · ")
+	var execution *postgres.CoreExecution
+	if result.Allowed {
+		simulated, err := core.SimulateExecution(core.ExecutionInput{
+			Event: core.Event{
+				OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
+				Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
+			},
+			Result: result, AvailableQusd: balance,
+			ReserveQusd: consumer.config.Limits.MinQusdReserve,
+			OperationID: event.EventID,
+		})
+		if err != nil {
+			consumer.failed.Add(1)
+			_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
+			consumer.logger.Warn("simulación ledger falló", "event_id", event.EventID, "error", err)
+			return
+		}
+		ledgerJSON, _ := json.Marshal(simulated.LedgerEntries)
+		execution = &postgres.CoreExecution{
+			OperationID: simulated.OperationID,
+			QusdAmount:  simulated.QusdAmount.Format(8), ReserveQusd: simulated.ReserveQusd.Format(8),
+			RemainingQusd: simulated.RemainingQusd.Format(8), LedgerJSON: string(ledgerJSON),
+			Reason: simulated.Reason, CreatedAt: postgres.NowMS(),
+		}
+	}
 	if err := repository.CompleteWithDecision(ctx, postgres.CoreDecision{
 		EventID: event.EventID, OfferUUID: payload.OfferUUID, Coin: payload.Coin,
 		Side: payload.Side, HunterDecision: payload.Decision, CoreKind: result.Kind,
 		Allowed: result.Allowed, Amount: amount.Format(8), Receive: receive.Format(8),
 		Rate: rate.Format(8), Reason: reason, ChecksJSON: string(checksJSON),
-		CreatedAt: postgres.NowMS(),
+		CreatedAt: postgres.NowMS(), Execution: execution,
 	}, postgres.NowMS()); err != nil {
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
@@ -133,6 +159,9 @@ func (consumer *hunterConsumer) consume(
 	consumer.processed.Add(1)
 	if result.Allowed {
 		consumer.allowed.Add(1)
+		if execution != nil {
+			consumer.executions.Add(1)
+		}
 	} else {
 		consumer.blocked.Add(1)
 	}
