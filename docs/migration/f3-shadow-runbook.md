@@ -24,6 +24,9 @@ producción**:
 - Secretos: `/opt/qvaapply-f3-shadow/hunter.env` (600), incluye token y
   credenciales cifradas de app para SSE.
 - Healthcheck: `/hunter healthcheck`; métricas en `/metrics`.
+- Cola de salida: `shadow.hunter_events`; `trading-core` la consume con claim
+  idempotente y métricas `trading_core_hunter_events_processed_total` /
+  `...pending` / `...failed_total`.
 - Métricas SSE: `hunter_stream_connected`, `hunter_stream_raw_events_total`,
   `hunter_stream_events_total`, `hunter_stream_errors_total`,
   `hunter_stream_last_lag_ms`, `hunter_stream_last_decision_us`.

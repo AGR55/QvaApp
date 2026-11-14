@@ -44,20 +44,26 @@ mutaciones de QvaPay y puede escalarse o reiniciarse sin tocar `core`.
 - Retención de polls: 24 h.
 - `/healthz`, `/readyz`, `/metrics`, `/candidates`.
 - Métricas SSE: conexión, eventos crudos/oportunidad, errores, lag y decisión.
+- `core` consume `shadow.hunter_events` con claim idempotente
+  (`FOR UPDATE SKIP LOCKED`), validación/reintentos y métricas
+  `trading_core_hunter_events_*`. Es intake, todavía no muta dinero.
 - Healthcheck del contenedor sin shell.
 
 ## Resultado en VPS
 
-### SSE (camino rápido)
+### SSE-only (camino rápido)
 
 ```text
 conexión    = 1
-polls /p2p  = 0
-eventos SSE = 5 crudos · 4 oportunidades (12 s)
-lag         = 10 ms
-decisión+persistencia = 3,7 ms
+polls /p2p  = 0  (no compite con las dos cuentas TS)
+eventos SSE = 8 oportunidades en la última muestra
+lag         = 14 ms
+decisión+persistencia = 6,3 ms
 errores SSE = 0
 ```
+
+`/p2p/averages` se refresca en background cada 5 min y no se interpone en la
+decisión del evento.
 
 El feed entrega `p2p.range_updated` de ofertas vivas cada pocos segundos. La
 evaluación local pura medida es **21,7 µs para 20 ofertas**; el resto del
@@ -76,9 +82,20 @@ El evento durable se deduplica por oferta/decisión/tasa; por eso las
 evaluaciones repetidas no generan eventos duplicados para core.
 
 La comparación con TS en el mismo periodo es favorable al hunter: TS tenía
-`delivery_lag=69 ms` y `decision=5 ms`; el hunter SSE midió `lag=10 ms` y
-`decisión+persistencia=3,7 ms` en la muestra anotada. La diferencia no es
+`delivery_lag=69 ms` y `decision=5 ms`; el hunter SSE midió `lag=14 ms` y
+`decisión+persistencia=6,3 ms` en la muestra anotada. La diferencia no es
 todavía un benchmark formal, pero confirma que el camino SSE es el correcto.
+
+### Core intake
+
+```text
+eventos procesados = 14
+pendientes         = 0
+fallidos           = 0
+```
+
+La cola `shadow.hunter_events` queda drenada. El consumidor es idempotente y
+tolera reintentos; la escritura de dinero sigue fuera de este corte.
 
 ## Tests y verificación
 
