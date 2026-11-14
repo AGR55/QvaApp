@@ -25,3 +25,4 @@ services/trading-core/bin/
 services/trading-core/trading-core
 services/trading-core/shadow-replay
 services/trading-core/shadow-audit
+services/trading-core/shadow-workflows

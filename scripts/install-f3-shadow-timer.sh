@@ -23,6 +23,8 @@ readonly invariants_service="qvaapply-f3-invariants.service"
 readonly invariants_timer="qvaapply-f3-invariants.timer"
 readonly soak_service="qvaapply-f3-soak.service"
 readonly soak_timer="qvaapply-f3-soak.timer"
+readonly workflows_service="qvaapply-f3-workflows.service"
+readonly workflows_timer="qvaapply-f3-workflows.timer"
 
 if (( EUID != 0 )); then
   echo "Ejecuta este script como root." >&2
@@ -39,7 +41,8 @@ case "$action" in
     if [[ ! -x "$app_root/current/scripts/f3-shadow-audit.sh" ]] \
       || [[ ! -x "$app_root/current/scripts/f3-shadow-tail.sh" ]] \
       || [[ ! -x "$app_root/current/scripts/f3-shadow-invariants.sh" ]] \
-      || [[ ! -x "$app_root/current/scripts/f3-shadow-soak.sh" ]]; then
+      || [[ ! -x "$app_root/current/scripts/f3-shadow-soak.sh" ]] \
+      || [[ ! -x "$app_root/current/scripts/f3-shadow-workflows.sh" ]]; then
       echo "Falta la release shadow activa; ejecuta antes deploy-f3-shadow.sh." >&2
       exit 2
     fi
@@ -163,17 +166,42 @@ RandomizedDelaySec=20s
 [Install]
 WantedBy=timers.target
 UNIT
+    cat > "$unit_dir/$workflows_service" <<'UNIT'
+[Unit]
+Description=Daily QvaApply F3 shadow workflow risk audit
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/opt/qvaapply-f3-shadow/current/scripts/f3-shadow-workflows.sh
+UNIT
+    cat > "$unit_dir/$workflows_timer" <<'UNIT'
+[Unit]
+Description=Daily QvaApply F3 shadow workflow risk audit
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=12m
+
+[Install]
+WantedBy=timers.target
+UNIT
     systemctl daemon-reload
-    systemctl enable --now "$audit_timer" "$replay_timer" "$tail_timer" "$invariants_timer" "$soak_timer"
+    systemctl enable --now "$audit_timer" "$replay_timer" "$tail_timer" "$invariants_timer" "$soak_timer" "$workflows_timer"
     systemctl list-timers --all 'qvaapply-f3-*' --no-pager
     ;;
   uninstall)
-    systemctl disable --now "$audit_timer" "$replay_timer" "$tail_timer" "$invariants_timer" "$soak_timer" 2>/dev/null || true
+    systemctl disable --now "$audit_timer" "$replay_timer" "$tail_timer" "$invariants_timer" "$soak_timer" "$workflows_timer" 2>/dev/null || true
     rm -f "$unit_dir/$audit_service" "$unit_dir/$audit_timer" \
       "$unit_dir/$replay_service" "$unit_dir/$replay_timer" \
       "$unit_dir/$tail_service" "$unit_dir/$tail_timer" \
       "$unit_dir/$invariants_service" "$unit_dir/$invariants_timer" \
-      "$unit_dir/$soak_service" "$unit_dir/$soak_timer"
+      "$unit_dir/$soak_service" "$unit_dir/$soak_timer" \
+      "$unit_dir/$workflows_service" "$unit_dir/$workflows_timer"
     systemctl daemon-reload
     echo "Timers F3 shadow desinstalados."
     ;;

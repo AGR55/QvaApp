@@ -163,6 +163,27 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  shadow-workflows:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      SHADOW_MODE: "true"
+    entrypoint: ["/shadow-workflows"]
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   shadow:
     name: qvaapply-f3-shadow
