@@ -52,7 +52,7 @@ trap cleanup EXIT
 
 echo "Ejecutando invariantes SQLite en modo read-only..."
 sqlite3 -readonly -json "file:${prod_db}?mode=ro" < "$sql_file" > "$violations_file"
-violations=$(grep -o '"check_id"' "$violations_file" | wc -l | tr -d '[:space:]')
+violations=$( { grep -o '"check_id"' "$violations_file" || true; } | wc -l | tr -d '[:space:]')
 if [[ ! $violations =~ ^[0-9]+$ ]]; then
   echo "No se pudo contar las violaciones." >&2
   exit 1
