@@ -57,6 +57,18 @@ Rutas nuevas, protegidas por la cookie de sesión:
 Verificado en VPS: sin sesión 401; con login 200 en las cuatro rutas. El store
 Postgres es solo lectura y no expone token/CSRF.
 
+## Dashboard/live API
+
+Rutas autenticadas por cookie:
+
+- `GET /api/dashboard`
+- `GET /api/live/balance`
+- `GET /api/live/own-offers?limit=50`
+- `GET /api/live/operations?limit=20`
+
+Verificado en VPS: sin sesión 401; con login 200 en las cuatro rutas. El store
+es Postgres read-only y no expone credenciales.
+
 ## Limitación actual
 
 El edge ya sirve un shell HTML mínimo que carga `/dashboard/app.js` y assets

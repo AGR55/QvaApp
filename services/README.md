@@ -149,9 +149,9 @@ defecto), evaluación de ofertas y cola durable; `trading-core` consume esa cola
 evalúa `riskpolicy` con snapshot de producción y persiste
 `shadow.core_decisions` sin mutar dinero. `scripts/f3-compare.sh` compara las métricas TS y Go; `scripts/f3-cutover-check.sh`
 valida el estado pre-cutover. `internal/notifier/webhook.go` y `webhook_admin.go` gestionan el webhook de
-Telegram sin registro automático; `internal/edge/mobile_api.go` sirve la API
-móvil autenticada; `internal/platform/qvapay/mutations.go` mantiene las
-mutaciones reales deshabilitadas. `cmd/notifier` es el
+Telegram sin registro automático; `internal/edge/mobile_api.go` y `dashboard_api.go` sirven APIs autenticadas; `internal/platform/qvapay/mutations.go` mantiene las
+mutaciones reales deshabilitadas; `internal/notifier/push.go` valida
+suscripciones/VAPID sin enviar todavía. `cmd/notifier` es el
 servicio send-only de Telegram (dry-run por defecto, sin long-polling);
 `cmd/edge` sirve shell, assets y resumen shadow sin proxy al monolito.
 `internal/notifier/commands.go` y `update.go` contienen parser y webhook de

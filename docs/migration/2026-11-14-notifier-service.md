@@ -46,6 +46,12 @@ por defecto**: devuelve `{"status":"disabled"}` sin red. El registro real exige
 `TELEGRAM_WEBHOOK_ENABLED=true`, URL pública y token interno. Todavía no se ha
 registrado el webhook de producción porque TS sigue en long-polling.
 
+## Push
+
+`internal/notifier/push.go` añade validación de suscripciones Web Push,
+almacén en memoria con TTL/dedupe y validación VAPID, todo testeado. Aún no se
+envían notificaciones ni se persisten suscripciones en Postgres.
+
 ## Qué no incluye todavía
 
 - Comandos, menús, callbacks y sesiones del bot TS.
