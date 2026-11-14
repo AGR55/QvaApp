@@ -192,9 +192,9 @@ Estado (2026-11-13): bootstrap shadow desplegado por SSH en
 loopback), sin tocar producción. Comparador persistente, replay del corpus y
 auditoría de decisiones reales operativos en la VPS: **4/4 casos · 14/14 pasos
 · 14/14 JSON idénticos** y **5/5 decisiones reales comparables**. Soak
-continuo iniciado con tail incremental cada 5 min, auditoría horaria y replay
-diario; pendiente completar 72 h, revisar memoria/divergencias y pasar a la
-siguiente fase de ingesta shadow en vivo.
+continuo iniciado con tail cada 5 min, auditoría horaria, replay diario e
+invariantes diarios. Caos (6 escenarios), benchmark y runbook completados.
+Pendiente completar 7 días/72 h y pasar a ingesta shadow en vivo.
 
 Actividades:
 
@@ -217,11 +217,16 @@ Actividades:
 Gate F3:
 
 - [ ] ≥ 99,9 % de decisiones idénticas durante **7 días consecutivos** de shadow
-      sobre datos reales; 0 divergencias sin explicar.
-- [ ] Invariantes limpios todos los días del periodo.
-- [ ] Suite de caos en verde y documentada.
+      sobre datos reales; 0 divergencias sin explicar. (En curso con tail cada
+      5 min; aún no hay 7 días.)
+- [ ] Invariantes limpios todos los días del periodo. (Auditor SQLite y timer
+      listos; 1 ejecución limpia registrada.)
+- [x] Suite de caos en verde y documentada. (6 escenarios; ver
+      `services/f3/chaos.sh`.)
 - [ ] RSS/CPU medidos y comparados con el baseline; sin fugas en 72 h.
-- [ ] Runbook de operación actualizado para el nuevo servicio.
+      (Medidos; falta confirmar 72 h.)
+- [x] Runbook de operación actualizado para el nuevo servicio.
+      (`docs/migration/f3-shadow-runbook.md`.)
 
 ## 6. F4 — `edge` y `notifier` (2–3 semanas)
 
