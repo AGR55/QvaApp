@@ -151,8 +151,8 @@ evalúa `riskpolicy` con snapshot de producción y persiste
 servicio send-only de Telegram (dry-run por defecto, sin long-polling);
 `cmd/edge` sirve shell, assets y resumen shadow sin proxy al monolito.
 `internal/notifier/commands.go` y `update.go` contienen parser y webhook de
-comandos; `internal/edge/auth.go` sesiones/CSRF; `internal/core/operations.go` y
-`platform/postgres/core_operations.go` la máquina y persistencia de operaciones. `shadow.hunter_events` para core. No
+comandos; `internal/edge/auth.go` y `session_http.go` sesiones/CSRF; `internal/core/operations.go`,
+`executor.go` y `platform/postgres/core_operations.go` la máquina, ejecutor y persistencia. `shadow.hunter_events` para core. No
 escribe dinero. `platform/qvapay` implementa el cliente de lectura de QvaPay
 sin login ni mutaciones. `cmd/shadow-qvapay` descifra en memoria el token de producción y
 guarda snapshots horarios (balance, ofertas y promedios) en

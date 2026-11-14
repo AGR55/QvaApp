@@ -25,9 +25,25 @@ asset /dashboard/app.js = 200, 380147 bytes
 
 ## Sesiones/CSRF
 
-`internal/edge/auth.go` añade tokens de sesión HMAC-SHA256 stateless, CSRF
-ligado a la sesión, cookies `HttpOnly`/`SameSite=Lax` y validación en tiempo
-constante. Está testeado; todavía no está cableado a `/api/session`.
+`internal/edge/auth.go` y `session_http.go` implementan:
+- sesión HMAC-SHA256 stateless con expiración;
+- CSRF ligado a la sesión;
+- cookies `HttpOnly`/`SameSite=Lax`;
+- `GET/POST/DELETE /api/session`.
+
+Credenciales reales se cargan de `edge.env` (600), generado en el deploy desde
+`DASHBOARD_ADMIN_PASSWORD` y `LOCAL_ENCRYPTION_KEY`. Verificado en VPS:
+
+```text
+sin sesión = 401
+login malo = 401
+login OK   = 200
+GET auth   = 200
+logout     = 204
+post-logout= 401
+```
+
+No se imprime ni se devuelve la contraseña/token.
 
 ## Limitación actual
 

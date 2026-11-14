@@ -55,7 +55,9 @@ failed    = 0
 `internal/core/operations.go` define el ciclo shadow
 `created → reserved → submitted → confirmed/rejected/uncertain` y
 `uncertain → reconciled/rejected`, con transiciones puras, terminales,
-idempotencia por ID y tests de matriz completa. Se persiste en `shadow.core_operations` con transiciones optimistas
+idempotencia por ID y tests de matriz completa. `internal/core/executor.go` añade el ejecutor shadow con interfaz remota
+inyectable (`reserved → submitted → confirmed/rejected/uncertain`), probado con
+fake. `shadow.core_operations` persiste con transiciones optimistas
 (version/CAS). Una decisión allowed crea la operación y la deja en `reserved`;
 verificado en VPS (`version=2`, 0 pendientes).
 Aún no se ejecuta dinero.
