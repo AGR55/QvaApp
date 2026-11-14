@@ -99,6 +99,26 @@ terminar. En la última ejecución de la VPS: **1138 eventos, 5 comparables,
 **237 eventos, 221 comparables, 221/221**. Evidencia:
 [decision-audit](evidence/2026-11-13-f3-decision-audit.md).
 
+## Soak continuo
+
+Los timers se instalan una sola vez en la VPS:
+
+```bash
+/opt/qvaapply-f3-shadow/current/scripts/install-f3-shadow-timer.sh install
+```
+
+- `qvaapply-f3-audit.timer`: cada hora.
+- `qvaapply-f3-replay.timer`: diario.
+- `Persistent=true`; sobreviven reinicios.
+- No tocan `/opt/qvaapply`; se desinstalan con `... uninstall`.
+
+`/metrics` expone `trading_core_shadow_runs_total`,
+`trading_core_shadow_decisions_total`,
+`trading_core_shadow_mismatches_total`,
+`trading_core_shadow_last_run_timestamp_seconds` y
+`trading_core_shadow_stats_error`. Evidencia:
+[soak-start](evidence/2026-11-13-f3-soak-start.md).
+
 ## Verificación
 
 ```bash
@@ -120,7 +140,7 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 
 ## Estado desplegado (2026-11-13)
 
-- Release activa `2df77638e149e7acab12bd196b4a3a29e6e0f03b` en
+- Release activa `ad99fac9c17ea047a10d45afa41bd41004c6b1b2` en
   `/opt/qvaapply-f3-shadow`.
 - Migración `0004_shadow.sql` aplicada; replay y auditoría persistentes.
 - Run `f3-vps-20261114T021952Z`: **4/4 casos, 14/14 pasos, 14/14 JSON
@@ -133,7 +153,8 @@ F3_POSTGRES_PASSWORD=test F3_REVISION=test \
 - Evidencias:
   [bootstrap](evidence/2026-11-13-f3-shadow-bootstrap.md) ·
   [replay](evidence/2026-11-13-f3-shadow-replay.md) ·
-  [decision-audit](evidence/2026-11-13-f3-decision-audit.md).
+  [decision-audit](evidence/2026-11-13-f3-decision-audit.md) ·
+  [soak-start](evidence/2026-11-13-f3-soak-start.md).
 
 ## Límites de esta entrega
 

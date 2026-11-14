@@ -144,7 +144,9 @@ producción. Expone `/healthz`, `/readyz` y `/metrics`. `cmd/shadow-replay`
 persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
 4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `cmd/shadow-audit` reconstruye
 riesgo desde `decision_events` reales y ya validó 221/221 eventos con evidencia
-en la copia local y 5/5 en la VPS.
+en la copia local y 5/5 en la VPS. Los timers `qvaapply-f3-audit.timer` y
+`qvaapply-f3-replay.timer` ejecutan el soak; `/metrics` publica runs,
+decisiones, divergencias y último run.
 
 ```bash
 scripts/package-f3-shadow.sh
