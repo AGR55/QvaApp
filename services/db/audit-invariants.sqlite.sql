@@ -81,6 +81,29 @@ WITH checks AS (
     AND (s.value IS NULL OR s.value = '' OR CAST(s.value AS REAL) < 0)
 
   UNION ALL
+  SELECT 'INV-01', 'critical', 'historial fiat con suma inconsistente', CAST(h.id AS TEXT)
+  FROM fiat_balance_history h
+  WHERE h.kind IN ('opening', 'movement', 'declaration')
+    AND h.balance_before IS NOT NULL
+    AND abs((h.balance_before + h.amount) - h.balance_after) > 0.000001
+
+  UNION ALL
+  SELECT 'INV-01', 'critical', 'historial fiat sin continuidad', CAST(h.id AS TEXT)
+  FROM (
+    SELECT id, coin, balance_before,
+      lag(balance_after) OVER (PARTITION BY coin ORDER BY id) AS previous
+    FROM fiat_balance_history
+  ) h
+  WHERE h.previous IS NOT NULL
+    AND h.balance_before IS NOT NULL
+    AND abs(h.balance_before - h.previous) > 0.000001
+
+  UNION ALL
+  SELECT 'INV-01', 'critical', 'historial fiat con tipo desconocido', CAST(h.id AS TEXT)
+  FROM fiat_balance_history h
+  WHERE h.kind NOT IN ('opening', 'movement', 'declaration', 'historical')
+
+  UNION ALL
   SELECT 'INV-01', 'critical', 'saldo fiat declarado negativo', fa.market_code
   FROM fiat_accounts fa
   WHERE coalesce(fa.declared_balance, 0) < 0
