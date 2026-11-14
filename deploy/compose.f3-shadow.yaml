@@ -94,6 +94,7 @@ services:
       HUNTER_CONFIG_FILE: /config/hunter-config.json
       HUNTER_POLL_MS: ${HUNTER_POLL_MS:-2500}
       PORT: "8091"
+    entrypoint: ["/hunter"]
     volumes:
       - ${F3_HUNTER_DATA_DIR:-../data}:/config:ro
     ports:
