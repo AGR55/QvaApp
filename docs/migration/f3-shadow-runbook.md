@@ -43,6 +43,10 @@ producción**:
   `trading_core_hunter_events_*` y `trading_core_core_decisions_*`.
 - Snapshot de core: `/opt/qvaapply-f3-shadow/data/core-config.json`, generado
   desde `risk_config`, `market_config` y saldos fiat en el deploy.
+- Operaciones shadow: `shadow.core_operations` con estados y versión optimista.
+- Bot: `POST /telegram/update` acepta updates de Telegram; dry-run por defecto.
+- Edge auth: primitivas de sesión/CSRF en `internal/edge/auth.go`, aún sin cablear
+  a las rutas HTTP.
 - Métricas SSE: `hunter_stream_connected`, `hunter_stream_raw_events_total`,
   `hunter_stream_events_total`, `hunter_stream_errors_total`,
   `hunter_stream_last_lag_ms`, `hunter_stream_last_decision_us`.

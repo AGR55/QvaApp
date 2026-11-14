@@ -23,6 +23,12 @@ asset /dashboard/app.js = 200, 380147 bytes
 / (shell SPA)           = 200
 ```
 
+## Sesiones/CSRF
+
+`internal/edge/auth.go` añade tokens de sesión HMAC-SHA256 stateless, CSRF
+ligado a la sesión, cookies `HttpOnly`/`SameSite=Lax` y validación en tiempo
+constante. Está testeado; todavía no está cableado a `/api/session`.
+
 ## Limitación actual
 
 El edge ya sirve un shell HTML mínimo que carga `/dashboard/app.js` y assets

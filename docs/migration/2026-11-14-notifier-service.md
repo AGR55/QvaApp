@@ -31,8 +31,9 @@ errors   = 0
 
 `internal/notifier/commands.go` añade parser/dispatcher de `/start`, `/help`,
 `/status`, `/pause` y `/resume`, con autorización por chat y textos estables.
-Los comandos de mutación no se conectan aún a Telegram; el parser está probado
-sin red.
+El webhook `POST /telegram/update` ya procesa mensajes/callbacks con
+`ParseUpdate` + `HandleUpdate`, autorización por `TELEGRAM_ADMIN_CHAT_ID` y
+respuesta dry-run. No hay long-polling ni token real usado en shadow.
 
 ## Qué no incluye todavía
 
