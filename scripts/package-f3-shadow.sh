@@ -37,6 +37,7 @@ required_paths=(
   scripts/deploy-f3-shadow.sh
   scripts/f3-shadow-replay.sh
   scripts/f3-shadow-audit.sh
+  scripts/f3-shadow-tail.sh
   scripts/install-f3-shadow-timer.sh
 )
 
@@ -105,6 +106,7 @@ for required_member in \
   scripts/deploy-f3-shadow.sh \
   scripts/f3-shadow-replay.sh \
   scripts/f3-shadow-audit.sh \
+  scripts/f3-shadow-tail.sh \
   scripts/install-f3-shadow-timer.sh; do
   if ! grep -Fqx -- "$required_member" <<<"$listing"; then
     echo "El paquete no contiene $required_member" >&2
