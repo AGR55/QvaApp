@@ -102,10 +102,7 @@ func KeyboardFromMenu(menu Menu) InlineKeyboard {
 	for _, row := range menu.Buttons {
 		inlineRow := make([]InlineButton, 0, len(row))
 		for _, button := range row {
-			inlineRow = append(inlineRow, InlineButton{
-				Text:         button.Text,
-				CallbackData: button.CallbackData,
-			})
+			inlineRow = append(inlineRow, InlineButton(button))
 		}
 		keyboard = append(keyboard, inlineRow)
 	}
