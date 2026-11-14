@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -22,6 +23,19 @@ type LedgerEntry struct {
 	Direction string
 	Amount    decimal.Value
 	Reason    string
+}
+
+// MarshalJSON expone el importe como texto decimal estable.
+func (entry LedgerEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Code      string `json:"code"`
+		Direction string `json:"direction"`
+		Amount    string `json:"amount"`
+		Reason    string `json:"reason"`
+	}{
+		Code: entry.Code, Direction: entry.Direction,
+		Amount: entry.Amount.Format(8), Reason: entry.Reason,
+	})
 }
 
 // ExecutionInput reúne la decisión ya evaluada y el estado con el que se quiere

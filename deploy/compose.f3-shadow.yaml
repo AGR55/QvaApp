@@ -148,6 +148,35 @@ services:
       retries: 6
       start_period: 5s
 
+  edge:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["edge"]
+    container_name: qvaapply-f3-shadow-edge
+    restart: unless-stopped
+    environment:
+      PORT: "8093"
+      STATIC_DIR: /static
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+    volumes:
+      - ../public:/static:ro
+    ports:
+      - "127.0.0.1:8093:8093"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/edge", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
   # Aplica services/db/migrations/0004_shadow.sql con psql, sin runner.
   # Se lanza desde scripts/deploy-f3-shadow.sh antes de activar la release.
   shadow-migrate:

@@ -25,9 +25,10 @@ shadow_workflows_binary="$repo_root/services/trading-core/shadow-workflows"
 shadow_qvapay_binary="$repo_root/services/trading-core/shadow-qvapay"
 hunter_binary="$repo_root/services/trading-core/hunter"
 notifier_binary="$repo_root/services/trading-core/notifier"
+edge_binary="$repo_root/services/trading-core/edge"
 
 cleanup() {
-  rm -f "$temporary_archive" "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary" "$shadow_qvapay_binary" "$hunter_binary" "$notifier_binary"
+  rm -f "$temporary_archive" "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary" "$shadow_qvapay_binary" "$hunter_binary" "$notifier_binary" "$edge_binary"
 }
 trap cleanup EXIT
 
@@ -77,6 +78,8 @@ required_paths=(
     go build -trimpath -ldflags="-s -w" -o hunter ./cmd/hunter
   CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH:-amd64}" GOWORK=off \
     go build -trimpath -ldflags="-s -w" -o notifier ./cmd/notifier
+  CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH:-amd64}" GOWORK=off \
+    go build -trimpath -ldflags="-s -w" -o edge ./cmd/edge
 )
 
 for required_path in "${required_paths[@]}"; do
@@ -125,6 +128,8 @@ for required_member in \
   services/trading-core/shadow-qvapay \
   services/trading-core/hunter \
   services/trading-core/notifier \
+  services/trading-core/edge \
+  public \
   services/trading-core/cmd/trading-core/main.go \
   services/trading-core/cmd/shadow-replay/main.go \
   services/trading-core/cmd/shadow-audit/main.go \
@@ -132,6 +137,8 @@ for required_member in \
   services/trading-core/cmd/shadow-qvapay/main.go \
   services/trading-core/cmd/hunter/main.go \
   services/trading-core/cmd/notifier/main.go \
+  services/trading-core/cmd/edge/main.go \
+  public/dashboard/app.js \
   services/db/migrations/0004_shadow.sql \
   services/db/migrations/0005_invariants.sql \
   services/db/migrations/0006_soak.sql \
@@ -172,7 +179,7 @@ if grep -Eq '(^|/)\.env$|(^|/)node_modules/|^data/|\.sqlite($|-shm$|-wal$)|^serv
 fi
 
 mv -f "$temporary_archive" "$archive"
-rm -f "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary" "$shadow_qvapay_binary" "$hunter_binary" "$notifier_binary"
+rm -f "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary" "$shadow_qvapay_binary" "$hunter_binary" "$notifier_binary" "$edge_binary"
 trap - EXIT
 
 echo "Paquete creado: $archive"

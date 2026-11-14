@@ -12,6 +12,7 @@ COPY services/trading-core/shadow-workflows /shadow-workflows
 COPY services/trading-core/shadow-qvapay /shadow-qvapay
 COPY services/trading-core/hunter /hunter
 COPY services/trading-core/notifier /notifier
+COPY services/trading-core/edge /edge
 
 EXPOSE 8090
 
