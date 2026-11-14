@@ -47,6 +47,15 @@ ssh -i ~/.ssh/qvaapply_codex root@2.25.247.171 \
    curl -sS http://127.0.0.1:8090/metrics | head'
 ```
 
+## Estado desplegado (2026-11-13)
+
+- Release `cac53dc2f71968b0e8d58c0679294281252e7dba` en
+  `/opt/qvaapply-f3-shadow`.
+- `healthz` y `readyz` en verde; contenedores healthy.
+- `127.0.0.1:8090` únicamente; Postgres sin puerto publicado.
+- Producción sigue en `02bb5afc...` y `/api/session` responde 200.
+- Evidencia: [evidence/2026-11-13-f3-shadow-bootstrap.md](evidence/2026-11-13-f3-shadow-bootstrap.md).
+
 ## Límites de esta entrega
 
 - No hay comparador de decisiones ni tablas shadow todavía.

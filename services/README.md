@@ -138,9 +138,9 @@ Informe: [2026-11-13-f2-prototype-report.md](../../docs/migration/2026-11-13-f2-
 
 ## F3 shadow
 
-El servicio `cmd/trading-core` expone `/healthz`, `/readyz` y `/metrics` en
-`127.0.0.1:8090`. Se despliega aislado en `/opt/qvaapply-f3-shadow` con
-Postgres propio y sin tocar producción:
+El servicio `cmd/trading-core` está desplegado en la VPS en
+`/opt/qvaapply-f3-shadow`, con Postgres propio, `127.0.0.1:8090` y sin tocar
+producción. Expone `/healthz`, `/readyz` y `/metrics`.
 
 ```bash
 scripts/package-f3-shadow.sh

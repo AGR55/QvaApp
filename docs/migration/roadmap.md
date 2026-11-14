@@ -187,6 +187,10 @@ Gate F2:
 Objetivo: implementar el servicio real y ejecutarlo **sin poder mutar** junto a
 producción.
 
+Estado (2026-11-13): bootstrap shadow desplegado por SSH en
+`/opt/qvaapply-f3-shadow` (health/ready/metrics, Postgres propio, puerto
+loopback), sin tocar producción. Comparador y datos shadow pendientes.
+
 Actividades:
 
 1. Portar el resto de casos de uso: operaciones/workflows, capital y rebalanceo,
