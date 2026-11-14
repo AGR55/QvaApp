@@ -155,6 +155,8 @@ services:
     profiles: ["edge"]
     container_name: qvaapply-f3-shadow-edge
     restart: unless-stopped
+    env_file:
+      - ${F3_EDGE_ENV:-/dev/null}
     environment:
       PORT: "8093"
       STATIC_DIR: /static

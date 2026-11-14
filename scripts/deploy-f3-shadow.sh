@@ -176,14 +176,28 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     printf '{"risk":%s,"markets":%s,"fiat":%s}\n' "$risk" "$core_markets" "$core_fiat" > "$temporary_core_config"
     chmod 644 "$temporary_core_config"
     mv -f "$temporary_core_config" "$hunter_data_dir/core-config.json"
+    edge_password=$(sed -n 's/^[[:space:]]*DASHBOARD_ADMIN_PASSWORD=//p' "$prod_env" | tail -n 1 | tr -d '\r')
+    edge_password=${edge_password#\"}
+    edge_password=${edge_password%\"}
+    if [[ -n $edge_password ]]; then
+      temporary_edge_env=$(mktemp "$app_root/edge.env.XXXXXX")
+      {
+        printf 'EDGE_ADMIN_PASSWORD=%s\n' "$edge_password"
+        printf 'EDGE_SESSION_SECRET=%s\n' "$local_key"
+        printf 'EDGE_SECURE_COOKIES=false\n'
+      } > "$temporary_edge_env"
+      chmod 600 "$temporary_edge_env"
+      mv -f "$temporary_edge_env" "$app_root/edge.env"
+    fi
     hunter_enabled=true
-    unset local_key encrypted_token encrypted_app_id encrypted_app_secret
+    unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password
   fi
 fi
 export F3_HUNTER_ENV="$hunter_env"
 export F3_HUNTER_DATA_DIR="$hunter_data_dir"
 export F3_HUNTER_CONFIG_FILE="$hunter_data_dir/hunter-config.json"
 export F3_CORE_CONFIG_FILE="$hunter_data_dir/core-config.json"
+export F3_EDGE_ENV="$app_root/edge.env"
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"

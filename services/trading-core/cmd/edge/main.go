@@ -1,5 +1,4 @@
-// Servicio edge: estáticos y resumen de sólo lectura para web y Android.
-// No autentica, no muta estado ni hace proxy al monolito TS.
+// Servicio edge: estáticos, sesión y resumen de sólo lectura para web/Android.
 package main
 
 import (
@@ -27,9 +26,12 @@ const (
 )
 
 type config struct {
-	Port        string
-	StaticDir   string
-	DatabaseURL string
+	Port          string
+	StaticDir     string
+	DatabaseURL   string
+	AdminPassword string
+	SessionSecret string
+	SecureCookies bool
 }
 
 func main() {
@@ -72,7 +74,23 @@ func run(logger *slog.Logger) error {
 
 	base := edge.NewHandler(cfg.StaticDir, stats)
 	shell := edge.NewShellHandler(cfg.StaticDir)
+	var session *edge.SessionHandler
+	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
+		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
+		if err != nil {
+			logger.Warn("sesión edge deshabilitada: secreto inválido", "error", err)
+		} else {
+			session = &edge.SessionHandler{
+				Manager: manager, Password: cfg.AdminPassword,
+				SecureCookies: cfg.SecureCookies, TTL: 12 * time.Hour,
+			}
+		}
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if session != nil && r.URL.Path == "/api/session" {
+			session.ServeHTTP(w, r)
+			return
+		}
 		switch r.URL.Path {
 		case "/healthz", "/readyz", "/metrics", "/api/edge/summary":
 			base.ServeHTTP(w, r)
@@ -107,13 +125,22 @@ func run(logger *slog.Logger) error {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		Port:        envOrDefault("PORT", defaultPort),
-		StaticDir:   envOrDefault("STATIC_DIR", defaultStatic),
-		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		Port:          envOrDefault("PORT", defaultPort),
+		StaticDir:     envOrDefault("STATIC_DIR", defaultStatic),
+		DatabaseURL:   strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		AdminPassword: strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
+		SessionSecret: strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
 	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {
 		return config{}, errors.New("PORT inválido")
+	}
+	if raw := strings.TrimSpace(os.Getenv("EDGE_SECURE_COOKIES")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return config{}, errors.New("EDGE_SECURE_COOKIES inválido")
+		}
+		cfg.SecureCookies = value
 	}
 	return cfg, nil
 }
