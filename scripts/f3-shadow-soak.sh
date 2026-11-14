@@ -68,7 +68,7 @@ if [[ ! $runs =~ ^[0-9]+$ || ! $decisions =~ ^[0-9]+$ || ! $mismatches =~ ^[0-9]
 fi
 
 sampled_at=$(date +%s)
-docker exec -T "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
+docker exec "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
   INSERT INTO shadow.soak_samples
     (sampled_at, service_rss_kb, service_cpu_percent, postgres_rss_kb,
      runs, decisions, mismatches, invariant_violations)

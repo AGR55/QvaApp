@@ -23,7 +23,7 @@ if [[ -z $shadow_password ]]; then
   exit 2
 fi
 
-docker exec -T "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
+docker exec "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
   SELECT count(*) AS samples,
     to_timestamp(min(sampled_at)) AS first_sample,
     to_timestamp(max(sampled_at)) AS last_sample,
@@ -34,7 +34,7 @@ docker exec -T "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
     max(mismatches) AS max_mismatches,
     max(invariant_violations) AS max_invariant_violations
   FROM shadow.soak_samples;"
-docker exec -T "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
+docker exec "$postgres" psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -c "
   SELECT to_timestamp(sampled_at) AS sampled_at, service_rss_kb,
     service_cpu_percent, postgres_rss_kb, runs, decisions, mismatches,
     invariant_violations
