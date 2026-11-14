@@ -93,12 +93,13 @@ qvapay_migration_file="$release_dir/services/db/migrations/0007_qvapay.sql"
 offers_migration_file="$release_dir/services/db/migrations/0008_qvapay_offers.sql"
 hunter_migration_file="$release_dir/services/db/migrations/0009_hunter.sql"
 hunter_events_migration_file="$release_dir/services/db/migrations/0010_hunter_events.sql"
+hunter_source_migration_file="$release_dir/services/db/migrations/0011_hunter_source.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011." >&2
   exit 2
 fi
 
@@ -135,12 +136,20 @@ if [[ -r $prod_env && -r $prod_db ]]; then
   local_key=${local_key%\"}
   encrypted_token=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
     "SELECT value FROM settings WHERE key = 'qvapay_token';" | tr -d '\r')
+  encrypted_app_id=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+    "SELECT value FROM settings WHERE key = 'market_feed_app_id';" | tr -d '\r')
+  encrypted_app_secret=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+    "SELECT value FROM settings WHERE key = 'market_feed_app_secret';" | tr -d '\r')
   if [[ $local_key =~ ^[a-fA-F0-9]{64}$ && -n $encrypted_token ]]; then
     install -d -m 700 "$hunter_data_dir"
     temporary_env=$(mktemp "$app_root/hunter.env.XXXXXX")
     {
       printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
       printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
+      if [[ -n $encrypted_app_id && -n $encrypted_app_secret ]]; then
+        printf 'QVA_APP_ID_CIPHERTEXT=%s\n' "$encrypted_app_id"
+        printf 'QVA_APP_SECRET_CIPHERTEXT=%s\n' "$encrypted_app_secret"
+      fi
     } > "$temporary_env"
     chmod 600 "$temporary_env"
     mv -f "$temporary_env" "$hunter_env"
@@ -152,7 +161,7 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     chmod 644 "$temporary_config"
     mv -f "$temporary_config" "$hunter_data_dir/hunter-config.json"
     hunter_enabled=true
-    unset local_key encrypted_token
+    unset local_key encrypted_token encrypted_app_id encrypted_app_secret
   fi
 fi
 export F3_HUNTER_ENV="$hunter_env"

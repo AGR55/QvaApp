@@ -41,6 +41,8 @@ type config struct {
 	PollMS      int
 	ConfigFile  string
 	Token       string
+	AppID       string
+	AppSecret   string
 }
 
 type pollResult struct {
@@ -48,12 +50,14 @@ type pollResult struct {
 	LatencyMS   int64
 	Offers      int
 	Candidates  int
+	Source      string
 	Error       string
 	Evaluations []hunter.Evaluation
 }
 
 type source interface {
 	Fetch(context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error)
+	Averages(context.Context) (map[string]qvapay.Average, error)
 }
 
 type qvapaySource struct {
@@ -68,21 +72,29 @@ func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[stri
 	if err != nil {
 		return nil, nil, err
 	}
+	averages, err := source.Averages(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return offers, averages, nil
+}
+
+func (source *qvapaySource) Averages(ctx context.Context) (map[string]qvapay.Average, error) {
 	source.mu.Lock()
 	defer source.mu.Unlock()
 	if len(source.averages) > 0 && time.Since(source.averagesAt) < time.Minute {
-		return offers, source.averages, nil
+		return source.averages, nil
 	}
 	averages, err := source.client.Averages(ctx)
 	if err != nil {
 		if len(source.averages) > 0 {
-			return offers, source.averages, nil
+			return source.averages, nil
 		}
-		return nil, nil, err
+		return nil, err
 	}
 	source.averages = averages
 	source.averagesAt = time.Now()
-	return offers, averages, nil
+	return averages, nil
 }
 
 func main() {
@@ -132,6 +144,7 @@ func run(logger *slog.Logger) error {
 	if err := service.loadConfig(); err != nil {
 		logger.Warn("configuración hunter no disponible; el servicio seguirá sin mercados", "error", err)
 	}
+	service.startStream(ctx, logger)
 
 	server := &http.Server{
 		Addr: ":" + cfg.Port, Handler: service,
@@ -204,6 +217,123 @@ type service struct {
 	events      atomic.Uint64
 	lastLatency atomic.Int64
 	lastPollAt  atomic.Int64
+
+	streamConnected    atomic.Bool
+	streamEvents       atomic.Uint64
+	streamErrors       atomic.Uint64
+	streamLastAt       atomic.Int64
+	streamLastLagMS    atomic.Int64
+	streamLastDecision atomic.Int64
+}
+
+func (service *service) startStream(ctx context.Context, logger *slog.Logger) {
+	if service.cfg.AppID == "" || service.cfg.AppSecret == "" {
+		logger.Info("feed SSE deshabilitado: faltan credenciales de app")
+		return
+	}
+	vaultClient, err := vault.New(envOrDefault("LOCAL_ENCRYPTION_KEY", ""))
+	if err != nil {
+		logger.Warn("feed SSE deshabilitado: clave de cifrado inválida", "error", err)
+		return
+	}
+	appID, err := vaultClient.Decrypt(service.cfg.AppID)
+	if err != nil {
+		logger.Warn("feed SSE deshabilitado: app-id no descifrable")
+		return
+	}
+	appSecret, err := vaultClient.Decrypt(service.cfg.AppSecret)
+	if err != nil {
+		logger.Warn("feed SSE deshabilitado: app-secret no descifrable")
+		return
+	}
+	stream := qvapay.NewStream()
+	go func() {
+		err := stream.Run(ctx, qvapay.StreamCredentials{AppID: appID, AppSecret: appSecret}, service.handleStreamEvent, service.handleStreamState)
+		if err != nil && ctx.Err() == nil {
+			logger.Warn("feed SSE terminó", "error", err)
+		}
+	}()
+}
+
+func (service *service) handleStreamState(state qvapay.StreamState) {
+	service.streamConnected.Store(state.Connected)
+	if state.Error != "" {
+		service.streamErrors.Add(1)
+		service.logger.Warn("estado feed SSE", "phase", state.Phase, "error", state.Error)
+	}
+}
+
+func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
+	switch event.Event {
+	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
+	default:
+		return
+	}
+	service.streamEvents.Add(1)
+	started := time.Now()
+	var payload struct {
+		Data   json.RawMessage `json:"data"`
+		SentAt string          `json:"sent_at"`
+	}
+	if err := json.Unmarshal(event.Data, &payload); err != nil || len(payload.Data) == 0 {
+		service.streamErrors.Add(1)
+		service.logger.Warn("evento SSE sin data válida", "event", event.Event)
+		return
+	}
+	var offer qvapay.Offer
+	if err := json.Unmarshal(payload.Data, &offer); err != nil {
+		service.streamErrors.Add(1)
+		service.logger.Warn("oferta SSE inválida", "event", event.Event, "error", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	averages, err := service.source.Averages(ctx)
+	if err != nil {
+		service.streamErrors.Add(1)
+		service.logger.Warn("promedios SSE no disponibles", "error", err)
+		return
+	}
+	config := service.currentConfig()
+	market, ok := config.Markets[offer.Coin]
+	if !ok {
+		return
+	}
+	decision := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
+	lag := int64(0)
+	if sentAt, err := time.Parse(time.RFC3339, payload.SentAt); err == nil {
+		lag = maxInt64(0, time.Since(sentAt).Milliseconds())
+	}
+	result := &pollResult{
+		PolledAt: time.Now().Unix(), LatencyMS: lag, Offers: 1, Source: "stream",
+		Evaluations: []hunter.Evaluation{decision},
+	}
+	if decision.Decision == "auto_buy" || decision.Decision == "manual_sell" {
+		result.Candidates = 1
+	}
+	if err := service.persist(ctx, result); err != nil {
+		service.streamErrors.Add(1)
+		service.logger.Warn("persistir evento SSE falló", "error", err)
+	}
+	service.streamLastAt.Store(result.PolledAt)
+	service.streamLastLagMS.Store(lag)
+	service.streamLastDecision.Store(time.Since(started).Microseconds())
+	service.candidates.Add(uint64(result.Candidates))
+	service.record(result)
+}
+
+func boolInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func maxInt64(left, right int64) int64 {
+	if left > right {
+		return left
+	}
+	return right
 }
 
 func (service *service) loop(ctx context.Context) {
@@ -243,7 +373,7 @@ func (service *service) poll(ctx context.Context) {
 	service.polls.Add(1)
 	offers, averages, err := service.source.Fetch(ctx)
 	latency := time.Since(started).Milliseconds()
-	result := &pollResult{PolledAt: time.Now().Unix(), LatencyMS: latency, Offers: len(offers)}
+	result := &pollResult{PolledAt: time.Now().Unix(), LatencyMS: latency, Offers: len(offers), Source: "poll"}
 	if err != nil {
 		service.errors.Add(1)
 		result.Error = err.Error()
@@ -296,10 +426,10 @@ func (service *service) persist(ctx context.Context, result *pollResult) error {
 	defer tx.Rollback(ctx) //nolint:errcheck
 	var pollID int64
 	err = tx.QueryRow(ctx, `
-		INSERT INTO shadow.hunter_polls (polled_at, latency_ms, offers, candidates, error)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''))
+		INSERT INTO shadow.hunter_polls (polled_at, latency_ms, offers, candidates, source, error)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
 		RETURNING poll_id`,
-		result.PolledAt, result.LatencyMS, result.Offers, result.Candidates, result.Error,
+		result.PolledAt, result.LatencyMS, result.Offers, result.Candidates, result.Source, result.Error,
 	).Scan(&pollID)
 	if err != nil {
 		return err
@@ -307,14 +437,14 @@ func (service *service) persist(ctx context.Context, result *pollResult) error {
 	for _, evaluation := range result.Evaluations {
 		_, err = tx.Exec(ctx, `
 			INSERT INTO shadow.hunter_candidates
-				(poll_id, offer_uuid, coin, side, rate, median, decision, reason, observed_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				(poll_id, offer_uuid, coin, side, rate, median, decision, reason, observed_at, source)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			ON CONFLICT (poll_id, offer_uuid) DO UPDATE SET
 				coin = excluded.coin, side = excluded.side, rate = excluded.rate,
 				median = excluded.median, decision = excluded.decision, reason = excluded.reason`,
 			pollID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
 			evaluation.Rate.Format(8), evaluation.Median.Format(8),
-			evaluation.Decision, evaluation.Reason, result.PolledAt,
+			evaluation.Decision, evaluation.Reason, result.PolledAt, result.Source,
 		)
 		if err != nil {
 			return err
@@ -391,6 +521,12 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_offers_total Ofertas leídas.\n# TYPE hunter_offers_total counter\nhunter_offers_total %d\n", service.offers.Load())
 	fmt.Fprintf(w, "# HELP hunter_candidates_total Candidatos auto_buy/manual_sell.\n# TYPE hunter_candidates_total counter\nhunter_candidates_total %d\n", service.candidates.Load())
 	fmt.Fprintf(w, "# HELP hunter_events_total Eventos candidate encolados para core.\n# TYPE hunter_events_total counter\nhunter_events_total %d\n", service.events.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_connected Feed SSE conectado (1/0).\n# TYPE hunter_stream_connected gauge\nhunter_stream_connected %d\n", boolInt(service.streamConnected.Load()))
+	fmt.Fprintf(w, "# HELP hunter_stream_events_total Eventos SSE oportunidad recibidos.\n# TYPE hunter_stream_events_total counter\nhunter_stream_events_total %d\n", service.streamEvents.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_last_event_timestamp_seconds Último evento SSE (Unix).\n# TYPE hunter_stream_last_event_timestamp_seconds gauge\nhunter_stream_last_event_timestamp_seconds %d\n", service.streamLastAt.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_last_lag_ms Delivery lag del último evento SSE.\n# TYPE hunter_stream_last_lag_ms gauge\nhunter_stream_last_lag_ms %d\n", service.streamLastLagMS.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_last_decision_us Decisión local del último evento SSE (µs).\n# TYPE hunter_stream_last_decision_us gauge\nhunter_stream_last_decision_us %d\n", service.streamLastDecision.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_latency_ms Latencia del último poll.\n# TYPE hunter_last_latency_ms gauge\nhunter_last_latency_ms %d\n", service.lastLatency.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_poll_timestamp_seconds Último poll (Unix).\n# TYPE hunter_last_poll_timestamp_seconds gauge\nhunter_last_poll_timestamp_seconds %d\n", service.lastPollAt.Load())
 }

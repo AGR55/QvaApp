@@ -149,6 +149,8 @@ services:
       - /migrations/0009_hunter.sql
       - -f
       - /migrations/0010_hunter_events.sql
+      - -f
+      - /migrations/0011_hunter_source.sql
     networks:
       - shadow
     read_only: true

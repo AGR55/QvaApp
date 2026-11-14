@@ -41,6 +41,7 @@ required_paths=(
   services/db/migrations/0008_qvapay_offers.sql
   services/db/migrations/0009_hunter.sql
   services/db/migrations/0010_hunter_events.sql
+  services/db/migrations/0011_hunter_source.sql
   services/db/audit-invariants.sqlite.sql
   parity/fixtures/replay/2026-11-12
   deploy/compose.f3-shadow.yaml
@@ -131,6 +132,7 @@ for required_member in \
   services/db/migrations/0008_qvapay_offers.sql \
   services/db/migrations/0009_hunter.sql \
   services/db/migrations/0010_hunter_events.sql \
+  services/db/migrations/0011_hunter_source.sql \
   services/db/audit-invariants.sqlite.sql \
   parity/fixtures/replay/2026-11-12/events.ndjson \
   parity/fixtures/replay/2026-11-12/scenarios.json \
