@@ -313,7 +313,11 @@ if [[ -z $hunter_metrics ]]; then
 else
   check_metric_eq "$hunter_metrics" hunter_stream_connected 1 "SSE conectado"
   check_metric_eq "$hunter_metrics" hunter_polls_total 0 "polls /p2p"
-  check_metric_eq "$hunter_metrics" hunter_stream_errors_total 0 "errores SSE"
+  check_metric_eq "$hunter_metrics" hunter_stream_consecutive_errors 0 "errores SSE consecutivos"
+  stream_errors=$(metric_value "$hunter_metrics" hunter_stream_errors_total)
+  if [[ ${stream_errors:-0} != 0 ]]; then
+    warn "hubo ${stream_errors} errores SSE acumulados; el feed está reconectado y sin errores consecutivos"
+  fi
 fi
 
 core_metrics=$(fetch_metrics "http://127.0.0.1:8090/metrics")

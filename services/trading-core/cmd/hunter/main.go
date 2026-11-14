@@ -224,6 +224,7 @@ type service struct {
 	streamRaw          atomic.Uint64
 	streamEvents       atomic.Uint64
 	streamErrors       atomic.Uint64
+	streamConsecutive  atomic.Uint64
 	streamLastAt       atomic.Int64
 	streamLastLagMS    atomic.Int64
 	streamLastDecision atomic.Int64
@@ -269,8 +270,12 @@ func (service *service) startStream(ctx context.Context, logger *slog.Logger) {
 
 func (service *service) handleStreamState(state qvapay.StreamState) {
 	service.streamConnected.Store(state.Connected)
+	if state.Connected {
+		service.streamConsecutive.Store(0)
+	}
 	if state.Error != "" {
 		service.streamErrors.Add(1)
+		service.streamConsecutive.Add(1)
 		service.logger.Warn("estado feed SSE", "phase", state.Phase, "error", state.Error)
 	}
 }
@@ -550,7 +555,8 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_connected Feed SSE conectado (1/0).\n# TYPE hunter_stream_connected gauge\nhunter_stream_connected %d\n", boolInt(service.streamConnected.Load()))
 	fmt.Fprintf(w, "# HELP hunter_stream_raw_events_total Eventos SSE recibidos (incluye init).\n# TYPE hunter_stream_raw_events_total counter\nhunter_stream_raw_events_total %d\n", service.streamRaw.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_events_total Eventos SSE oportunidad recibidos.\n# TYPE hunter_stream_events_total counter\nhunter_stream_events_total %d\n", service.streamEvents.Load())
-	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE acumulados.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_consecutive_errors Errores SSE desde la última conexión.\n# TYPE hunter_stream_consecutive_errors gauge\nhunter_stream_consecutive_errors %d\n", service.streamConsecutive.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_event_timestamp_seconds Último evento SSE (Unix).\n# TYPE hunter_stream_last_event_timestamp_seconds gauge\nhunter_stream_last_event_timestamp_seconds %d\n", service.streamLastAt.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_lag_ms Delivery lag del último evento SSE.\n# TYPE hunter_stream_last_lag_ms gauge\nhunter_stream_last_lag_ms %d\n", service.streamLastLagMS.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_decision_us Decisión local del último evento SSE (µs).\n# TYPE hunter_stream_last_decision_us gauge\nhunter_stream_last_decision_us %d\n", service.streamLastDecision.Load())
