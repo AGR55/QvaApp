@@ -22,9 +22,10 @@ trading_core_binary="$repo_root/services/trading-core/trading-core"
 shadow_replay_binary="$repo_root/services/trading-core/shadow-replay"
 shadow_audit_binary="$repo_root/services/trading-core/shadow-audit"
 shadow_workflows_binary="$repo_root/services/trading-core/shadow-workflows"
+shadow_qvapay_binary="$repo_root/services/trading-core/shadow-qvapay"
 
 cleanup() {
-  rm -f "$temporary_archive" "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary"
+  rm -f "$temporary_archive" "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary" "$shadow_qvapay_binary"
 }
 trap cleanup EXIT
 
@@ -35,6 +36,7 @@ required_paths=(
   services/db/migrations/0004_shadow.sql
   services/db/migrations/0005_invariants.sql
   services/db/migrations/0006_soak.sql
+  services/db/migrations/0007_qvapay.sql
   services/db/audit-invariants.sqlite.sql
   parity/fixtures/replay/2026-11-12
   deploy/compose.f3-shadow.yaml
@@ -42,6 +44,7 @@ required_paths=(
   scripts/f3-shadow-replay.sh
   scripts/f3-shadow-audit.sh
   scripts/f3-shadow-workflows.sh
+  scripts/f3-shadow-qvapay.sh
   scripts/f3-shadow-tail.sh
   scripts/f3-shadow-invariants.sh
   scripts/f3-shadow-soak.sh
@@ -60,6 +63,8 @@ required_paths=(
     go build -trimpath -ldflags="-s -w" -o shadow-audit ./cmd/shadow-audit
   CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH:-amd64}" GOWORK=off \
     go build -trimpath -ldflags="-s -w" -o shadow-workflows ./cmd/shadow-workflows
+  CGO_ENABLED=0 GOOS=linux GOARCH="${GOARCH:-amd64}" GOWORK=off \
+    go build -trimpath -ldflags="-s -w" -o shadow-qvapay ./cmd/shadow-qvapay
 )
 
 for required_path in "${required_paths[@]}"; do
@@ -103,13 +108,16 @@ for required_member in \
   services/trading-core/shadow-replay \
   services/trading-core/shadow-audit \
   services/trading-core/shadow-workflows \
+  services/trading-core/shadow-qvapay \
   services/trading-core/cmd/trading-core/main.go \
   services/trading-core/cmd/shadow-replay/main.go \
   services/trading-core/cmd/shadow-audit/main.go \
   services/trading-core/cmd/shadow-workflows/main.go \
+  services/trading-core/cmd/shadow-qvapay/main.go \
   services/db/migrations/0004_shadow.sql \
   services/db/migrations/0005_invariants.sql \
   services/db/migrations/0006_soak.sql \
+  services/db/migrations/0007_qvapay.sql \
   services/db/audit-invariants.sqlite.sql \
   parity/fixtures/replay/2026-11-12/events.ndjson \
   parity/fixtures/replay/2026-11-12/scenarios.json \
@@ -122,6 +130,7 @@ for required_member in \
   scripts/f3-shadow-replay.sh \
   scripts/f3-shadow-audit.sh \
   scripts/f3-shadow-workflows.sh \
+  scripts/f3-shadow-qvapay.sh \
   scripts/f3-shadow-tail.sh \
   scripts/f3-shadow-invariants.sh \
   scripts/f3-shadow-soak.sh \
@@ -139,7 +148,7 @@ if grep -Eq '(^|/)\.env$|(^|/)node_modules/|^data/|\.sqlite($|-shm$|-wal$)|^serv
 fi
 
 mv -f "$temporary_archive" "$archive"
-rm -f "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary"
+rm -f "$trading_core_binary" "$shadow_replay_binary" "$shadow_audit_binary" "$shadow_workflows_binary" "$shadow_qvapay_binary"
 trap - EXIT
 
 echo "Paquete creado: $archive"
