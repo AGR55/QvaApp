@@ -54,17 +54,32 @@ type source interface {
 	Fetch(context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error)
 }
 
-type qvapaySource struct{ client *qvapay.Client }
+type qvapaySource struct {
+	client     *qvapay.Client
+	mu         sync.Mutex
+	averages   map[string]qvapay.Average
+	averagesAt time.Time
+}
 
-func (source qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
+func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
 	offers, err := source.client.Offers(ctx, nil)
 	if err != nil {
 		return nil, nil, err
 	}
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	if len(source.averages) > 0 && time.Since(source.averagesAt) < time.Minute {
+		return offers, source.averages, nil
+	}
 	averages, err := source.client.Averages(ctx)
 	if err != nil {
+		if len(source.averages) > 0 {
+			return offers, source.averages, nil
+		}
 		return nil, nil, err
 	}
+	source.averages = averages
+	source.averagesAt = time.Now()
 	return offers, averages, nil
 }
 
@@ -109,7 +124,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	service := &service{
-		logger: logger, cfg: cfg, pool: pool, source: qvapaySource{client: client},
+		logger: logger, cfg: cfg, pool: pool, source: &qvapaySource{client: client},
 		ready: make(chan struct{}),
 	}
 	if err := service.loadConfig(); err != nil {

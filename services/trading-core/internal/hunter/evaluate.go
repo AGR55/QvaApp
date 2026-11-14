@@ -98,6 +98,23 @@ type Evaluation struct {
 	Reason    string
 }
 
+// MarshalJSON expone tasas como texto decimal estable, sin serializar big.Rat.
+func (e Evaluation) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		OfferUUID string `json:"offerUuid"`
+		Coin      string `json:"coin"`
+		Side      string `json:"side"`
+		Rate      string `json:"rate"`
+		Median    string `json:"median"`
+		Decision  string `json:"decision"`
+		Reason    string `json:"reason"`
+	}{
+		OfferUUID: e.OfferUUID, Coin: e.Coin, Side: e.Side,
+		Rate: e.Rate.Format(8), Median: e.Median.Format(8),
+		Decision: e.Decision, Reason: e.Reason,
+	})
+}
+
 // Evaluate clasifica una oferta P2P. decision puede ser auto_buy,
 // manual_sell, blocked o ignored.
 func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard decimal.Value) Evaluation {
