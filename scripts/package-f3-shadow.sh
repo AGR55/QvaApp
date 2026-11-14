@@ -120,7 +120,7 @@ for required_member in \
   fi
 done
 
-if grep -Eq '(^|/)\.env$|(^|/)node_modules/|^data/|\.sqlite|^services/trading-core/bin/' <<<"$listing"; then
+if grep -Eq '(^|/)\.env$|(^|/)node_modules/|^data/|\.sqlite($|-shm$|-wal$)|^services/trading-core/bin/' <<<"$listing"; then
   echo "El paquete contiene archivos prohibidos; se descarta." >&2
   exit 1
 fi
