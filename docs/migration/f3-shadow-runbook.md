@@ -135,6 +135,14 @@ Archivo: `/opt/qvaapply-f3-shadow/data/decision-events.cursor` (permisos 600).
   ejecución quedan para la siguiente.
 - Si el contenedor o la base fallan, el cursor no avanza y se reintenta.
 
+## Pre-cutover
+
+```bash
+ssh -i ~/.ssh/qvaapply_codex root@2.25.247.171 'bash -s'   < scripts/f3-cutover-check.sh
+```
+
+Solo lectura. Última ejecución: 35/35 OK. No ejecuta el cutover.
+
 ## Comparativa TS vs Go
 
 ```bash
