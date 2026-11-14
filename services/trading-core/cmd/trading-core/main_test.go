@@ -156,7 +156,7 @@ func TestMetricsShadowStats(t *testing.T) {
 	stats := func(context.Context) (shadow.Stats, error) {
 		return shadow.Stats{
 			Runs: 3, Decisions: 19, Mismatches: 2, LastRunAt: 1234,
-			InvariantViolations: 1, LastInvariantAt: 5678,
+			InvariantViolations: 1, LastInvariantAt: 5678, LastQvaPayAt: 9012,
 		}, nil
 	}
 	handler := newHandler(testConfig(), nil, stats)
@@ -170,6 +170,7 @@ func TestMetricsShadowStats(t *testing.T) {
 		"trading_core_shadow_last_run_timestamp_seconds 1234",
 		"trading_core_shadow_invariant_violations_total 1",
 		"trading_core_shadow_last_invariant_timestamp_seconds 5678",
+		"trading_core_shadow_last_qvapay_timestamp_seconds 9012",
 		"trading_core_shadow_stats_error 0",
 	} {
 		if !strings.Contains(body, expected) {

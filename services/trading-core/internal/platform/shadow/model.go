@@ -42,4 +42,5 @@ type Stats struct {
 	LastRunAt           int64
 	InvariantViolations int64
 	LastInvariantAt     int64
+	LastQvaPayAt        int64
 }

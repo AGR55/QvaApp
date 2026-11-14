@@ -123,10 +123,11 @@ func (repository *ShadowRepository) Stats(ctx context.Context) (shadow.Stats, er
 			(SELECT coalesce(sum(steps - matched), 0) FROM shadow.runs),
 			(SELECT coalesce(max(created_at), 0) FROM shadow.runs),
 			(SELECT coalesce(sum(violations), 0) FROM shadow.invariant_runs),
-			(SELECT coalesce(max(created_at), 0) FROM shadow.invariant_runs)`,
+			(SELECT coalesce(max(created_at), 0) FROM shadow.invariant_runs),
+			(SELECT coalesce(max(captured_at), 0) FROM shadow.qvapay_snapshots)`,
 	).Scan(
 		&stats.Runs, &stats.Decisions, &stats.Mismatches, &stats.LastRunAt,
-		&stats.InvariantViolations, &stats.LastInvariantAt,
+		&stats.InvariantViolations, &stats.LastInvariantAt, &stats.LastQvaPayAt,
 	)
 	if err != nil {
 		return shadow.Stats{}, err
