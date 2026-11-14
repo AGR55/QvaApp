@@ -41,8 +41,10 @@ respuesta dry-run. No hay long-polling ni token real usado en shadow.
 
 `internal/notifier/webhook.go` añade `SetWebhook`, `DeleteWebhook` y
 `WebhookInfo` con tests de URL/secret/allowed_updates y sin long-polling.
-Todavía no se registra automáticamente en Telegram; falta decidir la URL
-pública y la ventana de corte.
+El router `/admin/telegram/register|status` está integrado y **deshabilitado
+por defecto**: devuelve `{"status":"disabled"}` sin red. El registro real exige
+`TELEGRAM_WEBHOOK_ENABLED=true`, URL pública y token interno. Todavía no se ha
+registrado el webhook de producción porque TS sigue en long-polling.
 
 ## Qué no incluye todavía
 

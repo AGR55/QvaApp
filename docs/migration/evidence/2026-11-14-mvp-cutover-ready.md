@@ -16,7 +16,7 @@ Incluye:
 - health/ready de 8090/8091/8092/8093;
 - SSE conectado, **0 polls `/p2p`**, **0 errores SSE**;
 - cola hunter 0 pendientes/fallidos;
-- **19 decisiones core**, **18 ejecuciones ledger**, **12 operaciones
+- **21 decisiones core**, **20 ejecuciones ledger**, **14 operaciones
   confirmadas**;
 - invariantes sin violaciones;
 - producción TS intacta en `02bb5af`, API 200;
