@@ -197,9 +197,9 @@ replay, invariantes y workflows diarios. Caos (6 escenarios), benchmark y
 runbook completados. También se auditan **17/17 workflows reales** con
 `risk_decision_json`, invariantes de continuidad fiat/operaciones/intenciones y
 existe un cliente QvaPay **read-only** con tests y ya se ejecutan snapshots
-reales horarios (`/user`, `/p2p`, `/p2p/averages`). Pendiente completar 7
-días/72 h, conectar esos datos a decisiones shadow y portar el resto de casos
-de uso.
+reales horarios (`/user`, `/p2p`, `/p2p/averages`) y se persiste el inventario
+live de ofertas (20 en el último snapshot). Pendiente completar 7 días/72 h,
+conectar el inventario a decisiones shadow y portar el resto de casos de uso.
 
 Actividades:
 

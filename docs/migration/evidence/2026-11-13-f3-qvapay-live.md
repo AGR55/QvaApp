@@ -18,7 +18,13 @@ averages = 105
 
 - Persistido en `shadow.qvapay_snapshots`; no se guarda token ni payload
   sensible.
+- Inventario live en `shadow.qvapay_offers`: **20 ofertas** en el último run.
+  Distribución: BANK_CUP 7, ETECSA 7, CLASICA 2, BANDECPREPAGO 2, BANK_MLC 1,
+  ZELLE 1.
+- Cobertura inicial: **0/20** ofertas tienen ya una decisión TS en
+  `decision_events`; son ofertas nuevas. El tail las auditará cuando TS decida.
 - `/metrics` expone `trading_core_shadow_last_qvapay_timestamp_seconds`.
+- Migración `0008_qvapay_offers.sql`; ofertas con importes como texto decimal.
 - Timer `qvaapply-f3-qvapay.timer` cada hora. Ejecución manual del timer:
   `qvapay-20261114T042712Z`, mismo balance y conteos, `status=0/SUCCESS`.
 

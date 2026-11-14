@@ -74,7 +74,7 @@ El script:
 | `qvaapply-f3-invariants.timer` | 1 día | invariantes SQLite |
 | `qvaapply-f3-soak.timer` | 5 min | muestra RSS/CPU y contadores |
 | `qvaapply-f3-workflows.timer` | 1 día | `risk_decision_json` de workflows |
-| `qvaapply-f3-qvapay.timer` | 1 hora | snapshot QvaPay read-only |
+| `qvaapply-f3-qvapay.timer` | 1 hora | snapshot QvaPay read-only + ofertas |
 
 Todos son `Persistent=true`, con `Nice=10` e IO idle. Solo administran
 unidades `qvaapply-f3-*`.

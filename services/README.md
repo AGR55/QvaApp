@@ -146,7 +146,7 @@ persiste comparaciones del corpus en `shadow.*`; el último run en la VPS dio
 4/4 casos, 14/14 pasos y 14/14 JSON idénticos. `platform/qvapay` implementa el cliente de lectura de QvaPay sin login ni
 mutaciones. `cmd/shadow-qvapay` descifra en memoria el token de producción y
 guarda snapshots horarios (balance, ofertas y promedios) en
-`shadow.qvapay_snapshots`. El auditor de invariantes SQLite cubre continuidad
+`shadow.qvapay_snapshots` y el inventario en `shadow.qvapay_offers`. El auditor de invariantes SQLite cubre continuidad
 fiat, operaciones, intenciones y workflows. `cmd/shadow-audit` reconstruye
 riesgo desde `decision_events` reales y ya validó 221/221 eventos con evidencia
 en la copia local y 5/5 en la VPS. Los timers `qvaapply-f3-tail.timer`,
