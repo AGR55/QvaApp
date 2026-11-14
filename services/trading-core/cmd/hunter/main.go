@@ -221,6 +221,7 @@ type service struct {
 	lastPollAt  atomic.Int64
 
 	streamConnected    atomic.Bool
+	streamRaw          atomic.Uint64
 	streamEvents       atomic.Uint64
 	streamErrors       atomic.Uint64
 	streamLastAt       atomic.Int64
@@ -266,6 +267,7 @@ func (service *service) handleStreamState(state qvapay.StreamState) {
 }
 
 func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
+	service.streamRaw.Add(1)
 	switch event.Event {
 	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
 	default:
@@ -524,6 +526,7 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_candidates_total Candidatos auto_buy/manual_sell.\n# TYPE hunter_candidates_total counter\nhunter_candidates_total %d\n", service.candidates.Load())
 	fmt.Fprintf(w, "# HELP hunter_events_total Eventos candidate encolados para core.\n# TYPE hunter_events_total counter\nhunter_events_total %d\n", service.events.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_connected Feed SSE conectado (1/0).\n# TYPE hunter_stream_connected gauge\nhunter_stream_connected %d\n", boolInt(service.streamConnected.Load()))
+	fmt.Fprintf(w, "# HELP hunter_stream_raw_events_total Eventos SSE recibidos (incluye init).\n# TYPE hunter_stream_raw_events_total counter\nhunter_stream_raw_events_total %d\n", service.streamRaw.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_events_total Eventos SSE oportunidad recibidos.\n# TYPE hunter_stream_events_total counter\nhunter_stream_events_total %d\n", service.streamEvents.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_event_timestamp_seconds Último evento SSE (Unix).\n# TYPE hunter_stream_last_event_timestamp_seconds gauge\nhunter_stream_last_event_timestamp_seconds %d\n", service.streamLastAt.Load())

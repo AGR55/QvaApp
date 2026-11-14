@@ -42,8 +42,10 @@ func TestStreamReceivesEvents(t *testing.T) {
 	defer cancel()
 	events := make(chan StreamEvent, 1)
 	err := stream.Run(ctx, StreamCredentials{AppID: "app", AppSecret: "secret"}, func(event StreamEvent) {
-		events <- event
-		cancel()
+		if event.Event == "p2p.created" {
+			events <- event
+			cancel()
+		}
 	}, nil)
 	if err == nil {
 		t.Fatal("Run debía terminar al cancelar")

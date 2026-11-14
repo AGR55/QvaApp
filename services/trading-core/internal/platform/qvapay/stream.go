@@ -162,9 +162,6 @@ func (stream *Stream) runOnce(
 		if !json.Valid(raw) {
 			return fmt.Errorf("evento SSE con JSON inválido")
 		}
-		if event == "init" || event == "subscription_expired" {
-			return nil
-		}
 		if onEvent != nil {
 			onEvent(StreamEvent{Event: event, Data: raw})
 		}
