@@ -129,6 +129,7 @@ services:
       NOTIFIER_INTERNAL_TOKEN: ${NOTIFIER_INTERNAL_TOKEN:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    entrypoint: ["/notifier"]
     ports:
       - "127.0.0.1:8092:8092"
     networks:
