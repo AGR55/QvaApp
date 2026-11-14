@@ -1,0 +1,480 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "chat",
+  "sourceTests": [
+    "test/chat-images.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (7 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=41730d3d3b5f357ce64f76158b3f866c23a8ebc543d9c809a3d88bc6eb515f15",
+  "cases": [
+    {
+      "caseId": "contract/chat-images/02-validate-mime-dimensions-bytes",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:16",
+      "input": {
+        "scenario": "chat-images/02-validate-mime-dimensions-bytes"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "valid",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "bytes": {
+                  "sha256": "6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec",
+                  "bytes": 68
+                },
+                "mimeType": "image/png"
+              }
+            }
+          },
+          {
+            "label": "wrong-mime",
+            "outcome": {
+              "error": {
+                "message": "Imagen inválida: JPEG/PNG de hasta 1000×1000 píxeles.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "svg",
+            "outcome": {
+              "error": {
+                "message": "Solo se admiten imágenes JPEG o PNG.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "oversized",
+            "outcome": {
+              "error": {
+                "message": "La imagen debe ocupar como máximo 1 MiB.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "dimensions",
+            "outcome": {
+              "error": {
+                "message": "Imagen inválida: JPEG/PNG de hasta 1000×1000 píxeles.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/chat-images/03-multipart-single-image",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:23",
+      "input": {
+        "scenario": "chat-images/03-multipart-single-image"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "parse",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "attemptId": "attempt-0000000001",
+                "image": {
+                  "bytes": {
+                    "sha256": "6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec",
+                    "bytes": 68
+                  },
+                  "mimeType": "image/png"
+                },
+                "message": ""
+              }
+            }
+          },
+          {
+            "label": "parsed",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "imageBytes": 68,
+                "message": ""
+              }
+            }
+          },
+          {
+            "label": "parse-duplicate",
+            "outcome": {
+              "error": {
+                "message": "Formulario de imagen inválido.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/chat-images/04-remote-url-ssrf",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:32",
+      "input": {
+        "scenario": "chat-images/04-remote-url-ssrf"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "code": "ERR_INVALID_URL",
+                "input": "/storage/a.png",
+                "message": "Invalid URL",
+                "name": "TypeError"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "chatImageUrl",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "download-private",
+            "outcome": {
+              "error": {
+                "message": "Referencia de imagen no compatible.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "download-public",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "bytes": {
+                  "sha256": "6b1048f8a6d40bac0b2954c18fefa40c4ea7a96120fc2e54b7317c0e43c2bbec",
+                  "bytes": 68
+                },
+                "mimeType": "image/png"
+              }
+            }
+          },
+          {
+            "label": "calls",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/chat-images/05-remote-body-limits",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:44",
+      "input": {
+        "scenario": "chat-images/05-remote-body-limits"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "download:0",
+            "outcome": {
+              "error": {
+                "message": "Imagen remota demasiado grande.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "download:1",
+            "outcome": {
+              "error": {
+                "message": "Imagen inválida: JPEG/PNG de hasta 1000×1000 píxeles.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "download:2",
+            "outcome": {
+              "error": {
+                "message": "No se pudo descargar la imagen.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/chat-images/06-upstream-multipart-send",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:51",
+      "input": {
+        "scenario": "chat-images/06-upstream-multipart-send"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "sendChat",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "id": "image-id"
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/chat-images/07-list-preserves-images",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:62",
+      "input": {
+        "scenario": "chat-images/07-list-preserves-images"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "listChat",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "id": "2d350f5b79ccae4259819a19b093c041d2b5a01d27b973d6058de767f9d661cb",
+                  "image": "https://www.qvapay.com/storage/a.png",
+                  "message": "Recibo",
+                  "peerId": "peer"
+                },
+                {
+                  "id": "b91d6b010b5bcb8a2b4f07addf51c3231fa95988e63ba3fb571698ba13e6ed45",
+                  "image": "https://www.qvapay.com/storage/b.png",
+                  "message": "📎 Imagen adjunta",
+                  "peerId": "peer"
+                },
+                {
+                  "id": "6249e4e011fa2478c58998469835afc3036cc1cf0c77f8532177632d9b0a9b70",
+                  "image": "https://www.qvapay.com/storage/c.png",
+                  "message": "📎 Imagen adjunta",
+                  "peerId": "peer"
+                }
+              ]
+            }
+          },
+          {
+            "label": "messages",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "id": "2d350f5b79ccae4259819a19b093c041d2b5a01d27b973d6058de767f9d661cb",
+                  "image": "https://www.qvapay.com/storage/a.png",
+                  "message": "Recibo"
+                },
+                {
+                  "id": "b91d6b010b5bcb8a2b4f07addf51c3231fa95988e63ba3fb571698ba13e6ed45",
+                  "image": "https://www.qvapay.com/storage/b.png",
+                  "message": "📎 Imagen adjunta"
+                },
+                {
+                  "id": "6249e4e011fa2478c58998469835afc3036cc1cf0c77f8532177632d9b0a9b70",
+                  "image": "https://www.qvapay.com/storage/c.png",
+                  "message": "📎 Imagen adjunta"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/chat-images/01-malformed-success-uncertain",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/chat-images.test.ts:7",
+      "input": {
+        "scenario": "chat-images/01-malformed-success-uncertain"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "sendChat:not-json",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "QvaPay no devolvió el identificador del mensaje.",
+                  "name": "Error"
+                },
+                "kind": "chat",
+                "message": "No se recibió confirmación de QvaPay para chat; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "calls:not-json",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          },
+          {
+            "label": "sendChat:{}",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "QvaPay no devolvió el identificador del mensaje.",
+                  "name": "Error"
+                },
+                "kind": "chat",
+                "message": "No se recibió confirmación de QvaPay para chat; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "calls:{}",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          },
+          {
+            "label": "sendChat:{\"message\":null}",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "QvaPay no devolvió el identificador del mensaje.",
+                  "name": "Error"
+                },
+                "kind": "chat",
+                "message": "No se recibió confirmación de QvaPay para chat; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "calls:{\"message\":null}",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          }
+        ],
+        "effects": []
+      }
+    }
+  ]
+}

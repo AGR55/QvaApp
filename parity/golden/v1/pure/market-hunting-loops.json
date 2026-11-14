@@ -1,0 +1,333 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/application/market-hunting-loops.ts",
+  "sourceTests": [
+    "test/market-hunting-loops.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Bucles de cacería con Scheduler determinista: polling y feed progresan por separado, solo la página más reciente por mercado/lado, generaciones invalidan trabajo en curso, stop espera todo y los descartes se registran. · goldenHash=34e2538858a7a922ce745e80b0822e4236f975d89cd3bb377294348a014540f4",
+  "cases": [
+    {
+      "caseId": "pure/market-hunting-loops/polling-progress/0001",
+      "op": "market-hunting.polling-progress",
+      "source": "test/market-hunting-loops.test.ts:9",
+      "expect": {
+        "scan": true,
+        "polls": 1,
+        "ingested": 1,
+        "secondFeed": false
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/feed-progress/0001",
+      "op": "market-hunting.feed-progress",
+      "source": "test/market-hunting-loops.test.ts:28",
+      "expect": {
+        "feedRun": true,
+        "feedAfter": 1,
+        "polls": 1,
+        "feedTotal": 1
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/latest-page/0001",
+      "op": "market-hunting.latest-page",
+      "source": "test/market-hunting-loops.test.ts:43",
+      "expect": {
+        "remaining": 0,
+        "before": [
+          1000
+        ],
+        "after": [
+          {
+            "scannedAt": 1000,
+            "realtimeRecovery": true
+          },
+          {
+            "scannedAt": 3000,
+            "realtimeRecovery": true
+          },
+          {
+            "scannedAt": 4000,
+            "realtimeRecovery": true
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/ingest-error/0001",
+      "op": "market-hunting.ingest-error",
+      "source": "test/market-hunting-loops.test.ts:79",
+      "expect": {
+        "errors": [
+          "fallo"
+        ],
+        "ingested": [
+          1000,
+          2000
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/pause-stop/0001",
+      "op": "market-hunting.pause-stop",
+      "source": "test/market-hunting-loops.test.ts:99",
+      "expect": {
+        "outcomes": [
+          {
+            "stop": false,
+            "ingested": 1
+          },
+          {
+            "stop": true,
+            "ingested": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/generation-invalidate/0001",
+      "op": "market-hunting.generation-invalidate",
+      "source": "test/market-hunting-loops.test.ts:121",
+      "expect": {
+        "ingested": [
+          1000
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/stop-waits/0001",
+      "op": "market-hunting.stop-waits",
+      "source": "test/market-hunting-loops.test.ts:145",
+      "expect": {
+        "beforeIngestion": false,
+        "afterIngestion": true
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/timing/0001",
+      "op": "market-hunting.timing",
+      "source": "test/market-hunting-loops.test.ts:167",
+      "expect": {
+        "timings": [
+          {
+            "queueMs": 0,
+            "evaluationMs": 20,
+            "outcome": "success"
+          },
+          {
+            "queueMs": 15,
+            "evaluationMs": 10,
+            "outcome": "success"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/generation-replaces/0001",
+      "op": "market-hunting.generation-replaces",
+      "source": "test/market-hunting-loops.test.ts:189",
+      "expect": {
+        "ingested": [
+          1000,
+          2000
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/dispatch-sequence/0001",
+      "op": "market-hunting.dispatch-sequence",
+      "source": "test/market-hunting-loops.test.ts:206",
+      "expect": {
+        "ingested": [
+          1,
+          3
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/slow-read/0001",
+      "op": "market-hunting.slow-read",
+      "source": "test/market-hunting-loops.test.ts:225",
+      "expect": {
+        "first": [
+          2000
+        ],
+        "calls": 5,
+        "stoppedBeforeRelease": false,
+        "after": [
+          2000
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/discard-reasons/0001",
+      "op": "market-hunting.discard-reasons",
+      "source": "test/market-hunting-loops.test.ts:254",
+      "expect": {
+        "outcomes": [
+          {
+            "finalReason": "control",
+            "reasons": [
+              "superseded",
+              "capacity",
+              "capacity",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control",
+              "control"
+            ]
+          },
+          {
+            "finalReason": "shutdown",
+            "reasons": [
+              "superseded",
+              "capacity",
+              "capacity",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown",
+              "shutdown"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/market-hunting-loops/queue-limit/0001",
+      "op": "market-hunting.queue-limit",
+      "source": "test/market-hunting-loops.test.ts:277",
+      "expect": {
+        "count": 65,
+        "firstAfterHead": "TEST_1",
+        "last": "TEST_64"
+      }
+    }
+  ]
+}

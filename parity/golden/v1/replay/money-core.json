@@ -1,0 +1,1401 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "replay",
+  "targetService": "trading-core",
+  "module": "src/application/opportunity-orchestrator.ts",
+  "sourceTests": [
+    "test/market-feed.test.ts",
+    "test/opportunity-orchestrator.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Replay stateful del corpus 2026-11-12: feed sanitizado → dedupe durable → decisión/riesgo/liquidez → reserva e intención → mutación guionizada → conciliación. Sin red, sin reloj real, sin sleeps; UUID de workflow e intención normalizados por orden de aparición. · goldenHash=a4a731fcccb44a49412b6e608cebf6bcb697d81e1e0b95fc9c68c28de7a6a1a3",
+  "cases": [
+    {
+      "caseId": "replay/market-ingest/dedupe/0001",
+      "kind": "stateful",
+      "source": "test/market-feed.test.ts",
+      "session": {
+        "clock": {
+          "start": 1788744000000,
+          "stepMs": 1
+        },
+        "config": {
+          "qusdReserve": 0,
+          "risk": {
+            "minQusdReserve": 0
+          },
+          "markets": [
+            {
+              "code": "BANK_CUP",
+              "buyMaxRate": 970,
+              "sellMinRate": 1010,
+              "purchaseMaxQusd": 25,
+              "fiatBalance": 100000
+            }
+          ]
+        }
+      },
+      "sessionExpect": {
+        "stateDigest": "sha256:bc02f92ed3221b37b45514b14b1737d0d602172727b6c6a8245819cbf364777c"
+      },
+      "steps": [
+        {
+          "op": "market.ingest",
+          "input": {
+            "events": [
+              {
+                "event": "p2p.created",
+                "payload": {
+                  "event": "p2p.created",
+                  "sent_at": "2026-09-06T12:00:00.000Z",
+                  "data": {
+                    "uuid": "external-1",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T11:59:58.000Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000100
+              },
+              {
+                "event": "p2p.created",
+                "payload": {
+                  "event": "p2p.created",
+                  "sent_at": "2026-09-06T12:00:00.100Z",
+                  "data": {
+                    "uuid": "external-2",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "15.00000000",
+                    "receive": "15300.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T11:59:59.000Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000200
+              },
+              {
+                "event": "p2p.created",
+                "payload": {
+                  "event": "p2p.created",
+                  "sent_at": "2026-09-06T12:00:00.000Z",
+                  "data": {
+                    "uuid": "external-1",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T11:59:58.000Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000300
+              }
+            ]
+          },
+          "expect": {
+            "accepted": 2,
+            "duplicates": 1,
+            "pending": 2,
+            "observations": 0
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:a5a8fce07a9024bd9381e8b0657fefb7387c602f0f0c8d238002aace4b0a04ce"
+        },
+        {
+          "op": "market.ingest",
+          "input": {
+            "events": [
+              {
+                "event": "p2p.range_created",
+                "payload": {
+                  "event": "p2p.range_created",
+                  "sent_at": "2026-09-06T12:00:00.300Z",
+                  "data": {
+                    "uuid": "external-4",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "100.00000000",
+                    "receive": "102000.00000000",
+                    "available_amount": "100.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T12:00:00.100Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000500
+              },
+              {
+                "event": "p2p.range_created",
+                "payload": {
+                  "event": "p2p.range_created",
+                  "sent_at": "2026-09-06T12:00:00.300Z",
+                  "data": {
+                    "uuid": "external-4",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "100.00000000",
+                    "receive": "102000.00000000",
+                    "available_amount": "100.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T12:00:00.100Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000600
+              },
+              {
+                "event": "p2p.range_created",
+                "payload": {
+                  "event": "p2p.range_created",
+                  "sent_at": "2026-09-06T12:00:00.700Z",
+                  "data": {
+                    "uuid": "external-4",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "60.00000000",
+                    "receive": "61200.00000000",
+                    "available_amount": "60.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T12:00:00.600Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000700
+              }
+            ],
+            "observation": {
+              "coin": "BANK_CUP",
+              "averageBuy": "1015.00000000",
+              "averageSell": "1020.00000000",
+              "medianBuy": "1014.00000000",
+              "medianSell": "1021.00000000",
+              "bestBuy": "1012.00000000",
+              "bestSell": "1022.00000000",
+              "openOffers": 4,
+              "eligible": 2
+            }
+          },
+          "expect": {
+            "accepted": 2,
+            "duplicates": 1,
+            "pending": 4,
+            "observations": 1
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:813a5b52d8622de7574cedca0b0db9c8120eec0ca3fc50c9179f1835c63ec1e7"
+        },
+        {
+          "op": "market.ingest",
+          "input": {
+            "events": [
+              {
+                "event": "p2p.paused",
+                "payload": {
+                  "event": "p2p.paused",
+                  "sent_at": "2026-09-06T12:00:00.800Z",
+                  "data": {
+                    "uuid": "external-1",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "paused",
+                    "updated_at": "2026-09-06T12:00:00.750Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000800
+              },
+              {
+                "event": "p2p.paused",
+                "payload": {
+                  "event": "p2p.paused",
+                  "sent_at": "2026-09-06T12:00:00.800Z",
+                  "data": {
+                    "uuid": "external-1",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "paused",
+                    "updated_at": "2026-09-06T12:00:00.750Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744000900
+              },
+              {
+                "event": "p2p.created",
+                "payload": {
+                  "event": "p2p.created",
+                  "sent_at": "2026-09-06T12:00:01.000Z",
+                  "data": {
+                    "uuid": "external-5",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "30.00000000",
+                    "receive": "30500.00000000",
+                    "status": "open",
+                    "updated_at": "2026-09-06T12:00:00.900Z"
+                  }
+                },
+                "state": "pending",
+                "receivedAt": 1788744001000
+              }
+            ]
+          },
+          "expect": {
+            "accepted": 2,
+            "duplicates": 1,
+            "pending": 6,
+            "observations": 1
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:1411b7288d05eb5e62ff6017afd632d32e9581419ef3f176ab70e7d4154be453"
+        },
+        {
+          "op": "trading.state",
+          "input": {},
+          "expect": {
+            "operations": [],
+            "reservedQusd": "0.00000000",
+            "workflows": [],
+            "ownOffers": [],
+            "intents": [],
+            "feed": [
+              {
+                "key": "p2p.created:external-1:2026-09-06T11:59:58.000Z",
+                "event": "p2p.created",
+                "state": "pending",
+                "receivedAt": 1788744000100
+              },
+              {
+                "key": "p2p.created:external-2:2026-09-06T11:59:59.000Z",
+                "event": "p2p.created",
+                "state": "pending",
+                "receivedAt": 1788744000200
+              },
+              {
+                "key": "p2p.created:external-5:2026-09-06T12:00:00.900Z",
+                "event": "p2p.created",
+                "state": "pending",
+                "receivedAt": 1788744001000
+              },
+              {
+                "key": "p2p.paused:external-1:2026-09-06T12:00:00.750Z:2026-09-06T12:00:00.800Z",
+                "event": "p2p.paused",
+                "state": "pending",
+                "receivedAt": 1788744000800
+              },
+              {
+                "key": "p2p.range_created:external-4:2026-09-06T12:00:00.100Z:2026-09-06T12:00:00.300Z:100.00000000",
+                "event": "p2p.range_created",
+                "state": "pending",
+                "receivedAt": 1788744000500
+              },
+              {
+                "key": "p2p.range_created:external-4:2026-09-06T12:00:00.600Z:2026-09-06T12:00:00.700Z:60.00000000",
+                "event": "p2p.range_created",
+                "state": "pending",
+                "receivedAt": 1788744000700
+              }
+            ],
+            "observations": [
+              {
+                "coin": "BANK_CUP",
+                "openOffers": 4,
+                "eligible": 2,
+                "averageBuy": "1015.00000000",
+                "averageSell": "1020.00000000",
+                "medianBuy": "1014.00000000",
+                "medianSell": "1021.00000000",
+                "bestBuy": "1012.00000000",
+                "bestSell": "1022.00000000"
+              }
+            ]
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:1411b7288d05eb5e62ff6017afd632d32e9581419ef3f176ab70e7d4154be453"
+        }
+      ]
+    },
+    {
+      "caseId": "replay/money-core/apply/0001",
+      "kind": "stateful",
+      "source": "test/opportunity-orchestrator.test.ts",
+      "session": {
+        "clock": {
+          "start": 1788744000000,
+          "stepMs": 1
+        },
+        "config": {
+          "qusdReserve": 0,
+          "risk": {
+            "minQusdReserve": 0
+          },
+          "markets": [
+            {
+              "code": "BANK_CUP",
+              "buyMaxRate": 970,
+              "sellMinRate": 1010,
+              "purchaseMaxQusd": 25,
+              "fiatBalance": 100000
+            }
+          ]
+        }
+      },
+      "sessionExpect": {
+        "stateDigest": "sha256:bc02f92ed3221b37b45514b14b1737d0d602172727b6c6a8245819cbf364777c"
+      },
+      "steps": [
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-1",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T11:59:58.000Z",
+              "User": {
+                "uuid": "peer-1"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {
+              "qusdBalance": [
+                100
+              ],
+              "apply": [
+                {
+                  "ok": null
+                }
+              ]
+            }
+          },
+          "expect": {
+            "decision": {
+              "kind": "apply",
+              "opportunityUuid": "external-1",
+              "evaluatedAt": 1788744000002,
+              "requiredQusd": "20.00000000",
+              "requiredFiat": "0.00000000",
+              "projectedExposureQusd": "20.00000000",
+              "projectedDailyAppliedQusd": "20.00000000",
+              "checks": [
+                {
+                  "code": "price_policy",
+                  "status": "pass",
+                  "actual": "eligible",
+                  "limit": "eligible",
+                  "reason": "Supera el mínimo de venta."
+                },
+                {
+                  "code": "emergency_stop",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Interruptor de emergencia: correcto."
+                },
+                {
+                  "code": "automation_paused",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Automatización activa: correcto."
+                },
+                {
+                  "code": "unresolved_mutation",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Sin mutaciones inciertas: correcto."
+                },
+                {
+                  "code": "operation_amount",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 25,
+                  "reason": "Importe por operación: dentro del límite."
+                },
+                {
+                  "code": "concurrent_exposure",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 50,
+                  "reason": "Exposición simultánea: dentro del límite."
+                },
+                {
+                  "code": "daily_volume",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 100,
+                  "reason": "Volumen diario: dentro del límite."
+                },
+                {
+                  "code": "concurrent_operations",
+                  "status": "pass",
+                  "actual": 1,
+                  "limit": 2,
+                  "reason": "Operaciones simultáneas: dentro del límite."
+                },
+                {
+                  "code": "quote_age",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 45,
+                  "reason": "Antigüedad de la cotización: dentro del límite."
+                },
+                {
+                  "code": "expected_margin",
+                  "status": "pass",
+                  "actual": 2,
+                  "limit": "0.5000",
+                  "reason": "Margen esperado: suficiente."
+                },
+                {
+                  "code": "slippage",
+                  "status": "pass",
+                  "actual": "0.4926",
+                  "limit": 1,
+                  "reason": "Deslizamiento frente a referencia: dentro del límite."
+                },
+                {
+                  "code": "consecutive_errors",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 2,
+                  "reason": "Errores consecutivos: dentro del límite."
+                },
+                {
+                  "code": "market_cooldown",
+                  "status": "not_applicable",
+                  "limit": 30,
+                  "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+                },
+                {
+                  "code": "counterparty_cooldown",
+                  "status": "not_applicable",
+                  "limit": 300,
+                  "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+                },
+                {
+                  "code": "qusd_capital",
+                  "status": "pass",
+                  "actual": 100,
+                  "limit": 20,
+                  "reason": "QUSD disponible después de reserva: suficiente."
+                }
+              ],
+              "reasons": [
+                "La oportunidad cumple la política de precio y todos los límites."
+              ]
+            },
+            "workflow": {
+              "state": "applied",
+              "error": null
+            },
+            "applicationConfirmed": true,
+            "workflowRef": "wf-1"
+          },
+          "expectUpstream": [
+            {
+              "method": "qusdBalance",
+              "options": {
+                "priority": true
+              }
+            },
+            {
+              "method": "apply",
+              "uuid": "external-1",
+              "optionsHash": "2ccd94e2ba19c54ed10b40a18c17a6122ae49060dad6bb43051c9a65894d578b",
+              "responseHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+            }
+          ],
+          "expectStateDigest": "sha256:0768fe21ddee43738cc82e681879442b3c2c332204339860681c108a33423f29"
+        },
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-1",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T11:59:58.000Z",
+              "User": {
+                "uuid": "peer-1"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {}
+          },
+          "expect": {
+            "decision": {
+              "kind": "apply",
+              "opportunityUuid": "external-1",
+              "evaluatedAt": 1788744000002,
+              "requiredQusd": "20.00000000",
+              "requiredFiat": "0.00000000",
+              "projectedExposureQusd": "20.00000000",
+              "projectedDailyAppliedQusd": "20.00000000",
+              "checks": [
+                {
+                  "code": "price_policy",
+                  "status": "pass",
+                  "actual": "eligible",
+                  "limit": "eligible",
+                  "reason": "Supera el mínimo de venta."
+                },
+                {
+                  "code": "emergency_stop",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Interruptor de emergencia: correcto."
+                },
+                {
+                  "code": "automation_paused",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Automatización activa: correcto."
+                },
+                {
+                  "code": "unresolved_mutation",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Sin mutaciones inciertas: correcto."
+                },
+                {
+                  "code": "operation_amount",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 25,
+                  "reason": "Importe por operación: dentro del límite."
+                },
+                {
+                  "code": "concurrent_exposure",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 50,
+                  "reason": "Exposición simultánea: dentro del límite."
+                },
+                {
+                  "code": "daily_volume",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 100,
+                  "reason": "Volumen diario: dentro del límite."
+                },
+                {
+                  "code": "concurrent_operations",
+                  "status": "pass",
+                  "actual": 1,
+                  "limit": 2,
+                  "reason": "Operaciones simultáneas: dentro del límite."
+                },
+                {
+                  "code": "quote_age",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 45,
+                  "reason": "Antigüedad de la cotización: dentro del límite."
+                },
+                {
+                  "code": "expected_margin",
+                  "status": "pass",
+                  "actual": 2,
+                  "limit": "0.5000",
+                  "reason": "Margen esperado: suficiente."
+                },
+                {
+                  "code": "slippage",
+                  "status": "pass",
+                  "actual": "0.4926",
+                  "limit": 1,
+                  "reason": "Deslizamiento frente a referencia: dentro del límite."
+                },
+                {
+                  "code": "consecutive_errors",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 2,
+                  "reason": "Errores consecutivos: dentro del límite."
+                },
+                {
+                  "code": "market_cooldown",
+                  "status": "not_applicable",
+                  "limit": 30,
+                  "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+                },
+                {
+                  "code": "counterparty_cooldown",
+                  "status": "not_applicable",
+                  "limit": 300,
+                  "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+                },
+                {
+                  "code": "qusd_capital",
+                  "status": "pass",
+                  "actual": 100,
+                  "limit": 20,
+                  "reason": "QUSD disponible después de reserva: suficiente."
+                }
+              ],
+              "reasons": [
+                "La oportunidad cumple la política de precio y todos los límites."
+              ]
+            },
+            "workflow": {
+              "state": "applied",
+              "error": null
+            },
+            "applicationConfirmed": true,
+            "workflowRef": "wf-1"
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:0768fe21ddee43738cc82e681879442b3c2c332204339860681c108a33423f29"
+        },
+        {
+          "op": "trading.reconcile",
+          "input": {
+            "workflow": "wf-1",
+            "gateway": {}
+          },
+          "expect": {
+            "outcome": "applied",
+            "detail": "El flujo ya estaba cerrado."
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:0768fe21ddee43738cc82e681879442b3c2c332204339860681c108a33423f29"
+        },
+        {
+          "op": "trading.state",
+          "input": {},
+          "expect": {
+            "operations": [
+              {
+                "uuid": "external-1",
+                "offerType": "buy",
+                "coin": "BANK_CUP",
+                "amount": "20.00000000",
+                "receive": "20400.00000000",
+                "rate": "1020.00000000",
+                "state": "applied",
+                "autoApplied": true,
+                "orderUuid": null
+              }
+            ],
+            "reservedQusd": "0.00000000",
+            "workflows": [
+              {
+                "ref": "wf-1",
+                "state": "applied",
+                "error": null
+              }
+            ],
+            "ownOffers": [],
+            "intents": [
+              {
+                "ref": "intent-1",
+                "kind": "apply",
+                "state": "confirmed",
+                "operationUuid": "external-1",
+                "workflow": "wf-1",
+                "error": null
+              }
+            ],
+            "feed": [],
+            "observations": []
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:0768fe21ddee43738cc82e681879442b3c2c332204339860681c108a33423f29"
+        }
+      ]
+    },
+    {
+      "caseId": "replay/money-core/reject/0001",
+      "kind": "stateful",
+      "source": "test/opportunity-orchestrator.test.ts",
+      "session": {
+        "clock": {
+          "start": 1788744000000,
+          "stepMs": 1
+        },
+        "config": {
+          "qusdReserve": 0,
+          "risk": {
+            "minQusdReserve": 0
+          },
+          "markets": [
+            {
+              "code": "BANK_CUP",
+              "buyMaxRate": 970,
+              "sellMinRate": 1010,
+              "purchaseMaxQusd": 25,
+              "fiatBalance": 100000
+            }
+          ]
+        }
+      },
+      "sessionExpect": {
+        "stateDigest": "sha256:bc02f92ed3221b37b45514b14b1737d0d602172727b6c6a8245819cbf364777c"
+      },
+      "steps": [
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-2",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T11:59:59.000Z",
+              "User": {
+                "uuid": "peer-2"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {
+              "qusdBalance": [
+                0
+              ],
+              "listOffers": [
+                [
+                  {
+                    "uuid": "own-sale",
+                    "type": "sell",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "19800.00000000",
+                    "status": "open",
+                    "details": {
+                      "cuenta": "123"
+                    },
+                    "message": "Oferta original",
+                    "tags": [],
+                    "onlyKyc": false,
+                    "onlyVip": false,
+                    "private": false
+                  }
+                ]
+              ],
+              "getOffer": {
+                "own-sale": {
+                  "ok": {
+                    "uuid": "own-sale",
+                    "type": "sell",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "19800.00000000",
+                    "status": "open",
+                    "details": {
+                      "cuenta": "123"
+                    },
+                    "message": "Oferta original",
+                    "tags": [],
+                    "onlyKyc": false,
+                    "onlyVip": false,
+                    "private": false
+                  }
+                }
+              },
+              "cancel": [
+                {
+                  "ok": null
+                }
+              ],
+              "apply": [
+                {
+                  "error": {
+                    "kind": "api",
+                    "status": 409,
+                    "message": "Orden no disponible"
+                  }
+                }
+              ],
+              "createOffer": [
+                {
+                  "ok": {
+                    "uuid": "restored-own",
+                    "type": "sell",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "19800.00000000",
+                    "status": "open"
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "decision": {
+              "kind": "blocked",
+              "opportunityUuid": "external-2",
+              "evaluatedAt": 1788744000002,
+              "requiredQusd": "20.00000000",
+              "requiredFiat": "0.00000000",
+              "projectedExposureQusd": "20.00000000",
+              "projectedDailyAppliedQusd": "20.00000000",
+              "checks": [
+                {
+                  "code": "price_policy",
+                  "status": "pass",
+                  "actual": "eligible",
+                  "limit": "eligible",
+                  "reason": "Supera el mínimo de venta."
+                },
+                {
+                  "code": "emergency_stop",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Interruptor de emergencia: correcto."
+                },
+                {
+                  "code": "automation_paused",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Automatización activa: correcto."
+                },
+                {
+                  "code": "unresolved_mutation",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Sin mutaciones inciertas: correcto."
+                },
+                {
+                  "code": "operation_amount",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 25,
+                  "reason": "Importe por operación: dentro del límite."
+                },
+                {
+                  "code": "concurrent_exposure",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 50,
+                  "reason": "Exposición simultánea: dentro del límite."
+                },
+                {
+                  "code": "daily_volume",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 100,
+                  "reason": "Volumen diario: dentro del límite."
+                },
+                {
+                  "code": "concurrent_operations",
+                  "status": "pass",
+                  "actual": 1,
+                  "limit": 2,
+                  "reason": "Operaciones simultáneas: dentro del límite."
+                },
+                {
+                  "code": "quote_age",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 45,
+                  "reason": "Antigüedad de la cotización: dentro del límite."
+                },
+                {
+                  "code": "expected_margin",
+                  "status": "pass",
+                  "actual": 2,
+                  "limit": "0.5000",
+                  "reason": "Margen esperado: suficiente."
+                },
+                {
+                  "code": "slippage",
+                  "status": "pass",
+                  "actual": "0.4926",
+                  "limit": 1,
+                  "reason": "Deslizamiento frente a referencia: dentro del límite."
+                },
+                {
+                  "code": "consecutive_errors",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 2,
+                  "reason": "Errores consecutivos: dentro del límite."
+                },
+                {
+                  "code": "market_cooldown",
+                  "status": "not_applicable",
+                  "limit": 30,
+                  "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+                },
+                {
+                  "code": "counterparty_cooldown",
+                  "status": "not_applicable",
+                  "limit": 300,
+                  "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+                },
+                {
+                  "code": "qusd_capital",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 20,
+                  "reason": "QUSD disponible después de reserva: suficiente."
+                }
+              ],
+              "reasons": [
+                "La oportunidad cumple la política de precio y todos los límites.",
+                "QvaPay rechazó la aplicación: Orden no disponible"
+              ]
+            },
+            "workflow": {
+              "state": "restored",
+              "error": "Orden no disponible"
+            },
+            "applicationConfirmed": false,
+            "workflowRef": "wf-1"
+          },
+          "expectUpstream": [
+            {
+              "method": "qusdBalance",
+              "options": {
+                "priority": true
+              }
+            },
+            {
+              "method": "listOffers",
+              "query": {
+                "my": true,
+                "take": 100,
+                "page": 1,
+                "status": "open"
+              }
+            },
+            {
+              "method": "getOffer",
+              "uuid": "own-sale"
+            },
+            {
+              "method": "cancel",
+              "uuid": "own-sale",
+              "responseHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+            },
+            {
+              "method": "apply",
+              "uuid": "external-2",
+              "optionsHash": "2ccd94e2ba19c54ed10b40a18c17a6122ae49060dad6bb43051c9a65894d578b",
+              "responseHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+            },
+            {
+              "method": "createOffer",
+              "requestHash": "022fd750da4e19c07e7c45a8a72c8cc5434d70c199c4a391057cc7db6fcac4a1",
+              "amount": "20.00000000",
+              "receive": "19800.00000000",
+              "responseHash": "562a9061081d88f9cbdeb8c52665b0bc3ecafee8e530a8b5dae43560029fa8c5"
+            }
+          ],
+          "expectStateDigest": "sha256:1f89c15789d156dccee714b10c3a4e607349c4e9796c04972bfacf8483feddf2"
+        },
+        {
+          "op": "trading.state",
+          "input": {},
+          "expect": {
+            "operations": [],
+            "reservedQusd": "0.00000000",
+            "workflows": [
+              {
+                "ref": "wf-1",
+                "state": "restored",
+                "error": "Orden no disponible"
+              }
+            ],
+            "ownOffers": [
+              {
+                "workflow": "wf-1",
+                "originalUuid": "own-sale",
+                "state": "restored",
+                "restoredUuid": "restored-own",
+                "error": null
+              }
+            ],
+            "intents": [
+              {
+                "ref": "intent-1",
+                "kind": "apply",
+                "state": "rejected",
+                "operationUuid": "external-2",
+                "workflow": "wf-1",
+                "error": "Orden no disponible"
+              },
+              {
+                "ref": "intent-2",
+                "kind": "cancel_own_for_liquidity",
+                "state": "confirmed",
+                "operationUuid": "own-sale",
+                "workflow": "wf-1",
+                "error": null
+              },
+              {
+                "ref": "intent-3",
+                "kind": "restore_own_offer",
+                "state": "confirmed",
+                "operationUuid": "own-sale",
+                "workflow": "wf-1",
+                "error": null
+              }
+            ],
+            "feed": [],
+            "observations": []
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:1f89c15789d156dccee714b10c3a4e607349c4e9796c04972bfacf8483feddf2"
+        }
+      ]
+    },
+    {
+      "caseId": "replay/money-core/uncertain/0001",
+      "kind": "stateful",
+      "source": "test/opportunity-orchestrator.test.ts",
+      "session": {
+        "clock": {
+          "start": 1788744000000,
+          "stepMs": 1
+        },
+        "config": {
+          "qusdReserve": 0,
+          "risk": {
+            "minQusdReserve": 0
+          },
+          "markets": [
+            {
+              "code": "BANK_CUP",
+              "buyMaxRate": 970,
+              "sellMinRate": 1010,
+              "purchaseMaxQusd": 25,
+              "fiatBalance": 100000
+            }
+          ]
+        }
+      },
+      "sessionExpect": {
+        "stateDigest": "sha256:bc02f92ed3221b37b45514b14b1737d0d602172727b6c6a8245819cbf364777c"
+      },
+      "steps": [
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-5",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T12:00:00.900Z",
+              "User": {
+                "uuid": "peer-5"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {
+              "qusdBalance": [
+                100
+              ],
+              "apply": [
+                {
+                  "error": {
+                    "kind": "uncertain",
+                    "message": "timeout tras enviar apply"
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "decision": {
+              "kind": "blocked",
+              "opportunityUuid": "external-5",
+              "evaluatedAt": 1788744000002,
+              "requiredQusd": "20.00000000",
+              "requiredFiat": "0.00000000",
+              "projectedExposureQusd": "20.00000000",
+              "projectedDailyAppliedQusd": "20.00000000",
+              "checks": [
+                {
+                  "code": "price_policy",
+                  "status": "pass",
+                  "actual": "eligible",
+                  "limit": "eligible",
+                  "reason": "Supera el mínimo de venta."
+                },
+                {
+                  "code": "emergency_stop",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Interruptor de emergencia: correcto."
+                },
+                {
+                  "code": "automation_paused",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Automatización activa: correcto."
+                },
+                {
+                  "code": "unresolved_mutation",
+                  "status": "pass",
+                  "actual": false,
+                  "limit": false,
+                  "reason": "Sin mutaciones inciertas: correcto."
+                },
+                {
+                  "code": "operation_amount",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 25,
+                  "reason": "Importe por operación: dentro del límite."
+                },
+                {
+                  "code": "concurrent_exposure",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 50,
+                  "reason": "Exposición simultánea: dentro del límite."
+                },
+                {
+                  "code": "daily_volume",
+                  "status": "pass",
+                  "actual": 20,
+                  "limit": 100,
+                  "reason": "Volumen diario: dentro del límite."
+                },
+                {
+                  "code": "concurrent_operations",
+                  "status": "pass",
+                  "actual": 1,
+                  "limit": 2,
+                  "reason": "Operaciones simultáneas: dentro del límite."
+                },
+                {
+                  "code": "quote_age",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 45,
+                  "reason": "Antigüedad de la cotización: dentro del límite."
+                },
+                {
+                  "code": "expected_margin",
+                  "status": "pass",
+                  "actual": 2,
+                  "limit": "0.5000",
+                  "reason": "Margen esperado: suficiente."
+                },
+                {
+                  "code": "slippage",
+                  "status": "pass",
+                  "actual": "0.4926",
+                  "limit": 1,
+                  "reason": "Deslizamiento frente a referencia: dentro del límite."
+                },
+                {
+                  "code": "consecutive_errors",
+                  "status": "pass",
+                  "actual": 0,
+                  "limit": 2,
+                  "reason": "Errores consecutivos: dentro del límite."
+                },
+                {
+                  "code": "market_cooldown",
+                  "status": "not_applicable",
+                  "limit": 30,
+                  "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+                },
+                {
+                  "code": "counterparty_cooldown",
+                  "status": "not_applicable",
+                  "limit": 300,
+                  "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+                },
+                {
+                  "code": "qusd_capital",
+                  "status": "pass",
+                  "actual": 100,
+                  "limit": 20,
+                  "reason": "QUSD disponible después de reserva: suficiente."
+                }
+              ],
+              "reasons": [
+                "La oportunidad cumple la política de precio y todos los límites.",
+                "QvaPay no confirmó la aplicación: No se recibió confirmación de QvaPay para apply; se requiere conciliación."
+              ]
+            },
+            "workflow": {
+              "state": "apply_uncertain",
+              "error": "No se recibió confirmación de QvaPay para apply; se requiere conciliación."
+            },
+            "applicationConfirmed": false,
+            "workflowRef": "wf-1"
+          },
+          "expectUpstream": [
+            {
+              "method": "qusdBalance",
+              "options": {
+                "priority": true
+              }
+            },
+            {
+              "method": "apply",
+              "uuid": "external-5",
+              "optionsHash": "2ccd94e2ba19c54ed10b40a18c17a6122ae49060dad6bb43051c9a65894d578b",
+              "responseHash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+            }
+          ],
+          "expectStateDigest": "sha256:1b2f1aa92c04f583c146d0e7e6e7f2d64e576d2e2f7c617e25d7e2a42916da6f"
+        },
+        {
+          "op": "trading.reconcile",
+          "input": {
+            "workflow": "wf-1",
+            "gateway": {
+              "getOffer": {
+                "external-5": {
+                  "ok": {
+                    "uuid": "external-5",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "pending",
+                    "updated_at": "2026-09-06T12:00:00.900Z",
+                    "User": {
+                      "uuid": "peer-5"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "expect": {
+            "outcome": "unresolved",
+            "detail": "Estado remoto no concluyente: pending."
+          },
+          "expectUpstream": [
+            {
+              "method": "getOffer",
+              "uuid": "external-5"
+            }
+          ],
+          "expectStateDigest": "sha256:9ce295abd90268ce37fbd6dc0e969cc8b0ddde31dbd2b77ef4ad69ac1fd23a22"
+        },
+        {
+          "op": "trading.reconcile",
+          "input": {
+            "workflow": "wf-1",
+            "gateway": {
+              "getOffer": {
+                "external-5": {
+                  "ok": {
+                    "uuid": "external-5",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "processing",
+                    "updated_at": "2026-09-06T12:00:00.900Z",
+                    "User": {
+                      "uuid": "peer-5"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "expect": {
+            "outcome": "applied",
+            "detail": "Aplicación confirmada en estado processing."
+          },
+          "expectUpstream": [
+            {
+              "method": "getOffer",
+              "uuid": "external-5"
+            }
+          ],
+          "expectStateDigest": "sha256:668a290e64553a384a4cdc3e1c66056c8585b9e79df40d81ab9b09189fa2e375"
+        },
+        {
+          "op": "trading.state",
+          "input": {},
+          "expect": {
+            "operations": [
+              {
+                "uuid": "external-5",
+                "offerType": "buy",
+                "coin": "BANK_CUP",
+                "amount": "20.00000000",
+                "receive": "20400.00000000",
+                "rate": "1020.00000000",
+                "state": "applied",
+                "autoApplied": true,
+                "orderUuid": null
+              }
+            ],
+            "reservedQusd": "0.00000000",
+            "workflows": [
+              {
+                "ref": "wf-1",
+                "state": "applied",
+                "error": null
+              }
+            ],
+            "ownOffers": [],
+            "intents": [
+              {
+                "ref": "intent-1",
+                "kind": "apply",
+                "state": "reconciled",
+                "operationUuid": "external-5",
+                "workflow": "wf-1",
+                "error": "No se recibió confirmación de QvaPay para apply; se requiere conciliación."
+              }
+            ],
+            "feed": [],
+            "observations": []
+          },
+          "expectUpstream": [],
+          "expectStateDigest": "sha256:668a290e64553a384a4cdc3e1c66056c8585b9e79df40d81ab9b09189fa2e375"
+        }
+      ]
+    }
+  ]
+}

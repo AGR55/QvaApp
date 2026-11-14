@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# Despliega trading-core F3 en modo shadow dentro de la VPS.
+#
+# Uso (como root, en la VPS):
+#   deploy-f3-shadow.sh <release.tar.gz> <revision>
+#
+# Este script administra exclusivamente /opt/qvaapply-f3-shadow. No modifica
+# /opt/qvaapply, no reemplaza el contenedor Node `qvaapply`, no publica puertos
+# fuera de loopback y nunca elimina los volúmenes de Postgres.
+set -Eeuo pipefail
+
+archive=${1:?Falta el archivo de release}
+revision=${2:?Falta la revisión Git}
+
+readonly app_root="/opt/qvaapply-f3-shadow"
+readonly prod_root="/opt/qvaapply"
+readonly shadow_port=8090
+release_dir="$app_root/releases/$revision"
+env_file="$app_root/.env"
+compose_rel="deploy/compose.f3-shadow.yaml"
+
+if (( EUID != 0 )); then
+  echo "El despliegue debe ejecutarse como root." >&2
+  exit 2
+fi
+
+# Salvaguarda explícita: este script jamás debe operar sobre producción.
+if [[ $app_root == "$prod_root" || $app_root == "$prod_root/"* ]]; then
+  echo "Ruta de instalación insegura: $app_root" >&2
+  exit 2
+fi
+
+for command_name in docker curl openssl flock tar; do
+  if ! command -v "$command_name" >/dev/null 2>&1; then
+    echo "Falta el comando requerido: $command_name" >&2
+    exit 2
+  fi
+done
+
+if [[ ! $revision =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
+  echo "La revisión no es un nombre seguro: $revision" >&2
+  exit 2
+fi
+if [[ ! -f $archive ]]; then
+  echo "No existe el archivo de release: $archive" >&2
+  exit 2
+fi
+
+install -d -m 755 "$app_root" "$app_root/releases"
+
+exec 9>"$app_root/deploy.lock"
+if ! flock -n 9; then
+  echo "Ya hay otro despliegue de qvaapply-f3-shadow en curso." >&2
+  exit 1
+fi
+
+# Contraseña propia del shadow. Solo se genera la primera vez; si el archivo
+# ya existe se respeta para no perder acceso a una base ya inicializada.
+umask 077
+if [[ ! -f $env_file ]]; then
+  temporary_env=$(mktemp "$app_root/.env.XXXXXX")
+  printf 'F3_POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" > "$temporary_env"
+  chmod 600 "$temporary_env"
+  mv -f "$temporary_env" "$env_file"
+  echo "Creado $env_file con una contraseña aleatoria." >&2
+fi
+chmod 600 "$env_file"
+
+shadow_password=$(sed -n 's/^[[:space:]]*F3_POSTGRES_PASSWORD=//p' "$env_file" | tail -n 1 | tr -d '\r')
+shadow_password=${shadow_password#\"}
+shadow_password=${shadow_password%\"}
+if [[ -z $shadow_password ]]; then
+  echo "Falta F3_POSTGRES_PASSWORD en $env_file" >&2
+  exit 2
+fi
+export F3_POSTGRES_PASSWORD="$shadow_password"
+export F3_REVISION="$revision"
+
+compose_for() {
+  local file=$1
+  shift
+  docker compose --env-file "$env_file" -f "$file" "$@"
+}
+
+install -d -m 755 "$release_dir"
+tar -xzf "$archive" -C "$release_dir"
+
+compose_file="$release_dir/$compose_rel"
+migration_file="$release_dir/services/db/migrations/0004_shadow.sql"
+invariants_migration_file="$release_dir/services/db/migrations/0005_invariants.sql"
+soak_migration_file="$release_dir/services/db/migrations/0006_soak.sql"
+qvapay_migration_file="$release_dir/services/db/migrations/0007_qvapay.sql"
+offers_migration_file="$release_dir/services/db/migrations/0008_qvapay_offers.sql"
+hunter_migration_file="$release_dir/services/db/migrations/0009_hunter.sql"
+hunter_events_migration_file="$release_dir/services/db/migrations/0010_hunter_events.sql"
+if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
+  echo "El archivo de release no contiene el despliegue F3 esperado." >&2
+  exit 2
+fi
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010." >&2
+  exit 2
+fi
+
+# Valida la interpolación antes de construir.
+compose_for "$compose_file" config -q
+
+previous_release=""
+if [[ -L $app_root/current ]]; then
+  previous_release=$(readlink -f "$app_root/current" 2>/dev/null || true)
+fi
+
+if ! compose_for "$compose_file" build; then
+  echo "Falló la construcción de la imagen shadow; se conserva la release activa." >&2
+  exit 1
+fi
+
+# Aplica la migración (idempotente) antes de activar la release. Si falla,
+# /opt/qvaapply-f3-shadow/current sigue apuntando a la release anterior y no
+# se levanta ningún contenedor nuevo.
+if ! compose_for "$compose_file" run --rm -T shadow-migrate; then
+  echo "Falló la migración shadow; se conserva la release activa." >&2
+  exit 1
+fi
+
+# Prepara el hunter long-running con secretos y config fuera del repositorio.
+hunter_enabled=false
+hunter_env="$app_root/hunter.env"
+hunter_data_dir="$app_root/data"
+prod_env="/opt/qvaapply/config/env"
+prod_db="/opt/qvaapply/data/qvaapply.sqlite"
+if [[ -r $prod_env && -r $prod_db ]]; then
+  local_key=$(sed -n 's/^[[:space:]]*LOCAL_ENCRYPTION_KEY=//p' "$prod_env" | tail -n 1 | tr -d '\r')
+  local_key=${local_key#\"}
+  local_key=${local_key%\"}
+  encrypted_token=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
+    "SELECT value FROM settings WHERE key = 'qvapay_token';" | tr -d '\r')
+  if [[ $local_key =~ ^[a-fA-F0-9]{64}$ && -n $encrypted_token ]]; then
+    install -d -m 700 "$hunter_data_dir"
+    temporary_env=$(mktemp "$app_root/hunter.env.XXXXXX")
+    {
+      printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
+      printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
+    } > "$temporary_env"
+    chmod 600 "$temporary_env"
+    mv -f "$temporary_env" "$hunter_env"
+    markets=$(sqlite3 -readonly -json "file:${prod_db}?mode=ro" \
+      "SELECT code, active, buy_max_rate, sell_min_rate, purchase_max_qusd, outgoing_transfer_fee, hunt_buy_enabled, hunt_sell_enabled FROM market_config ORDER BY code;")
+    [[ -n $markets ]] || markets='[]'
+    temporary_config=$(mktemp "$hunter_data_dir/hunter-config.XXXXXX")
+    printf '{"price_guard_percent":15,"markets":%s}\n' "$markets" > "$temporary_config"
+    chmod 644 "$temporary_config"
+    mv -f "$temporary_config" "$hunter_data_dir/hunter-config.json"
+    hunter_enabled=true
+    unset local_key encrypted_token
+  fi
+fi
+export F3_HUNTER_ENV="$hunter_env"
+export F3_HUNTER_DATA_DIR="$hunter_data_dir"
+export F3_HUNTER_CONFIG_FILE="$hunter_data_dir/hunter-config.json"
+
+ln -sfn "$release_dir" "$app_root/current.next"
+mv -Tf "$app_root/current.next" "$app_root/current"
+
+started=true
+if [[ $hunter_enabled == true ]]; then
+  if ! compose_for "$compose_file" --profile hunter up -d --remove-orphans; then
+    started=false
+  fi
+else
+  echo "Hunter deshabilitado: no hay token QvaPay utilizable." >&2
+  if ! compose_for "$compose_file" up -d --remove-orphans; then
+    started=false
+  fi
+fi
+
+healthy=false
+for _ in {1..60}; do
+  [[ $started == true ]] || break
+  if curl --fail --silent --show-error --max-time 3 \
+      "http://127.0.0.1:${shadow_port}/healthz" >/dev/null \
+    && curl --fail --silent --show-error --max-time 3 \
+      "http://127.0.0.1:${shadow_port}/readyz" >/dev/null; then
+    if [[ $hunter_enabled != true ]]; then
+      healthy=true
+      break
+    fi
+    if curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8091/healthz" >/dev/null \
+      && curl --fail --silent --show-error --max-time 3 \
+        "http://127.0.0.1:8091/readyz" >/dev/null; then
+      healthy=true
+      break
+    fi
+    # Hunter aún arrancando: seguir esperando, no abortar el bucle.
+  fi
+  sleep 2
+done
+
+if [[ $healthy != true ]]; then
+  echo "La nueva release shadow no superó /healthz y /readyz." >&2
+  compose_for "$compose_file" logs --no-color --tail=100 >&2 || true
+
+  if [[ -n $previous_release && -d $previous_release && $previous_release != "$release_dir" ]]; then
+    ln -sfn "$previous_release" "$app_root/current.next"
+    mv -Tf "$app_root/current.next" "$app_root/current"
+    F3_REVISION=$(basename "$previous_release")
+    export F3_REVISION
+    if compose_for "$previous_release/$compose_rel" --profile hunter up -d --build --remove-orphans; then
+      echo "Se restauró la release anterior: $previous_release" >&2
+    else
+      echo "No se pudo restaurar la release anterior: $previous_release" >&2
+    fi
+  else
+    # `down` sin --volumes: el volumen de Postgres se conserva.
+    compose_for "$compose_file" down || true
+    rm -f "$app_root/current"
+    echo "No había una release anterior; el shadow quedó detenido. Los volúmenes se conservan." >&2
+  fi
+  exit 1
+fi
+
+echo "trading-core shadow desplegado en $release_dir"
+echo "  healthz: http://127.0.0.1:${shadow_port}/healthz"
+echo "  readyz:  http://127.0.0.1:${shadow_port}/readyz"
+echo "  metrics: http://127.0.0.1:${shadow_port}/metrics"
+if [[ $hunter_enabled == true ]]; then
+  echo "  hunter:  http://127.0.0.1:8091/metrics"
+fi

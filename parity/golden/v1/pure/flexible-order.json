@@ -1,0 +1,709 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/flexible-order.ts",
+  "sourceTests": [
+    "test/flexible-order.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Funciones puras de órdenes flexibles: dimensionado constante, proyección del estado de la orden hija y recuperación inequívoca. Deterministas (fechas ISO fijas, sin store ni fetch). · goldenHash=e5de34a37ff57556da66625fb08176d15da0e2a4ad87902d42c829afc72baaeb",
+  "cases": [
+    {
+      "caseId": "pure/flexible-order/size/capacity-cents/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:15",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 10.129,
+        "limit": 25
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "10.12000000",
+        "receive": "9108.00000000",
+        "rate": "900.00000000",
+        "status": "open",
+        "offer_kind": "flexible"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/size/capacity-limit/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:15",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 100,
+        "limit": 25
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "25.00000000",
+        "receive": "22500.00000000",
+        "rate": "900.00000000",
+        "status": "open",
+        "offer_kind": "flexible"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/size/order-max/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:15",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 100,
+        "limit": 100
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "30.00000000",
+        "receive": "27000.00000000",
+        "rate": "900.00000000",
+        "status": "open",
+        "offer_kind": "flexible"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/size/available/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:21",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": 8,
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 20
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "8.00000000",
+        "receive": "7200.00000000",
+        "rate": "900.00000000",
+        "status": "open",
+        "offer_kind": "flexible"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/size/zero-capacity/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:22",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 0
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/size/below-order-min/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:22",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 4.99
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/size/negative-capacity/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:22",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": -1
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/size/null-order-min/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:23",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": null,
+          "order_max": "30"
+        },
+        "capacity": 20
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/size/max-below-min/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:24",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": 2
+        },
+        "capacity": 20
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/size/fixed-untouched/0001",
+      "op": "flexible.size",
+      "source": "test/flexible-order.test.ts:25",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "fixed",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30"
+        },
+        "capacity": 1
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "100.00000000",
+        "receive": "90000.00000000",
+        "rate": "900.00000000",
+        "status": "open",
+        "offer_kind": "fixed"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/order/status-from-child/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:30",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        },
+        "orderUuid": "child"
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "10.00000000",
+        "receive": "9000.00000000",
+        "rate": "900.00000000",
+        "status": "paid",
+        "updated_at": "1970-01-01T00:00:10.000Z"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/order/requires-id/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:32",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        }
+      },
+      "expectError": {
+        "class": "validation",
+        "messageIncludes": "requiere identificar su orden"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/order/unknown-id/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:33",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        },
+        "orderUuid": "another"
+      },
+      "expectError": {
+        "class": "error",
+        "messageIncludes": "no devolvió la orden"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/recovery/unique-owner/0001",
+      "op": "flexible.matchingRecoveryOrder",
+      "source": "test/flexible-order.test.ts:34",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        },
+        "amount": 10,
+        "since": 10000,
+        "account": "me"
+      },
+      "expect": {
+        "uuid": "child",
+        "status": "paid",
+        "amount": "10.00000000",
+        "receive": "9000.00000000",
+        "created_at": "1970-01-01T00:00:10.000Z"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/recovery/other-owner/0001",
+      "op": "flexible.matchingRecoveryOrder",
+      "source": "test/flexible-order.test.ts:35",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        },
+        "amount": 10,
+        "since": 10000,
+        "account": "other"
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/recovery/out-of-window/0001",
+      "op": "flexible.matchingRecoveryOrder",
+      "source": "test/flexible-order.test.ts:36",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:03:20.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        },
+        "amount": 10,
+        "since": 10000,
+        "account": "me"
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/recovery/ambiguous/0001",
+      "op": "flexible.matchingRecoveryOrder",
+      "source": "test/flexible-order.test.ts:37",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            },
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "paid",
+              "created_at": "1970-01-01T00:00:10.000Z",
+              "Taker": {
+                "uuid": "me"
+              }
+            }
+          ]
+        },
+        "amount": 10,
+        "since": 10000,
+        "account": "me"
+      },
+      "expect": null
+    },
+    {
+      "caseId": "pure/flexible-order/financial-date/sell-paid/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:76",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "completed",
+              "created_at": "2026-10-18T10:00:00Z",
+              "paid_at": "2026-10-19T10:00:00Z",
+              "released_at": "2026-10-19T10:05:00Z"
+            }
+          ],
+          "updated_at": "2026-10-20T10:00:00Z"
+        },
+        "orderUuid": "child"
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "10.00000000",
+        "receive": "9000.00000000",
+        "rate": "900.00000000",
+        "status": "completed",
+        "updated_at": "2026-10-19T10:00:00Z"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/financial-date/buy-released/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:77",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "completed",
+              "created_at": "2026-10-18T10:00:00Z",
+              "paid_at": "2026-10-19T10:00:00Z",
+              "released_at": "2026-10-19T10:05:00Z"
+            }
+          ]
+        },
+        "orderUuid": "child"
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "buy",
+        "coin": "BANK_CUP",
+        "amount": "10.00000000",
+        "receive": "9000.00000000",
+        "rate": "900.00000000",
+        "status": "completed",
+        "updated_at": "2026-10-19T10:05:00Z"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/financial-date/sell-released-fallback/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:78",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "completed",
+              "created_at": "2026-10-18T10:00:00Z",
+              "paid_at": null,
+              "released_at": "2026-10-19T10:05:00Z"
+            }
+          ]
+        },
+        "orderUuid": "child"
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "10.00000000",
+        "receive": "9000.00000000",
+        "rate": "900.00000000",
+        "status": "completed",
+        "updated_at": "2026-10-19T10:05:00Z"
+      }
+    },
+    {
+      "caseId": "pure/flexible-order/financial-date/created-fallback/0001",
+      "op": "flexible.orderForOperation",
+      "source": "test/flexible-order.test.ts:79",
+      "input": {
+        "offer": {
+          "uuid": "parent",
+          "type": "sell",
+          "coin": "BANK_CUP",
+          "amount": 100,
+          "receive": 90000,
+          "status": "open",
+          "offer_kind": "flexible",
+          "available_amount": "70",
+          "order_min": "5",
+          "order_max": "30",
+          "Orders": [
+            {
+              "uuid": "child",
+              "amount": 10,
+              "receive": 9000,
+              "status": "completed",
+              "created_at": "2026-10-18T10:00:00Z",
+              "paid_at": null,
+              "released_at": null
+            }
+          ]
+        },
+        "orderUuid": "child"
+      },
+      "expect": {
+        "uuid": "parent",
+        "type": "sell",
+        "coin": "BANK_CUP",
+        "amount": "10.00000000",
+        "receive": "9000.00000000",
+        "rate": "900.00000000",
+        "status": "completed",
+        "updated_at": "2026-10-18T10:00:00Z"
+      }
+    }
+  ]
+}

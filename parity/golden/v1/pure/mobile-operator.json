@@ -1,0 +1,275 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "gateway",
+  "module": "src/mobile-operator.ts",
+  "sourceTests": [
+    "test/mobile-operator.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato móvil: token solo hasheado, cupos de lectura y mutación separados, revocación, auditoría de acciones inciertas sin filtrar el secreto y composición de operaciones con órdenes hermanas. · goldenHash=fe78ce7670b9c6e698d5f426bc88d012e2de876b41b3e2caef275a56ccd68cd4",
+  "cases": [
+    {
+      "caseId": "pure/mobile-operator/credentials/0001",
+      "op": "mobile.operator.credentials",
+      "source": "test/mobile-operator.test.ts:5",
+      "expect": {
+        "tokenLength": 48,
+        "tokenStored": false,
+        "first": true,
+        "rateLimitedAfter60": true,
+        "readOkAfterWriteLimit": true,
+        "readRateLimitedAfter20": true,
+        "writeStillLimited": true,
+        "okAfterWindow": true,
+        "revoked": true,
+        "checkAfterRevoke": false,
+        "audit": [
+          "mobile_operator_created",
+          "mobile_operator_revoked"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/mobile-operator/action-uncertain/0001",
+      "op": "mobile.operator.action-uncertain",
+      "source": "test/mobile-operator.test.ts:34",
+      "expect": {
+        "error": "QvaPay timeout",
+        "audit": [
+          "mobile_paid_requested",
+          "mobile_paid_uncertain",
+          "mobile_action_timing"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/mobile-operator/action-audit-failure/0001",
+      "op": "mobile.operator.action-audit-failure",
+      "source": "test/mobile-operator.test.ts:47",
+      "expect": {
+        "mutations": 1,
+        "outcome": "confirmed",
+        "totalMsAtLeastZero": true,
+        "secretLeaked": false
+      }
+    },
+    {
+      "caseId": "pure/mobile-operator/operations/0001",
+      "op": "mobile.operator.operations",
+      "source": "test/mobile-operator.test.ts:67",
+      "input": {
+        "limit": 10,
+        "operations": [
+          {
+            "uuid": "sell-1",
+            "offerType": "sell",
+            "coin": "BPA",
+            "amount": 10,
+            "receive": 100,
+            "rate": 10,
+            "state": "applied",
+            "createdAt": 1
+          },
+          {
+            "uuid": "buy-1",
+            "offerType": "buy",
+            "coin": "BAND",
+            "amount": 10,
+            "receive": 100,
+            "rate": 10,
+            "state": "acknowledged",
+            "createdAt": 2
+          },
+          {
+            "uuid": "buy-paid",
+            "offerType": "buy",
+            "coin": "BAND",
+            "amount": 10,
+            "receive": 100,
+            "rate": 10,
+            "state": "paid",
+            "createdAt": 3
+          },
+          {
+            "uuid": "buy-revision",
+            "offerType": "buy",
+            "coin": "BAND",
+            "amount": 10,
+            "receive": 100,
+            "rate": 10,
+            "state": "revision",
+            "createdAt": 4
+          }
+        ],
+        "alerts": [
+          {
+            "id": "a1",
+            "type": "operation-applied",
+            "message": "Aviso",
+            "createdAt": 3,
+            "operationUuid": "sell-1",
+            "url": "/?view=ops"
+          }
+        ],
+        "markets": [
+          {
+            "code": "BPA",
+            "label": "BPA",
+            "currency": "CUP"
+          },
+          {
+            "code": "BAND",
+            "label": "Bandec",
+            "currency": "CUP"
+          }
+        ]
+      },
+      "expect": {
+        "operations": [
+          {
+            "uuid": "sell-1",
+            "actions": [
+              "paid",
+              "cancel"
+            ]
+          },
+          {
+            "uuid": "buy-1",
+            "actions": [
+              "received",
+              "cancel"
+            ]
+          },
+          {
+            "uuid": "buy-paid",
+            "actions": [
+              "received"
+            ]
+          },
+          {
+            "uuid": "buy-revision",
+            "actions": []
+          }
+        ],
+        "alerts": [
+          {
+            "id": "a1",
+            "type": "operation-applied",
+            "message": "Aviso",
+            "createdAt": 3,
+            "operationUuid": "sell-1"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/mobile-operator/threads/0001",
+      "op": "mobile.operator.threads",
+      "source": "test/mobile-operator.test.ts:87",
+      "input": {
+        "limit": 100,
+        "operations": [
+          {
+            "uuid": "parent",
+            "orderUuid": "one",
+            "offerType": "sell",
+            "coin": "CLASICA",
+            "amount": 10,
+            "receive": 11,
+            "rate": 1.1,
+            "state": "applied",
+            "createdAt": 1
+          }
+        ],
+        "threads": [
+          {
+            "id": "parent:one",
+            "uuid": "parent",
+            "orderUuid": "one",
+            "offerType": "sell",
+            "role": "taker",
+            "coin": "CLASICA",
+            "amount": 10,
+            "receive": 11,
+            "state": "applied",
+            "createdAt": 1,
+            "discoveredAt": 1,
+            "updatedAt": 1
+          },
+          {
+            "id": "parent:two",
+            "uuid": "parent",
+            "orderUuid": "two",
+            "offerType": "sell",
+            "role": "taker",
+            "coin": "CLASICA",
+            "amount": 20,
+            "receive": 22,
+            "state": "processing",
+            "createdAt": 2,
+            "discoveredAt": 2,
+            "updatedAt": 2
+          },
+          {
+            "id": "own:fixed",
+            "uuid": "own",
+            "offerType": "buy",
+            "role": "creator",
+            "coin": "CLASICA",
+            "amount": 30,
+            "receive": 33,
+            "state": "paid",
+            "createdAt": 3,
+            "discoveredAt": 3,
+            "updatedAt": 3
+          }
+        ],
+        "markets": [
+          {
+            "code": "CLASICA",
+            "label": "Clásica",
+            "currency": "USD"
+          }
+        ]
+      },
+      "expect": {
+        "operations": [
+          {
+            "id": "own:fixed",
+            "uuid": "own",
+            "side": "sell",
+            "role": "creator",
+            "chatAvailable": true,
+            "actions": []
+          },
+          {
+            "id": "parent:two",
+            "uuid": "parent",
+            "orderUuid": "two",
+            "side": "sell",
+            "role": "taker",
+            "chatAvailable": true,
+            "actions": []
+          },
+          {
+            "id": "parent:one",
+            "uuid": "parent",
+            "orderUuid": "one",
+            "side": "sell",
+            "role": "taker",
+            "chatAvailable": true,
+            "actions": [
+              "paid",
+              "cancel"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "cassetteVersion": 1,
+  "name": "apply-409-contention",
+  "description": "K3: rechazos 409 de apply (OFFER_CONTENDED, OFFER_PAUSED, PEER_REQUIREMENTS_NOT_MET con missing, oferta ya tomada genérica) y éxito con latencia virtual. Un 409 OFFER_CONTENDED no es pérdida definitiva.",
+  "contract": "K3",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": {
+      "uuid": "user-owner-0001",
+      "email": "owner@fake.qvapay",
+      "balance": "250.00000000",
+      "available": "250.00000000"
+    },
+    "offers": [
+      {
+        "uuid": "offer-contended-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "20.00000000",
+        "receive": "20.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-aaaa-0001" },
+        "Peer": {},
+        "details": [{ "name": "bank", "value": "BPA" }]
+      },
+      {
+        "uuid": "offer-paused-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "20.00000000",
+        "receive": "20.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-aaaa-0002" },
+        "Peer": {},
+        "details": [{ "name": "bank", "value": "BPA" }]
+      },
+      {
+        "uuid": "offer-requirements-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "20.00000000",
+        "receive": "20.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-aaaa-0003" },
+        "Peer": {},
+        "details": [{ "name": "bank", "value": "BPA" }]
+      },
+      {
+        "uuid": "offer-taken-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "20.00000000",
+        "receive": "20.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-aaaa-0004" },
+        "Peer": {},
+        "details": [{ "name": "bank", "value": "BPA" }]
+      },
+      {
+        "uuid": "offer-success-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "20.00000000",
+        "receive": "20.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-aaaa-0005" },
+        "Peer": {},
+        "details": [{ "name": "bank", "value": "BPA" }]
+      }
+    ]
+  },
+  "exchanges": [
+    {
+      "id": "apply-offer-contended",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-contended-1/apply" },
+      "delayMs": 1218,
+      "response": {
+        "status": 409,
+        "body": { "error": "La oferta está en contención", "code": "OFFER_CONTENDED" }
+      },
+      "logAssertions": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-contended-1/apply",
+        "headers": { "authorization": "Bearer test-owner-token" }
+      }
+    },
+    {
+      "id": "apply-offer-paused",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-paused-1/apply" },
+      "response": {
+        "status": 409,
+        "body": { "error": "La oferta está pausada", "code": "OFFER_PAUSED" }
+      }
+    },
+    {
+      "id": "apply-requirements-not-met",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-requirements-1/apply" },
+      "response": {
+        "status": 409,
+        "body": {
+          "error": "No cumples los requisitos del peer",
+          "code": "PEER_REQUIREMENTS_NOT_MET",
+          "missing": ["kyc_verified", "min_amount", "vip_only"]
+        }
+      }
+    },
+    {
+      "id": "apply-offer-already-taken",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-taken-1/apply" },
+      "response": {
+        "status": 409,
+        "body": { "error": "La oferta ya fue tomada", "code": "HTTP_409" }
+      }
+    },
+    {
+      "id": "apply-success",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-success-1/apply" },
+      "delayMs": 1032,
+      "effects": [{ "op": "apply", "uuid": "offer-success-1", "order": "order-apply-0001" }],
+      "response": { "status": 200, "body": {} },
+      "logAssertions": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-success-1/apply",
+        "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "headers": { "authorization": "Bearer test-owner-token" }
+      }
+    },
+    {
+      "id": "get-after-apply",
+      "contract": "K3",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-success-1" },
+      "response": { "status": 200, "body": { "p2p": { "$offer": "offer-success-1" } } }
+    }
+  ]
+}

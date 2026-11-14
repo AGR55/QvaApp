@@ -105,7 +105,7 @@ hasta que la rama de endurecimiento de Sync Core sea revisada y desplegada.
 pnpm typecheck       # análisis estático estricto
 pnpm test            # suite unitaria, contractual e integrada
 pnpm build           # servidor + panel de producción
-pnpm check           # tipos, 118 pruebas, builds y escáner de secretos
+pnpm check           # tipos, 718 pruebas, builds y escáner de secretos
 pnpm check:ui        # build + recorrido Chromium, responsive y WCAG automatizado
 pnpm start           # ejecuta dist/index.js
 ```
@@ -119,6 +119,7 @@ pnpm start           # ejecuta dist/index.js
 - [Despliegue futuro en VPS](docs/VPS.md)
 - [Política de seguridad](SECURITY.md)
 - [Evidencia de verificación](docs/VERIFICATION.md)
+- [Plan de migración a microservicios Go](docs/migration/README.md) (propuesta, no ejecutada)
 - Contrato local OpenAPI autenticado: `/api/openapi.json`
 
 La integración se basa en la [documentación oficial de QvaPay](https://www.qvapay.com/docs). No se ejecutan pruebas automáticas contra mutaciones reales de QvaPay.

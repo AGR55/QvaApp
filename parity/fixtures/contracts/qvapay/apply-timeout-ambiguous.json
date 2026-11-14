@@ -1,0 +1,111 @@
+{
+  "cassetteVersion": 1,
+  "name": "apply-timeout-ambiguous",
+  "description": "K3/K4: mutación incierta. `hang` simula timeout de lectura/mutación (el SUT aborta con su reloj inyectado), `after-headers` aplica la orden y corta la respuesta (ambigua), `destroy` resetea la conexión antes de responder. La conciliación posterior lee la oferta del mundo.",
+  "contract": "K3",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": { "uuid": "user-owner-0001" },
+    "offers": [
+      {
+        "uuid": "offer-hang-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "12.50000000",
+        "receive": "12.50000000",
+        "status": "open",
+        "User": { "uuid": "peer-hang-0001" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-slow-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "12.50000000",
+        "receive": "12.50000000",
+        "status": "open",
+        "User": { "uuid": "peer-slow-0001" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-ambiguous-1",
+        "type": "buy",
+        "coin": "QUSD",
+        "amount": "12.50000000",
+        "receive": "12.50000000",
+        "status": "open",
+        "User": { "uuid": "peer-amb-0001" },
+        "Peer": {},
+        "details": []
+      },
+      {
+        "uuid": "offer-destroy-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "12.50000000",
+        "receive": "12.50000000",
+        "status": "open",
+        "User": { "uuid": "peer-destroy-0001" },
+        "Peer": {},
+        "details": []
+      }
+    ]
+  },
+  "exchanges": [
+    {
+      "id": "apply-timeout-after-send-hang",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-hang-1/apply" },
+      "abort": "hang",
+      "logAssertions": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-hang-1/apply",
+        "headers": { "authorization": "Bearer test-owner-token" }
+      }
+    },
+    {
+      "id": "apply-slow-response",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-slow-1/apply" },
+      "delayMs": 25000,
+      "effects": [{ "op": "apply", "uuid": "offer-slow-1", "order": "order-slow-0001" }],
+      "response": { "status": 200, "body": {} }
+    },
+    {
+      "id": "apply-ambiguous-after-headers",
+      "contract": "K3",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-ambiguous-1/apply" },
+      "effects": [{ "op": "apply", "uuid": "offer-ambiguous-1", "order": "order-amb-0001" }],
+      "abort": "after-headers",
+      "response": {
+        "status": 200,
+        "headers": { "x-cache": "MISS" },
+        "partialBody": "{\"order\":\"order-amb-0001\",\"amount\":\"12.50000000\",\"rece"
+      },
+      "logAssertions": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-ambiguous-1/apply"
+      }
+    },
+    {
+      "id": "apply-connection-reset",
+      "contract": "K4",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-destroy-1/apply" },
+      "abort": "destroy"
+    },
+    {
+      "id": "reconcile-ambiguous-apply",
+      "contract": "K3",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-ambiguous-1" },
+      "response": { "status": 200, "body": { "p2p": { "$offer": "offer-ambiguous-1" } } }
+    },
+    {
+      "id": "reconcile-hang-still-open",
+      "contract": "K3",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-hang-1" },
+      "response": { "status": 200, "body": { "p2p": { "$offer": "offer-hang-1" } } }
+    }
+  ]
+}

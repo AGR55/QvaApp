@@ -1,0 +1,353 @@
+{
+  "schema": "qvaapply.replay-scenarios/v1",
+  "corpus": "2026-11-12",
+  "defaults": {
+    "session": {
+      "clock": {
+        "start": 1788744000000,
+        "stepMs": 1
+      },
+      "config": {
+        "qusdReserve": 0,
+        "risk": {
+          "minQusdReserve": 0
+        },
+        "markets": [
+          {
+            "code": "BANK_CUP",
+            "buyMaxRate": 970,
+            "sellMinRate": 1010,
+            "purchaseMaxQusd": 25,
+            "fiatBalance": 100000
+          }
+        ]
+      }
+    }
+  },
+  "cases": [
+    {
+      "caseId": "replay/market-ingest/dedupe/0001",
+      "source": "test/market-feed.test.ts",
+      "steps": [
+        {
+          "op": "market.ingest",
+          "input": {
+            "events": [],
+            "ingest": {
+              "events": [
+                0,
+                1,
+                2
+              ]
+            }
+          }
+        },
+        {
+          "op": "market.ingest",
+          "input": {
+            "events": [],
+            "ingest": {
+              "events": [
+                4,
+                5,
+                6
+              ]
+            },
+            "observation": {
+              "coin": "BANK_CUP",
+              "averageBuy": "1015.00000000",
+              "averageSell": "1020.00000000",
+              "medianBuy": "1014.00000000",
+              "medianSell": "1021.00000000",
+              "bestBuy": "1012.00000000",
+              "bestSell": "1022.00000000",
+              "openOffers": 4,
+              "eligible": 2
+            }
+          }
+        },
+        {
+          "op": "market.ingest",
+          "input": {
+            "events": [],
+            "ingest": {
+              "events": [
+                7,
+                8,
+                9
+              ]
+            }
+          }
+        },
+        {
+          "op": "trading.state",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "caseId": "replay/money-core/apply/0001",
+      "source": "test/opportunity-orchestrator.test.ts",
+      "steps": [
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-1",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T11:59:58.000Z",
+              "User": {
+                "uuid": "peer-1"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {
+              "qusdBalance": [
+                100
+              ],
+              "apply": [
+                {
+                  "ok": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-1",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T11:59:58.000Z",
+              "User": {
+                "uuid": "peer-1"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {}
+          }
+        },
+        {
+          "op": "trading.reconcile",
+          "input": {
+            "workflow": "wf-1",
+            "gateway": {}
+          }
+        },
+        {
+          "op": "trading.state",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "caseId": "replay/money-core/reject/0001",
+      "source": "test/opportunity-orchestrator.test.ts",
+      "steps": [
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-2",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T11:59:59.000Z",
+              "User": {
+                "uuid": "peer-2"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {
+              "qusdBalance": [
+                0
+              ],
+              "listOffers": [
+                [
+                  {
+                    "uuid": "own-sale",
+                    "type": "sell",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "19800.00000000",
+                    "status": "open",
+                    "details": {
+                      "cuenta": "123"
+                    },
+                    "message": "Oferta original",
+                    "tags": [],
+                    "onlyKyc": false,
+                    "onlyVip": false,
+                    "private": false
+                  }
+                ]
+              ],
+              "getOffer": {
+                "own-sale": {
+                  "ok": {
+                    "uuid": "own-sale",
+                    "type": "sell",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "19800.00000000",
+                    "status": "open",
+                    "details": {
+                      "cuenta": "123"
+                    },
+                    "message": "Oferta original",
+                    "tags": [],
+                    "onlyKyc": false,
+                    "onlyVip": false,
+                    "private": false
+                  }
+                }
+              },
+              "cancel": [
+                {
+                  "ok": null
+                }
+              ],
+              "apply": [
+                {
+                  "error": {
+                    "kind": "api",
+                    "status": 409,
+                    "message": "Orden no disponible"
+                  }
+                }
+              ],
+              "createOffer": [
+                {
+                  "ok": {
+                    "uuid": "restored-own",
+                    "type": "sell",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "19800.00000000",
+                    "status": "open"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "trading.state",
+          "input": {}
+        }
+      ]
+    },
+    {
+      "caseId": "replay/money-core/uncertain/0001",
+      "source": "test/opportunity-orchestrator.test.ts",
+      "steps": [
+        {
+          "op": "trading.decide",
+          "input": {
+            "target": {
+              "uuid": "external-5",
+              "type": "buy",
+              "coin": "BANK_CUP",
+              "amount": "20.00000000",
+              "receive": "20400.00000000",
+              "status": "open",
+              "updated_at": "2026-09-06T12:00:00.900Z",
+              "User": {
+                "uuid": "peer-5"
+              }
+            },
+            "referenceRate": "1015.00000000",
+            "expectedMarginPercent": "2.0000",
+            "priceDecision": "eligible",
+            "priceReason": "Supera el mínimo de venta.",
+            "gateway": {
+              "qusdBalance": [
+                100
+              ],
+              "apply": [
+                {
+                  "error": {
+                    "kind": "uncertain",
+                    "message": "timeout tras enviar apply"
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "op": "trading.reconcile",
+          "input": {
+            "workflow": "wf-1",
+            "gateway": {
+              "getOffer": {
+                "external-5": {
+                  "ok": {
+                    "uuid": "external-5",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "pending",
+                    "updated_at": "2026-09-06T12:00:00.900Z",
+                    "User": {
+                      "uuid": "peer-5"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "op": "trading.reconcile",
+          "input": {
+            "workflow": "wf-1",
+            "gateway": {
+              "getOffer": {
+                "external-5": {
+                  "ok": {
+                    "uuid": "external-5",
+                    "type": "buy",
+                    "coin": "BANK_CUP",
+                    "amount": "20.00000000",
+                    "receive": "20400.00000000",
+                    "status": "processing",
+                    "updated_at": "2026-09-06T12:00:00.900Z",
+                    "User": {
+                      "uuid": "peer-5"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "op": "trading.state",
+          "input": {}
+        }
+      ]
+    }
+  ]
+}

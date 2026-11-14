@@ -1,0 +1,145 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "gateway",
+  "module": "src/dashboard-auth.ts",
+  "sourceTests": [
+    "test/dashboard-auth.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Autenticación local del panel: cookie HttpOnly/SameSite=Strict, CSRF exacto, alias loopback del mismo puerto, límite de 5 intentos y expiración de sesión. No se exponen cookies ni tokens reales. · goldenHash=997d95b2c36d54eec3aa2012d085adb5c570fb61c70d1426915d2ee54f276783",
+  "cases": [
+    {
+      "caseId": "pure/dashboard-auth/login-csrf/0001",
+      "op": "auth.login",
+      "source": "test/dashboard-auth.test.ts:5",
+      "input": {
+        "password": "correcta-muy-larga-2026",
+        "trustedOrigin": "http://127.0.0.1:3000",
+        "now": 1000,
+        "loginPassword": "correcta-muy-larga-2026",
+        "clientId": "local"
+      },
+      "expect": {
+        "httpOnly": true,
+        "sameSiteStrict": true,
+        "maxAge": 28800,
+        "expiresAt": 28801000,
+        "csrfAccepted": true,
+        "wrongCsrfStatus": 403
+      }
+    },
+    {
+      "caseId": "pure/dashboard-auth/origins-rate-limit/0001",
+      "op": "auth.origins-rate-limit",
+      "source": "test/dashboard-auth.test.ts:20",
+      "input": {
+        "password": "correcta-muy-larga-2026",
+        "trustedOrigin": "http://127.0.0.1:3000",
+        "now": 0,
+        "clientId": "local",
+        "failed": 5,
+        "origins": [
+          "http://127.0.0.1:3000",
+          "http://localhost:3000",
+          "http://[::1]:3000",
+          "http://localhost:3001",
+          "https://localhost:3000",
+          "http://127.0.0.1.example:3000",
+          "http://192.168.1.5:3000",
+          null
+        ]
+      },
+      "expect": {
+        "origins": [
+          {
+            "ok": true
+          },
+          {
+            "ok": true
+          },
+          {
+            "ok": true
+          },
+          {
+            "ok": false,
+            "status": 403
+          },
+          {
+            "ok": false,
+            "status": 403
+          },
+          {
+            "ok": false,
+            "status": 403
+          },
+          {
+            "ok": false,
+            "status": 403
+          },
+          {
+            "ok": false,
+            "status": 403
+          }
+        ],
+        "failedStatuses": [
+          401,
+          401,
+          401,
+          401,
+          401
+        ],
+        "finalStatus": 429
+      }
+    },
+    {
+      "caseId": "pure/dashboard-auth/origins-public/0001",
+      "op": "auth.origins",
+      "source": "test/dashboard-auth.test.ts:41",
+      "input": {
+        "password": "correcta-muy-larga-2026",
+        "trustedOrigin": "https://panel.example.com",
+        "origins": [
+          "https://panel.example.com",
+          "https://localhost",
+          "http://panel.example.com"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "ok": true
+          },
+          {
+            "ok": false,
+            "status": 403
+          },
+          {
+            "ok": false,
+            "status": 403
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/dashboard-auth/session-expiry/0001",
+      "op": "auth.session",
+      "source": "test/dashboard-auth.test.ts:51",
+      "input": {
+        "password": "correcta-muy-larga-2026",
+        "trustedOrigin": "http://127.0.0.1:3000",
+        "now": 0,
+        "sessionDurationMs": 100,
+        "advance": 101
+      },
+      "expect": {
+        "before": true,
+        "after": false
+      }
+    }
+  ]
+}

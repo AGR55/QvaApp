@@ -2,6 +2,12 @@
 
 QvaApply es un monolito modular de una sola instancia. Esta forma reduce coordinación distribuida y es adecuada para un propietario y SQLite, sin mezclar responsabilidades.
 
+> **Estado futuro:** el plan de migración a microservicios Go está en
+> [migration/README.md](migration/README.md), con la arquitectura objetivo, el
+> roadmap y la estrategia de paridad. Mientras la migración no se apruebe y
+> ejecute, este documento y los ADR-0001/0002 siguen siendo la arquitectura
+> vigente.
+
 ## Dependencias
 
 ```text

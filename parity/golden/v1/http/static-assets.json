@@ -1,0 +1,157 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/static-assets.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (1 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=4621ca49dedd49b619f51a1c5e3dae94497be669f8f2c586a25efb1f1467a32e",
+  "cases": [
+    {
+      "caseId": "http/static-assets/01-compressed-head-etag",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/static-assets.test.ts:9",
+      "input": {
+        "scenario": "static-assets/01-compressed-head-etag"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/asset",
+              "headers": {
+                "accept-encoding": "gzip, br"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-encoding": "br",
+              "content-type": "text/javascript",
+              "cache-control": "public, no-cache"
+            },
+            "body": "\u001b�\u0018�\u001d��\u001b�f1��$�\u001b^�>��C\t1%{��Ra',>�\u0017�\t\u0001��\u001a��\u0015��\r\u0001�'�\u0002"
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/asset",
+              "headers": {
+                "accept-encoding": "br;q=0, gzip;q=1"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-encoding": "gzip",
+              "content-type": "text/javascript",
+              "cache-control": "public, no-cache"
+            },
+            "body": "\u001f�\b\u0000\u0000\u0000\u0000\u0000\u0000\u0003���\t� \u0014\u0000���x\u000e\u0011\r\u0013a\u0010��\u00198~s\u0004w��g�}�Q�3��x{�-R�K�Ӻd���{���{������\u0007z��%\u0000\u0019\u0000\u0000"
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/asset",
+              "headers": {
+                "accept-encoding": "br;q=0, gzip;q=0"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-type": "text/javascript",
+              "cache-control": "public, no-cache"
+            },
+            "body": {
+              "sha256": "675a004ceba0ba81258bb78c844286172132f67e42f3e26ac16042deeaf89e34",
+              "bytes": 6400
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/asset",
+              "headers": {
+                "accept-encoding": "br"
+              },
+              "payload": null
+            },
+            "status": 304,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-encoding": "br",
+              "content-type": "text/javascript",
+              "cache-control": "public, no-cache"
+            },
+            "body": ""
+          },
+          {
+            "request": {
+              "method": "HEAD",
+              "url": "/asset",
+              "headers": {
+                "accept-encoding": "br"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-encoding": "br",
+              "content-type": "text/javascript",
+              "cache-control": "public, no-cache"
+            },
+            "body": ""
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/asset",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-type": "text/javascript",
+              "cache-control": "public, no-cache"
+            },
+            "body": {
+              "sha256": "cb55c7c45db845409d0f03dfeb046a9aa48dec608a676b5519945c887aa31a79",
+              "bytes": 6400
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "static.encodings",
+            "value": [
+              "br",
+              "gzip",
+              "identity"
+            ]
+          },
+          {
+            "effect": "static.conditional",
+            "value": {
+              "changed": 200,
+              "headBytes": 0,
+              "unchanged": 304
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

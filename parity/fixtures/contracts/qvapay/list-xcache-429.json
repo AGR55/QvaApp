@@ -1,0 +1,122 @@
+{
+  "cassetteVersion": 1,
+  "name": "list-xcache-429",
+  "description": "K2: listado paginado con envelope data/offers, x-cache HIT/MISS, 429 con y sin Retry-After, JSON malformado y timeout de lectura. La latencia solo avanza el reloj virtual.",
+  "contract": "K2",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": {
+      "uuid": "user-owner-0001",
+      "email": "owner@fake.qvapay",
+      "username": "owner",
+      "balance": "250.00000000",
+      "available": "250.00000000"
+    },
+    "offers": [
+      {
+        "uuid": "offer-open-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "25.00000000",
+        "receive": "25.00000000",
+        "status": "open",
+        "User": { "uuid": "user-owner-0001", "username": "owner" },
+        "Peer": {},
+        "details": [{ "name": "bank", "value": "BPA" }],
+        "tags": ["auto"],
+        "created_at": "2026-01-01T00:00:00.000Z",
+        "updated_at": "2026-01-01T00:00:00.000Z"
+      }
+    ]
+  },
+  "exchanges": [
+    {
+      "id": "list-page-1-hit",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "1", "take": "100" } },
+      "response": {
+        "status": 200,
+        "headers": { "x-cache": "HIT" },
+        "body": {
+          "data": [{ "$offer": "offer-open-1" }],
+          "total": 2,
+          "current_page": 1,
+          "per_page": 100
+        }
+      },
+      "logAssertions": {
+        "method": "GET",
+        "path": "/v2/p2p",
+        "query": { "page": "1" },
+        "headers": { "authorization": "Bearer test-reader-token" }
+      }
+    },
+    {
+      "id": "list-page-2-miss",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "2" } },
+      "delayMs": 2401,
+      "response": {
+        "status": 200,
+        "headers": { "x-cache": "MISS" },
+        "body": {
+          "offers": [{ "$offer": "offer-open-1" }],
+          "total": 2,
+          "current_page": 2,
+          "per_page": 100
+        }
+      }
+    },
+    {
+      "id": "list-page-3-429-retry-after",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "3" } },
+      "response": {
+        "status": 429,
+        "headers": { "retry-after": "2", "x-cache": "MISS" },
+        "body": { "error": "Demasiadas solicitudes al listado P2P", "code": "RATE_LIMITED" }
+      }
+    },
+    {
+      "id": "list-page-4-429-no-retry-after",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "4" } },
+      "response": {
+        "status": 429,
+        "headers": { "x-cache": "MISS" },
+        "body": { "error": "Demasiadas solicitudes al listado P2P", "code": "RATE_LIMITED" }
+      }
+    },
+    {
+      "id": "list-page-5-json-truncado",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "5" } },
+      "response": {
+        "status": 200,
+        "headers": { "x-cache": "MISS" },
+        "bodyRaw": "{\"data\":[{\"uuid\":\"offer-open-1\","
+      }
+    },
+    {
+      "id": "list-page-6-oferta-malformada",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "6" } },
+      "response": {
+        "status": 200,
+        "headers": { "x-cache": "MISS" },
+        "body": {
+          "data": [{ "type": "sell", "coin": "QUSD", "amount": "25.00000000", "receive": "25.00000000", "status": "open" }],
+          "total": 1,
+          "current_page": 6,
+          "per_page": 100
+        }
+      }
+    },
+    {
+      "id": "list-page-7-timeout-hang",
+      "contract": "K2",
+      "match": { "method": "GET", "path": "/v2/p2p", "query": { "page": "7" } },
+      "abort": "hang"
+    }
+  ]
+}

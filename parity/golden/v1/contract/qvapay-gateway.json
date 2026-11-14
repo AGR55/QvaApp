@@ -1,0 +1,1117 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qvapay-gateway.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (27 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=3cfdc09c57f3b92a7dffcb9323dc81fe9f4a5e1f977c6506269ebb0483d5fa1e",
+  "cases": [
+    {
+      "caseId": "contract/qvapay-gateway/08-malformed-payment-details",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:100",
+      "input": {
+        "scenario": "qvapay-gateway/08-malformed-payment-details"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "getOffer",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (oferta solicitada): datos de pago inválidos.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (oferta solicitada): datos de pago duplicados.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (oferta solicitada): datos de pago inválidos.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/09-hung-read-no-block",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:117",
+      "input": {
+        "scenario": "qvapay-gateway/09-hung-read-no-block"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 5,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 4600,
+                "status": "open",
+                "type": "sell",
+                "uuid": "slow"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "calls",
+            "value": [
+              "GET",
+              "POST"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/10-independent-mutation-quota",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:139",
+      "input": {
+        "scenario": "qvapay-gateway/10-independent-mutation-quota"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "mutations",
+            "outcome": {
+              "ok": true,
+              "value": [
+                null,
+                null
+              ]
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "calls",
+            "value": [
+              {
+                "at": 1000,
+                "url": "https://api.qvapay.com/p2p/one/apply"
+              },
+              {
+                "at": 1000,
+                "url": "https://api.qvapay.com/p2p/two/cancel"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/11-critical-balance-priority",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:158",
+      "input": {
+        "scenario": "qvapay-gateway/11-critical-balance-priority"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "qusdBalance",
+            "outcome": {
+              "ok": true,
+              "value": 100
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 5,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 4600,
+                "status": "open",
+                "type": "sell",
+                "uuid": "slow"
+              }
+            }
+          },
+          {
+            "label": "qusdBalance:network",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "fetch failed",
+                  "name": "TypeError"
+                },
+                "message": "No se pudo conectar con QvaPay. Comprueba tu conexión e inténtalo de nuevo.",
+                "name": "Error",
+                "reason": "network"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/12-apply-window-across-restarts",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:179",
+      "input": {
+        "scenario": "qvapay-gateway/12-apply-window-across-restarts"
+      },
+      "expect": {
+        "observations": [],
+        "effects": [
+          {
+            "effect": "waits",
+            "value": [
+              60001
+            ]
+          },
+          {
+            "effect": "calls",
+            "value": [
+              1000,
+              1000,
+              61001
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/02-telemetry-safe",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:20",
+      "input": {
+        "scenario": "qvapay-gateway/02-telemetry-safe"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/13-conditions-changed-no-quota",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:206",
+      "input": {
+        "scenario": "qvapay-gateway/13-conditions-changed-no-quota"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply",
+            "outcome": {
+              "error": {
+                "code": "LOCAL_CONDITIONS_CHANGED",
+                "message": "Las condiciones de la oferta cambiaron antes del envío; no se aplicó.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 409
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "calls",
+            "outcome": {
+              "ok": true,
+              "value": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "state",
+            "value": []
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/14-retry-after-across-restart",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:224",
+      "input": {
+        "scenario": "qvapay-gateway/14-retry-after-across-restart"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply:429",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "Demasiadas solicitudes",
+                "name": "Error",
+                "retryAfterMs": 90000,
+                "status": 429
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "apply:after-retry",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "calls",
+            "outcome": {
+              "ok": true,
+              "value": 2
+            }
+          },
+          {
+            "label": "now",
+            "outcome": {
+              "ok": true,
+              "value": 91000
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/15-preflight-failure-no-quota",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:250",
+      "input": {
+        "scenario": "qvapay-gateway/15-preflight-failure-no-quota"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply",
+            "outcome": {
+              "error": {
+                "code": "LOCAL_PREFLIGHT_FAILED",
+                "message": "No se pudo revalidar la oferta antes del envío; no se envió la aplicación.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 409
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "calls",
+            "outcome": {
+              "ok": true,
+              "value": 0
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/16-idempotency-key",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:271",
+      "input": {
+        "scenario": "qvapay-gateway/16-idempotency-key"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "createOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 1,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 900,
+                "status": "open",
+                "type": "buy",
+                "uuid": "created"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "request.body",
+            "value": {
+              "amount": 1,
+              "coin": "BANK_CUP",
+              "details": [
+                {
+                  "name": "cuenta",
+                  "value": "123"
+                }
+              ],
+              "idempotency_key": "intent-12345678",
+              "receive": 900,
+              "type": "buy"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/03-empty-peer-open-offer",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:29",
+      "input": {
+        "scenario": "qvapay-gateway/03-empty-peer-open-offer"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "User": {
+                  "uuid": "creator"
+                },
+                "amount": 10,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 10200,
+                "status": "open",
+                "type": "buy",
+                "uuid": "open-without-peer"
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/17-decimal-strings",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:295",
+      "input": {
+        "scenario": "qvapay-gateway/17-decimal-strings"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "listOffersPage",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "offers": [
+                  {
+                    "amount": 20.5,
+                    "receive": 20000.25
+                  }
+                ]
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/18-ambiguous-amounts",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:307",
+      "input": {
+        "scenario": "qvapay-gateway/18-ambiguous-amounts"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list:20 QUSD",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (lista P2P, posición 1, amount): debe ser positivo.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "list:0",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (lista P2P, posición 1, amount): debe ser positivo.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "list:1e3",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (lista P2P, posición 1, amount): debe ser positivo.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/19-averages-numeric",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:318",
+      "input": {
+        "scenario": "qvapay-gateway/19-averages-numeric"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "p2pAverages",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "BANK_CUP": {
+                  "average_buy": 1010.5
+                }
+              }
+            }
+          },
+          {
+            "label": "p2pAverages:invalid",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (promedio BANK_CUP.average_buy).",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/20-read-network-classification",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:330",
+      "input": {
+        "scenario": "qvapay-gateway/20-read-network-classification"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "listOffersPage",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "fetch failed",
+                  "name": "TypeError"
+                },
+                "message": "No se pudo conectar con QvaPay. Comprueba tu conexión e inténtalo de nuevo.",
+                "name": "Error",
+                "reason": "network"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/21-list-429",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:346",
+      "input": {
+        "scenario": "qvapay-gateway/21-list-429"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "listOffersPage",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "Demasiadas solicitudes",
+                "name": "Error",
+                "retryAfterMs": 7000,
+                "status": 429
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "calls",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/22-edit-timeout-uncertain",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:362",
+      "input": {
+        "scenario": "qvapay-gateway/22-edit-timeout-uncertain"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "editOffer",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "The operation was aborted due to timeout",
+                  "name": "TimeoutError"
+                },
+                "kind": "edit",
+                "message": "No se recibió confirmación de QvaPay para edit; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/23-malformed-2xx-uncertain",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:376",
+      "input": {
+        "scenario": "qvapay-gateway/23-malformed-2xx-uncertain"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "createOffer",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "QvaPay no devolvió la oferta creada",
+                  "name": "Error"
+                },
+                "kind": "create",
+                "message": "No se recibió confirmación de QvaPay para create; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "editOffer",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "QvaPay no devolvió la oferta editada",
+                  "name": "Error"
+                },
+                "kind": "edit",
+                "message": "No se recibió confirmación de QvaPay para edit; se requiere conciliación.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/24-second-apply-no-wait",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:400",
+      "input": {
+        "scenario": "qvapay-gateway/24-second-apply-no-wait"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply:second",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "apply:third",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "code": "LOCAL_APPLY_QUOTA"
+              }
+            }
+          },
+          {
+            "label": "apply:first",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "sent",
+            "value": [
+              "https://api.qvapay.com/p2p/first/apply",
+              "https://api.qvapay.com/p2p/second/apply"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/25-liquidity-revalidation",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:412",
+      "input": {
+        "scenario": "qvapay-gateway/25-liquidity-revalidation"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "profile",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "uuid": "me"
+              }
+            }
+          },
+          {
+            "label": "editOffer",
+            "outcome": {
+              "error": {
+                "code": "LOCAL_CONDITIONS_CHANGED",
+                "message": "Las condiciones cambiaron antes de la mutación; no se envió.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 409
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "sent",
+            "value": [
+              "https://api.qvapay.com/user"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/04-documented-chat",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:42",
+      "input": {
+        "scenario": "qvapay-gateway/04-documented-chat"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "sendChat",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "id": "automatic-1"
+              }
+            }
+          },
+          {
+            "label": "listChat",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "createdAt": 1788955260000,
+                  "id": "own-2",
+                  "message": "Voy a pagar",
+                  "peerId": "me"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/26-flexible-completed-no-peer",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:424",
+      "input": {
+        "scenario": "qvapay-gateway/26-flexible-completed-no-peer"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Orders": [
+                  {
+                    "Taker": {
+                      "uuid": "me"
+                    },
+                    "amount": 40,
+                    "receive": 40,
+                    "status": "completed",
+                    "uuid": "child"
+                  }
+                ],
+                "Peer": null,
+                "amount": 40,
+                "coin": "CLASICA",
+                "details": null,
+                "offer_kind": "flexible",
+                "receive": 40,
+                "status": "completed",
+                "type": "sell",
+                "uuid": "range"
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/27-accounting-validates-capital",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:434",
+      "input": {
+        "scenario": "qvapay-gateway/27-accounting-validates-capital"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "getOffer",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (oferta solicitada): datos de pago inválidos.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "getOffer:analytics",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": {
+                  "uuid": "me"
+                },
+                "amount": 10,
+                "coin": "CLASICA",
+                "details": null,
+                "receive": 10.9,
+                "status": "paid",
+                "type": "sell",
+                "uuid": "paid"
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/05-legacy-chat",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:54",
+      "input": {
+        "scenario": "qvapay-gateway/05-legacy-chat"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "sendChat",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "createdAt": 1788955200000,
+                "id": "automatic-1"
+              }
+            }
+          },
+          {
+            "label": "listChat",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "createdAt": 1788955260000,
+                  "id": "own-2",
+                  "message": "Voy a pagar",
+                  "peerId": "me"
+                }
+              ]
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/01-apply-quota-release",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:6",
+      "input": {
+        "scenario": "qvapay-gateway/01-apply-quota-release"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "apply:first",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "apply:second",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "apply:third",
+            "outcome": {
+              "error": {
+                "code": "LOCAL_APPLY_QUOTA",
+                "message": "Sin cupo de aplicación durante 60 s; la oferta no se envió ni mantiene ocupada la cola.",
+                "name": "Error",
+                "retryAfterMs": 59981,
+                "status": 409
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "apply:fresh",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "calls",
+            "outcome": {
+              "ok": true,
+              "value": 3
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "apply.timings",
+            "value": [
+              {
+                "budgetWaitMs": 0,
+                "dispatchedAt": 1000,
+                "finishedAt": 1010,
+                "outcome": "confirmed",
+                "queuedAt": 1000,
+                "uuid": "first"
+              },
+              {
+                "budgetWaitMs": 0,
+                "dispatchedAt": 1010,
+                "finishedAt": 1020,
+                "outcome": "confirmed",
+                "queuedAt": 1010,
+                "uuid": "second"
+              },
+              {
+                "budgetWaitMs": 0,
+                "dispatchedAt": null,
+                "finishedAt": 1020,
+                "outcome": "LOCAL_APPLY_QUOTA",
+                "queuedAt": 1020,
+                "uuid": "third"
+              },
+              {
+                "budgetWaitMs": 0,
+                "dispatchedAt": 61021,
+                "finishedAt": 61031,
+                "outcome": "confirmed",
+                "queuedAt": 61021,
+                "uuid": "fresh-observation"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/06-invalid-peer-with-counterpart",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:67",
+      "input": {
+        "scenario": "qvapay-gateway/06-invalid-peer-with-counterpart"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "getOffer",
+            "outcome": {
+              "error": {
+                "message": "Respuesta inválida de QvaPay (oferta solicitada, Peer): identidad inválida.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-gateway/07-payment-details-array",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-gateway.test.ts:81",
+      "input": {
+        "scenario": "qvapay-gateway/07-payment-details-array"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 10,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 9400,
+                "status": "open",
+                "type": "buy",
+                "uuid": "offer-details-1"
+              }
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 10,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 9400,
+                "status": "open",
+                "type": "buy",
+                "uuid": "offer-details-1"
+              }
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 10,
+                "coin": "BANK_CUP",
+                "details": {
+                  "Banco": "BPA",
+                  "Cuenta": "001234"
+                },
+                "receive": 9400,
+                "status": "open",
+                "type": "buy",
+                "uuid": "offer-details-1"
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    }
+  ]
+}

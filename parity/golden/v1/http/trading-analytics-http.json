@@ -1,0 +1,153 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/trading-analytics-http.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (1 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=74f1db521072c272d414f5bde79094798dc22f10aa10c71b86a652d7d4e9fa40",
+  "cases": [
+    {
+      "caseId": "http/trading-analytics/01-auth-bounds",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/trading-analytics-http.test.ts:5",
+      "input": {
+        "scenario": "trading-analytics/01-auth-bounds"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/trading-analytics",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000"
+              },
+              "payload": {
+                "password": "analytics-http-password-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/trading-analytics?days=365",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "querystring/days must be equal to one of the allowed values"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/trading-analytics?days=7&account=other",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "days": 7,
+                "volume": 12
+              },
+              "source": "sqlite"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/trading-analytics?days=7",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "days": 7,
+                "volume": 12
+              },
+              "source": "sqlite"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "tradingAnalytics.days",
+            "value": [
+              7,
+              7
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

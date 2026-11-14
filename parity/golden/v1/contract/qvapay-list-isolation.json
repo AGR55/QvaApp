@@ -1,0 +1,108 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qvapay-list-isolation.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (2 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=264fa3bf86460c184185ac50867cfe464b3ff1638478a509764d88acd57dc6f8",
+  "cases": [
+    {
+      "caseId": "contract/qvapay-list-isolation/02-interval-starts-after-budget",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-isolation.test.ts:30",
+      "input": {
+        "scenario": "qvapay-list-isolation/02-interval-starts-after-budget"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "total": 0
+              }
+            }
+          },
+          {
+            "label": "profile",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "uuid": "owner"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "sleeps",
+            "value": [
+              1667
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-isolation/01-budget-does-not-block-reads",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-isolation.test.ts:6",
+      "input": {
+        "scenario": "qvapay-list-isolation/01-budget-does-not-block-reads"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "profile",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "uuid": "owner"
+              }
+            }
+          },
+          {
+            "label": "edit:conditions",
+            "outcome": {
+              "error": {
+                "code": "LOCAL_CONDITIONS_CHANGED",
+                "message": "Las condiciones cambiaron antes de la mutación; no se envió.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 409
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "list",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "total": 0
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "paths",
+            "value": [
+              "/user",
+              "/p2p"
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
