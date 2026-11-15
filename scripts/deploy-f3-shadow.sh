@@ -121,6 +121,15 @@ if [[ ! -s $push_env ]]; then
   mv -f "$temporary_push" "$push_env"
 fi
 chmod 600 "$push_env"
+notifier_secret_file="$app_root/notifier.secret"
+if [[ ! -s $notifier_secret_file ]]; then
+  temporary_secret=$(mktemp "$app_root/notifier.secret.XXXXXX")
+  openssl rand -hex 32 > "$temporary_secret"
+  chmod 600 "$temporary_secret"
+  mv -f "$temporary_secret" "$notifier_secret_file"
+fi
+chmod 600 "$notifier_secret_file"
+notifier_secret=$(cat "$notifier_secret_file")
 export F3_NOTIFIER_ENV="$push_env"
 
 # Valida la interpolación antes de construir.
@@ -363,6 +372,8 @@ PY
       printf 'QVAPAY_API_BASE_URL=%s\n' "${QVAPAY_API_BASE_URL:-https://api.qvapay.com}"
       printf 'CORE_AUTOTRADE=true\n'
       printf 'CORE_AUTOTRADE_DRY_RUN=%s\n' "$existing_core_dry"
+      printf 'NOTIFIER_URL=http://notifier:8092\n'
+      printf 'NOTIFIER_INTERNAL_TOKEN=%s\n' "$notifier_secret"
     } > "$temporary_core"
     chmod 600 "$temporary_core"
     mv -f "$temporary_core" "$core_env"
@@ -395,6 +406,7 @@ if [[ -r $prod_env ]]; then
   printf 'EDGE_URL=http://edge:8093\n' >> "$temporary_notifier"
   printf 'EDGE_ORIGIN=%s\n' "$notifier_origin" >> "$temporary_notifier"
   printf 'EDGE_ADMIN_PASSWORD=%s\n' "$edge_password" >> "$temporary_notifier"
+  printf 'NOTIFIER_INTERNAL_TOKEN=%s\n' "$notifier_secret" >> "$temporary_notifier"
   chmod 600 "$temporary_notifier"
   mv -f "$temporary_notifier" "$notifier_env"
   export F3_NOTIFIER_ENV="$notifier_env"

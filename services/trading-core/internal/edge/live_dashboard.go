@@ -20,6 +20,7 @@ type LiveReader interface {
 	Offers(ctx context.Context, params url.Values) ([]qvapay.Offer, error)
 	Offer(ctx context.Context, uuid string) (qvapay.Offer, error)
 	Transactions(ctx context.Context, page, take int) (qvapay.TransactionPage, error)
+	Averages(ctx context.Context) (map[string]qvapay.Average, error)
 }
 
 // LiveDashboard cachea lecturas QvaPay para que el panel no golpee la API en
@@ -41,6 +42,7 @@ type liveDashboardSnapshot struct {
 	OwnOffers    []map[string]any
 	Transactions []map[string]any
 	Market       map[string]map[string]any
+	Averages     map[string]any
 	Operations   []map[string]any
 	History      []map[string]any
 	UpdatedAt    int64
@@ -74,6 +76,7 @@ func (live *LiveDashboard) Snapshot(ctx context.Context) liveDashboardSnapshot {
 func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboardSnapshot {
 	snapshot := liveDashboardSnapshot{
 		Market:    map[string]map[string]any{},
+		Averages:  map[string]any{},
 		UpdatedAt: now.UnixMilli(),
 		Live:      true,
 	}
@@ -123,6 +126,18 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 	snapshot.Operations = make([]map[string]any, 0, len(operations))
 	for _, operation := range operations {
 		snapshot.Operations = append(snapshot.Operations, operation)
+	}
+	if averages, err := live.Reader.Averages(ctx); err == nil {
+		for coin, average := range averages {
+			snapshot.Averages[coin] = map[string]any{
+				"medianBuy":   decimalFloat(average.MedianBuy),
+				"medianSell":  decimalFloat(average.MedianSell),
+				"averageBuy":  decimalFloat(average.AverageBuy),
+				"averageSell": decimalFloat(average.AverageSell),
+				"count":       average.Count,
+				"updatedAt":   average.UpdatedAt,
+			}
+		}
 	}
 	if live.Pool != nil {
 		rows, err := live.Pool.Query(ctx, `

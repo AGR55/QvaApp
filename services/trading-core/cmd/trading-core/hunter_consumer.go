@@ -47,6 +47,7 @@ type hunterConsumer struct {
 	applied        atomic.Uint64
 	trader         *autoTrader
 	reconciler     *operationReconciler
+	notifier       *operationNotifier
 }
 
 type hunterPayload struct {
@@ -84,12 +85,14 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		localOps:      postgres.NewLocalOperationRepository(pool),
 	}
 	consumer.trader = buildAutoTrader(logger)
+	consumer.notifier = newOperationNotifier()
 	if token, ok := decryptQvaToken(logger); ok {
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
 			consumer.reconciler = &operationReconciler{
 				pool: pool, reader: reader, repo: consumer.operationRepo,
 				localOps: consumer.localOps,
 				fiat:     &runtimeconfig.Repository{Pool: pool},
+				notifier: consumer.notifier,
 				logger:   logger,
 			}
 			logger.Info("conciliador QvaPay habilitado")
@@ -359,6 +362,65 @@ func (consumer *hunterConsumer) recordLocalOperation(
 	})
 	if err != nil && consumer.logger != nil {
 		consumer.logger.Warn("no se pudo publicar la operación en el panel", "operation_id", operationID, "error", err)
+	}
+	if state == "applied" {
+		consumer.notifyApplied(ctx, payload, amount, receive, operation)
+	}
+}
+
+func (consumer *hunterConsumer) notifyApplied(
+	ctx context.Context,
+	payload hunterPayload,
+	amount, receive decimal.Value,
+	operation core.Operation,
+) {
+	if consumer.notifier == nil {
+		return
+	}
+	fee := decimal.Zero()
+	if config, err := consumer.configSnapshot(); err == nil {
+		fee = config.Markets[payload.Coin].OutgoingFee
+	}
+	total := receive.Add(fee)
+	currency := marketCurrency(payload.Coin)
+	linkUUID := payload.OfferUUID
+	if operation.OrderUUID != "" {
+		linkUUID = operation.OrderUUID
+	}
+	var builder strings.Builder
+	if payload.Side == "sell" {
+		builder.WriteString("🪙 Venta de QUSD aplicada\n\n")
+		fmt.Fprintf(&builder, "🌐 Mercado: %s\n", payload.Coin)
+		fmt.Fprintf(&builder, "💰 Importe: %s QUSD\n", amount.Format(2))
+		fmt.Fprintf(&builder, "💵 Recibirás: %s %s\n", receive.Format(2), currency)
+		fmt.Fprintf(&builder, "📈 Tasa: %s\n", payload.Rate)
+		fmt.Fprintf(&builder, "🆔 ID: %s\n", payload.OfferUUID)
+		fmt.Fprintf(&builder, "🔗 https://qvapay.com/p2p/%s\n\n", linkUUID)
+		builder.WriteString("📌 Siguiente paso: confirma la recepción del fiat y pulsa «Confirmar recepción».")
+	} else {
+		builder.WriteString("🛒 Compra de QUSD aplicada\n\n")
+		fmt.Fprintf(&builder, "🌐 Mercado: %s\n", payload.Coin)
+		fmt.Fprintf(&builder, "💰 Importe: %s QUSD\n", amount.Format(2))
+		fmt.Fprintf(&builder, "💸 Debes enviar: %s %s\n", total.Format(2), currency)
+		fmt.Fprintf(&builder, "📈 Tasa: %s\n", payload.Rate)
+		if fee.Sign() > 0 {
+			fmt.Fprintf(&builder, "🧾 Comisión: %s %s\n", fee.Format(2), currency)
+		}
+		fmt.Fprintf(&builder, "🆔 ID: %s\n", payload.OfferUUID)
+		fmt.Fprintf(&builder, "🔗 https://qvapay.com/p2p/%s\n\n", linkUUID)
+		builder.WriteString("📌 Siguiente paso: envía el pago fiat y pulsa «Registrar pago».")
+	}
+	if err := consumer.notifier.Send(ctx, builder.String(), "apply:"+payload.OfferUUID); err != nil && consumer.logger != nil {
+		consumer.logger.Warn("no se pudo notificar la aplicación", "offer_uuid", payload.OfferUUID, "error", err)
+	}
+}
+
+func marketCurrency(coin string) string {
+	switch strings.ToUpper(coin) {
+	case "BANK_CUP", "ETECSA":
+		return "CUP"
+	default:
+		return "USD"
 	}
 }
 

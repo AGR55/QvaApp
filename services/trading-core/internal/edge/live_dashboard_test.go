@@ -38,6 +38,12 @@ func (fake *fakeLiveReader) Offer(_ context.Context, uuid string) (qvapay.Offer,
 	return qvapay.Offer{}, nil
 }
 
+func (fake *fakeLiveReader) Averages(context.Context) (map[string]qvapay.Average, error) {
+	return map[string]qvapay.Average{
+		"CLASICA": {MedianBuy: decimal.MustParse("1.07"), MedianSell: decimal.MustParse("1.10"), Count: 10},
+	}, nil
+}
+
 func (fake *fakeLiveReader) Transactions(context.Context, int, int) (qvapay.TransactionPage, error) {
 	return qvapay.TransactionPage{Transactions: fake.txs}, nil
 }
@@ -68,6 +74,9 @@ func TestLiveDashboardSnapshotAndCache(t *testing.T) {
 		t.Fatalf("own=%d tx=%d", len(snapshot.OwnOffers), len(snapshot.Transactions))
 	}
 	if len(snapshot.Market["CLASICA"]["offers"].([]any)) != 1 || len(snapshot.Market["BANK_CUP"]["offers"].([]any)) != 1 {
+		t.Fatalf("market = %+v", snapshot.Market)
+	}
+	if snapshot.Averages["CLASICA"].(map[string]any)["medianSell"].(float64) != 1.10 {
 		t.Fatalf("market = %+v", snapshot.Market)
 	}
 	if snapshot.Transactions[0]["createdAt"].(int64) == 0 {
