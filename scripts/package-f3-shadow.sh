@@ -67,6 +67,7 @@ required_paths=(
   scripts/f3-export-operations-sql.py
   scripts/f3-export-dashboard-history-sql.py
   scripts/f3-sync-fiat-balances.py
+  scripts/f3-real-apply-cancel.sh
   scripts/f3-shadow-invariants.sh
   scripts/f3-shadow-soak.sh
   scripts/f3-shadow-soak-report.sh
@@ -187,6 +188,7 @@ for required_member in \
   scripts/f3-export-operations-sql.py \
   scripts/f3-export-dashboard-history-sql.py \
   scripts/f3-sync-fiat-balances.py \
+  scripts/f3-real-apply-cancel.sh \
   scripts/f3-shadow-invariants.sh \
   scripts/f3-shadow-soak.sh \
   scripts/f3-shadow-soak-report.sh \

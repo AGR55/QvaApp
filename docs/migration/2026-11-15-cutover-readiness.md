@@ -120,6 +120,33 @@ fondos cero. Para probarla con dinero real hace falta:
 2. declarar el saldo MLC real de la cuenta;
 3. autorizar un importe y una ventana de congelamiento de TS.
 
+## Primer apply real + cancelación (2026-11-15)
+
+Oferta privada `cbb26757-...`, fija, 10 QUSD a 1.06 USD/QUSD (rango de pago 60
+minutos, aunque se canceló en segundos). Procedimiento ejecutado con
+`scripts/f3-real-apply-cancel.sh`:
+
+```text
+backup               1.7 GB, 19:14 UTC
+TS                   congelado
+CORE_AUTOTRADE_DRY_RUN=false
+EDGE_MUTATIONS_LIVE=true
+core_operations      confirmed · 10.00000000 QUSD · 10.60000000 USD
+QvaPay antes         status=processing · applied=true
+cancel               HTTP 204
+QvaPay después       status=open · applied=false
+core_operations      reconciled
+restaurado           DRY_RUN=true · MUTATIONS_LIVE=false · TS running
+producción           API 200 · dominio 200
+```
+
+No se movió dinero: la orden se aplicó y se canceló antes de pagar. La oferta
+vuelve a estar `open` y reutilizable.
+
+Esto valida el camino real de `apply` para ofertas fijas (sin cuerpo, sin
+`order`) y la cancelación por UUID de oferta. Las flexibles ya validaron su
+respuesta con `order`, pero todavía no se aplicó una flexible real.
+
 ## Segunda oferta de prueba (CLASICA)
 
 Oferta `a617538e-...`, del mismo contraparte:
