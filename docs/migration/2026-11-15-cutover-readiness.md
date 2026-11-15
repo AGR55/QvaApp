@@ -66,7 +66,23 @@ Además:
 - **Pago asistido real**: 200 con contraparte, destino y fingerprint.
 - **Conciliación real**: 200 con estado/importes/aplicado de QvaPay.
 
-## Bloqueo principal restante: motor autónomo
+## Motor autónomo en dry-run
+
+El core ya ejecuta el ciclo completo en simulación:
+
+```text
+hunter_event -> core.Decide -> reserved -> submitted -> dry_run
+```
+
+- `CORE_AUTOTRADE=true`
+- `CORE_AUTOTRADE_DRY_RUN=true`
+- Estado terminal `dry_run`, distinto de `confirmed`.
+- `trading_core_autotrade_applied_total` solo cuenta aplicaciones reales; en
+  dry-run permanece en 0.
+- Evento sintético procesado: decisión `apply`, operación `dry_run`, sin llamada
+  a QvaPay.
+
+## Bloqueo principal restante: aplicación real controlada
 
 El borde ya sirve web, configuración, lecturas y mutaciones bajo bandera, pero
 **el bucle autónomo de caza y aplicación sigue siendo TS**. El hunter Go publica
