@@ -371,6 +371,36 @@ PY
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
   fi
 fi
+# El notifier necesita Telegram y credenciales de panel para el bot. Se
+# combinan con el env_file de VAPID y se mantienen en un archivo 600.
+notifier_env="$app_root/notifier.env"
+if [[ -r $prod_env ]]; then
+  telegram_token=$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$prod_env" | tail -1 | tr -d '\r')
+  telegram_chat=$(sed -n 's/^TELEGRAM_ADMIN_CHAT_ID=//p' "$prod_env" | tail -1 | tr -d '\r')
+  edge_password=$(sed -n 's/^DASHBOARD_ADMIN_PASSWORD=//p' "$prod_env" | tail -1 | tr -d '\r')
+  notifier_origin=$(sed -n 's/^DASHBOARD_TRUSTED_ORIGIN=//p' "$prod_env" | tail -1 | tr -d '\r')
+  notifier_origin=${notifier_origin#\"}
+  notifier_origin=${notifier_origin%\"}
+  notifier_origin=${notifier_origin:-https://qvapply.honux.tech}
+  temporary_notifier=$(mktemp "$app_root/notifier.env.XXXXXX")
+  cat "$push_env" > "$temporary_notifier"
+  if [[ -n $telegram_token ]]; then printf 'TELEGRAM_BOT_TOKEN=%s\n' "$telegram_token" >> "$temporary_notifier"; fi
+  if [[ -n $telegram_chat ]]; then
+    printf 'TELEGRAM_CHAT_ID=%s\n' "$telegram_chat" >> "$temporary_notifier"
+    printf 'TELEGRAM_ADMIN_CHAT_ID=%s\n' "$telegram_chat" >> "$temporary_notifier"
+  fi
+  printf 'TELEGRAM_POLLING_ENABLED=true\n' >> "$temporary_notifier"
+  printf 'TELEGRAM_WEBHOOK_ENABLED=false\n' >> "$temporary_notifier"
+  printf 'NOTIFIER_DRY_RUN=false\n' >> "$temporary_notifier"
+  printf 'EDGE_URL=http://edge:8093\n' >> "$temporary_notifier"
+  printf 'EDGE_ORIGIN=%s\n' "$notifier_origin" >> "$temporary_notifier"
+  printf 'EDGE_ADMIN_PASSWORD=%s\n' "$edge_password" >> "$temporary_notifier"
+  chmod 600 "$temporary_notifier"
+  mv -f "$temporary_notifier" "$notifier_env"
+  export F3_NOTIFIER_ENV="$notifier_env"
+  unset telegram_token telegram_chat edge_password notifier_origin
+fi
+
 export F3_HUNTER_ENV="$hunter_env"
 export F3_HUNTER_DATA_DIR="$hunter_data_dir"
 export F3_HUNTER_CONFIG_FILE="$hunter_data_dir/hunter-config.json"

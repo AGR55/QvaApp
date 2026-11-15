@@ -142,6 +142,32 @@ func (repository *Repository) Save(
 	return version, nil
 }
 
+// SettingBool lee un ajuste booleano de shadow.runtime_settings. found=false
+// cuando la clave no existe.
+func (repository *Repository) SettingBool(
+	ctx context.Context,
+	key string,
+) (bool, bool, error) {
+	if repository == nil || repository.Pool == nil {
+		return false, false, errors.New("runtimeconfig: repositorio sin pool")
+	}
+	var raw []byte
+	err := repository.Pool.QueryRow(ctx, `
+		SELECT value FROM shadow.runtime_settings WHERE key = $1`, key,
+	).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	var value bool
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false, false, err
+	}
+	return value, true, nil
+}
+
 // Revisions devuelve las últimas revisiones, de la más nueva a la más antigua.
 // El límite se recorta a 1..100 y usa 20 cuando no se indica.
 func (repository *Repository) Revisions(

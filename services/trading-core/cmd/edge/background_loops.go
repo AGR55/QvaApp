@@ -35,6 +35,9 @@ func runOfferRefresh(
 		if err != nil {
 			continue
 		}
+		if enabled, found, err := configs.SettingBool(ctx, "control.refresh"); err == nil && found && !enabled {
+			continue
+		}
 		interval := time.Duration(config.Automation.OfferRefreshIntervalMinutes * float64(time.Minute))
 		spacing := time.Duration(config.Automation.OfferRefreshSpacingSeconds * float64(time.Second))
 		offers, err := reader.Offers(ctx, url.Values{

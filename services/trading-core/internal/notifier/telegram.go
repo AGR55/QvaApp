@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -111,4 +112,50 @@ func (deduper *Deduper) Seen(key string) bool {
 	}
 	deduper.seen[key] = now
 	return false
+}
+
+// GetUpdates hace long polling de Telegram. Devuelve los updates crudos para
+// que el llamador los valide con ParseUpdate.
+func (client *Client) GetUpdates(
+	ctx context.Context,
+	offset int64,
+	timeout time.Duration,
+) ([]json.RawMessage, error) {
+	if client.Token == "" {
+		return nil, fmt.Errorf("token de Telegram no configurado")
+	}
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	query := url.Values{}
+	query.Set("offset", fmt.Sprintf("%d", offset))
+	query.Set("timeout", fmt.Sprintf("%d", int(timeout.Seconds())))
+	query.Set("allowed_updates", `["message","callback_query"]`)
+	endpoint := client.BaseURL + "/bot" + client.Token + "/getUpdates?" + query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	httpClient := &http.Client{Timeout: timeout + 10*time.Second}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("conectar Telegram: %w", err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
+	if err != nil {
+		return nil, fmt.Errorf("leer updates: %w", err)
+	}
+	var envelope struct {
+		OK          bool              `json:"ok"`
+		Result      []json.RawMessage `json:"result"`
+		Description string            `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, fmt.Errorf("respuesta de updates inválida")
+	}
+	if !envelope.OK {
+		return nil, &APIError{Status: response.StatusCode, Description: envelope.Description}
+	}
+	return envelope.Result, nil
 }

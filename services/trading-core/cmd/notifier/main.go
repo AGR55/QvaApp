@@ -44,6 +44,10 @@ type config struct {
 	WebPushPrivate  string
 	WebPushSubject  string
 	PushSendEnabled bool
+	PollingEnabled  bool
+	EdgeURL         string
+	EdgePassword    string
+	EdgeOrigin      string
 	DryRun          bool
 }
 
@@ -60,7 +64,17 @@ func loadConfig() (config, error) {
 		WebPushPublic:  strings.TrimSpace(os.Getenv("WEB_PUSH_PUBLIC_KEY")),
 		WebPushPrivate: strings.TrimSpace(os.Getenv("WEB_PUSH_PRIVATE_KEY")),
 		WebPushSubject: strings.TrimSpace(os.Getenv("WEB_PUSH_SUBJECT")),
+		EdgeURL:        envOrDefault("EDGE_URL", "http://edge:8093"),
+		EdgePassword:   strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
+		EdgeOrigin:     envOrDefault("EDGE_ORIGIN", "https://qvapply.honux.tech"),
 		DryRun:         true,
+	}
+	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_POLLING_ENABLED")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return config{}, fmt.Errorf("TELEGRAM_POLLING_ENABLED inválido")
+		}
+		cfg.PollingEnabled = value
 	}
 	if raw := strings.TrimSpace(os.Getenv("TELEGRAM_ADMIN_CHAT_ID")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)
@@ -156,6 +170,16 @@ func run(logger *slog.Logger) error {
 				Enabled:        cfg.WebhookEnabled,
 			},
 		},
+	}
+	if cfg.PollingEnabled && !cfg.DryRun && cfg.Token != "" && cfg.AdminChatID != 0 && cfg.EdgePassword != "" {
+		runtime := &telegramRuntime{
+			client: client, edge: newEdgeClient(cfg.EdgeURL, cfg.EdgeOrigin, cfg.EdgePassword),
+			adminChatID: cfg.AdminChatID, logger: logger,
+		}
+		go runtime.Run(ctx)
+		logger.Info("telegram long polling habilitado", "edge", cfg.EdgeURL)
+	} else if cfg.PollingEnabled {
+		logger.Warn("telegram polling no iniciado: faltan token, chat, contraseña del edge o dry-run activo")
 	}
 	server := &http.Server{
 		Addr: ":" + cfg.Port, Handler: service,
