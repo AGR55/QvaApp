@@ -170,6 +170,8 @@ func run(logger *slog.Logger) error {
 			r.URL.Path == "/api/fiat-history" ||
 			r.URL.Path == "/api/market-analytics" ||
 			r.URL.Path == "/api/analytics/fees" ||
+			r.URL.Path == "/api/operations/chats/unread" ||
+			r.URL.Path == "/api/mobile/payment-receipts" ||
 			strings.HasPrefix(r.URL.Path, "/api/offers/rebalance/")) {
 			dashboardRead.ServeHTTP(w, r)
 			return

@@ -1066,3 +1066,58 @@ func TestDashboardReadAPIHeadersAndNoCORS(t *testing.T) {
 	}
 	dashboardReadAssertHeaders(t, recorder)
 }
+
+func TestDashboardReadAPIChatUnreadAndReceipts(t *testing.T) {
+	now := time.UnixMilli(1_700_000_000_000)
+	api, cookie := newDashboardReadTestAPI(t, now)
+	dashboardReadWriteJSON(t, api.File, map[string]any{
+		"receipts": []any{
+			map[string]any{"id": "r-1", "status": "paid", "receivedAt": int64(10), "operationUuid": "op-1", "reason": nil},
+			map[string]any{"id": "r-2", "status": "pending", "receivedAt": int64(11), "operationUuid": nil, "reason": "sin referencia"},
+		},
+		"chatUnread": map[string]int64{"thread-1": 3, "op-1": 0},
+	})
+
+	t.Run("chat unread", func(t *testing.T) {
+		recorder := dashboardReadDo(api, http.MethodGet, dashboardReadChatUnreadPath, cookie)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+		}
+		dashboardReadAssertHeaders(t, recorder)
+		var unread map[string]int64
+		if err := json.Unmarshal(dashboardReadDecodeDataOnly(t, recorder), &unread); err != nil {
+			t.Fatalf("unread: %v", err)
+		}
+		if unread["thread-1"] != 3 || unread["op-1"] != 0 || len(unread) != 2 {
+			t.Fatalf("unread = %v", unread)
+		}
+	})
+
+	t.Run("payment receipts", func(t *testing.T) {
+		recorder := dashboardReadDo(api, http.MethodGet, dashboardReadPaymentReceiptsPath, cookie)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+		}
+		dashboardReadAssertHeaders(t, recorder)
+		var receipts []map[string]any
+		if err := json.Unmarshal(dashboardReadDecodeDataOnly(t, recorder), &receipts); err != nil {
+			t.Fatalf("receipts: %v", err)
+		}
+		if len(receipts) != 2 || receipts[0]["id"] != "r-1" || receipts[1]["status"] != "pending" {
+			t.Fatalf("receipts = %v", receipts)
+		}
+	})
+
+	t.Run("empty snapshot", func(t *testing.T) {
+		emptyAPI, emptyCookie := newDashboardReadTestAPI(t, now)
+		dashboardReadWriteJSON(t, emptyAPI.File, map[string]any{})
+		unread := dashboardReadDo(emptyAPI, http.MethodGet, dashboardReadChatUnreadPath, emptyCookie)
+		if got := string(dashboardReadDecodeDataOnly(t, unread)); got != "{}" {
+			t.Fatalf("unread vacío = %q", got)
+		}
+		receipts := dashboardReadDo(emptyAPI, http.MethodGet, dashboardReadPaymentReceiptsPath, emptyCookie)
+		if got := string(dashboardReadDecodeDataOnly(t, receipts)); got != "[]" {
+			t.Fatalf("receipts vacíos = %q", got)
+		}
+	})
+}

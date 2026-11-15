@@ -23,6 +23,8 @@ const (
 	dashboardReadRebalancePrefix     = "/api/offers/rebalance/"
 	dashboardReadMarketAnalyticsPath = "/api/market-analytics"
 	dashboardReadAnalyticsFeesPath   = "/api/analytics/fees"
+	dashboardReadChatUnreadPath      = "/api/operations/chats/unread"
+	dashboardReadPaymentReceiptsPath = "/api/mobile/payment-receipts"
 
 	// maxDashboardReadSnapshotBytes acota el snapshot leído del disco. Un
 	// archivo mayor se rechaza sin cargarlo entero en memoria.
@@ -61,6 +63,8 @@ type dashboardReadSnapshot struct {
 	RebalanceJobs      []dashboardReadRebalanceJob `json:"rebalanceJobs"`
 	MarketObservations []dashboardReadMarketPoint  `json:"marketObservations"`
 	AnalyticsFees      []dashboardReadAnalyticsFee `json:"analyticsFees"`
+	Receipts           []mobileAuthReceipt         `json:"receipts"`
+	ChatUnread         map[string]int64            `json:"chatUnread"`
 }
 
 // dashboardReadDevice es un dispositivo móvil registrado.
@@ -185,7 +189,9 @@ func (api *DashboardReadAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path == dashboardReadDevicesPath ||
 		r.URL.Path == dashboardReadFiatHistoryPath ||
 		r.URL.Path == dashboardReadMarketAnalyticsPath ||
-		r.URL.Path == dashboardReadAnalyticsFeesPath
+		r.URL.Path == dashboardReadAnalyticsFeesPath ||
+		r.URL.Path == dashboardReadChatUnreadPath ||
+		r.URL.Path == dashboardReadPaymentReceiptsPath
 	if !known {
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 		return
@@ -222,6 +228,18 @@ func (api *DashboardReadAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, dashboardResponse{
 			Data: dashboardReadPageItems(snapshot.AnalyticsFees, page),
 		})
+	case r.URL.Path == dashboardReadChatUnreadPath:
+		unread := snapshot.ChatUnread
+		if unread == nil {
+			unread = map[string]int64{}
+		}
+		writeJSON(w, http.StatusOK, dashboardResponse{Data: unread})
+	case r.URL.Path == dashboardReadPaymentReceiptsPath:
+		receipts := snapshot.Receipts
+		if receipts == nil {
+			receipts = []mobileAuthReceipt{}
+		}
+		writeJSON(w, http.StatusOK, dashboardResponse{Data: receipts})
 	}
 }
 

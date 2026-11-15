@@ -225,6 +225,49 @@ def export_analytics_fees(connection: sqlite3.Connection) -> list[dict[str, Any]
     return items
 
 
+def export_chat_unread(connection: sqlite3.Connection) -> dict[str, int]:
+    """Contadores locales de no leídos por hilo, con el alias del UUID padre."""
+    threads: list[tuple[str, str, str | None]] = []
+    for row in rows(
+        connection,
+        "SELECT payload_json FROM chat_threads ORDER BY updated_at DESC LIMIT 500",
+    ):
+        try:
+            thread = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(thread, dict):
+            continue
+        uuid = text(thread.get("uuid")) or ""
+        if not uuid:
+            continue
+        order = text(thread.get("orderUuid"))
+        threads.append((uuid, f"{uuid}:{order or 'fixed'}", order))
+
+    operations: dict[str, str | None] = {}
+    for row in rows(connection, "SELECT uuid, order_uuid FROM operations LIMIT 5000"):
+        operations[text(row["uuid"]) or ""] = text(row["order_uuid"])
+
+    stored: dict[str, int] = {}
+    for row in rows(
+        connection,
+        "SELECT key, value FROM settings WHERE key LIKE 'operation-chat-unread:%' LIMIT 5000",
+    ):
+        key = text(row["key"]) or ""
+        try:
+            stored[key.removeprefix("operation-chat-unread:")] = int(row["value"] or 0)
+        except (TypeError, ValueError):
+            continue
+
+    counts: dict[str, int] = {}
+    for uuid, thread_id, order in threads:
+        unread = max(0, stored.get(thread_id, 0))
+        counts[thread_id] = unread
+        if operations.get(uuid) == order:
+            counts[uuid] = unread
+    return counts
+
+
 def export_operational_health(connection: sqlite3.Connection) -> Any:
     """Estado de salud que el monitor TS guarda ya serializado en settings."""
     for row in rows(connection, "SELECT value FROM settings WHERE key = 'operational_health'"):
@@ -364,6 +407,7 @@ def main() -> int:
             "auditLog": export_audit_log(connection),
             "analytics": export_analytics(connection),
             "operationalHealth": export_operational_health(connection),
+            "chatUnread": export_chat_unread(connection),
         }
     finally:
         connection.close()
