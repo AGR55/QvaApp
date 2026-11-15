@@ -257,6 +257,8 @@ PY
       trusted_origin=$(sed -n 's/^[[:space:]]*DASHBOARD_TRUSTED_ORIGIN=//p' "$prod_env" | tail -n 1 | tr -d '\r')
       trusted_origin=${trusted_origin#\"}
       trusted_origin=${trusted_origin%\"}
+      existing_edge_live=$(sed -n 's/^EDGE_MUTATIONS_LIVE=//p' "$app_root/edge.env" 2>/dev/null | tail -1 | tr -d '\r')
+      existing_edge_live=${existing_edge_live:-false}
       temporary_edge_env=$(mktemp "$app_root/edge.env.XXXXXX")
       {
         printf 'EDGE_ADMIN_PASSWORD=%s\n' "$edge_password"
@@ -352,6 +354,8 @@ PY
       chmod 644 "$app_root/cooperative.json"
     fi
     core_env="$app_root/core.env"
+    existing_core_dry=$(sed -n 's/^CORE_AUTOTRADE_DRY_RUN=//p' "$core_env" 2>/dev/null | tail -1 | tr -d '\r')
+    existing_core_dry=${existing_core_dry:-true}
     temporary_core=$(mktemp "$app_root/core.env.XXXXXX")
     {
       printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
