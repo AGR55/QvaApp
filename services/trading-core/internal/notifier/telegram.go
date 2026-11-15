@@ -159,3 +159,31 @@ func (client *Client) GetUpdates(
 	}
 	return envelope.Result, nil
 }
+
+// AnswerCallbackQuery detiene el indicador de carga del botón inline.
+func (client *Client) AnswerCallbackQuery(ctx context.Context, callbackID string) error {
+	if client.Token == "" || strings.TrimSpace(callbackID) == "" {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]any{"callback_query_id": callbackID})
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		client.BaseURL+"/bot"+client.Token+"/answerCallbackQuery", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	httpClient := client.HTTP
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 10 * time.Second}
+	}
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
+		return &APIError{Status: response.StatusCode, Description: strings.TrimSpace(string(body))}
+	}
+	return nil
+}

@@ -63,6 +63,9 @@ func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Upda
 		_ = runtime.client.SendMessage(ctx, chat, text)
 		return text, true
 	}
+	if update.CallbackID != "" {
+		_ = runtime.client.AnswerCallbackQuery(ctx, update.CallbackID)
+	}
 	text := update.Text
 	if data := update.CallbackData; data != "" {
 		if strings.HasPrefix(data, "cmd:") {

@@ -20,6 +20,7 @@ type Update struct {
 	ChatID       int64
 	Text         string
 	CallbackData string
+	CallbackID   string
 	FromID       int64
 	IsBot        bool
 }
@@ -42,6 +43,7 @@ type updateMessage struct {
 }
 
 type updateCallbackQuery struct {
+	ID      *string        `json:"id"`
 	Message *updateMessage `json:"message"`
 	Data    *string        `json:"data"`
 	From    *updateUser    `json:"from"`
@@ -74,10 +76,11 @@ func ParseUpdate(payload []byte) (Update, bool) {
 	}
 
 	var (
-		chat *updateChat
-		text *string
-		data *string
-		from *updateUser
+		chat       *updateChat
+		text       *string
+		data       *string
+		from       *updateUser
+		callbackID *string
 	)
 
 	switch {
@@ -92,6 +95,7 @@ func ParseUpdate(payload []byte) (Update, bool) {
 		chat = envelope.CallbackQuery.Message.Chat
 		data = envelope.CallbackQuery.Data
 		from = envelope.CallbackQuery.From
+		callbackID = envelope.CallbackQuery.ID
 	default:
 		return Update{}, false
 	}
@@ -121,6 +125,9 @@ func ParseUpdate(payload []byte) (Update, bool) {
 			return Update{}, false
 		}
 		update.CallbackData = *data
+	}
+	if callbackID != nil {
+		update.CallbackID = *callbackID
 	}
 
 	if update.Text == "" && update.CallbackData == "" {
