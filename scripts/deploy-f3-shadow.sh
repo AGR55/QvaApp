@@ -263,6 +263,13 @@ with open(sys.argv[2], "w", encoding="utf-8") as target:
     json.dump(health, target, ensure_ascii=False, separators=(",", ":"))
 PY
     chmod 644 "$app_root/operational-health.json"
+    web_extras=$(python3 "$release_dir/scripts/f3-export-web-extras.py" "$prod_db")
+    if [[ -n $web_extras ]]; then
+      temporary_extras=$(mktemp "$app_root/web-extras.XXXXXX")
+      printf '%s\n' "$web_extras" > "$temporary_extras"
+      chmod 644 "$temporary_extras"
+      mv -f "$temporary_extras" "$app_root/web-extras.json"
+    fi
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
   fi
@@ -287,6 +294,12 @@ fi
 if [[ -s "$app_root/operational-health.json" ]]; then
   export F3_OPERATIONAL_HEALTH_FILE="$app_root/operational-health.json"
 fi
+if [[ -s "$app_root/web-extras.json" ]]; then
+  export F3_WEB_EXTRAS_FILE="$app_root/web-extras.json"
+fi
+install -d -m 755 "$app_root/market-icons"
+chown 65532:65532 "$app_root/market-icons" 2>/dev/null || true
+export F3_MARKET_ICONS_DIR="$app_root/market-icons"
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"

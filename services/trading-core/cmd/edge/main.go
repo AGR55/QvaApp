@@ -40,6 +40,8 @@ type config struct {
 	MobileAuthFile  string
 	DashboardFile   string
 	HealthFile      string
+	ExtrasFile      string
+	IconsDir        string
 	TrustedOrigin   string
 	EncryptionKey   string
 }
@@ -93,6 +95,7 @@ func run(logger *slog.Logger) error {
 	base := edge.NewHandler(cfg.StaticDir, stats)
 	shell := edge.NewShellHandler(cfg.StaticDir)
 	staticRoutes := edge.NewStaticRoutes(cfg.StaticDir)
+	staticRoutes.IconDir = cfg.IconsDir
 	var session *edge.SessionHandler
 	var mobile *edge.MobileAPI
 	var dashboard *edge.DashboardAPI
@@ -107,6 +110,8 @@ func run(logger *slog.Logger) error {
 	var mobileInsights *edge.MobileInsightsAPI
 	var configAdmin *edge.ConfigAdminAPI
 	var marketSource *edge.MarketSourceAPI
+	var webExtras *edge.WebExtrasAPI
+	var marketIcons *edge.MarketIconsAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -136,6 +141,19 @@ func run(logger *slog.Logger) error {
 			huntingDiagnostics = &edge.HuntingDiagnosticsAPI{
 				Sessions: manager,
 				File:     cfg.DashboardFile,
+			}
+			webExtras = &edge.WebExtrasAPI{
+				Sessions: manager, File: cfg.ExtrasFile,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
+			if writePool != nil {
+				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
+			}
+			if cfg.IconsDir != "" {
+				marketIcons = &edge.MarketIconsAPI{
+					Sessions: manager, Dir: cfg.IconsDir,
+					TrustedOrigin: cfg.TrustedOrigin,
+				}
 			}
 			mobileInsights = &edge.MobileInsightsAPI{
 				Auth: mobileAuth,
@@ -248,6 +266,17 @@ func run(logger *slog.Logger) error {
 				return
 			}
 		}
+		if marketIcons != nil && r.URL.Path == "/api/market-icons" {
+			marketIcons.ServeHTTP(w, r)
+			return
+		}
+		if webExtras != nil && (r.URL.Path == "/api/logs" ||
+			r.URL.Path == "/api/notifications" ||
+			r.URL.Path == "/api/recovery" ||
+			strings.HasPrefix(r.URL.Path, "/api/notifications/")) {
+			webExtras.ServeHTTP(w, r)
+			return
+		}
 		if configAdmin == nil && (r.URL.Path == "/api/config" || r.URL.Path == "/api/config-revisions") {
 			writeEdgeUnavailable(w)
 			return
@@ -345,6 +374,8 @@ func loadConfig() (config, error) {
 		MobileAuthFile:  strings.TrimSpace(os.Getenv("EDGE_MOBILE_AUTH_FILE")),
 		DashboardFile:   strings.TrimSpace(os.Getenv("EDGE_DASHBOARD_SNAPSHOT_FILE")),
 		HealthFile:      strings.TrimSpace(os.Getenv("EDGE_OPERATIONAL_HEALTH_FILE")),
+		ExtrasFile:      strings.TrimSpace(os.Getenv("EDGE_WEB_EXTRAS_FILE")),
+		IconsDir:        strings.TrimSpace(os.Getenv("EDGE_MARKET_ICONS_DIR")),
 	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {

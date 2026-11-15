@@ -18,6 +18,9 @@ var staticRoutePrefixes = []string{"auth", "icons", "logo", "market-icons"}
 type StaticRoutes struct {
 	// Dir es la raíz de los estáticos (por ejemplo public/).
 	Dir string
+	// IconDir es un volumen escribible para iconos subidos desde el panel.
+	// Si un icono no existe ahí se usa el asset público de Dir.
+	IconDir string
 	// Files sirve los archivos ya validados. Si es nil se usa un
 	// http.FileServer sobre Dir.
 	Files http.Handler

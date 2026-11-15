@@ -44,3 +44,8 @@ CREATE TABLE IF NOT EXISTS shadow.runtime_settings (
   value jsonb NOT NULL,
   updated_at bigint NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow.notification_acks (
+  id text PRIMARY KEY,
+  acknowledged_at bigint NOT NULL
+);
