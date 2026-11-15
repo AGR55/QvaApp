@@ -16,6 +16,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/edge"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
 const (
@@ -37,6 +39,8 @@ type config struct {
 	ChatThreadsFile string
 	MobileAuthFile  string
 	DashboardFile   string
+	TrustedOrigin   string
+	EncryptionKey   string
 }
 
 func main() {
@@ -60,6 +64,7 @@ func run(logger *slog.Logger) error {
 
 	var stats edge.StatsFunc
 	var pool *pgxpool.Pool
+	var writePool *pgxpool.Pool
 	if cfg.DatabaseURL == "" {
 		logger.Info("DATABASE_URL no configurada; resumen deshabilitado")
 	} else {
@@ -71,6 +76,13 @@ func run(logger *slog.Logger) error {
 		} else {
 			defer pool.Close()
 			stats = postgresStats(pool)
+			writePool, err = openWritePool(ctx, cfg.DatabaseURL)
+			if err != nil {
+				logger.Warn("Postgres de escritura no disponible; configuración deshabilitada", "error", err)
+				writePool = nil
+			} else {
+				defer writePool.Close()
+			}
 		}
 	}
 	if info, err := os.Stat(cfg.StaticDir); err != nil || !info.IsDir() {
@@ -92,6 +104,8 @@ func run(logger *slog.Logger) error {
 	var tradingAnalytics *edge.TradingAnalyticsAPI
 	var huntingDiagnostics *edge.HuntingDiagnosticsAPI
 	var mobileInsights *edge.MobileInsightsAPI
+	var configAdmin *edge.ConfigAdminAPI
+	var marketSource *edge.MarketSourceAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -129,6 +143,27 @@ func run(logger *slog.Logger) error {
 			configAPI = &edge.ConfigAPI{
 				Sessions:      manager,
 				PublicPushKey: cfg.PublicPushKey,
+			}
+			if writePool != nil {
+				configAdmin = &edge.ConfigAdminAPI{
+					Sessions:      manager,
+					Config:        &runtimeconfig.Repository{Pool: writePool},
+					Settings:      &edge.PostgresReaderStore{Pool: writePool},
+					TrustedOrigin: cfg.TrustedOrigin,
+				}
+				if cfg.EncryptionKey != "" {
+					vaultClient, err := vault.New(cfg.EncryptionKey)
+					if err != nil {
+						logger.Warn("vault del panel no disponible", "error", err)
+					} else {
+						marketSource = &edge.MarketSourceAPI{
+							Sessions:      manager,
+							Store:         &edge.PostgresReaderStore{Pool: writePool},
+							Vault:         vaultClient,
+							TrustedOrigin: cfg.TrustedOrigin,
+						}
+					}
+				}
 			}
 			if pool != nil {
 				configAPI.Store = &edge.PostgresConfigStore{Pool: pool}
@@ -192,10 +227,35 @@ func run(logger *slog.Logger) error {
 			operations.ServeHTTP(w, r)
 			return
 		}
+		if marketSource != nil && (r.URL.Path == "/api/market-source" ||
+			strings.HasPrefix(r.URL.Path, "/api/market-source/") ||
+			r.URL.Path == "/api/market-readers" ||
+			strings.HasPrefix(r.URL.Path, "/api/market-readers/")) {
+			marketSource.ServeHTTP(w, r)
+			return
+		}
+		if configAdmin != nil {
+			switch r.URL.Path {
+			case "/api/config", "/api/config-revisions", "/api/hunting",
+				"/api/strategy", "/api/control":
+				configAdmin.ServeHTTP(w, r)
+				return
+			}
+		}
+		if configAdmin == nil && (r.URL.Path == "/api/config" || r.URL.Path == "/api/config-revisions") {
+			writeEdgeUnavailable(w)
+			return
+		}
+		if marketSource == nil && (r.URL.Path == "/api/market-source" ||
+			strings.HasPrefix(r.URL.Path, "/api/market-source/") ||
+			r.URL.Path == "/api/market-readers" ||
+			strings.HasPrefix(r.URL.Path, "/api/market-readers/")) {
+			writeEdgeUnavailable(w)
+			return
+		}
 		if configAPI != nil {
 			switch r.URL.Path {
-			case "/api/config", "/api/config-revisions", "/api/market-source",
-				"/api/audit", "/api/notifications", "/api/logs", "/api/recovery",
+			case "/api/audit", "/api/notifications", "/api/logs", "/api/recovery",
 				"/api/openapi.json", "/api/push/public-key":
 				configAPI.ServeHTTP(w, r)
 				return
@@ -257,6 +317,13 @@ func run(logger *slog.Logger) error {
 	return server.Shutdown(shutdownCtx)
 }
 
+func writeEdgeUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write([]byte("{\"error\":\"Configuración no disponible.\"}\n"))
+}
+
 func loadConfig() (config, error) {
 	cfg := config{
 		Port:            envOrDefault("PORT", defaultPort),
@@ -264,6 +331,8 @@ func loadConfig() (config, error) {
 		DatabaseURL:     strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		AdminPassword:   strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
 		SessionSecret:   strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
+		TrustedOrigin:   strings.TrimSpace(os.Getenv("EDGE_TRUSTED_ORIGIN")),
+		EncryptionKey:   strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY")),
 		OperatorsFile:   strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
 		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),
 		ChatThreadsFile: strings.TrimSpace(os.Getenv("EDGE_CHAT_THREADS_FILE")),
@@ -282,6 +351,20 @@ func loadConfig() (config, error) {
 		cfg.SecureCookies = value
 	}
 	return cfg, nil
+}
+
+// openWritePool abre el pool mínimo usado por las mutaciones de configuración.
+// Está separado del pool read-only para que las lecturas sigan sin poder
+// escribir aunque un handler tenga un error.
+func openWritePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
+	poolConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	poolConfig.MaxConns = 2
+	poolConfig.MinConns = 0
+	poolConfig.MaxConnLifetime = 30 * time.Minute
+	return pgxpool.NewWithConfig(ctx, poolConfig)
 }
 
 // openStatsPool abre un pool con la sesión en sólo lectura para que cualquier

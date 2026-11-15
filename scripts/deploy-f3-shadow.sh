@@ -99,12 +99,13 @@ core_executions_migration_file="$release_dir/services/db/migrations/0013_core_ex
 core_operations_migration_file="$release_dir/services/db/migrations/0014_core_operations.sql"
 push_subscriptions_migration_file="$release_dir/services/db/migrations/0015_push_subscriptions.sql"
 transactions_migration_file="$release_dir/services/db/migrations/0016_qvapay_transactions.sql"
+runtime_config_migration_file="$release_dir/services/db/migrations/0017_runtime_config.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file || ! -f $core_executions_migration_file || ! -f $core_operations_migration_file || ! -f $push_subscriptions_migration_file || ! -f $transactions_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012/0013/0014/0015/0016." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file || ! -f $core_executions_migration_file || ! -f $core_operations_migration_file || ! -f $push_subscriptions_migration_file || ! -f $transactions_migration_file || ! -f $runtime_config_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012/0013/0014/0015/0016/0017." >&2
   exit 2
 fi
 
@@ -127,6 +128,24 @@ fi
 if ! compose_for "$compose_file" run --rm -T shadow-migrate; then
   echo "Falló la migración shadow; se conserva la release activa." >&2
   exit 1
+fi
+
+# Siembra una única vez la configuración editable desde el SQLite de
+# producción. Los redeploys no sobrescriben cambios hechos desde el panel.
+if [[ -r /opt/qvaapply/data/qvaapply.sqlite ]]; then
+  runtime_config=$(python3 "$release_dir/scripts/f3-export-runtime-config.py" /opt/qvaapply/data/qvaapply.sqlite)
+  if [[ -n $runtime_config ]]; then
+    docker exec -i qvaapply-f3-shadow-postgres psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -v config="$runtime_config" <<'SQL'
+WITH inserted AS (
+  INSERT INTO shadow.runtime_config (id, config_json, version, reason, updated_by, updated_at)
+  VALUES (1, :'config'::jsonb, 1, 'Configuración inicial desde producción', 'deploy', (extract(epoch from now()) * 1000)::bigint)
+  ON CONFLICT (id) DO NOTHING
+  RETURNING version, config_json, reason, updated_by, updated_at
+)
+INSERT INTO shadow.runtime_config_revisions (version, config_json, reason, updated_by, created_at)
+SELECT version, config_json, reason, updated_by, updated_at FROM inserted;
+SQL
+  fi
 fi
 
 # Prepara el hunter long-running con secretos y config fuera del repositorio.
@@ -182,11 +201,16 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     edge_password=${edge_password#\"}
     edge_password=${edge_password%\"}
     if [[ -n $edge_password ]]; then
+      trusted_origin=$(sed -n 's/^[[:space:]]*DASHBOARD_TRUSTED_ORIGIN=//p' "$prod_env" | tail -n 1 | tr -d '\r')
+      trusted_origin=${trusted_origin#\"}
+      trusted_origin=${trusted_origin%\"}
       temporary_edge_env=$(mktemp "$app_root/edge.env.XXXXXX")
       {
         printf 'EDGE_ADMIN_PASSWORD=%s\n' "$edge_password"
         printf 'EDGE_SESSION_SECRET=%s\n' "$local_key"
         printf 'EDGE_SECURE_COOKIES=false\n'
+        printf 'EDGE_TRUSTED_ORIGIN=%s\n' "$trusted_origin"
+        printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
       } > "$temporary_edge_env"
       chmod 600 "$temporary_edge_env"
       mv -f "$temporary_edge_env" "$app_root/edge.env"
@@ -231,7 +255,7 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     chmod 644 "$temporary_dashboard"
     mv -f "$temporary_dashboard" "$app_root/dashboard-snapshot.json"
     hunter_enabled=true
-    unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password
+    unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
   fi
 fi
 export F3_HUNTER_ENV="$hunter_env"

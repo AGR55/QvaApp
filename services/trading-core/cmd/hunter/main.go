@@ -25,6 +25,7 @@ import (
 	"github.com/AGR55/QvaApp/services/trading-core/internal/hunter"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
 const (
@@ -32,6 +33,12 @@ const (
 	defaultPollMS   = 0
 	defaultConfig   = "/config/hunter-config.json"
 	shutdownTimeout = 10 * time.Second
+
+	// pollTickInterval es la resolución del planificador. El intervalo real
+	// de poll lo fija la configuración runtime y puede ser mayor.
+	pollTickInterval = 500 * time.Millisecond
+	// pollTimeout acota cada ciclo completo: ofertas y promedios.
+	pollTimeout = 30 * time.Second
 )
 
 type config struct {
@@ -62,13 +69,15 @@ type source interface {
 
 type qvapaySource struct {
 	client     *qvapay.Client
+	readers    func(context.Context) []*qvapay.Client
+	index      atomic.Uint64
 	mu         sync.Mutex
 	averages   map[string]qvapay.Average
 	averagesAt time.Time
 }
 
 func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
-	offers, err := source.client.Offers(ctx, nil)
+	offers, err := source.nextClient(ctx).Offers(ctx, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -85,7 +94,7 @@ func (source *qvapaySource) Averages(ctx context.Context) (map[string]qvapay.Ave
 	if len(source.averages) > 0 && time.Since(source.averagesAt) < 5*time.Minute {
 		return source.averages, nil
 	}
-	averages, err := source.client.Averages(ctx)
+	averages, err := source.nextClient(ctx).Averages(ctx)
 	if err != nil {
 		if len(source.averages) > 0 {
 			return source.averages, nil
@@ -95,6 +104,20 @@ func (source *qvapaySource) Averages(ctx context.Context) (map[string]qvapay.Ave
 	source.averages = averages
 	source.averagesAt = time.Now()
 	return averages, nil
+}
+
+// nextClient rota entre las cuentas lectoras habilitadas. Cada llamada avanza
+// el índice, de modo que un token rechazado deja de usarse en el siguiente
+// poll. Sin lectores se usa el cliente primario.
+func (source *qvapaySource) nextClient(ctx context.Context) *qvapay.Client {
+	if source.readers == nil {
+		return source.client
+	}
+	clients := source.readers(ctx)
+	if selected := selectReaderClient(clients, source.index.Add(1)-1); selected != nil {
+		return selected
+	}
+	return source.client
 }
 
 func main() {
@@ -138,12 +161,23 @@ func run(logger *slog.Logger) error {
 	}
 
 	service := &service{
-		logger: logger, cfg: cfg, pool: pool, source: &qvapaySource{client: client},
-		ready: make(chan struct{}),
+		logger: logger, cfg: cfg, pool: pool,
+		vault: vaultClient, baseURL: cfg.BaseURL,
+		runtime: &runtimeconfig.Repository{Pool: pool},
+		ready:   make(chan struct{}),
 	}
+	// Sin configuración runtime el planificador conserva el intervalo de la
+	// variable de entorno.
+	service.pollInterval.Store(int64(cfg.PollMS))
+	service.source = &qvapaySource{client: client, readers: service.readerClients}
 	if err := service.loadConfig(); err != nil {
 		logger.Warn("configuración hunter no disponible; el servicio seguirá sin mercados", "error", err)
 	}
+	// La configuración del panel tiene prioridad sobre el archivo. Si todavía
+	// no existe, se mantiene la leída del archivo.
+	reloadCtx, cancelReload := context.WithTimeout(ctx, runtimeReloadTimeout)
+	service.reloadRuntimeConfig(reloadCtx)
+	cancelReload()
 	service.startStream(ctx, logger)
 
 	server := &http.Server{
@@ -154,6 +188,7 @@ func run(logger *slog.Logger) error {
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
 	go service.loop(ctx)
+	go service.runtimeLoop(ctx)
 
 	logger.Info("hunter iniciado", "port", cfg.Port, "poll_ms", cfg.PollMS, "config", cfg.ConfigFile)
 	select {
@@ -201,14 +236,31 @@ func loadConfig() (config, error) {
 }
 
 type service struct {
-	logger *slog.Logger
-	cfg    config
-	pool   *pgxpool.Pool
-	source source
-	ready  chan struct{}
+	logger  *slog.Logger
+	cfg     config
+	pool    *pgxpool.Pool
+	source  source
+	vault   *vault.Vault
+	baseURL string
+	runtime *runtimeconfig.Repository
+	ready   chan struct{}
 
-	configMu sync.RWMutex
-	config   hunter.Config
+	// pollInterval y paused los refresca runtimeLoop cada 5 s. El intervalo
+	// está en milisegundos; 0 significa sin poll (solo SSE).
+	pollInterval atomic.Int64
+	paused       atomic.Bool
+	// lastPollAttemptMS marca el intento de poll para el planificador, en
+	// milisegundos. lastPollAt sigue en segundos para métricas y readyz.
+	lastPollAttemptMS atomic.Int64
+
+	configMu      sync.RWMutex
+	config        hunter.Config
+	runtimeConfig runtimeconfig.Config
+	runtimeLoaded bool
+
+	readersMu   sync.Mutex
+	readerCache []*qvapay.Client
+	readersAt   time.Time
 
 	mu          sync.RWMutex
 	lastPoll    *pollResult
@@ -356,20 +408,37 @@ func maxInt64(left, right int64) int64 {
 }
 
 func (service *service) loop(ctx context.Context) {
-	if service.cfg.PollMS <= 0 {
-		<-ctx.Done()
-		return
-	}
-	interval := time.Duration(service.cfg.PollMS) * time.Millisecond
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(pollTickInterval)
 	defer ticker.Stop()
-	service.poll(ctx)
+	var inFlight atomic.Bool
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			service.poll(ctx)
+			if service.paused.Load() {
+				continue
+			}
+			intervalMS := service.pollInterval.Load()
+			if intervalMS <= 0 {
+				continue
+			}
+			now := time.Now().UnixMilli()
+			if now-service.lastPollAttemptMS.Load() < intervalMS {
+				continue
+			}
+			// Un poll lento no acumula ejecuciones: los ticks que caen
+			// mientras hay uno en curso se descartan.
+			if !inFlight.CompareAndSwap(false, true) {
+				continue
+			}
+			service.lastPollAttemptMS.Store(now)
+			go func() {
+				defer inFlight.Store(false)
+				pollCtx, cancel := context.WithTimeout(ctx, pollTimeout)
+				defer cancel()
+				service.poll(pollCtx)
+			}()
 		}
 	}
 }
@@ -534,8 +603,8 @@ func (service *service) readyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxAge := int64(15)
-	if service.cfg.PollMS > 0 {
-		maxAge = int64(3*service.cfg.PollMS/1000 + 5)
+	if intervalMS := service.pollInterval.Load(); intervalMS > 0 {
+		maxAge = 3*intervalMS/1000 + 5
 	}
 	last := service.lastPollAt.Load()
 	if last == 0 || time.Now().Unix()-last > maxAge {

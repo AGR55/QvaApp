@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,14 +16,20 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
 type hunterConsumer struct {
-	pool          *pgxpool.Pool
-	logger        *slog.Logger
-	worker        string
+	pool *pgxpool.Pool
+	// configMu protege config y configErr: reloadRuntime reemplaza el snapshot
+	// mientras consume lo lee desde otro goroutine.
+	configMu      sync.RWMutex
 	config        core.Config
 	configErr     error
+	runtime       *runtimeconfig.Repository
+	runtimeAt     atomic.Int64
+	logger        *slog.Logger
+	worker        string
 	shadowRepo    *postgres.ShadowRepository
 	operationRepo *postgres.CoreOperationRepository
 	processed     atomic.Uint64
@@ -55,7 +62,8 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	}
 	return &hunterConsumer{
 		pool: pool, logger: logger, worker: worker, config: config,
-		configErr: configErr, shadowRepo: postgres.NewShadowRepository(pool),
+		configErr: configErr, runtime: &runtimeconfig.Repository{Pool: pool},
+		shadowRepo:    postgres.NewShadowRepository(pool),
 		operationRepo: postgres.NewCoreOperationRepository(pool),
 	}
 }
@@ -98,7 +106,11 @@ func (consumer *hunterConsumer) consume(
 		consumer.logger.Warn("evento hunter inválido", "event_id", event.EventID, "error", err)
 		return
 	}
-	if consumer.configErr != nil {
+	// La configuración del panel puede cambiar en cualquier momento; se
+	// refresca (con throttle) antes de decidir con el snapshot vigente.
+	consumer.reloadRuntime(ctx, time.Now())
+	config, configErr := consumer.configSnapshot()
+	if configErr != nil {
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), "configuración core no disponible")
 		return
@@ -113,7 +125,7 @@ func (consumer *hunterConsumer) consume(
 	result, err := core.Decide(core.Event{
 		OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
 		Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
-	}, consumer.config, balance, postgres.NowMS())
+	}, config, balance, postgres.NowMS())
 	if err != nil {
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
@@ -130,7 +142,7 @@ func (consumer *hunterConsumer) consume(
 				Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
 			},
 			Result: result, AvailableQusd: balance,
-			ReserveQusd: consumer.config.Limits.MinQusdReserve,
+			ReserveQusd: config.Limits.MinQusdReserve,
 			OperationID: event.EventID,
 		})
 		if err != nil {

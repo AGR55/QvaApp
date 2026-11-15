@@ -49,6 +49,7 @@ required_paths=(
   services/db/migrations/0014_core_operations.sql
   services/db/migrations/0015_push_subscriptions.sql
   services/db/migrations/0016_qvapay_transactions.sql
+  services/db/migrations/0017_runtime_config.sql
   services/db/audit-invariants.sqlite.sql
   parity/fixtures/replay/2026-11-12
   deploy/compose.f3-shadow.yaml
@@ -59,6 +60,7 @@ required_paths=(
   scripts/f3-shadow-qvapay.sh
   scripts/f3-shadow-tail.sh
   scripts/f3-export-dashboard-snapshot.py
+  scripts/f3-export-runtime-config.py
   scripts/f3-shadow-invariants.sh
   scripts/f3-shadow-soak.sh
   scripts/f3-shadow-soak-report.sh
@@ -156,6 +158,7 @@ for required_member in \
   services/db/migrations/0014_core_operations.sql \
   services/db/migrations/0015_push_subscriptions.sql \
   services/db/migrations/0016_qvapay_transactions.sql \
+  services/db/migrations/0017_runtime_config.sql \
   services/db/audit-invariants.sqlite.sql \
   parity/fixtures/replay/2026-11-12/events.ndjson \
   parity/fixtures/replay/2026-11-12/scenarios.json \
@@ -171,6 +174,7 @@ for required_member in \
   scripts/f3-shadow-qvapay.sh \
   scripts/f3-shadow-tail.sh \
   scripts/f3-export-dashboard-snapshot.py \
+  scripts/f3-export-runtime-config.py \
   scripts/f3-shadow-invariants.sh \
   scripts/f3-shadow-soak.sh \
   scripts/f3-shadow-soak-report.sh \
