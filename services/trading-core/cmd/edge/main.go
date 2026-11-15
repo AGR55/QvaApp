@@ -141,7 +141,9 @@ func run(logger *slog.Logger) error {
 			session.ServeHTTP(w, r)
 			return
 		}
-		if r.URL.Path == "/api/mobile/device-check" || r.URL.Path == "/api/mobile/operator-check" {
+		if r.URL.Path == "/api/mobile/device-check" ||
+			r.URL.Path == "/api/mobile/operator-check" ||
+			r.URL.Path == "/api/mobile/receipt-outcomes" {
 			mobileAuth.ServeHTTP(w, r)
 			return
 		}

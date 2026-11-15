@@ -211,8 +211,8 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     # Hashes de credenciales móviles. El archivo es privado (600) y el edge solo
     # compara sha256(token); nunca publica ni registra estos valores.
     mobile_auth=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
-      "SELECT json_object('devices', (SELECT json_group_array(json_object('tokenHash', token_hash, 'revokedAt', revoked_at)) FROM sms_devices), 'operators', (SELECT json_group_array(json_object('id', json_extract(value,'\$.id'), 'tokenHash', json_extract(value,'\$.tokenHash'), 'scopes', json(json_extract(value,'\$.scopes')), 'revokedAt', json_extract(value,'\$.revokedAt'))) FROM json_each((SELECT value FROM settings WHERE key = 'mobile_operators_v1'))));")
-    [[ -n $mobile_auth ]] || mobile_auth='{"devices":[],"operators":[]}'
+      "SELECT json_object('devices', (SELECT json_group_array(json_object('tokenHash', token_hash, 'revokedAt', revoked_at)) FROM sms_devices), 'operators', (SELECT json_group_array(json_object('id', json_extract(value,'\$.id'), 'tokenHash', json_extract(value,'\$.tokenHash'), 'scopes', json(json_extract(value,'\$.scopes')), 'revokedAt', json_extract(value,'\$.revokedAt'))) FROM json_each((SELECT value FROM settings WHERE key = 'mobile_operators_v1'))), 'receipts', (SELECT json_group_array(json_object('id', id, 'status', state, 'receivedAt', received_at, 'operationUuid', operation_uuid, 'reason', reason)) FROM (SELECT id, state, received_at, operation_uuid, reason FROM payment_receipts ORDER BY created_at DESC LIMIT 100)));")
+    [[ -n $mobile_auth ]] || mobile_auth='{"devices":[],"operators":[],"receipts":[]}'
     temporary_mobile_auth=$(mktemp "$app_root/mobile-auth.XXXXXX")
     printf '%s\n' "$mobile_auth" > "$temporary_mobile_auth"
     # El edge corre como UID 65532 en una imagen distroless; el archivo debe

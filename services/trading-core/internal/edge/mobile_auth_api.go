@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	// mobileDeviceCheckPath y mobileOperatorCheckPath son las únicas rutas
-	// servidas por MobileAuthAPI.
-	mobileDeviceCheckPath   = "/api/mobile/device-check"
-	mobileOperatorCheckPath = "/api/mobile/operator-check"
+	// Rutas servidas por MobileAuthAPI.
+	mobileDeviceCheckPath     = "/api/mobile/device-check"
+	mobileOperatorCheckPath   = "/api/mobile/operator-check"
+	mobileReceiptOutcomesPath = "/api/mobile/receipt-outcomes"
 
 	// maxMobileAuthSnapshotBytes acota el snapshot leído del disco. Un archivo
 	// mayor se rechaza sin cargarlo entero en memoria.
@@ -52,8 +52,19 @@ var (
 // mobileAuthSnapshot es el documento privado montado en el contenedor. Solo se
 // usan los hashes, scopes e identificadores; ningún otro campo se expone.
 type mobileAuthSnapshot struct {
-	Devices   []mobileAuthRecord `json:"devices"`
-	Operators []mobileAuthRecord `json:"operators"`
+	Devices   []mobileAuthRecord  `json:"devices"`
+	Operators []mobileAuthRecord  `json:"operators"`
+	Receipts  []mobileAuthReceipt `json:"receipts"`
+}
+
+// mobileAuthReceipt es la proyección pública que consume la app móvil. Nunca
+// incluye remitente, teléfono ni identificadores de dispositivo.
+type mobileAuthReceipt struct {
+	ID            string  `json:"id"`
+	Status        string  `json:"status"`
+	ReceivedAt    int64   `json:"receivedAt"`
+	OperationUUID *string `json:"operationUuid"`
+	Reason        *string `json:"reason"`
 }
 
 // mobileAuthRecord representa un dispositivo u operador. RevokedAt se conserva
@@ -147,7 +158,7 @@ func (api *MobileAuthAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 
 	switch r.URL.Path {
-	case mobileDeviceCheckPath, mobileOperatorCheckPath:
+	case mobileDeviceCheckPath, mobileOperatorCheckPath, mobileReceiptOutcomesPath:
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 		return
@@ -176,6 +187,8 @@ func (api *MobileAuthAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.deviceCheck(w, token, snapshot)
 	case mobileOperatorCheckPath:
 		api.operatorCheck(w, token, snapshot)
+	case mobileReceiptOutcomesPath:
+		api.receiptOutcomes(w, token, snapshot)
 	}
 }
 
@@ -232,10 +245,37 @@ func (api *MobileAuthAPI) operatorCheck(
 	writeJSON(w, http.StatusOK, mobileOperatorCheckResponse{OK: true, Scopes: scopes})
 }
 
+// receiptOutcomes sirve la proyección pública de comprobantes a un operador
+// con scope read. Comparte el mismo límite de lectura que operator-check.
+func (api *MobileAuthAPI) receiptOutcomes(
+	w http.ResponseWriter,
+	token string,
+	snapshot mobileAuthSnapshot,
+) {
+	record, ok := mobileAuthOperator(snapshot.Operators, token)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
+			Error: mobileOperatorCredentialError,
+		})
+		return
+	}
+	if !api.allowRead(record.rateKey(), api.now()) {
+		writeJSON(w, http.StatusTooManyRequests, mobileAuthErrorResponse{
+			Error: mobileOperatorRateLimitError,
+		})
+		return
+	}
+	receipts := snapshot.Receipts
+	if receipts == nil {
+		receipts = []mobileAuthReceipt{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": receipts})
+}
+
 // writeCredentialError elige el mensaje 401 correspondiente a la ruta.
 func (api *MobileAuthAPI) writeCredentialError(w http.ResponseWriter, path string) {
 	message := mobileDeviceCredentialError
-	if path == mobileOperatorCheckPath {
+	if path == mobileOperatorCheckPath || path == mobileReceiptOutcomesPath {
 		message = mobileOperatorCredentialError
 	}
 	writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{Error: message})

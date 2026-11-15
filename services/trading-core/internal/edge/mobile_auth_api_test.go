@@ -606,3 +606,50 @@ func TestMobileAuthAPIHeadersOnEveryResponse(t *testing.T) {
 		})
 	}
 }
+
+func TestMobileAuthAPIReceiptOutcomes(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "mobile_auth.json")
+	raw, err := json.Marshal(map[string]any{
+		"devices": []map[string]any{},
+		"operators": []map[string]any{
+			mobileAuthTestOperator("op-1", mobileAuthTestOperatorToken,
+				[]string{"read"}, nil),
+		},
+		"receipts": []map[string]any{
+			{"id": "r-1", "status": "paid", "receivedAt": 100, "operationUuid": "op-1", "reason": nil},
+			{"id": "r-2", "status": "pending", "receivedAt": 101, "operationUuid": nil, "reason": "sin referencia"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Marshal snapshot: %v", err)
+	}
+	writeMobileAuthTestFile(t, file, raw)
+	api := newMobileAuthTestAPI(t, file)
+
+	recorder := mobileAuthTestDo(api, http.MethodGet, mobileReceiptOutcomesPath,
+		"Bearer "+mobileAuthTestOperatorToken)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	assertMobileAuthTestHeaders(t, recorder)
+	body := decodeMobileAuthTestBody(t, recorder)
+	var receipts []map[string]any
+	if err := json.Unmarshal(body["data"], &receipts); err != nil {
+		t.Fatalf("data inválida: %v", err)
+	}
+	if len(receipts) != 2 || receipts[0]["id"] != "r-1" || receipts[1]["status"] != "pending" {
+		t.Fatalf("receipts = %v", receipts)
+	}
+	if strings.Contains(recorder.Body.String(), "tokenHash") {
+		t.Fatal("la respuesta no debe contener hashes")
+	}
+
+	missing := mobileAuthTestDo(api, http.MethodGet, mobileReceiptOutcomesPath, "")
+	if missing.Code != http.StatusUnauthorized {
+		t.Fatalf("sin credencial: status = %d", missing.Code)
+	}
+	if !strings.Contains(missing.Body.String(), mobileOperatorCredentialError) {
+		t.Fatalf("mensaje = %q", missing.Body.String())
+	}
+}
