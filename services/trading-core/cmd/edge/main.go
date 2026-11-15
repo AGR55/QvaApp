@@ -49,6 +49,7 @@ type config struct {
 	EncryptionKey    string
 	MutationsEnabled bool
 	MutationsLive    bool
+	LiveDashboard    bool
 	QvaToken         string
 	MutationBaseURL  string
 	WebhookEnabled   bool
@@ -128,6 +129,7 @@ func run(logger *slog.Logger) error {
 	var analyticsFees *edge.AnalyticsFeesAPI
 	var mutations *edge.MutationsAPI
 	var qvapayWebhook *edge.QvapayWebhookAPI
+	var liveReader edge.LiveReader
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -203,17 +205,27 @@ func run(logger *slog.Logger) error {
 				mutations.Store = &edge.PostgresMutationStore{Pool: writePool}
 				qvapayWebhook.Store = &edge.PostgresFeedEventStore{Pool: writePool}
 			}
-			if cfg.MutationsLive && cfg.QvaToken != "" && cfg.EncryptionKey != "" {
+			if (cfg.MutationsLive || cfg.LiveDashboard) && cfg.QvaToken != "" && cfg.EncryptionKey != "" {
 				vaultClient, err := vault.New(cfg.EncryptionKey)
 				if err != nil {
-					logger.Warn("mutaciones live deshabilitadas: clave inválida", "error", err)
+					logger.Warn("QvaPay live deshabilitado: clave inválida", "error", err)
 				} else if token, err := vaultClient.Decrypt(cfg.QvaToken); err != nil {
-					logger.Warn("mutaciones live deshabilitadas: token inválido", "error", err)
+					logger.Warn("QvaPay live deshabilitado: token inválido", "error", err)
 				} else {
-					client := qvapay.NewMutationClient(cfg.MutationBaseURL, token)
-					client.Enable()
-					mutations.Live = &liveMutations{client: client}
-					logger.Info("mutaciones QvaPay LIVE habilitadas")
+					if cfg.MutationsLive {
+						client := qvapay.NewMutationClient(cfg.MutationBaseURL, token)
+						client.Enable()
+						mutations.Live = &liveMutations{client: client}
+						logger.Info("mutaciones QvaPay LIVE habilitadas")
+					}
+					if cfg.LiveDashboard {
+						if reader, err := qvapay.New(cfg.MutationBaseURL, token); err == nil {
+							liveReader = reader
+							logger.Info("dashboard QvaPay LIVE habilitado")
+						} else {
+							logger.Warn("dashboard live deshabilitado", "error", err)
+						}
+					}
 				}
 			}
 			if cfg.IconsDir != "" {
@@ -277,6 +289,9 @@ func run(logger *slog.Logger) error {
 				}
 			}
 		}
+	}
+	if liveReader != nil && dashboard != nil {
+		dashboard.Live = &edge.LiveDashboard{Reader: liveReader, Pool: writePool}
 	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if session != nil && r.URL.Path == "/api/session" {

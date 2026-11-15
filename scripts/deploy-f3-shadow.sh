@@ -257,6 +257,7 @@ PY
         printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
         printf 'EDGE_MUTATIONS_ENABLED=true\n'
         printf 'EDGE_MUTATIONS_LIVE=false\n'
+        printf 'EDGE_LIVE_DASHBOARD=true\n'
         if [[ -n ${encrypted_token:-} ]]; then
           printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
         fi

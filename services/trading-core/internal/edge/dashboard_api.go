@@ -101,34 +101,41 @@ type DashboardAPI struct {
 	Runtime         *runtimeconfig.Repository
 	Settings        SettingStore
 	CooperativeFile string
+	Live            *LiveDashboard
 	Now             func() time.Time
 }
 
 type dashboardWebSnapshot struct {
 	DashboardSummary
-	GeneratedAt         int64                  `json:"generatedAt"`
-	State               dashboardWebState      `json:"state"`
-	Markets             []runtimeconfig.Market `json:"markets"`
-	Strategy            dashboardStrategy      `json:"strategy"`
-	Risk                dashboardRisk          `json:"risk"`
-	Availability        dashboardAvailability  `json:"availability"`
-	Rankings            dashboardRankings      `json:"rankings"`
-	Alerts              []any                  `json:"alerts"`
-	Operations          []any                  `json:"operations"`
-	OwnOffers           []any                  `json:"ownOffers"`
-	Transactions        []any                  `json:"transactions"`
-	Market              map[string]any         `json:"market"`
-	Budget              map[string]any         `json:"budget"`
-	Averages            map[string]any         `json:"averages"`
-	Freshness           map[string]any         `json:"freshness"`
-	MarketHistory       []any                  `json:"marketHistory"`
-	Hunting             any                    `json:"hunting"`
-	Automation          any                    `json:"automation"`
-	Workflows           []any                  `json:"workflows"`
-	MutationIntents     []any                  `json:"mutationIntents"`
-	CapitalReservations []any                  `json:"capitalReservations"`
-	CooperativeNetwork  map[string]any         `json:"cooperativeNetwork"`
-	CooperativeHunting  map[string]any         `json:"cooperativeHunting"`
+	GeneratedAt          int64                  `json:"generatedAt"`
+	State                dashboardWebState      `json:"state"`
+	Markets              []runtimeconfig.Market `json:"markets"`
+	Strategy             dashboardStrategy      `json:"strategy"`
+	Risk                 dashboardRisk          `json:"risk"`
+	Availability         dashboardAvailability  `json:"availability"`
+	Rankings             dashboardRankings      `json:"rankings"`
+	Alerts               []any                  `json:"alerts"`
+	Operations           []any                  `json:"operations"`
+	OwnOffers            []any                  `json:"ownOffers"`
+	Transactions         []any                  `json:"transactions"`
+	Market               map[string]any         `json:"market"`
+	Budget               map[string]any         `json:"budget"`
+	Averages             map[string]any         `json:"averages"`
+	Freshness            map[string]any         `json:"freshness"`
+	MarketHistory        []any                  `json:"marketHistory"`
+	Balance              float64                `json:"balance"`
+	History              []any                  `json:"history"`
+	Activity             []any                  `json:"activity"`
+	DiscoveredMarkets    []any                  `json:"discoveredMarkets"`
+	WorkflowOffers       []any                  `json:"workflowOffers"`
+	RecoverableWorkflows []any                  `json:"recoverableWorkflows"`
+	Hunting              any                    `json:"hunting"`
+	Automation           any                    `json:"automation"`
+	Workflows            []any                  `json:"workflows"`
+	MutationIntents      []any                  `json:"mutationIntents"`
+	CapitalReservations  []any                  `json:"capitalReservations"`
+	CooperativeNetwork   map[string]any         `json:"cooperativeNetwork"`
+	CooperativeHunting   map[string]any         `json:"cooperativeHunting"`
 }
 
 type dashboardWebState struct {
@@ -350,6 +357,29 @@ func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSumma
 			}
 		}
 	}
+	if api.Live != nil {
+		live := api.Live.Snapshot(ctx)
+		if live.Live {
+			snapshot.Balance = live.Balance
+			snapshot.OwnOffers = liveAnyList(live.OwnOffers)
+			snapshot.Transactions = liveAnyList(live.Transactions)
+			snapshot.Market = liveAnyMap(live.Market)
+			snapshot.Operations = liveAnyList(live.Operations)
+			snapshot.Availability.Qusd = dashboardQusdAvailability{
+				Available: live.Balance, Reported: live.Balance,
+			}
+			updated := map[string]any{
+				"balance": live.UpdatedAt, "ownOffers": live.UpdatedAt,
+				"transactions": live.UpdatedAt,
+			}
+			markets := map[string]any{}
+			for code := range live.Market {
+				markets[code] = live.UpdatedAt
+			}
+			updated["markets"] = markets
+			snapshot.Freshness = updated
+		}
+	}
 	if summary.CorePending > 0 {
 		snapshot.State.Active = int(summary.CorePending)
 	}
@@ -556,4 +586,20 @@ func (store *PostgresDashboardStore) Operations(
 		return nil, err
 	}
 	return operations, nil
+}
+
+func liveAnyList(items []map[string]any) []any {
+	result := make([]any, len(items))
+	for index, item := range items {
+		result[index] = item
+	}
+	return result
+}
+
+func liveAnyMap(items map[string]map[string]any) map[string]any {
+	result := make(map[string]any, len(items))
+	for key, item := range items {
+		result[key] = item
+	}
+	return result
 }
