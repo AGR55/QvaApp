@@ -5,15 +5,16 @@ set -Eeuo pipefail
 
 WATCH_END="${F3_WATCH_END:-2026-11-29T20:28:49Z}"
 ARCHIVE_DIR="${F3_ARCHIVE_DIR:-/opt/qvaapply-archive}"
+DRY_RUN="${F3_DRY_RUN:-no}"
 
-if [[ "${F3_CONFIRM_REMOVE:-}" != "yes" ]]; then
+if [[ "$DRY_RUN" != "yes" && "${F3_CONFIRM_REMOVE:-}" != "yes" ]]; then
   echo "Falta F3_CONFIRM_REMOVE=yes. Este script borra el contenedor/imagen de TS." >&2
   exit 2
 fi
 
 now=$(date -u +%s)
 end=$(date -u -d "$WATCH_END" +%s)
-if (( now < end )) && [[ "${F3_FORCE:-}" != "yes" ]]; then
+if [[ "$DRY_RUN" != "yes" ]] && (( now < end )) && [[ "${F3_FORCE:-}" != "yes" ]]; then
   echo "La vigilancia termina en $WATCH_END. Faltan $(( (end - now) / 3600 )) horas." >&2
   echo "Usa F3_FORCE=yes solo con autorización explícita." >&2
   exit 3
@@ -37,6 +38,15 @@ grep -q 'proxy_pass http://127.0.0.1:8093' /etc/nginx/sites-available/qvaapply.c
 uncertain=$(docker exec -i qvaapply-f3-shadow-postgres psql -U qvaapply -d qvaapply -Atc \
   "select count(*) from shadow.core_operations where state='uncertain';" | tr -d '[:space:]')
 [[ "$uncertain" == "0" ]] || { echo "Hay $uncertain operaciones inciertas" >&2; exit 7; }
+
+if [[ "$DRY_RUN" == "yes" ]]; then
+  echo "== dry-run: no se archiva ni se borra nada"
+  echo "archivo previsto: $ARCHIVE_DIR/qvaapply-ts-<timestamp>.tar.gz"
+  echo "contenedor: $(docker inspect -f '{{.Name}} {{.State.Status}}' qvaapply 2>/dev/null || echo missing)"
+  echo "imagen: $(docker inspect -f '{{.Image}}' qvaapply 2>/dev/null || echo missing)"
+  echo "comando real: F3_CONFIRM_REMOVE=yes $0"
+  exit 0
+fi
 
 echo "== archivo de seguridad"
 install -d -m 0700 "$ARCHIVE_DIR"
