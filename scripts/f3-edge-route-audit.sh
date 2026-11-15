@@ -227,7 +227,7 @@ done < "${TMP_DIR}/ts-expanded.txt" | sort -u > "${TMP_DIR}/ts-routes.txt"
 # ---------------------------------------------------------------------------
 route_is_interesting() {
   case "$1" in
-    /healthz|/readyz|/metrics|/api/edge/summary|/api/session|/api/dashboard)
+    /|/service-worker.js|/healthz|/readyz|/metrics|/api/edge/summary|/api/session|/api/dashboard)
       return 0
       ;;
     /api/*)
@@ -266,15 +266,34 @@ route_is_interesting() {
       [[ -n "${route}" ]] || continue
       # live_api.go sirve el parámetro :coin a partir de un prefijo. Se
       # representa como ruta paramétrica para compararla con el TS.
-      if [[ "${route}" == "/api/live/markets/" ]]; then
-        route="/api/live/markets/:param"
+      if [[ "${route}" == "/api/live/markets/" || "${route}" == "/api/offers/rebalance/" ]]; then
+        route="${route}:param"
       fi
       route_is_interesting "${route}" || continue
       for method in "${methods[@]}"; do
+        # El shell raíz solo sirve GET/HEAD; el resto de verbos no existe.
+        if [[ "${route}" == "/" && "${method}" != "GET" ]]; then
+          continue
+        fi
         printf '%s %s\n' "${method}" "${route}"
       done
     done < <(grep -oE '"/[^"]*"' "${file}" 2>/dev/null | tr -d '"' | sort -u || true)
   done
+
+  # StaticRoutes declara sus prefijos en un slice; se sintetizan las rutas
+  # paramétricas que resolve() atiende realmente.
+  static_routes_file="${EDGE_DIR}/static_routes.go"
+  if [[ -r "${static_routes_file}" ]]; then
+    while IFS= read -r prefix; do
+      [[ -n "${prefix}" ]] || continue
+      printf 'GET /%s/:param\n' "${prefix}"
+    done < <(
+      sed -n 's/.*staticRoutePrefixes = \[\]string{\(.*\)}.*/\1/p' "${static_routes_file}" \
+        | grep -oE '"[^"]+"' \
+        | tr -d '"' \
+        || true
+    )
+  fi
 
   # El shell Go sirve assets y hace fallback SPA para rutas sin extensión.
   # Se representa como un comodín estático, no como una ruta de API.

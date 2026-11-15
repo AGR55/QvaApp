@@ -102,12 +102,17 @@ Rutas autenticadas por cookie:
 - `GET /api/offers/rebalance/:id`
 - `GET /api/market-analytics?coin=CLASICA`
 - `GET /api/analytics/fees?page=1`
+- `GET /api/trading-analytics?days=30` (FIFO completo, portado de TS)
+- `GET /api/hunting/diagnostics?hours=24&coin=CLASICA`
+- `GET /api/operations/chats/unread`
+- `GET /api/mobile/payment-receipts`
 
 Credenciales móviles con `Authorization: Bearer`:
 
 - `GET /api/mobile/device-check`
 - `GET /api/mobile/operator-check` (60 lecturas/minuto por operador)
 - `GET /api/mobile/receipt-outcomes`
+- `GET /api/mobile/insights?kind=health|profitability|history|diagnostics`
 
 Los hashes viven en `/opt/qvaapply-f3-shadow/mobile-auth.json` (600,
 propiedad de UID 65532); el edge solo compara `sha256(token)` y nunca los
@@ -119,9 +124,11 @@ Verificado en VPS: rutas de lectura 200 con login, 401 sin sesión; dispositivo
 u operador inválido 401; snapshot con 2 dispositivos, 2 operadores y 100
 comprobantes, sin `tokenHash` en la respuesta.
 
-La auditoría estática actualiza a **33/109 rutas exactas**; siguen 76
-pendientes, en su mayoría mutaciones (`POST/PUT/DELETE`) fuera del alcance
-read-only y rutas de chat que dependen del servicio remoto.
+La auditoría estática actualiza a **46/109 rutas exactas**; siguen 63
+pendientes: 55 mutaciones (`POST/PUT/DELETE`) fuera del alcance read-only, las
+rutas de chat por operación, `payment-preview` y el fallback
+`/dashboard/:wildcard`. El chat y el preview dependen del servicio remoto de
+QvaPay/chat y no se replican en el shadow.
 
 ## Limitación actual
 

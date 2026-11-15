@@ -57,19 +57,19 @@ Salida del script en el commit de trabajo de esta auditoría:
 
 ```text
 Rutas TS únicas:          109
-Rutas edge únicas:        39
-Cubiertas exactamente:    33
-Rutas TS no cubiertas:    76
-Rutas edge extra:         6 (incluye `GET /:wildcard`; los prefijos estáticos
-P4 de `static_routes.go` no se cuentan como rutas exactas)
+Rutas edge únicas:        52
+Cubiertas exactamente:    46
+Rutas TS no cubiertas:    63
+Rutas edge extra:         6 (incluye `GET /:wildcard` y `/api/edge/summary`)
 ```
 
-La extracción Go ahora considera cualquier literal `/api/...` y descarta los
-prefijos de dispatch que terminan en `/`. Antes sólo miraba `/api/mobile/*` y
-`/api/live/*`, por lo que las rutas de configuración y observabilidad ya
-implementadas no aparecían.
+La extracción Go considera cualquier literal `/api/...`, sintetiza las rutas
+paramétricas declaradas como prefijo (`/api/live/markets/`,
+`/api/offers/rebalance/`) y las rutas de `staticRoutePrefixes`. Antes sólo
+miraba `/api/mobile/*` y `/api/live/*`, por lo que configuración,
+observabilidad y estáticos ya implementados no aparecían.
 
-### Rutas cubiertas exactamente (33)
+### Rutas cubiertas exactamente (46)
 
 La lista completa la emite el script. Incluye sesión, dashboard/live,
 observabilidad, configuración, operadores, chats (metadatos), dispositivos,
@@ -92,7 +92,7 @@ GET /:wildcard    # shell estático / fallback SPA
 no equivale a las rutas estáticas específicas del monolito (`/`, `/dashboard/*`,
 `/icons/:name`, etc.).
 
-### Rutas TS no cubiertas (76)
+### Rutas TS no cubiertas (63)
 
 La lista completa la emite el script. La mayoría son mutaciones
 (`POST/PUT/DELETE`) fuera del alcance read-only. Las lecturas que siguen
@@ -103,11 +103,10 @@ pendientes dependen de datos remotos o de read models complejos:
 - **Chats por operación:** `GET /api/operations/:uuid/chat`,
   `.../chat/sends/:attemptId`, `.../chat/images/:messageId` y sus variantes
   móviles; requieren el servicio remoto de chat, que no está en el shadow.
-- **Analítica avanzada:** `GET /api/trading-analytics`,
-  `GET /api/hunting/diagnostics`, `GET /api/mobile/insights`.
-- **Pagos asistidos:** `GET /api/mobile/operations/:uuid/payment-preview`,
-  `GET /api/mobile/payment-receipts`.
-- **Resto (lectura):** `GET /api/operations/chats/unread`.
+- **Pagos asistidos:** `GET /api/mobile/operations/:uuid/payment-preview`
+  requiere perfil y oferta en vivo de QvaPay.
+- **Estático restante:** `GET /dashboard/:wildcard`; el shell lo sirve como
+  fallback, pero el comparador exacto no lo equipara.
 - **Mutaciones (no portadas):** el resto son `POST`, `PUT` y `DELETE` de
   configuración, ofertas, market readers, recovery, workflows, contribuciones,
   push subscriptions, blocked offers, simulaciones y webhooks.
