@@ -69,7 +69,7 @@ func TestAutoTraderDryRunDoesNotCallQvaPay(t *testing.T) {
 	repo := &fakeOperationRepo{operation: reservedOperation(t)}
 	executor := &fakeExecutor{}
 	trader := &autoTrader{dryRun: true, executor: executor}
-	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"))
+	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"), true)
 	if err != nil || state != core.StateDryRun || executor.calls != 0 {
 		t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
 	}
@@ -90,7 +90,7 @@ func TestAutoTraderLiveOutcomes(t *testing.T) {
 			repo := &fakeOperationRepo{operation: reservedOperation(t)}
 			executor := &fakeExecutor{err: tc.err, order: "order-1"}
 			trader := &autoTrader{executor: executor}
-			state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"))
+			state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"), true)
 			if err != nil || state != tc.state || executor.calls != 1 {
 				t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
 			}
@@ -117,7 +117,7 @@ func TestAutoTraderConfirmedIsIdempotent(t *testing.T) {
 	repo := &fakeOperationRepo{operation: operation}
 	executor := &fakeExecutor{order: "order-1"}
 	trader := &autoTrader{executor: executor}
-	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"))
+	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"), true)
 	if err != nil || state != core.StateConfirmed || executor.calls != 0 {
 		t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
 	}
@@ -233,5 +233,18 @@ func TestQvapayTradeExecutorValidatesResponse(t *testing.T) {
 				t.Fatalf("order=%q err=%v", order, err)
 			}
 		})
+	}
+}
+
+func TestAutoTraderFixedOfferNeedsNoOrder(t *testing.T) {
+	repo := &fakeOperationRepo{operation: reservedOperation(t)}
+	executor := &fakeExecutor{order: ""}
+	trader := &autoTrader{executor: executor}
+	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"), false)
+	if err != nil || state != core.StateConfirmed || executor.calls != 1 {
+		t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
+	}
+	if len(repo.orders) != 0 {
+		t.Fatalf("una oferta fija no debe persistir orden: %+v", repo.orders)
 	}
 }

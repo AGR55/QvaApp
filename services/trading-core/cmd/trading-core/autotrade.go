@@ -23,9 +23,9 @@ type qvapayTradeExecutor struct {
 	client *qvapay.MutationClient
 }
 
-// Apply envía la orden flexible y exige que QvaPay devuelva el UUID de la
-// orden, el importe solicitado exacto y una recepción positiva. Si la respuesta
-// no coincide, la operación queda incierta: el dinero pudo haberse movido.
+// Apply envía la aplicación. Las ofertas flexibles llevan importe y exigen
+// UUID de orden, importe exacto y recepción positiva. Las fijas se envían sin
+// cuerpo y QvaPay puede responder sin orden; en ese caso se confirma igual.
 func (executor *qvapayTradeExecutor) Apply(ctx context.Context, offerUUID string, amount *decimal.Value) (string, error) {
 	result, err := executor.client.Apply(ctx, offerUUID, amount)
 	if err != nil {
@@ -44,11 +44,11 @@ func (executor *qvapayTradeExecutor) Apply(ctx context.Context, offerUUID string
 		}
 	}
 	order := strings.TrimSpace(body.Order)
+	if amount == nil {
+		return order, nil
+	}
 	if order == "" {
 		return "", errors.New("QvaPay no devolvió el UUID de la orden")
-	}
-	if amount == nil {
-		return "", errors.New("aplicación sin importe solicitado")
 	}
 	applied, err := decimal.Parse(body.Amount.String())
 	if err != nil || applied.Cmp(*amount) != 0 {
@@ -82,6 +82,7 @@ func (trader *autoTrader) Execute(
 	repository operationTransitioner,
 	operationID, offerUUID string,
 	amount decimal.Value,
+	flexible bool,
 ) (core.OperationState, error) {
 	if trader == nil {
 		return "", errors.New("autotrader no configurado")
@@ -119,7 +120,11 @@ func (trader *autoTrader) Execute(
 	if trader.executor == nil {
 		return "", errors.New("executor QvaPay no configurado")
 	}
-	orderUUID, applyErr := trader.executor.Apply(ctx, offerUUID, &amount)
+	var requested *decimal.Value
+	if flexible {
+		requested = &amount
+	}
+	orderUUID, applyErr := trader.executor.Apply(ctx, offerUUID, requested)
 	if applyErr != nil {
 		target := core.StateUncertain
 		var mutationError *qvapay.MutationError
@@ -134,13 +139,21 @@ func (trader *autoTrader) Execute(
 		}
 		return target, nil
 	}
-	if err := repository.SetOrder(ctx, operationID, orderUUID); err != nil {
-		// La orden existe en QvaPay pero no se pudo persistir: se marca incierta
-		// para que el conciliador la resuelva con la referencia remota.
+	if flexible && orderUUID == "" {
 		if _, transitionErr := repository.Transition(ctx, operationID, core.StateUncertain, trader.timestamp()); transitionErr != nil {
-			return "", errors.Join(err, transitionErr)
+			return "", transitionErr
 		}
-		return core.StateUncertain, err
+		return core.StateUncertain, errors.New("aplicación flexible sin UUID de orden")
+	}
+	if orderUUID != "" {
+		if err := repository.SetOrder(ctx, operationID, orderUUID); err != nil {
+			// La orden existe en QvaPay pero no se pudo persistir: se marca incierta
+			// para que el conciliador la resuelva con la referencia remota.
+			if _, transitionErr := repository.Transition(ctx, operationID, core.StateUncertain, trader.timestamp()); transitionErr != nil {
+				return "", errors.Join(err, transitionErr)
+			}
+			return core.StateUncertain, err
+		}
 	}
 	confirmed, err := repository.Transition(ctx, operationID, core.StateConfirmed, trader.timestamp())
 	if err != nil {

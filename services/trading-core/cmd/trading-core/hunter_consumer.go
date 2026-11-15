@@ -284,7 +284,9 @@ func (consumer *hunterConsumer) consume(
 			} else {
 				consumer.operations.Add(1)
 				if consumer.trader != nil {
-					state, executeErr := consumer.trader.Execute(ctx, consumer.operationRepo, event.EventID, payload.OfferUUID, amount)
+					state, executeErr := consumer.trader.Execute(
+						ctx, consumer.operationRepo, event.EventID, payload.OfferUUID,
+						amount, payload.OfferKind == "flexible")
 					if executeErr != nil {
 						consumer.logger.Warn("autotrade falló", "event_id", event.EventID, "error", executeErr)
 					} else if state == core.StateConfirmed {
@@ -306,10 +308,9 @@ func sizePayloadAmount(
 	usage core.Usage,
 	rate decimal.Value,
 ) (decimal.Value, decimal.Value, bool, string) {
-	if payload.Side != "buy" {
-		return decimal.Zero(), decimal.Zero(), false, ""
-	}
-	if payload.OfferKind != "flexible" && strings.TrimSpace(payload.Available) == "" {
+	if payload.Side != "buy" || payload.OfferKind != "flexible" {
+		// Las ofertas fijas se aplican por su importe exacto y sin cuerpo; solo
+		// las flexibles admiten dimensionado.
 		return decimal.Zero(), decimal.Zero(), false, ""
 	}
 	if rate.Sign() <= 0 {
