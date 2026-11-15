@@ -56,6 +56,12 @@ type LiveMutations interface {
 	ConfirmReceived(ctx context.Context, offerUUID, order string) error
 }
 
+// LiveChat ejecuta el chat real de QvaPay. Si es nil, el chat es local.
+type LiveChat interface {
+	ListChat(ctx context.Context, operationUUID, order string) ([]ChatMessage, error)
+	SendChat(ctx context.Context, operationUUID, order, message string) (ChatMessage, error)
+}
+
 type ChatMessage struct {
 	ID            string `json:"id"`
 	OperationUUID string `json:"operationUuid"`
@@ -79,6 +85,7 @@ type MutationsAPI struct {
 	MobileAuth    *MobileAuthAPI
 	Store         MutationStore
 	Live          LiveMutations
+	Chat          LiveChat
 	TrustedOrigin string
 	Now           func() time.Time
 }
@@ -1276,9 +1283,15 @@ func (api *MutationsAPI) chatGet(
 	r *http.Request,
 	operationUUID string,
 ) {
-	messages, err := api.Store.ListMessages(ctx, operationUUID, mutationsChatListLimit)
+	var messages []ChatMessage
+	var err error
+	if api.Chat != nil {
+		messages, err = api.Chat.ListChat(ctx, operationUUID, strings.TrimSpace(r.URL.Query().Get("order")))
+	} else {
+		messages, err = api.Store.ListMessages(ctx, operationUUID, mutationsChatListLimit)
+	}
 	if err != nil {
-		writeMutationStorageUnavailable(w)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Chat no disponible."})
 		return
 	}
 	if messages == nil {
@@ -1343,6 +1356,17 @@ func (api *MutationsAPI) chatSend(
 	if err != nil {
 		writeMutationStorageUnavailable(w)
 		return
+	}
+	if api.Chat != nil {
+		remote, err := api.Chat.SendChat(ctx, operationUUID, orderUUID, message)
+		if err != nil {
+			_ = api.Store.Record(ctx, "chat_send_failed", operationUUID, mutationPayload(raw), actor, api.now().UnixMilli())
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "QvaPay rechazó el mensaje."})
+			return
+		}
+		if remote.ID != "" {
+			id = remote.ID
+		}
 	}
 	chatMessage := ChatMessage{
 		ID:            id,

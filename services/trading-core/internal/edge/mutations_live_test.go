@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -117,5 +118,36 @@ func TestMutationsAPILiveFailure(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no se registró el fallo de la mutación")
+	}
+}
+
+type fakeLiveChat struct {
+	sent []string
+}
+
+func (live *fakeLiveChat) ListChat(context.Context, string, string) ([]ChatMessage, error) {
+	return []ChatMessage{{ID: "m1", Message: "hola", Direction: "in"}}, nil
+}
+
+func (live *fakeLiveChat) SendChat(_ context.Context, operationUUID, order, text string) (ChatMessage, error) {
+	live.sent = append(live.sent, text)
+	return ChatMessage{ID: "m2", OperationUUID: operationUUID, OrderUUID: order, Message: text, Direction: "out"}, nil
+}
+
+func TestMutationsAPILiveChat(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	chat := &fakeLiveChat{}
+	api.Chat = chat
+
+	get := mutationsTestDo(api, mutationsTestCall{method: http.MethodGet, target: "/api/operations/op-1/chat", cookie: cookie})
+	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), "hola") {
+		t.Fatalf("chat get: %d %s", get.Code, get.Body.String())
+	}
+	post := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/chat",
+		body: `{"message":"respuesta"}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if post.Code != http.StatusCreated || len(chat.sent) != 1 || chat.sent[0] != "respuesta" {
+		t.Fatalf("chat post: %d %+v %s", post.Code, chat.sent, post.Body.String())
 	}
 }

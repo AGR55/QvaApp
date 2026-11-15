@@ -225,6 +225,12 @@ func run(logger *slog.Logger) error {
 						} else {
 							logger.Warn("dashboard live deshabilitado", "error", err)
 						}
+						if chatClient, err := qvapay.NewChatClient(cfg.MutationBaseURL, token); err == nil {
+							mutations.Chat = &liveChat{client: chatClient}
+							logger.Info("chat QvaPay LIVE habilitado")
+						} else {
+							logger.Warn("chat live deshabilitado", "error", err)
+						}
 					}
 				}
 			}
