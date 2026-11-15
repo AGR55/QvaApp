@@ -46,6 +46,16 @@ type MutationStore interface {
 
 // ChatMessage es un mensaje del chat sombra. OrderUUID y AttemptID pueden ir
 // vacíos; el resto identifica el hilo y el intento de envío.
+// LiveMutations ejecuta mutaciones reales contra QvaPay. Si es nil, el edge
+// conserva el modo shadow y solo registra intenciones.
+type LiveMutations interface {
+	CreateOffer(ctx context.Context, payload map[string]any) (map[string]any, error)
+	EditOffer(ctx context.Context, offerUUID string, payload map[string]any) error
+	CancelOffer(ctx context.Context, offerUUID, order string) error
+	MarkPaid(ctx context.Context, offerUUID, order, txID string) error
+	ConfirmReceived(ctx context.Context, offerUUID, order string) error
+}
+
 type ChatMessage struct {
 	ID            string `json:"id"`
 	OperationUUID string `json:"operationUuid"`
@@ -68,6 +78,7 @@ type MutationsAPI struct {
 	Sessions      *SessionManager
 	MobileAuth    *MobileAuthAPI
 	Store         MutationStore
+	Live          LiveMutations
 	TrustedOrigin string
 	Now           func() time.Time
 }
@@ -848,11 +859,36 @@ func (api *MutationsAPI) createOffer(
 		writeMutationStorageUnavailable(w)
 		return
 	}
+	execution := "shadow"
+	if api.Live != nil {
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Oferta inválida."})
+			return
+		}
+		if _, ok := payload["receive"]; !ok {
+			payload["receive"] = body.Amount * body.Rate
+		}
+		if _, ok := payload["idempotency_key"]; !ok {
+			payload["idempotency_key"] = uuid
+		}
+		result, err := api.Live.CreateOffer(ctx, payload)
+		if err != nil {
+			_ = api.Store.Record(ctx, "offer_create_failed", uuid, mutationPayload(raw), actor, api.now().UnixMilli())
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "QvaPay rechazó la creación de la oferta."})
+			return
+		}
+		if remote, ok := result["uuid"].(string); ok && remote != "" {
+			uuid = remote
+		}
+		execution = "qvapay"
+	}
 	if !api.record(ctx, w, "offer_created", uuid, raw, actor) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"data": map[string]any{
+			"execution": execution,
 			"uuid":      uuid,
 			"coin":      coin,
 			"type":      body.Type,
@@ -860,7 +896,6 @@ func (api *MutationsAPI) createOffer(
 			"receive":   body.Amount * body.Rate,
 			"rate":      body.Rate,
 			"status":    "open",
-			"execution": "shadow",
 		},
 	})
 }
@@ -895,6 +930,18 @@ func (api *MutationsAPI) updateOffer(
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Tasa inválida."})
 		return
 	}
+	if api.Live != nil {
+		var payload map[string]any
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Oferta inválida."})
+			return
+		}
+		if err := api.Live.EditOffer(ctx, uuid, payload); err != nil {
+			_ = api.Store.Record(ctx, "offer_update_failed", uuid, mutationPayload(raw), actor, api.now().UnixMilli())
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "QvaPay rechazó la edición de la oferta."})
+			return
+		}
+	}
 	if !api.record(ctx, w, "offer_updated", uuid, raw, actor) {
 		return
 	}
@@ -909,6 +956,13 @@ func (api *MutationsAPI) deleteOffer(
 	actor string,
 ) {
 	payload, _ := json.Marshal(map[string]string{"uuid": uuid})
+	if api.Live != nil {
+		if err := api.Live.CancelOffer(ctx, uuid, r.URL.Query().Get("order")); err != nil {
+			_ = api.Store.Record(ctx, "offer_cancel_failed", uuid, payload, actor, api.now().UnixMilli())
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "QvaPay rechazó la cancelación de la oferta."})
+			return
+		}
+	}
 	if !api.record(ctx, w, "offer_cancelled", uuid, payload, actor) {
 		return
 	}
@@ -1024,10 +1078,32 @@ func (api *MutationsAPI) operationAction(
 	if !mutationDecodeBody(w, raw, &body, true) {
 		return
 	}
+	reference := ""
 	if body.Reference != nil {
-		reference := strings.TrimSpace(*body.Reference)
+		reference = strings.TrimSpace(*body.Reference)
 		if reference == "" || utf8.RuneCountInString(reference) > 200 {
 			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "La referencia del pago es inválida."})
+			return
+		}
+	}
+	if api.Live != nil && route.action != "ack" {
+		order := r.URL.Query().Get("order")
+		var err error
+		switch route.action {
+		case "paid":
+			if reference == "" {
+				writeJSON(w, http.StatusBadRequest, map[string]any{"error": "La referencia del pago es obligatoria."})
+				return
+			}
+			err = api.Live.MarkPaid(ctx, route.id, order, reference)
+		case "received":
+			err = api.Live.ConfirmReceived(ctx, route.id, order)
+		case "cancel":
+			err = api.Live.CancelOffer(ctx, route.id, order)
+		}
+		if err != nil {
+			_ = api.Store.Record(ctx, "operation_"+route.action+"_failed", route.id, mutationPayload(raw), actor, api.now().UnixMilli())
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "QvaPay rechazó la operación."})
 			return
 		}
 	}

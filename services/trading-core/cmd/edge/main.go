@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/edge"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
@@ -47,6 +48,9 @@ type config struct {
 	TrustedOrigin    string
 	EncryptionKey    string
 	MutationsEnabled bool
+	MutationsLive    bool
+	QvaToken         string
+	MutationBaseURL  string
 	WebhookEnabled   bool
 	WebhookSecret    string
 }
@@ -198,6 +202,19 @@ func run(logger *slog.Logger) error {
 				analyticsFees.Store = &edge.PostgresFeeStore{Pool: writePool}
 				mutations.Store = &edge.PostgresMutationStore{Pool: writePool}
 				qvapayWebhook.Store = &edge.PostgresFeedEventStore{Pool: writePool}
+			}
+			if cfg.MutationsLive && cfg.QvaToken != "" && cfg.EncryptionKey != "" {
+				vaultClient, err := vault.New(cfg.EncryptionKey)
+				if err != nil {
+					logger.Warn("mutaciones live deshabilitadas: clave inválida", "error", err)
+				} else if token, err := vaultClient.Decrypt(cfg.QvaToken); err != nil {
+					logger.Warn("mutaciones live deshabilitadas: token inválido", "error", err)
+				} else {
+					client := qvapay.NewMutationClient(cfg.MutationBaseURL, token)
+					client.Enable()
+					mutations.Live = &liveMutations{client: client}
+					logger.Info("mutaciones QvaPay LIVE habilitadas")
+				}
 			}
 			if cfg.IconsDir != "" {
 				marketIcons = &edge.MarketIconsAPI{
@@ -477,6 +494,8 @@ func loadConfig() (config, error) {
 		SessionSecret:   strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
 		TrustedOrigin:   strings.TrimSpace(os.Getenv("EDGE_TRUSTED_ORIGIN")),
 		WebhookSecret:   strings.TrimSpace(os.Getenv("EDGE_QVAPAY_WEBHOOK_SECRET")),
+		QvaToken:        strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT")),
+		MutationBaseURL: envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"),
 		EncryptionKey:   strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY")),
 		OperatorsFile:   strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
 		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),

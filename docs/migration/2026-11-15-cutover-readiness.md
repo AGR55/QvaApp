@@ -25,10 +25,12 @@ markets:      producción 5  → shadow 5
 
 Además:
 
-- `internal/platform/qvapay/mutations.go` sólo implementa `Apply` y `Cancel`.
-  Faltan `createOffer`, `editOffer`, `markPaid`, `confirmReceived` y el flujo de
-  conciliación.
-- `MutationsAPI` registra intenciones en shadow; no ejecuta QvaPay.
+- `internal/platform/qvapay/mutations.go` ya implementa `Apply`, `Cancel`,
+  `CreateOffer`, `EditOffer`, `MarkPaid` y `ConfirmReceived` con tests.
+- `MutationsAPI` puede usar esas mutaciones reales con
+  `EDGE_MUTATIONS_LIVE=true`; por defecto sigue en shadow.
+- Falta el flujo completo de conciliación/idempotencia de operaciones y el
+  dashboard vivo.
 - `payment-preview` devuelve 503 porque necesita perfil/oferta en vivo.
 - El chat del edge es local; no habla con el chat remoto de QvaPay.
 - El webhook QvaPay del edge está activo con HMAC, pero el webhook de Telegram

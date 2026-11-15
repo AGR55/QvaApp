@@ -180,6 +180,104 @@ func (c *MutationClient) Cancel(ctx context.Context, offerUUID, order string) (M
 	return c.doMutation(ctx, endpoint, nil, false)
 }
 
+// CreateOffer crea una oferta P2P. El payload se envía tal cual a QvaPay;
+// el llamador debe incluir idempotency_key cuando quiera reintentos seguros.
+func (c *MutationClient) CreateOffer(ctx context.Context, payload map[string]any) (MutationResult, error) {
+	if !c.mutationsEnabled() {
+		return MutationResult{}, ErrMutationsDisabled
+	}
+	if strings.TrimSpace(c.Token) == "" {
+		return MutationResult{}, ErrMissingToken
+	}
+	if len(payload) == 0 {
+		return MutationResult{}, fmt.Errorf("payload de creación vacío")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return MutationResult{}, fmt.Errorf("no se pudo codificar la oferta: %w", err)
+	}
+	if len(body) > 32<<10 {
+		return MutationResult{}, fmt.Errorf("payload de creación demasiado grande")
+	}
+	endpoint, err := mutationCreateEndpoint(c.BaseURL)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return c.doMutation(ctx, endpoint, bytes.NewReader(body), true)
+}
+
+// EditOffer modifica una oferta existente con POST /p2p/{uuid}/edit.
+func (c *MutationClient) EditOffer(ctx context.Context, offerUUID string, payload map[string]any) (MutationResult, error) {
+	if !c.mutationsEnabled() {
+		return MutationResult{}, ErrMutationsDisabled
+	}
+	if strings.TrimSpace(c.Token) == "" {
+		return MutationResult{}, ErrMissingToken
+	}
+	if len(payload) == 0 {
+		return MutationResult{}, fmt.Errorf("payload de edición vacío")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return MutationResult{}, fmt.Errorf("no se pudo codificar la edición: %w", err)
+	}
+	if len(body) > 32<<10 {
+		return MutationResult{}, fmt.Errorf("payload de edición demasiado grande")
+	}
+	endpoint, err := mutationEndpoint(c.BaseURL, offerUUID, "edit", "")
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return c.doMutation(ctx, endpoint, bytes.NewReader(body), true)
+}
+
+// MarkPaid marca una operación como pagada. El txID es la referencia que el
+// operador debe conservar para conciliar.
+func (c *MutationClient) MarkPaid(ctx context.Context, offerUUID, order, txID string) (MutationResult, error) {
+	if !c.mutationsEnabled() {
+		return MutationResult{}, ErrMutationsDisabled
+	}
+	if strings.TrimSpace(c.Token) == "" {
+		return MutationResult{}, ErrMissingToken
+	}
+	txID = strings.TrimSpace(txID)
+	if txID == "" || len(txID) > 200 {
+		return MutationResult{}, fmt.Errorf("referencia de pago inválida")
+	}
+	if order != "" && !isMutationUUID(order) {
+		return MutationResult{}, fmt.Errorf("UUID de orden inválido: %w", ErrInvalidUUID)
+	}
+	endpoint, err := mutationEndpoint(c.BaseURL, offerUUID, "paid", order)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	payload, err := json.Marshal(struct {
+		TxID string `json:"tx_id"`
+	}{TxID: txID})
+	if err != nil {
+		return MutationResult{}, fmt.Errorf("no se pudo codificar la referencia: %w", err)
+	}
+	return c.doMutation(ctx, endpoint, bytes.NewReader(payload), true)
+}
+
+// ConfirmReceived confirma la recepción de una operación.
+func (c *MutationClient) ConfirmReceived(ctx context.Context, offerUUID, order string) (MutationResult, error) {
+	if !c.mutationsEnabled() {
+		return MutationResult{}, ErrMutationsDisabled
+	}
+	if strings.TrimSpace(c.Token) == "" {
+		return MutationResult{}, ErrMissingToken
+	}
+	if order != "" && !isMutationUUID(order) {
+		return MutationResult{}, fmt.Errorf("UUID de orden inválido: %w", ErrInvalidUUID)
+	}
+	endpoint, err := mutationEndpoint(c.BaseURL, offerUUID, "received", order)
+	if err != nil {
+		return MutationResult{}, err
+	}
+	return c.doMutation(ctx, endpoint, nil, false)
+}
+
 func (c *MutationClient) mutationsEnabled() bool {
 	if c == nil {
 		return false
@@ -270,28 +368,15 @@ func mutationEndpoint(baseURL, offerUUID, action, order string) (string, error) 
 		return "", fmt.Errorf("UUID de oferta inválido: %w", ErrInvalidUUID)
 	}
 	switch action {
-	case "apply", "cancel":
+	case "apply", "cancel", "edit", "paid", "received":
 	default:
 		return "", fmt.Errorf("acción de mutación no permitida: %q", action)
 	}
 
-	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	parsed, err := mutationBaseURL(baseURL)
 	if err != nil {
-		return "", fmt.Errorf("BaseURL de QvaPay inválida: %w", err)
+		return "", err
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return "", fmt.Errorf("BaseURL de QvaPay debe usar http o https")
-	}
-	if parsed.Host == "" {
-		return "", fmt.Errorf("BaseURL de QvaPay sin host")
-	}
-	if parsed.User != nil {
-		return "", fmt.Errorf("BaseURL de QvaPay no debe incluir credenciales")
-	}
-	if parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
-		return "", fmt.Errorf("BaseURL de QvaPay no debe incluir query ni fragmento")
-	}
-
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/p2p/" + offerUUID + "/" + action
 	parsed.RawPath = ""
 	if order != "" {
@@ -344,4 +429,35 @@ func redactToken(text, token string) string {
 		return text
 	}
 	return strings.ReplaceAll(text, token, "[redacted]")
+}
+
+func mutationBaseURL(baseURL string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil {
+		return nil, fmt.Errorf("BaseURL de QvaPay inválida: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("BaseURL de QvaPay debe usar http o https")
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("BaseURL de QvaPay sin host")
+	}
+	if parsed.User != nil {
+		return nil, fmt.Errorf("BaseURL de QvaPay no debe incluir credenciales")
+	}
+	if parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return nil, fmt.Errorf("BaseURL de QvaPay no debe incluir query ni fragmento")
+	}
+	return parsed, nil
+}
+
+func mutationCreateEndpoint(baseURL string) (string, error) {
+	parsed, err := mutationBaseURL(baseURL)
+	if err != nil {
+		return "", err
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/p2p/create"
+	parsed.RawPath = ""
+	parsed.RawQuery = ""
+	return parsed.String(), nil
 }

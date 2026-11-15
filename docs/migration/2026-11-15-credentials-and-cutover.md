@@ -114,8 +114,9 @@ en modo read-only.
 
 Todo lo que crea, edita o cancela ofertas, aplica operaciones, rebalancea
 capital, publica contribuciones cooperativas o resuelve conciliaciones sigue
-**apagado**. El adaptador `internal/platform/qvapay/mutations.go` solo ejecuta
-`Apply`/`Cancel` cuando un operador llama a `Enable()`. No se habilita desde una
+**apagado**. El adaptador `internal/platform/qvapay/mutations.go` ejecuta
+`Apply`, `Cancel`, `CreateOffer`, `EditOffer`, `MarkPaid` y `ConfirmReceived`
+cuando `EDGE_MUTATIONS_LIVE=true` y el token está disponible. No se habilita desde una
 ruta web ni desde una variable de entorno.
 
 Para un cutover controlado:

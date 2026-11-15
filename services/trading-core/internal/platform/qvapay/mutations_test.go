@@ -468,10 +468,14 @@ func TestMutationClientEnableDisable(t *testing.T) {
 func TestMutationClientHasNoUnsupportedMutations(t *testing.T) {
 	clientType := reflect.TypeOf((*MutationClient)(nil))
 	want := map[string]bool{
-		"Apply":   true,
-		"Cancel":  true,
-		"Disable": true,
-		"Enable":  true,
+		"Apply":           true,
+		"Cancel":          true,
+		"ConfirmReceived": true,
+		"CreateOffer":     true,
+		"Disable":         true,
+		"EditOffer":       true,
+		"Enable":          true,
+		"MarkPaid":        true,
 	}
 	got := make(map[string]bool, clientType.NumMethod())
 	for index := 0; index < clientType.NumMethod(); index++ {
@@ -485,4 +489,87 @@ func TestMutationClientHasNoUnsupportedMutations(t *testing.T) {
 func decimalValue(text string) *decimal.Value {
 	value := decimal.MustParse(text)
 	return &value
+}
+
+func TestMutationClientCreateOffer(t *testing.T) {
+	server, calls := newMutationRecorder(t, http.StatusCreated, `{"p2p":{"uuid":"`+mutationOfferUUID+`"}}`)
+	client := NewMutationClient(server.URL, "token")
+	client.Enable()
+
+	payload := map[string]any{
+		"type": "sell", "coin": "CLASICA", "amount": 10, "receive": 11,
+		"details":         []map[string]string{{"name": "Cuenta", "value": "123"}},
+		"idempotency_key": "idem-1",
+	}
+	result, err := client.CreateOffer(context.Background(), payload)
+	if err != nil {
+		t.Fatalf("CreateOffer: %v", err)
+	}
+	if result.StatusCode != http.StatusCreated || !strings.Contains(string(result.Body), mutationOfferUUID) {
+		t.Fatalf("resultado = %+v", result)
+	}
+	recorded := calls()
+	if len(recorded) != 1 || recorded[0].path != "/p2p/create" || recorded[0].method != http.MethodPost {
+		t.Fatalf("llamadas = %+v", recorded)
+	}
+	if !strings.Contains(recorded[0].body, `"idempotency_key":"idem-1"`) {
+		t.Fatalf("cuerpo = %s", recorded[0].body)
+	}
+	if recorded[0].contentType != "application/json" {
+		t.Fatalf("Content-Type = %q", recorded[0].contentType)
+	}
+}
+
+func TestMutationClientEditOffer(t *testing.T) {
+	server, calls := newMutationRecorder(t, http.StatusOK, `{"p2p":{"uuid":"`+mutationOfferUUID+`"}}`)
+	client := NewMutationClient(server.URL, "token")
+	client.Enable()
+
+	if _, err := client.EditOffer(context.Background(), mutationOfferUUID, map[string]any{"amount": 5, "rate": 1.1}); err != nil {
+		t.Fatalf("EditOffer: %v", err)
+	}
+	recorded := calls()
+	if len(recorded) != 1 || recorded[0].path != "/p2p/"+mutationOfferUUID+"/edit" {
+		t.Fatalf("llamadas = %+v", recorded)
+	}
+	if recorded[0].body != `{"amount":5,"rate":1.1}` {
+		t.Fatalf("cuerpo = %s", recorded[0].body)
+	}
+}
+
+func TestMutationClientMarkPaid(t *testing.T) {
+	server, calls := newMutationRecorder(t, http.StatusOK, `{}`)
+	client := NewMutationClient(server.URL, "token")
+	client.Enable()
+
+	if _, err := client.MarkPaid(context.Background(), mutationOfferUUID, mutationOrderUUID, "ref-123"); err != nil {
+		t.Fatalf("MarkPaid: %v", err)
+	}
+	recorded := calls()
+	if len(recorded) != 1 || recorded[0].path != "/p2p/"+mutationOfferUUID+"/paid" {
+		t.Fatalf("llamadas = %+v", recorded)
+	}
+	if recorded[0].query != "order="+mutationOrderUUID {
+		t.Fatalf("query = %q", recorded[0].query)
+	}
+	if recorded[0].body != `{"tx_id":"ref-123"}` {
+		t.Fatalf("cuerpo = %s", recorded[0].body)
+	}
+}
+
+func TestMutationClientConfirmReceived(t *testing.T) {
+	server, calls := newMutationRecorder(t, http.StatusOK, `{}`)
+	client := NewMutationClient(server.URL, "token")
+	client.Enable()
+
+	if _, err := client.ConfirmReceived(context.Background(), mutationOfferUUID, mutationOrderUUID); err != nil {
+		t.Fatalf("ConfirmReceived: %v", err)
+	}
+	recorded := calls()
+	if len(recorded) != 1 || recorded[0].path != "/p2p/"+mutationOfferUUID+"/received" {
+		t.Fatalf("llamadas = %+v", recorded)
+	}
+	if recorded[0].body != "" || recorded[0].contentType != "" {
+		t.Fatalf("cuerpo inesperado: %+v", recorded[0])
+	}
 }
