@@ -58,7 +58,11 @@ func (reconciler *operationReconciler) runOnce(ctx context.Context) {
 		FROM shadow.core_operations o
 		JOIN shadow.core_decisions d ON d.event_id = o.operation_id
 		WHERE o.state = 'uncertain'
-		   OR (o.state = 'confirmed' AND o.updated_at < $1)
+		   OR (o.state = 'confirmed' AND o.updated_at < $1
+		       AND EXISTS (
+		         SELECT 1 FROM shadow.local_operations l
+		         WHERE l.uuid = d.offer_uuid AND l.state IN ('applied', 'paid')
+		       ))
 		ORDER BY o.updated_at ASC LIMIT 20`, staleBefore)
 	if err != nil {
 		return
