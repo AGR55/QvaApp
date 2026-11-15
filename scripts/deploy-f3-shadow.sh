@@ -110,6 +110,18 @@ if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migr
   exit 2
 fi
 
+# Genera una única vez el par VAPID del shadow. No se imprime por stdout ni se
+# commitea; queda en un archivo 600 reutilizado por notifier y edge.
+push_env="$app_root/push.env"
+if [[ ! -s $push_env ]]; then
+  temporary_push=$(mktemp "$app_root/push.env.XXXXXX")
+  python3 "$release_dir/scripts/f3-generate-vapid.py" > "$temporary_push"
+  chmod 600 "$temporary_push"
+  mv -f "$temporary_push" "$push_env"
+fi
+chmod 600 "$push_env"
+export F3_NOTIFIER_ENV="$push_env"
+
 # Valida la interpolación antes de construir.
 compose_for "$compose_file" config -q
 
@@ -212,6 +224,10 @@ if [[ -r $prod_env && -r $prod_db ]]; then
         printf 'EDGE_SECURE_COOKIES=false\n'
         printf 'EDGE_TRUSTED_ORIGIN=%s\n' "$trusted_origin"
         printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
+        push_public=$(sed -n 's/^WEB_PUSH_PUBLIC_KEY=//p' "$push_env" | tail -n 1 | tr -d '\r')
+        if [[ -n $push_public ]]; then
+          printf 'EDGE_PUSH_PUBLIC_KEY=%s\n' "$push_public"
+        fi
       } > "$temporary_edge_env"
       chmod 600 "$temporary_edge_env"
       mv -f "$temporary_edge_env" "$app_root/edge.env"

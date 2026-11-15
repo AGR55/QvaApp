@@ -62,6 +62,7 @@ required_paths=(
   scripts/f3-export-dashboard-snapshot.py
   scripts/f3-export-runtime-config.py
   scripts/f3-export-web-extras.py
+  scripts/f3-generate-vapid.py
   scripts/f3-shadow-invariants.sh
   scripts/f3-shadow-soak.sh
   scripts/f3-shadow-soak-report.sh
@@ -177,6 +178,7 @@ for required_member in \
   scripts/f3-export-dashboard-snapshot.py \
   scripts/f3-export-runtime-config.py \
   scripts/f3-export-web-extras.py \
+  scripts/f3-generate-vapid.py \
   scripts/f3-shadow-invariants.sh \
   scripts/f3-shadow-soak.sh \
   scripts/f3-shadow-soak-report.sh \

@@ -123,6 +123,8 @@ services:
     profiles: ["notifier"]
     container_name: qvaapply-f3-shadow-notifier
     restart: unless-stopped
+    env_file:
+      - ${F3_NOTIFIER_ENV:-/dev/null}
     environment:
       PORT: "8092"
       NOTIFIER_DRY_RUN: ${NOTIFIER_DRY_RUN:-true}
