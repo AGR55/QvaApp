@@ -187,6 +187,15 @@ func (api *DecisionEventsAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 
 	path := r.URL.Path
+	if uuid, ok := blockedOfferDismissUUID(path); ok {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"status": "method_not_allowed"})
+			return
+		}
+		api.dismissBlockedOffer(w, r, uuid)
+		return
+	}
 	switch {
 	case path == decisionEventsAuditPath:
 		if r.Method != http.MethodGet {
@@ -579,4 +588,53 @@ func decisionEventsNormalizeChecks(raw json.RawMessage) json.RawMessage {
 		return json.RawMessage("[]")
 	}
 	return trimmed
+}
+
+// blockedOfferDismissUUID reconoce /api/blocked-offers/{uuid}/dismiss.
+func blockedOfferDismissUUID(path string) (string, bool) {
+	remainder, ok := strings.CutPrefix(path, "/api/blocked-offers/")
+	if !ok {
+		return "", false
+	}
+	uuid, ok := strings.CutSuffix(remainder, "/dismiss")
+	if !ok || uuid == "" || strings.Contains(uuid, "/") || len(uuid) > 100 {
+		return "", false
+	}
+	return uuid, true
+}
+
+// dismissBlockedOffer oculta todas las decisiones bloqueadas pendientes de una
+// oferta. No hay mutación remota: el descarte vive solo en el edge shadow.
+func (api *DecisionEventsAPI) dismissBlockedOffer(w http.ResponseWriter, r *http.Request, uuid string) {
+	if _, ok := api.authenticated(r); !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Autenticación requerida."})
+		return
+	}
+	cookie, _ := api.authenticated(r)
+	if !api.mutationAllowed(w, r, cookie) {
+		return
+	}
+	snapshot, ok := api.loadSnapshot()
+	if !ok {
+		writeDecisionEventsUnavailable(w)
+		return
+	}
+	ids := make([]int64, 0, 4)
+	for _, event := range snapshot.DecisionEvents {
+		if event.UUID != uuid || event.ResolvedAt != nil {
+			continue
+		}
+		if event.Decision == "blocked" || event.Decision == "manual_review" {
+			ids = append(ids, event.ID)
+		}
+	}
+	if len(ids) > 0 && api.Dismissals != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), statsTimeout)
+		defer cancel()
+		if err := api.Dismissals.Add(ctx, ids, api.now().UnixMilli()); err != nil {
+			writeDecisionEventsUnavailable(w)
+			return
+		}
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

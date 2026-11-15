@@ -82,3 +82,14 @@ CREATE TABLE IF NOT EXISTS shadow.chat_push_devices (
   token text NOT NULL UNIQUE,
   updated_at bigint NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow.analytics_fee_evidence (
+  account_uuid text NOT NULL,
+  offer_uuid text NOT NULL,
+  gross_qusd double precision NOT NULL,
+  fee_qusd double precision NOT NULL,
+  evidence text NOT NULL,
+  version integer NOT NULL,
+  updated_at bigint NOT NULL,
+  PRIMARY KEY (account_uuid, offer_uuid)
+);

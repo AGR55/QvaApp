@@ -292,10 +292,16 @@ route_is_interesting() {
   fi
   if [[ -r "${EDGE_DIR}/web_extras_api.go" ]]; then
     printf 'POST /api/notifications/:param/ack\n'
+    printf 'POST /api/recovery/:param/evidence\n'
+    printf 'POST /api/recovery/:param/acknowledge\n'
   fi
   if [[ -r "${EDGE_DIR}/decision_events_api.go" ]]; then
     printf 'POST /api/decision-events/dismiss-all\n'
     printf 'POST /api/decision-events/:param/dismiss\n'
+    printf 'POST /api/blocked-offers/:param/dismiss\n'
+  fi
+  if [[ -r "${EDGE_DIR}/analytics_fees_api.go" ]]; then
+    printf 'POST /api/analytics/fees\n'
   fi
   if [[ -r "${EDGE_DIR}/mobile_admin_api.go" ]]; then
     printf 'GET /api/mobile/devices\nPOST /api/mobile/devices\nDELETE /api/mobile/devices/:param\n'

@@ -664,3 +664,464 @@ func TestPostgresAckStoreNilPool(t *testing.T) {
 		t.Fatal("Ack con pool nil debe fallar")
 	}
 }
+
+type webExtrasSettingPut struct {
+	key   string
+	value []byte
+	now   int64
+}
+
+type webExtrasFakeSettings struct {
+	values map[string][]byte
+	getErr error
+	putErr error
+	puts   []webExtrasSettingPut
+}
+
+func (settings *webExtrasFakeSettings) GetSetting(_ context.Context, key string) ([]byte, bool, error) {
+	if settings.getErr != nil {
+		return nil, false, settings.getErr
+	}
+	value, ok := settings.values[key]
+	return value, ok, nil
+}
+
+func (settings *webExtrasFakeSettings) PutSetting(_ context.Context, key string, value []byte, now int64) error {
+	settings.puts = append(settings.puts, webExtrasSettingPut{key: key, value: value, now: now})
+	if settings.putErr != nil {
+		return settings.putErr
+	}
+	if settings.values == nil {
+		settings.values = map[string][]byte{}
+	}
+	settings.values[key] = value
+	return nil
+}
+
+const webExtrasRecoveryTestSnapshot = `{
+ "logs":[],
+ "notifications":[],
+ "recovery":{"items":[
+  {"intentId":"i-1","kind":"apply","state":"uncertain","operationUuid":null,"workflowId":null,"createdAt":1,"updatedAt":2,"error":null,"acknowledged":false,"evidence":[],"manualEligible":false,"manualOutcomes":[],"manualBlockedReason":"solo lectura"},
+  {"intentId":"i-2","kind":"rollback","state":"blocked","operationUuid":"op-2","createdAt":3,"updatedAt":4,"acknowledged":false,"evidence":[{"text":"nota previa","actor":"system","at":5}]}
+ ],"blocked":true,"checkedAt":9}
+}`
+
+type webExtrasRecoveryTestEvidence struct {
+	Text  string `json:"text"`
+	Actor string `json:"actor"`
+	At    int64  `json:"at"`
+}
+
+type webExtrasRecoveryTestItem struct {
+	IntentID            string                          `json:"intentId"`
+	Kind                string                          `json:"kind"`
+	State               string                          `json:"state"`
+	Acknowledged        bool                            `json:"acknowledged"`
+	Evidence            []webExtrasRecoveryTestEvidence `json:"evidence"`
+	ManualBlockedReason string                          `json:"manualBlockedReason"`
+}
+
+type webExtrasRecoveryTestPayload struct {
+	Data struct {
+		Items     []webExtrasRecoveryTestItem `json:"items"`
+		Blocked   bool                        `json:"blocked"`
+		CheckedAt int64                       `json:"checkedAt"`
+	} `json:"data"`
+}
+
+func newWebExtrasRecoveryTestAPI(
+	t *testing.T,
+	snapshot string,
+) (*WebExtrasAPI, *webExtrasFakeSettings, *http.Cookie, string) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "web-extras.json")
+	if err := os.WriteFile(file, []byte(snapshot), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	manager := newSessionTestManager(t, 15*time.Minute)
+	now := time.UnixMilli(webExtrasTestNowMS)
+	token, csrf, err := manager.Issue(now)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	settings := &webExtrasFakeSettings{values: map[string][]byte{}}
+	api := &WebExtrasAPI{
+		Sessions: manager, File: file, Acks: &webExtrasFakeAckStore{},
+		Settings: settings, TrustedOrigin: "https://panel.example",
+		Now: func() time.Time { return now },
+	}
+	return api, settings, &http.Cookie{Name: CookieName, Value: token}, csrf
+}
+
+func decodeWebExtrasRecoveryItem(
+	t *testing.T,
+	recorder *httptest.ResponseRecorder,
+) webExtrasRecoveryTestItem {
+	t.Helper()
+	response := decodeWebExtrasBody[struct {
+		Data webExtrasRecoveryTestItem `json:"data"`
+	}](t, recorder)
+	return response.Data
+}
+
+func TestWebExtrasRecoveryMergesPersistedState(t *testing.T) {
+	api, settings, cookie, _ := newWebExtrasRecoveryTestAPI(t, webExtrasRecoveryTestSnapshot)
+	settings.values[webExtrasRecoveryAckPrefix+"i-1"] = []byte("1700000000000")
+	settings.values[webExtrasRecoveryEvidencePrefix+"i-1"] = []byte(
+		`[{"text":"revisado a mano","actor":"panel","at":1700000000500}]`)
+	settings.values[webExtrasRecoveryEvidencePrefix+"i-2"] = []byte(`{no es json`)
+
+	recorder := webExtrasDo(api, http.MethodGet, "/api/recovery", "", cookie, "", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	payload := decodeWebExtrasBody[webExtrasRecoveryTestPayload](t, recorder)
+	if !payload.Data.Blocked || payload.Data.CheckedAt != 9 || len(payload.Data.Items) != 2 {
+		t.Fatalf("payload = %+v", payload.Data)
+	}
+	byID := make(map[string]webExtrasRecoveryTestItem, len(payload.Data.Items))
+	for _, item := range payload.Data.Items {
+		byID[item.IntentID] = item
+	}
+
+	first := byID["i-1"]
+	if !first.Acknowledged {
+		t.Fatal("i-1 debe quedar reconocida")
+	}
+	if len(first.Evidence) != 1 || first.Evidence[0].Text != "revisado a mano" ||
+		first.Evidence[0].Actor != "panel" || first.Evidence[0].At != 1700000000500 {
+		t.Fatalf("i-1 evidence = %+v", first.Evidence)
+	}
+	if first.Kind != "apply" || first.State != "uncertain" || first.ManualBlockedReason != "solo lectura" {
+		t.Fatalf("i-1 perdió campos del snapshot: %+v", first)
+	}
+
+	second := byID["i-2"]
+	if second.Acknowledged {
+		t.Fatal("i-2 no tiene ack persistido")
+	}
+	if len(second.Evidence) != 1 || second.Evidence[0].Text != "nota previa" ||
+		second.Evidence[0].Actor != "system" || second.Evidence[0].At != 5 {
+		t.Fatalf("i-2 debe conservar la evidencia del snapshot: %+v", second.Evidence)
+	}
+}
+
+func TestWebExtrasRecoverySettingsError(t *testing.T) {
+	api, settings, cookie, _ := newWebExtrasRecoveryTestAPI(t, webExtrasRecoveryTestSnapshot)
+	settings.getErr = errors.New("boom")
+	recorder := webExtrasDo(api, http.MethodGet, "/api/recovery", "", cookie, "", "")
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if payload["status"] != "unavailable" {
+		t.Fatalf("payload = %v", payload)
+	}
+}
+
+func TestWebExtrasRecoveryEvidenceAppends(t *testing.T) {
+	api, settings, cookie, csrf := newWebExtrasRecoveryTestAPI(t, webExtrasRecoveryTestSnapshot)
+	path := "/api/recovery/i-2/evidence"
+
+	recorder := webExtrasDo(api, http.MethodPost, path,
+		`{"evidence":"  comprobante revisado  "}`, cookie, csrf, "https://panel.example")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q", got)
+	}
+	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("X-Content-Type-Options = %q", got)
+	}
+	if got := recorder.Header().Get("Content-Type"); !strings.HasPrefix(got, "application/json") {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("CORS inesperado: %q", got)
+	}
+
+	item := decodeWebExtrasRecoveryItem(t, recorder)
+	if item.IntentID != "i-2" || item.Acknowledged {
+		t.Fatalf("item = %+v", item)
+	}
+	if len(item.Evidence) != 2 {
+		t.Fatalf("evidence = %+v", item.Evidence)
+	}
+	if got := item.Evidence[1]; got.Text != "comprobante revisado" ||
+		got.Actor != "panel" || got.At != webExtrasTestNowMS {
+		t.Fatalf("entrada añadida = %+v", got)
+	}
+	if got := item.Evidence[0]; got.Text != "nota previa" {
+		t.Fatalf("entrada previa = %+v", got)
+	}
+
+	key := webExtrasRecoveryEvidencePrefix + "i-2"
+	var stored []webExtrasRecoveryTestEvidence
+	if err := json.Unmarshal(settings.values[key], &stored); err != nil {
+		t.Fatalf("setting guardado: %v", err)
+	}
+	if len(stored) != 2 || stored[1].Text != "comprobante revisado" {
+		t.Fatalf("setting = %+v", stored)
+	}
+	if len(settings.puts) != 1 || settings.puts[0].key != key ||
+		settings.puts[0].now != webExtrasTestNowMS {
+		t.Fatalf("puts = %+v", settings.puts)
+	}
+
+	recorder = webExtrasDo(api, http.MethodPost, path,
+		`{"evidence":"segunda nota valida"}`, cookie, csrf, "https://panel.example")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("segundo status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	item = decodeWebExtrasRecoveryItem(t, recorder)
+	if len(item.Evidence) != 3 || item.Evidence[2].Text != "segunda nota valida" {
+		t.Fatalf("segunda evidence = %+v", item.Evidence)
+	}
+	if err := json.Unmarshal(settings.values[key], &stored); err != nil {
+		t.Fatalf("setting guardado: %v", err)
+	}
+	if len(stored) != 3 || stored[0].Text != "nota previa" || stored[1].Text != "comprobante revisado" {
+		t.Fatalf("setting acumulado = %+v", stored)
+	}
+}
+
+func TestWebExtrasRecoveryEvidenceFromEmptySnapshot(t *testing.T) {
+	api, settings, cookie, csrf := newWebExtrasRecoveryTestAPI(t, webExtrasRecoveryTestSnapshot)
+	recorder := webExtrasDo(api, http.MethodPost, "/api/recovery/i-1/evidence",
+		`{"evidence":"primera nota manual"}`, cookie, csrf, "https://panel.example")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	item := decodeWebExtrasRecoveryItem(t, recorder)
+	if len(item.Evidence) != 1 || item.Evidence[0].Text != "primera nota manual" {
+		t.Fatalf("evidence = %+v", item.Evidence)
+	}
+	if _, ok := settings.values[webExtrasRecoveryEvidencePrefix+"i-1"]; !ok {
+		t.Fatal("falta el setting de evidencia")
+	}
+}
+
+func TestWebExtrasRecoveryAcknowledge(t *testing.T) {
+	api, settings, cookie, csrf := newWebExtrasRecoveryTestAPI(t, webExtrasRecoveryTestSnapshot)
+	recorder := webExtrasDo(api, http.MethodPost, "/api/recovery/i-1/acknowledge",
+		"", cookie, csrf, "https://panel.example")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	item := decodeWebExtrasRecoveryItem(t, recorder)
+	if item.IntentID != "i-1" || !item.Acknowledged {
+		t.Fatalf("item = %+v", item)
+	}
+	if item.Kind != "apply" || item.State != "uncertain" {
+		t.Fatalf("item perdió campos: %+v", item)
+	}
+	stamp, ok := settings.values[webExtrasRecoveryAckPrefix+"i-1"]
+	if !ok {
+		t.Fatal("falta el setting de ack")
+	}
+	if string(stamp) != "1700000000000" {
+		t.Fatalf("stamp = %q", stamp)
+	}
+
+	recorder = webExtrasDo(api, http.MethodGet, "/api/recovery", "", cookie, "", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET status = %d", recorder.Code)
+	}
+	payload := decodeWebExtrasBody[webExtrasRecoveryTestPayload](t, recorder)
+	if len(payload.Data.Items) != 2 || !payload.Data.Items[0].Acknowledged {
+		t.Fatalf("payload = %+v", payload.Data.Items)
+	}
+}
+
+func TestWebExtrasRecoveryMutationGuards(t *testing.T) {
+	api, settings, cookie, csrf := newWebExtrasRecoveryTestAPI(t, webExtrasRecoveryTestSnapshot)
+	const evidencePath = "/api/recovery/i-1/evidence"
+	const ackPath = "/api/recovery/i-1/acknowledge"
+	const origin = "https://panel.example"
+
+	t.Run("intención inexistente", func(t *testing.T) {
+		for _, path := range []string{
+			"/api/recovery/nope/evidence",
+			"/api/recovery/nope/acknowledge",
+		} {
+			recorder := webExtrasDo(api, http.MethodPost, path,
+				`{"evidence":"nota suficientemente larga"}`, cookie, csrf, origin)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("%s: status = %d (cuerpo %q)", path, recorder.Code, recorder.Body.String())
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("%s: JSON: %v", path, err)
+			}
+			if payload["error"] != "Intención no encontrada." {
+				t.Fatalf("%s: error = %q", path, payload["error"])
+			}
+		}
+	})
+
+	t.Run("cuerpo inválido", func(t *testing.T) {
+		bodies := []string{
+			"",
+			"{}",
+			"no es json",
+			`{"evidence":12}`,
+			`{"evidence":""}`,
+			`{"evidence":"corto"}`,
+			`{"evidence":"` + strings.Repeat("a", 11) + `"}`,
+			`{"evidence":"` + strings.Repeat("a", webExtrasRecoveryEvidenceMaxRune+1) + `"}`,
+			`{"evidence":"` + strings.Repeat("á", webExtrasRecoveryEvidenceMaxRune+1) + `"}`,
+		}
+		for _, body := range bodies {
+			recorder := webExtrasDo(api, http.MethodPost, evidencePath, body, cookie, csrf, origin)
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("cuerpo %q: status = %d (cuerpo %q)", body, recorder.Code, recorder.Body.String())
+			}
+		}
+		long := `{"evidence":"` + strings.Repeat("a", webExtrasRecoveryBodyBytes) + `"}`
+		recorder := webExtrasDo(api, http.MethodPost, evidencePath, long, cookie, csrf, origin)
+		if recorder.Code != http.StatusRequestEntityTooLarge {
+			t.Fatalf("cuerpo enorme: status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("límites válidos", func(t *testing.T) {
+		for _, body := range []string{
+			`{"evidence":"` + strings.Repeat("a", webExtrasRecoveryEvidenceMinRune) + `"}`,
+			`{"evidence":"` + strings.Repeat("a", webExtrasRecoveryEvidenceMaxRune) + `"}`,
+		} {
+			recorder := webExtrasDo(api, http.MethodPost, evidencePath, body, cookie, csrf, origin)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+			}
+		}
+	})
+
+	t.Run("sin sesión", func(t *testing.T) {
+		for _, path := range []string{evidencePath, ackPath} {
+			recorder := webExtrasDo(api, http.MethodPost, path,
+				`{"evidence":"nota suficientemente larga"}`, nil, csrf, origin)
+			if recorder.Code != http.StatusUnauthorized {
+				t.Fatalf("%s: status = %d", path, recorder.Code)
+			}
+		}
+	})
+
+	t.Run("origen y csrf", func(t *testing.T) {
+		cases := []struct {
+			name, csrf, origin string
+		}{
+			{"origen ajeno", csrf, "https://evil.example"},
+			{"sin origen", csrf, ""},
+			{"sin csrf", "", origin},
+			{"csrf incorrecto", "incorrecto", origin},
+		}
+		for _, testCase := range cases {
+			for _, path := range []string{evidencePath, ackPath} {
+				recorder := webExtrasDo(api, http.MethodPost, path,
+					`{"evidence":"nota suficientemente larga"}`,
+					cookie, testCase.csrf, testCase.origin)
+				if recorder.Code != http.StatusForbidden {
+					t.Fatalf("%s %s: status = %d (cuerpo %q)",
+						testCase.name, path, recorder.Code, recorder.Body.String())
+				}
+			}
+		}
+	})
+
+	t.Run("método incorrecto", func(t *testing.T) {
+		for _, path := range []string{
+			evidencePath, ackPath,
+			"/api/recovery/nope/evidence", "/api/recovery/nope/acknowledge",
+		} {
+			for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+				recorder := webExtrasDo(api, method, path, "", cookie, csrf, "")
+				if recorder.Code != http.StatusMethodNotAllowed {
+					t.Fatalf("%s %s: status = %d", method, path, recorder.Code)
+				}
+				if got := recorder.Header().Get("Allow"); got != http.MethodPost {
+					t.Fatalf("%s %s: Allow = %q", method, path, got)
+				}
+			}
+		}
+	})
+
+	t.Run("rutas desconocidas", func(t *testing.T) {
+		for _, path := range []string{
+			"/api/recovery/",
+			"/api/recovery/i-1",
+			"/api/recovery/i-1/other",
+			"/api/recovery/i-1/evidence/x",
+			"/api/recovery/i-1/acknowledge/",
+			"/api/recovery//evidence",
+		} {
+			recorder := webExtrasDo(api, http.MethodPost, path,
+				`{"evidence":"nota suficientemente larga"}`, cookie, csrf, origin)
+			if recorder.Code != http.StatusNotFound {
+				t.Fatalf("%s: status = %d (cuerpo %q)", path, recorder.Code, recorder.Body.String())
+			}
+		}
+	})
+
+	t.Run("error al guardar", func(t *testing.T) {
+		settings.putErr = errors.New("boom")
+		for _, path := range []string{evidencePath, ackPath} {
+			recorder := webExtrasDo(api, http.MethodPost, path,
+				`{"evidence":"nota suficientemente larga"}`, cookie, csrf, origin)
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("%s: status = %d (cuerpo %q)", path, recorder.Code, recorder.Body.String())
+			}
+			var payload map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("%s: JSON: %v", path, err)
+			}
+			if payload["status"] != "unavailable" {
+				t.Fatalf("%s: payload = %v", path, payload)
+			}
+		}
+	})
+}
+
+func TestWebExtrasRecoveryWithoutSettings(t *testing.T) {
+	api, _, cookie, csrf := newWebExtrasTestAPI(t, webExtrasRecoveryTestSnapshot)
+
+	recorder := webExtrasDo(api, http.MethodGet, "/api/recovery", "", cookie, "", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	payload := decodeWebExtrasBody[webExtrasRecoveryTestPayload](t, recorder)
+	if len(payload.Data.Items) != 2 || !payload.Data.Blocked {
+		t.Fatalf("payload = %+v", payload.Data)
+	}
+	for _, item := range payload.Data.Items {
+		if item.Acknowledged {
+			t.Fatalf("%s no debe quedar reconocida sin Settings", item.IntentID)
+		}
+	}
+	if len(payload.Data.Items[1].Evidence) != 1 ||
+		payload.Data.Items[1].Evidence[0].Text != "nota previa" {
+		t.Fatalf("i-2 evidence = %+v", payload.Data.Items[1].Evidence)
+	}
+
+	for _, path := range []string{
+		"/api/recovery/i-1/evidence",
+		"/api/recovery/i-1/acknowledge",
+	} {
+		recorder = webExtrasDo(api, http.MethodPost, path,
+			`{"evidence":"nota suficientemente larga"}`, cookie, csrf, "https://panel.example")
+		if recorder.Code != http.StatusServiceUnavailable {
+			t.Fatalf("%s: status = %d (cuerpo %q)", path, recorder.Code, recorder.Body.String())
+		}
+		var body map[string]string
+		if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%s: JSON: %v", path, err)
+		}
+		if body["status"] != "unavailable" {
+			t.Fatalf("%s: payload = %v", path, body)
+		}
+	}
+}

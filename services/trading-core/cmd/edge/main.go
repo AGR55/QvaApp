@@ -117,6 +117,7 @@ func run(logger *slog.Logger) error {
 	var simulation *edge.SimulationAPI
 	var mobileAdmin *edge.MobileAdminAPI
 	var pushSubscriptions *edge.PushSubscriptionsAPI
+	var analyticsFees *edge.AnalyticsFeesAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -168,6 +169,10 @@ func run(logger *slog.Logger) error {
 				Sessions: manager, PublicKey: cfg.PublicPushKey,
 				TrustedOrigin: cfg.TrustedOrigin,
 			}
+			analyticsFees = &edge.AnalyticsFeesAPI{
+				Sessions: manager, File: cfg.ExtrasFile,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
 			if writePool != nil {
 				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
 				decisionEvents.Dismissals = &edge.PostgresDismissalStore{Pool: writePool}
@@ -176,6 +181,8 @@ func run(logger *slog.Logger) error {
 				mobileAuth.Overlay = mobileStore
 				mobileAdmin.Store = mobileStore
 				pushSubscriptions.Store = &edge.PostgresPushStore{Pool: writePool}
+				webExtras.Settings = &edge.PostgresReaderStore{Pool: writePool}
+				analyticsFees.Store = &edge.PostgresFeeStore{Pool: writePool}
 			}
 			if cfg.IconsDir != "" {
 				marketIcons = &edge.MarketIconsAPI{
@@ -242,6 +249,10 @@ func run(logger *slog.Logger) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if session != nil && r.URL.Path == "/api/session" {
 			session.ServeHTTP(w, r)
+			return
+		}
+		if analyticsFees != nil && r.URL.Path == "/api/analytics/fees" {
+			analyticsFees.ServeHTTP(w, r)
 			return
 		}
 		if pushSubscriptions != nil && (r.URL.Path == "/api/push/subscriptions" || r.URL.Path == "/api/push/public-key") {
@@ -314,7 +325,8 @@ func run(logger *slog.Logger) error {
 		if webExtras != nil && (r.URL.Path == "/api/logs" ||
 			r.URL.Path == "/api/notifications" ||
 			r.URL.Path == "/api/recovery" ||
-			strings.HasPrefix(r.URL.Path, "/api/notifications/")) {
+			strings.HasPrefix(r.URL.Path, "/api/notifications/") ||
+			strings.HasPrefix(r.URL.Path, "/api/recovery/")) {
 			webExtras.ServeHTTP(w, r)
 			return
 		}

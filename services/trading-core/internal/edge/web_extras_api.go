@@ -24,6 +24,17 @@ const (
 	webExtrasRecoveryPath      = "/api/recovery"
 	webExtrasAckSuffix         = "/ack"
 
+	// Claves de shadow.runtime_settings usadas para superponer el estado de
+	// recuperación sin mutar el snapshot exportado por el monolito TS.
+	webExtrasRecoveryAckPrefix       = "recovery_ack:"
+	webExtrasRecoveryEvidencePrefix  = "recovery_evidence:"
+	webExtrasRecoveryEvidenceActor   = "panel"
+	webExtrasRecoveryEvidenceAction  = "evidence"
+	webExtrasRecoveryAckAction       = "acknowledge"
+	webExtrasRecoveryEvidenceMinRune = 12
+	webExtrasRecoveryEvidenceMaxRune = 1_000
+	webExtrasRecoveryBodyBytes       = 16 << 10
+
 	// webExtrasMaxSnapshotBytes acota el snapshot que el proceso edge carga en
 	// memoria por petición.
 	webExtrasMaxSnapshotBytes = 8 << 20
@@ -98,13 +109,18 @@ func (store *PostgresAckStore) Ack(ctx context.Context, id string, now int64) er
 //	GET  /api/notifications
 //	POST /api/notifications/{id}/ack
 //	GET  /api/recovery
+//	POST /api/recovery/{intentId}/evidence
+//	POST /api/recovery/{intentId}/acknowledge
 //
-// Todas exigen cookie de sesión. La mutación exige además Origin permitido y
-// CSRF de doble envío. Las respuestas nunca exponen rutas ni errores internos.
+// Todas exigen cookie de sesión. Las mutaciones exigen además Origin permitido
+// y CSRF de doble envío. Las respuestas nunca exponen rutas ni errores internos.
+// El estado de recuperación se completa con shadow.runtime_settings, sin tocar
+// dinero ni el snapshot exportado.
 type WebExtrasAPI struct {
 	Sessions      *SessionManager
 	File          string
 	Acks          AckStore
+	Settings      SettingStore
 	TrustedOrigin string
 	Now           func() time.Time
 }
@@ -185,6 +201,14 @@ type webExtrasRecoveryResponse struct {
 	Data json.RawMessage `json:"data"`
 }
 
+// webExtrasRecoveryEvidenceEntry es una nota manual asociada a una intención de
+// recuperación. No altera el estado ni autoriza ninguna operación con dinero.
+type webExtrasRecoveryEvidenceEntry struct {
+	Text  string `json:"text"`
+	Actor string `json:"actor"`
+	At    int64  `json:"at"`
+}
+
 var (
 	webExtrasBearerRE = regexp.MustCompile(`(?i)Bearer\s+\S+`)
 	webExtrasOpaqueRE = regexp.MustCompile(`\b\d+\|[A-Za-z0-9._~-]+\b`)
@@ -206,6 +230,21 @@ func (api *WebExtrasAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			api.ack(w, r, id)
 			return
 		}
+	}
+
+	if intentID, action, ok := webExtrasRecoveryAction(path); ok {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"status": "method_not_allowed"})
+			return
+		}
+		switch action {
+		case webExtrasRecoveryEvidenceAction:
+			api.recoveryEvidence(w, r, intentID)
+		case webExtrasRecoveryAckAction:
+			api.recoveryAcknowledge(w, r, intentID)
+		}
+		return
 	}
 
 	switch path {
@@ -238,7 +277,7 @@ func (api *WebExtrasAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case webExtrasNotificationsPath:
 		api.notifications(w, r, snapshot)
 	case webExtrasRecoveryPath:
-		api.recovery(w, snapshot)
+		api.recovery(w, r, snapshot)
 	}
 }
 
@@ -330,12 +369,310 @@ func (api *WebExtrasAPI) notifications(w http.ResponseWriter, r *http.Request, s
 	writeJSON(w, http.StatusOK, webExtrasNotificationsResponse{Data: items})
 }
 
-func (api *WebExtrasAPI) recovery(w http.ResponseWriter, snapshot webExtrasSnapshot) {
+// webExtrasRecoveryAction reconoce /api/recovery/{intentId}/evidence y
+// /api/recovery/{intentId}/acknowledge con exactamente un segmento de id no
+// vacío.
+func webExtrasRecoveryAction(path string) (string, string, bool) {
+	remainder, ok := strings.CutPrefix(path, webExtrasRecoveryPath+"/")
+	if !ok {
+		return "", "", false
+	}
+	intentID, action, ok := strings.Cut(remainder, "/")
+	if !ok || intentID == "" || action == "" || strings.Contains(action, "/") {
+		return "", "", false
+	}
+	switch action {
+	case webExtrasRecoveryEvidenceAction:
+		return intentID, webExtrasRecoveryEvidenceAction, true
+	case webExtrasRecoveryAckAction:
+		return intentID, webExtrasRecoveryAckAction, true
+	default:
+		return "", "", false
+	}
+}
+
+// webExtrasDecodeRecovery separa el documento de recuperación en sus claves
+// originales y sus items, preservando el resto de campos tal cual llegaron.
+func webExtrasDecodeRecovery(raw json.RawMessage) (map[string]json.RawMessage, []map[string]json.RawMessage, bool) {
+	document := map[string]json.RawMessage{}
+	if len(raw) > 0 && strings.TrimSpace(string(raw)) != "null" {
+		if err := json.Unmarshal(raw, &document); err != nil || document == nil {
+			return nil, nil, false
+		}
+	}
+	items := []map[string]json.RawMessage{}
+	if itemsRaw, ok := document["items"]; ok && strings.TrimSpace(string(itemsRaw)) != "null" {
+		if err := json.Unmarshal(itemsRaw, &items); err != nil {
+			return nil, nil, false
+		}
+		if items == nil {
+			items = []map[string]json.RawMessage{}
+		}
+	}
+	if _, ok := document["blocked"]; !ok {
+		document["blocked"] = json.RawMessage("false")
+	}
+	return document, items, true
+}
+
+func webExtrasRecoveryIntentID(item map[string]json.RawMessage) (string, bool) {
+	raw, ok := item["intentId"]
+	if !ok {
+		return "", false
+	}
+	var intentID string
+	if err := json.Unmarshal(raw, &intentID); err != nil || intentID == "" {
+		return "", false
+	}
+	return intentID, true
+}
+
+func webExtrasRecoveryItemIndex(items []map[string]json.RawMessage, intentID string) int {
+	for index, item := range items {
+		if id, ok := webExtrasRecoveryIntentID(item); ok && id == intentID {
+			return index
+		}
+	}
+	return -1
+}
+
+func webExtrasDecodeRecoveryEvidence(raw []byte) ([]webExtrasRecoveryEvidenceEntry, bool) {
+	if len(raw) == 0 {
+		return nil, false
+	}
+	var entries []webExtrasRecoveryEvidenceEntry
+	if err := json.Unmarshal(raw, &entries); err != nil || entries == nil {
+		return nil, false
+	}
+	return entries, true
+}
+
+// recoverySuperpose aplica los overrides persistidos en shadow.runtime_settings
+// sobre un item del snapshot. El resultado conserva el resto de claves intactas.
+func (api *WebExtrasAPI) recoverySuperpose(ctx context.Context, item map[string]json.RawMessage) (map[string]json.RawMessage, error) {
+	merged := make(map[string]json.RawMessage, len(item)+2)
+	for key, value := range item {
+		merged[key] = value
+	}
+	if api.Settings == nil {
+		return merged, nil
+	}
+	intentID, ok := webExtrasRecoveryIntentID(merged)
+	if !ok {
+		return merged, nil
+	}
+	if _, found, err := api.Settings.GetSetting(ctx, webExtrasRecoveryAckPrefix+intentID); err != nil {
+		return nil, err
+	} else if found {
+		merged["acknowledged"] = json.RawMessage("true")
+	}
+	evidenceRaw, found, err := api.Settings.GetSetting(ctx, webExtrasRecoveryEvidencePrefix+intentID)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		if entries, ok := webExtrasDecodeRecoveryEvidence(evidenceRaw); ok {
+			encoded, err := json.Marshal(entries)
+			if err != nil {
+				return nil, err
+			}
+			merged["evidence"] = encoded
+		}
+	}
+	return merged, nil
+}
+
+func (api *WebExtrasAPI) recovery(w http.ResponseWriter, r *http.Request, snapshot webExtrasSnapshot) {
 	recovery := snapshot.Recovery
-	if len(recovery) == 0 || string(recovery) == "null" {
+	if len(recovery) == 0 || strings.TrimSpace(string(recovery)) == "null" {
 		recovery = json.RawMessage(`{"items":[],"blocked":false}`)
 	}
-	writeJSON(w, http.StatusOK, webExtrasRecoveryResponse{Data: recovery})
+	document, items, ok := webExtrasDecodeRecovery(recovery)
+	if !ok {
+		// Un snapshot con forma inesperada se devuelve sin overrides para no
+		// romper la lectura que ya consumía el panel.
+		writeJSON(w, http.StatusOK, webExtrasRecoveryResponse{Data: recovery})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), statsTimeout)
+	defer cancel()
+
+	merged := make([]map[string]json.RawMessage, 0, len(items))
+	for _, item := range items {
+		updated, err := api.recoverySuperpose(ctx, item)
+		if err != nil {
+			writeWebExtrasUnavailable(w)
+			return
+		}
+		merged = append(merged, updated)
+	}
+	encodedItems, err := json.Marshal(merged)
+	if err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	document["items"] = encodedItems
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	writeJSON(w, http.StatusOK, webExtrasRecoveryResponse{Data: encoded})
+}
+
+// recoveryItemFromSnapshot resuelve el item del snapshot para una mutación.
+func (api *WebExtrasAPI) recoveryItemFromSnapshot(
+	w http.ResponseWriter,
+	intentID string,
+) (map[string]json.RawMessage, bool) {
+	snapshot, ok := api.loadSnapshot()
+	if !ok {
+		writeWebExtrasUnavailable(w)
+		return nil, false
+	}
+	_, items, ok := webExtrasDecodeRecovery(snapshot.Recovery)
+	if !ok {
+		writeWebExtrasRecoveryNotFound(w)
+		return nil, false
+	}
+	index := webExtrasRecoveryItemIndex(items, intentID)
+	if index < 0 {
+		writeWebExtrasRecoveryNotFound(w)
+		return nil, false
+	}
+	return items[index], true
+}
+
+// recoveryMutationAllowed aplica los controles comunes a las mutaciones de
+// recuperación: cookie de sesión, Origin permitido y CSRF de doble envío.
+func (api *WebExtrasAPI) recoveryMutationAllowed(w http.ResponseWriter, r *http.Request) bool {
+	cookie, ok := api.authenticated(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "Autenticación requerida."})
+		return false
+	}
+	return api.mutationAllowed(w, r, cookie)
+}
+
+func (api *WebExtrasAPI) recoveryEvidence(w http.ResponseWriter, r *http.Request, intentID string) {
+	if !api.recoveryMutationAllowed(w, r) {
+		return
+	}
+	text, status := webExtrasDecodeEvidenceRequest(r)
+	if status != 0 {
+		message := "Evidencia inválida."
+		if status == http.StatusRequestEntityTooLarge {
+			message = "Solicitud demasiado grande."
+		}
+		writeJSON(w, status, map[string]any{"error": message})
+		return
+	}
+	if api.Settings == nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	item, ok := api.recoveryItemFromSnapshot(w, intentID)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), statsTimeout)
+	defer cancel()
+
+	merged, err := api.recoverySuperpose(ctx, item)
+	if err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	entries := []webExtrasRecoveryEvidenceEntry{}
+	if current, ok := webExtrasDecodeRecoveryEvidence(merged["evidence"]); ok {
+		entries = current
+	}
+	now := api.now().UnixMilli()
+	entries = append(entries, webExtrasRecoveryEvidenceEntry{
+		Text:  text,
+		Actor: webExtrasRecoveryEvidenceActor,
+		At:    now,
+	})
+	encoded, err := json.Marshal(entries)
+	if err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	if err := api.Settings.PutSetting(ctx, webExtrasRecoveryEvidencePrefix+intentID, encoded, now); err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	merged["evidence"] = encoded
+	writeWebExtrasRecoveryItem(w, merged)
+}
+
+func (api *WebExtrasAPI) recoveryAcknowledge(w http.ResponseWriter, r *http.Request, intentID string) {
+	if !api.recoveryMutationAllowed(w, r) {
+		return
+	}
+	if api.Settings == nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	item, ok := api.recoveryItemFromSnapshot(w, intentID)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), statsTimeout)
+	defer cancel()
+
+	merged, err := api.recoverySuperpose(ctx, item)
+	if err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	now := api.now().UnixMilli()
+	stamp := []byte(strconv.FormatInt(now, 10))
+	if err := api.Settings.PutSetting(ctx, webExtrasRecoveryAckPrefix+intentID, stamp, now); err != nil {
+		writeWebExtrasUnavailable(w)
+		return
+	}
+	merged["acknowledged"] = json.RawMessage("true")
+	writeWebExtrasRecoveryItem(w, merged)
+}
+
+// webExtrasDecodeEvidenceRequest valida el cuerpo de una nota de evidencia. El
+// segundo valor es 0 cuando el texto es válido o el status HTTP que se debe
+// devolver en caso contrario.
+func webExtrasDecodeEvidenceRequest(r *http.Request) (string, int) {
+	if r.Body == nil {
+		return "", http.StatusBadRequest
+	}
+	raw, err := io.ReadAll(io.LimitReader(r.Body, webExtrasRecoveryBodyBytes+1))
+	if err != nil {
+		return "", http.StatusBadRequest
+	}
+	if len(raw) > webExtrasRecoveryBodyBytes {
+		return "", http.StatusRequestEntityTooLarge
+	}
+	var payload struct {
+		Evidence *string `json:"evidence"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Evidence == nil {
+		return "", http.StatusBadRequest
+	}
+	text := strings.TrimSpace(*payload.Evidence)
+	length := utf8.RuneCountInString(text)
+	if length < webExtrasRecoveryEvidenceMinRune || length > webExtrasRecoveryEvidenceMaxRune {
+		return "", http.StatusBadRequest
+	}
+	return text, 0
+}
+
+func writeWebExtrasRecoveryItem(w http.ResponseWriter, item map[string]json.RawMessage) {
+	writeJSON(w, http.StatusOK, map[string]any{"data": item})
+}
+
+func writeWebExtrasRecoveryNotFound(w http.ResponseWriter) {
+	writeJSON(w, http.StatusNotFound, map[string]any{"error": "Intención no encontrada."})
 }
 
 func (api *WebExtrasAPI) ack(w http.ResponseWriter, r *http.Request, id string) {

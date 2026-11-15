@@ -958,3 +958,35 @@ func TestDecisionEventsRoutingAndMethods(t *testing.T) {
 		}
 	}
 }
+
+func TestDecisionEventsBlockedOfferDismiss(t *testing.T) {
+	api, store, cookie, csrf := newDecisionEventsTestAPI(t, decisionEventsTestSnapshot)
+	recorder := decisionEventsDo(api, http.MethodPost, "/api/blocked-offers/offer-2/dismiss", "{}",
+		cookie, csrf, "https://panel.example")
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	if len(store.calls) != 1 || !slices.Equal(store.calls[0].ids, []int64{2}) {
+		t.Fatalf("dismissals = %+v", store.calls)
+	}
+
+	missing := decisionEventsDo(api, http.MethodPost, "/api/blocked-offers/offer-999/dismiss", "{}",
+		cookie, csrf, "https://panel.example")
+	if missing.Code != http.StatusNoContent {
+		t.Fatalf("oferta ausente: %d", missing.Code)
+	}
+	if len(store.calls) != 1 {
+		t.Fatalf("una oferta sin eventos no debe añadir descartes: %+v", store.calls)
+	}
+
+	anonymous := decisionEventsDo(api, http.MethodPost, "/api/blocked-offers/offer-2/dismiss", "{}",
+		nil, "", "")
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("sin sesión: %d", anonymous.Code)
+	}
+	wrongMethod := decisionEventsDo(api, http.MethodGet, "/api/blocked-offers/offer-2/dismiss", "",
+		cookie, "", "")
+	if wrongMethod.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("método: %d", wrongMethod.Code)
+	}
+}
