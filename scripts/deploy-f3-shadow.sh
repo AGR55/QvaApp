@@ -256,6 +256,11 @@ PY
         printf 'EDGE_TRUSTED_ORIGIN=%s\n' "$trusted_origin"
         printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
         printf 'EDGE_MUTATIONS_ENABLED=true\n'
+        printf 'EDGE_MUTATIONS_LIVE=false\n'
+        if [[ -n ${encrypted_token:-} ]]; then
+          printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
+        fi
+        printf 'QVAPAY_API_BASE_URL=%s\n' "${QVAPAY_API_BASE_URL:-https://api.qvapay.com}"
         webhook_secret_file="$app_root/webhook.secret"
         if [[ ! -s $webhook_secret_file ]]; then
           temporary_secret=$(mktemp "$app_root/webhook.secret.XXXXXX")
