@@ -143,3 +143,8 @@ CREATE TABLE IF NOT EXISTS shadow.local_operations (
   reference_rate double precision,
   counterparty_id text
 );
+
+-- La orden flexible que devuelve QvaPay se conserva para cancelar y conciliar
+-- una aplicación real. Es idempotente para reaplicar la migración.
+ALTER TABLE shadow.core_operations
+  ADD COLUMN IF NOT EXISTS order_uuid text NOT NULL DEFAULT '';
