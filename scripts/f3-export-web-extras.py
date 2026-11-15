@@ -144,6 +144,70 @@ def export_recovery(connection: sqlite3.Connection) -> dict[str, Any]:
     return {"items": items, "blocked": bool(items)}
 
 
+def export_decision_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": integer(row["id"]),
+            "version": text(row["version"]) or "",
+            "uuid": text(row["offer_uuid"]) or "",
+            "coin": text(row["coin"]) or "",
+            "offerType": text(row["offer_type"]) or "",
+            "amount": float(row["amount"] or 0),
+            "receive": float(row["receive"] or 0),
+            "rate": float(row["rate"] or 0),
+            "decision": text(row["decision"]) or "",
+            "reason": text(row["reason"]) or "",
+            "checks": json.loads(row["checks_json"] or "[]"),
+            "referenceRate": None if row["reference_rate"] is None else float(row["reference_rate"]),
+            "resolution": text(row["resolution"]),
+            "createdAt": integer(row["created_at"]),
+            "updatedAt": integer(row["updated_at"]),
+            "resolvedAt": None if row["resolved_at"] is None else integer(row["resolved_at"]),
+        }
+        for row in rows(
+            connection,
+            "SELECT * FROM decision_events ORDER BY id DESC LIMIT 2000",
+        )
+    ]
+
+
+def export_simulation(connection: sqlite3.Connection) -> dict[str, Any]:
+    account = ""
+    for row in rows(connection, "SELECT value FROM settings WHERE key = 'analytics_account_uuid'"):
+        account = text(row["value"]) or ""
+        break
+    own_offers: list[str] = []
+    for row in rows(
+        connection,
+        "SELECT payload_json FROM remote_resource_cache WHERE resource_key = 'own-offers'",
+    ):
+        try:
+            payload = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            continue
+        data = payload.get("data") if isinstance(payload, dict) else payload
+        if isinstance(data, list):
+            own_offers = [str(item.get("uuid")) for item in data if isinstance(item, dict) and item.get("uuid")]
+    observations = [
+        {
+            "key": text(row["event_key"]) or "",
+            "at": integer(row["received_at"]),
+            "payload": text(row["payload_json"]) or "",
+        }
+        for row in rows(
+            connection,
+            "SELECT event_key, received_at, payload_json FROM market_feed_events"
+            " WHERE event IN ('p2p.created','p2p.reopened','p2p.range_created','p2p.range_updated')"
+            " ORDER BY received_at DESC, event_key DESC LIMIT 5000",
+        )
+    ]
+    return {
+        "accountUuid": account,
+        "ownOffers": own_offers,
+        "observations": observations,
+    }
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Uso: f3-export-web-extras.py <sqlite>", file=sys.stderr)
@@ -154,6 +218,8 @@ def main() -> int:
             "logs": export_logs(connection),
             "notifications": export_notifications(connection),
             "recovery": export_recovery(connection),
+            "decisionEvents": export_decision_events(connection),
+            "simulation": export_simulation(connection),
         }
     finally:
         connection.close()

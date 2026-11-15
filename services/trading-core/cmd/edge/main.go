@@ -112,6 +112,8 @@ func run(logger *slog.Logger) error {
 	var marketSource *edge.MarketSourceAPI
 	var webExtras *edge.WebExtrasAPI
 	var marketIcons *edge.MarketIconsAPI
+	var decisionEvents *edge.DecisionEventsAPI
+	var simulation *edge.SimulationAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -146,8 +148,18 @@ func run(logger *slog.Logger) error {
 				Sessions: manager, File: cfg.ExtrasFile,
 				TrustedOrigin: cfg.TrustedOrigin,
 			}
+			decisionEvents = &edge.DecisionEventsAPI{
+				Sessions: manager, File: cfg.ExtrasFile,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
+			simulation = &edge.SimulationAPI{
+				Sessions: manager, MobileAuth: mobileAuth, File: cfg.ExtrasFile,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
 			if writePool != nil {
 				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
+				decisionEvents.Dismissals = &edge.PostgresDismissalStore{Pool: writePool}
+				simulation.Runtime = &runtimeconfig.Repository{Pool: writePool}
 			}
 			if cfg.IconsDir != "" {
 				marketIcons = &edge.MarketIconsAPI{
@@ -308,7 +320,16 @@ func run(logger *slog.Logger) error {
 			dashboard.ServeHTTP(w, r)
 			return
 		}
-		if observability != nil && (r.URL.Path == "/api/decision-events" || r.URL.Path == "/api/operational-health") {
+		if decisionEvents != nil && (r.URL.Path == "/api/decision-events" ||
+			strings.HasPrefix(r.URL.Path, "/api/decision-events/")) {
+			decisionEvents.ServeHTTP(w, r)
+			return
+		}
+		if simulation != nil && (r.URL.Path == "/api/hunting/simulate" || r.URL.Path == "/api/mobile/simulate") {
+			simulation.ServeHTTP(w, r)
+			return
+		}
+		if observability != nil && r.URL.Path == "/api/operational-health" {
 			observability.ServeHTTP(w, r)
 			return
 		}

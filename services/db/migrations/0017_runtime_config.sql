@@ -49,3 +49,8 @@ CREATE TABLE IF NOT EXISTS shadow.notification_acks (
   id text PRIMARY KEY,
   acknowledged_at bigint NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow.decision_dismissals (
+  id bigint PRIMARY KEY,
+  dismissed_at bigint NOT NULL
+);
