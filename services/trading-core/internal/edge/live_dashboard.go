@@ -2,6 +2,7 @@ package edge
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -40,6 +41,7 @@ type liveDashboardSnapshot struct {
 	Transactions []map[string]any
 	Market       map[string]map[string]any
 	Operations   []map[string]any
+	History      []map[string]any
 	UpdatedAt    int64
 	Live         bool
 }
@@ -88,10 +90,14 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 			snapshot.OwnOffers = append(snapshot.OwnOffers, liveOfferMap(offer, snapshot.UpdatedAt))
 		}
 	}
+	operations := map[string]map[string]any{}
 	if page, err := live.Reader.Transactions(ctx, 1, 20); err == nil {
 		snapshot.Transactions = make([]map[string]any, 0, len(page.Transactions))
 		for _, tx := range page.Transactions {
 			snapshot.Transactions = append(snapshot.Transactions, liveTransactionMap(tx))
+			if operation, ok := liveP2POperation(tx); ok {
+				operations[operation["uuid"].(string)] = operation
+			}
 		}
 	}
 	if offers, err := live.Reader.Offers(ctx, url.Values{
@@ -113,24 +119,68 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 			snapshot.Market[coin] = entry
 		}
 	}
+	snapshot.Operations = make([]map[string]any, 0, len(operations))
+	for _, operation := range operations {
+		snapshot.Operations = append(snapshot.Operations, operation)
+	}
 	if live.Pool != nil {
 		rows, err := live.Pool.Query(ctx, `
 			SELECT operation_id, state, qusd_amount, fiat_amount, updated_at
 			FROM shadow.core_operations
 			ORDER BY updated_at DESC LIMIT 50`)
 		if err == nil {
-			defer rows.Close()
-			snapshot.Operations = make([]map[string]any, 0, 50)
+			existing := make(map[string]struct{}, len(snapshot.Operations))
+			for _, operation := range snapshot.Operations {
+				if uuid, ok := operation["uuid"].(string); ok {
+					existing[uuid] = struct{}{}
+				}
+			}
 			for rows.Next() {
 				var id, state, qusd, fiat string
 				var updated int64
 				if rows.Scan(&id, &state, &qusd, &fiat, &updated) != nil {
 					continue
 				}
+				if _, ok := existing[id]; ok {
+					continue
+				}
+				amount, _ := strconv.ParseFloat(qusd, 64)
+				receive, _ := strconv.ParseFloat(fiat, 64)
+				rate := 0.0
+				if amount > 0 {
+					rate = receive / amount
+				}
 				snapshot.Operations = append(snapshot.Operations, map[string]any{
-					"uuid": id, "state": state, "qusdAmount": qusd,
-					"fiatAmount": fiat, "updatedAt": updated,
+					"uuid": id, "coin": "", "offerType": "", "amount": amount,
+					"receive": receive, "rate": rate, "state": state,
+					"createdAt": updated, "updatedAt": updated,
 				})
+			}
+			rows.Close()
+		}
+		if _, err := live.Pool.Exec(ctx, `
+			INSERT INTO shadow.live_dashboard_history(created_at, qusd_balance, open_offers, active_operations)
+			SELECT $1, $2, $3, $4
+			WHERE NOT EXISTS (SELECT 1 FROM shadow.live_dashboard_history WHERE created_at > $1 - 300000)`,
+			snapshot.UpdatedAt, snapshot.Balance, len(snapshot.OwnOffers), len(snapshot.Operations)); err == nil {
+			historyRows, err := live.Pool.Query(ctx, `
+				SELECT created_at, qusd_balance, open_offers, active_operations
+				FROM shadow.live_dashboard_history
+				WHERE created_at >= $1 ORDER BY created_at DESC LIMIT 500`, snapshot.UpdatedAt-7*86_400_000)
+			if err == nil {
+				for historyRows.Next() {
+					var created int64
+					var balance float64
+					var open, active int
+					if historyRows.Scan(&created, &balance, &open, &active) != nil {
+						continue
+					}
+					snapshot.History = append(snapshot.History, map[string]any{
+						"createdAt": created, "qusdBalance": balance,
+						"openOffers": open, "activeOperations": active,
+					})
+				}
+				historyRows.Close()
 			}
 		}
 	}
@@ -191,4 +241,47 @@ func decimalFloat(value interface{ Format(int) string }) float64 {
 		return 0
 	}
 	return parsed
+}
+
+func liveP2POperation(tx qvapay.Transaction) (map[string]any, bool) {
+	if len(tx.P2P) == 0 || string(tx.P2P) == "null" {
+		return nil, false
+	}
+	var raw struct {
+		UUID    string `json:"uuid"`
+		Coin    string `json:"coin"`
+		Type    string `json:"type"`
+		Status  string `json:"status"`
+		Amount  any    `json:"amount"`
+		Receive any    `json:"receive"`
+	}
+	if json.Unmarshal(tx.P2P, &raw) != nil || raw.UUID == "" || raw.Coin == "" {
+		return nil, false
+	}
+	amount := anyFloat(raw.Amount)
+	receive := anyFloat(raw.Receive)
+	rate := 0.0
+	if amount > 0 {
+		rate = receive / amount
+	}
+	return map[string]any{
+		"uuid": raw.UUID, "coin": raw.Coin, "offerType": raw.Type,
+		"amount": amount, "receive": receive, "rate": rate,
+		"state": raw.Status, "createdAt": parseQvaTime(tx.CreatedAt),
+		"updatedAt": parseQvaTime(tx.UpdatedAt),
+	}, true
+}
+
+func anyFloat(value any) float64 {
+	switch item := value.(type) {
+	case float64:
+		return item
+	case string:
+		parsed, _ := strconv.ParseFloat(item, 64)
+		return parsed
+	case json.Number:
+		parsed, _ := item.Float64()
+		return parsed
+	}
+	return 0
 }

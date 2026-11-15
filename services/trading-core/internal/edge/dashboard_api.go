@@ -365,6 +365,7 @@ func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSumma
 			snapshot.Transactions = liveAnyList(live.Transactions)
 			snapshot.Market = liveAnyMap(live.Market)
 			snapshot.Operations = liveAnyList(live.Operations)
+			snapshot.History = liveAnyList(live.History)
 			snapshot.Availability.Qusd = dashboardQusdAvailability{
 				Available: live.Balance, Reported: live.Balance,
 			}

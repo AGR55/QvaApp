@@ -119,3 +119,10 @@ CREATE TABLE IF NOT EXISTS shadow.qvapay_feed_events (
   payload_json jsonb NOT NULL,
   received_at bigint NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow.live_dashboard_history (
+  created_at bigint PRIMARY KEY,
+  qusd_balance double precision NOT NULL,
+  open_offers integer NOT NULL,
+  active_operations integer NOT NULL
+);
