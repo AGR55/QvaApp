@@ -20,7 +20,8 @@ ownOffers:    producción 4  → shadow 4 (mismo rate/amount)
 balance:      producción 495.2 → shadow 495.2
 transactions: producción 12 → shadow 20 (ventana de 20)
 market:       producción 5  → shadow 12 (incluye monedas fuera de market_config)
-operations:   producción 1  → shadow 46 (core_operations, aún no es el modelo local)
+operations:   producción 1  → shadow 50 (operaciones locales importadas + P2P)
+history:                       shadow ya registra snapshots cada 5 min
 ```
 
 Además:
@@ -29,8 +30,10 @@ Además:
   `CreateOffer`, `EditOffer`, `MarkPaid` y `ConfirmReceived` con tests.
 - `MutationsAPI` puede usar esas mutaciones reales con
   `EDGE_MUTATIONS_LIVE=true`; por defecto sigue en shadow.
-- Falta el flujo completo de conciliación/idempotencia de operaciones y el
-  dashboard vivo.
+- El dashboard ya lee balance, ofertas, transacciones, mercado y operaciones
+  en vivo, y registra historial.
+- Faltan chat remoto, `payment-preview` real, conciliación completa y el
+  ensayo de corte.
 - `payment-preview` devuelve 503 porque necesita perfil/oferta en vivo.
 - El chat del edge es local; no habla con el chat remoto de QvaPay.
 - El webhook QvaPay del edge está activo con HMAC, pero el webhook de Telegram
