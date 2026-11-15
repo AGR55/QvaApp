@@ -144,6 +144,48 @@ def export_recovery(connection: sqlite3.Connection) -> dict[str, Any]:
     return {"items": items, "blocked": bool(items)}
 
 
+def export_analytics_fees(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for row in rows(
+        connection,
+        "SELECT a.payload_json, f.fee_qusd, f.gross_qusd, f.evidence, f.version"
+        " FROM analytics_offers a LEFT JOIN analytics_fee_evidence f"
+        " ON f.account_uuid = a.account_uuid AND f.offer_uuid = a.uuid"
+        " WHERE json_extract(a.payload_json, '$.side') = 'incoming'"
+        " ORDER BY a.completed_at DESC, a.uuid DESC LIMIT 2000",
+    ):
+        try:
+            offer = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(offer, dict):
+            continue
+        amount = offer.get("amount")
+        gross = row["gross_qusd"]
+        try:
+            amount_number = float(amount)
+        except (TypeError, ValueError):
+            amount_number = None
+        try:
+            gross_number = None if gross is None else float(gross)
+        except (TypeError, ValueError):
+            gross_number = None
+        items.append(
+            {
+                "uuid": text(offer.get("uuid")),
+                "coin": text(offer.get("coin")),
+                "amount": amount_number,
+                "receive": offer.get("receive"),
+                "completedAt": offer.get("completedAt"),
+                "feeQusd": None if row["fee_qusd"] is None else float(row["fee_qusd"]),
+                "evidence": text(row["evidence"]) or "",
+                "version": integer(row["version"]) or 0,
+                "stale": gross_number is not None and amount_number is not None and gross_number != amount_number,
+            }
+        )
+    return items
+
+
 def export_cooperative(connection: sqlite3.Connection) -> dict[str, Any]:
     resources: dict[str, Any] = {}
     for row in rows(
@@ -248,6 +290,7 @@ def main() -> int:
             "decisionEvents": export_decision_events(connection),
             "simulation": export_simulation(connection),
             "cooperative": export_cooperative(connection),
+            "analyticsFees": export_analytics_fees(connection),
         }
     finally:
         connection.close()
