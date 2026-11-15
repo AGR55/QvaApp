@@ -21,6 +21,10 @@ else
   filters=("market-math" "pure/budget/" "risk-policy" "liquidity-plan" "apply-budget" "hunting-requirements" "flexible-order" "pure/dashboard/" "reconciliation-scheduler" "monetary-intents" "market-list-budget" "cooperative-menu" "telegram-menu" "chat-stream" "qusd-balance-cache" "telegram-runtime" "pure/scheduler/" "mobile-operator" "dashboard-auth" "hunting-balance" "dashboard-controls" "market-hunting")
 fi
 
+if [[ -x ../scripts/test-backup-vps.sh ]]; then
+  bash ../scripts/test-backup-vps.sh
+fi
+
 pending="$(gofmt -l shared trading-core)"
 if [[ -n "$pending" ]]; then
   printf 'gofmt pendiente en:\n%s\n' "$pending"
