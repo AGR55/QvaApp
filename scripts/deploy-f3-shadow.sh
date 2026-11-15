@@ -168,6 +168,33 @@ hunter_data_dir="$app_root/data"
 prod_env="/opt/qvaapply/config/env"
 prod_db="/opt/qvaapply/data/qvaapply.sqlite"
 if [[ -r $prod_env && -r $prod_db ]]; then
+  # Reutiliza el par VAPID de producción para que las suscripciones Push sigan
+  # siendo válidas tras el cutover. El archivo es 600 y nunca se imprime.
+  python3 - "$prod_db" "$push_env" <<'PY' || true
+import json
+import os
+import sqlite3
+import sys
+
+connection = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+row = connection.execute("SELECT value FROM settings WHERE key = 'web_push:vapid_keys'").fetchone()
+connection.close()
+if row:
+    keys = json.loads(row[0])
+    public = keys.get("publicKey")
+    private = keys.get("privateKey")
+    if isinstance(public, str) and isinstance(private, str) and public and private:
+        target = sys.argv[2]
+        temporary = target + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(f"WEB_PUSH_PUBLIC_KEY={public}\n")
+            handle.write(f"WEB_PUSH_PRIVATE_KEY={private}\n")
+            handle.write("WEB_PUSH_SUBJECT=mailto:admin@qvapply.honux.tech\n")
+            handle.write("PUSH_SEND_ENABLED=true\n")
+            handle.write(f"EDGE_PUSH_PUBLIC_KEY={public}\n")
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+PY
   local_key=$(sed -n 's/^[[:space:]]*LOCAL_ENCRYPTION_KEY=//p' "$prod_env" | tail -n 1 | tr -d '\r')
   local_key=${local_key#\"}
   local_key=${local_key%\"}
