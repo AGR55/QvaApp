@@ -300,6 +300,9 @@ func run(logger *slog.Logger) error {
 	if liveReader != nil && dashboard != nil {
 		dashboard.Live = &edge.LiveDashboard{Reader: liveReader, Pool: writePool}
 	}
+	if liveReader != nil && mutations != nil {
+		mutations.Reconcile = &edge.Reconciler{Reader: liveReader, Store: mutations.Store}
+	}
 	if liveReader != nil && writePool != nil {
 		paymentPreview = &edge.PaymentPreviewAPI{
 			MobileAuth: mobileAuth, Reader: liveReader,

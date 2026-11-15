@@ -86,6 +86,7 @@ type MutationsAPI struct {
 	Store         MutationStore
 	Live          LiveMutations
 	Chat          LiveChat
+	Reconcile     *Reconciler
 	TrustedOrigin string
 	Now           func() time.Time
 }
@@ -1132,6 +1133,21 @@ func (api *MutationsAPI) workflowReconcile(
 		return
 	}
 	payload, _ := json.Marshal(map[string]string{"workflowId": workflowID})
+	if api.Reconcile != nil {
+		report, err := api.Reconcile.Check(ctx, workflowID, r.URL.Query().Get("order"))
+		if err != nil {
+			_ = api.Store.Record(ctx, "workflow_reconcile_failed", workflowID, payload, actor, api.now().UnixMilli())
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "No se pudo conciliar con QvaPay."})
+			return
+		}
+		if !api.record(ctx, w, "workflow_reconcile", workflowID, payload, actor) {
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+			"workflowId": workflowID, "report": report, "execution": "qvapay",
+		}})
+		return
+	}
 	if !api.record(ctx, w, "workflow_reconcile", workflowID, payload, actor) {
 		return
 	}
