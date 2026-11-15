@@ -23,22 +23,23 @@ type hunterConsumer struct {
 	pool *pgxpool.Pool
 	// configMu protege config y configErr: reloadRuntime reemplaza el snapshot
 	// mientras consume lo lee desde otro goroutine.
-	configMu      sync.RWMutex
-	config        core.Config
-	configErr     error
-	runtime       *runtimeconfig.Repository
-	runtimeAt     atomic.Int64
-	logger        *slog.Logger
-	worker        string
-	shadowRepo    *postgres.ShadowRepository
-	operationRepo *postgres.CoreOperationRepository
-	processed     atomic.Uint64
-	allowed       atomic.Uint64
-	blocked       atomic.Uint64
-	executions    atomic.Uint64
-	operations    atomic.Uint64
-	failed        atomic.Uint64
-	pending       atomic.Int64
+	configMu       sync.RWMutex
+	config         core.Config
+	configErr      error
+	runtime        *runtimeconfig.Repository
+	runtimeAt      atomic.Int64
+	runtimeVersion atomic.Int64
+	logger         *slog.Logger
+	worker         string
+	shadowRepo     *postgres.ShadowRepository
+	operationRepo  *postgres.CoreOperationRepository
+	processed      atomic.Uint64
+	allowed        atomic.Uint64
+	blocked        atomic.Uint64
+	executions     atomic.Uint64
+	operations     atomic.Uint64
+	failed         atomic.Uint64
+	pending        atomic.Int64
 }
 
 type hunterPayload struct {

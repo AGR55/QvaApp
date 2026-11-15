@@ -80,10 +80,11 @@ func (consumer *hunterConsumer) reloadRuntime(ctx context.Context, now time.Time
 		return
 	}
 
-	config, _, err := consumer.runtime.Load(ctx)
+	config, version, err := consumer.runtime.Load(ctx)
 	switch {
 	case err == nil:
 		consumer.applyConfig(coreConfigFromRuntime(config))
+		consumer.runtimeVersion.Store(version)
 	case errors.Is(err, runtimeconfig.ErrNotFound):
 		// Sin configuración del panel sigue vigente el archivo.
 	default:
