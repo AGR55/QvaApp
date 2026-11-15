@@ -489,7 +489,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                   }
                 />
               </MarketField>
-              <MarketField label="Máximo QUSD por compra" htmlFor={`market-max-amount-${index}`}>
+              <MarketField label="Máximo QUSD por oferta (0 = sin límite)" htmlFor={`market-max-amount-${index}`}>
                 <Input
                   id={`market-max-amount-${index}`}
                   type="number"

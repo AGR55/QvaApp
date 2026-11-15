@@ -82,6 +82,44 @@ hunter_event -> core.Decide -> reserved -> submitted -> dry_run
 - Evento sintético procesado: decisión `apply`, operación `dry_run`, sin llamada
   a QvaPay.
 
+## Dimensionado de ofertas por rango
+
+El core ya no aplica el importe publicado a ciegas. Para ofertas
+`offerKind=flexible` calcula:
+
+```text
+capacidad = (fiat disponible - comisión saliente) / tasa
+importe   = floor(min(disponible, orderMax, capacidad,
+                      máximo del mercado, máximo por operación,
+                      exposición restante, volumen diario restante), 2)
+```
+
+- Si el resultado queda por debajo de `orderMin`, no se aplica.
+- `purchaseMaxQusd` es por mercado y se edita en el panel
+  («Máximo QUSD por oferta (0 = sin límite)»).
+- La exposición simultánea y el volumen diario se leen de
+  `shadow.core_operations`, no se asumen cero.
+
+Prueba en shadow con eventos sintéticos:
+
+```text
+BANK_CUP  300 disponibles, tope 200, fondos 119.800 CUP, tasa 1100
+  -> 108.90 QUSD  (limitado por fondos)
+CLASICA   100 disponibles, orderMax 40, tasa 1.06
+  -> 40.00 QUSD   (limitado por el máximo de la oferta)
+```
+
+## Oferta de prueba BANK_MLC
+
+La oferta `c2e0d454-...` es `BANK_MLC`, `sell`, `flexible`, 100 QUSD por 133
+MLC (tasa 1.33), rango 5–100. **BANK_MLC no existe en `market_config` ni tiene
+saldo fiat declarado**, así que el core la bloquea por mercado inactivo y por
+fondos cero. Para probarla con dinero real hace falta:
+
+1. agregar `BANK_MLC` en el panel con sus límites reales;
+2. declarar el saldo MLC real de la cuenta;
+3. autorizar un importe y una ventana de congelamiento de TS.
+
 ## Idempotencia y conciliación
 
 - Una operación ya `confirmed` no vuelve a llamar a QvaPay.
