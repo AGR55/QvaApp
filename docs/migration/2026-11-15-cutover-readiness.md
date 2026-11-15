@@ -36,7 +36,9 @@ Además:
 - El chat ya es real contra QvaPay (lectura y envío de texto).
 - `payment-preview` ya existe con validación estricta de rol, contraparte,
   estado, importes y destino; rechaza con 409 si no puede verificar el pago.
-- Faltan conciliación completa y el ensayo de corte.
+- La conciliación ya consulta QvaPay y devuelve estado/importes/aplicado.
+- Falta validar un preview 200 con una operación completa y ejecutar el ensayo
+  de corte con TS congelado.
 - `payment-preview` devuelve 503 porque necesita perfil/oferta en vivo.
 - El chat del edge es local; no habla con el chat remoto de QvaPay.
 - El webhook QvaPay del edge está activo con HMAC, pero el webhook de Telegram
