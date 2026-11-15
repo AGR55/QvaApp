@@ -56,6 +56,36 @@ minutos de las ofertas fijas.
 
 `trading_core_autotrade_applied_total = 1`.
 
+### Cierre de la primera operación autónoma
+
+QvaPay pasó la oferta a `paid` y luego `completed`. El conciliador actualizó el
+panel y el ledger fiat:
+
+```text
+saldo QUSD QvaPay     120.57 -> 134.85  (+14.28)
+fiat CLASICA          44.437 -> 29.357  (-15.08 = 15.00 + 0.08 fee)
+local_operations      applied -> paid -> completed
+fiat_ledger           1 débito de 15.08 CLASICA
+```
+
+La transición `paid` ocurrió antes de desplegar el registro fiat; el débito se
+corrigió con el mismo método idempotente (`RecordOperationFiat`). Las
+transiciones posteriores ya lo registran automáticamente: el conciliador
+consulta `paid`/`completed` y aplica el movimiento antes de actualizar el
+estado local.
+
+### TS definitivamente parado
+
+```text
+docker stop qvaapply
+docker update --restart=no qvaapply
+estado   exited
+restart  no
+```
+
+No vuelve a arrancar ni con un reinicio del host. Para rollback:
+`docker update --restart=unless-stopped qvaapply && docker start qvaapply`.
+
 ## Validaciones previas al corte
 
 - Aplicación y cancelación real de una oferta **fija** (10 QUSD).
