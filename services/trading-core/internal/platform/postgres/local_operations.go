@@ -100,6 +100,44 @@ func (repository *LocalOperationRepository) Get(ctx context.Context, uuid string
 	return operation, true, nil
 }
 
+// PendingForCancel devuelve operaciones aplicadas que ya superaron el corte.
+func (repository *LocalOperationRepository) PendingForCancel(
+	ctx context.Context,
+	cutoffMS int64,
+) ([]LocalOperation, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT uuid, offer_type, coin, amount, receive, rate, state, auto_applied,
+		       order_uuid, counterparty_id, created_at, updated_at
+		FROM shadow.local_operations
+		WHERE state IN ('applied', 'acknowledged')
+		  AND created_at > 0 AND created_at <= $1
+		ORDER BY created_at ASC
+		LIMIT 20`, cutoffMS)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	operations := make([]LocalOperation, 0, 20)
+	for rows.Next() {
+		var operation LocalOperation
+		var order, counterparty *string
+		if err := rows.Scan(&operation.UUID, &operation.OfferType, &operation.Coin,
+			&operation.Amount, &operation.Receive, &operation.Rate, &operation.State,
+			&operation.AutoApplied, &order, &counterparty,
+			&operation.CreatedAt, &operation.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if order != nil {
+			operation.OrderUUID = *order
+		}
+		if counterparty != nil {
+			operation.CounterpartyID = *counterparty
+		}
+		operations = append(operations, operation)
+	}
+	return operations, rows.Err()
+}
+
 // SetState actualiza el estado y la marca de tiempo.
 func (repository *LocalOperationRepository) SetState(ctx context.Context, uuid, state string, now int64) error {
 	_, err := repository.pool.Exec(ctx, `

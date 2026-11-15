@@ -224,6 +224,17 @@ func run(logger *slog.Logger) error {
 						client := qvapay.NewMutationClient(cfg.MutationBaseURL, token)
 						client.Enable()
 						mutations.Live = &liveMutations{client: client}
+						if writePool != nil {
+							if readClient, err := qvapay.New(cfg.MutationBaseURL, token); err == nil {
+								configs := &runtimeconfig.Repository{Pool: writePool}
+								localOps := postgres.NewLocalOperationRepository(writePool)
+								go runOfferRefresh(ctx, logger, readClient, client, configs)
+								go runAutoCancel(ctx, logger, readClient, client, configs, localOps)
+								logger.Info("bucles de refresco y autocancelación habilitados")
+							} else {
+								logger.Warn("bucles de mantenimiento deshabilitados", "error", err)
+							}
+						}
 						logger.Info("mutaciones QvaPay LIVE habilitadas")
 					}
 					if cfg.LiveDashboard {

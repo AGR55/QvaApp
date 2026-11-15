@@ -164,6 +164,8 @@ type Offer struct {
 	OfferKind       string          `json:"offer_kind"`
 	Details         map[string]any  `json:"details"`
 	Orders          []OfferOrder    `json:"Orders"`
+	Message         string          `json:"message"`
+	UpdatedAt       string          `json:"updated_at"`
 }
 
 // OfferOrder es una orden hija de una oferta flexible.
@@ -222,6 +224,8 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		OfferKind       string          `json:"offer_kind"`
 		Details         map[string]any  `json:"details"`
 		Orders          []OfferOrder    `json:"Orders"`
+		Message         any             `json:"message"`
+		UpdatedAt       any             `json:"updated_at"`
 	}
 	if err := decodeJSON(data, &raw); err != nil {
 		return err
@@ -274,6 +278,8 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		OfferKind:       raw.OfferKind,
 		Details:         raw.Details,
 		Orders:          raw.Orders,
+		Message:         scalarString(raw.Message),
+		UpdatedAt:       scalarString(raw.UpdatedAt),
 	}
 	return nil
 }
