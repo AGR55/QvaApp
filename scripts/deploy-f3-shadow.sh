@@ -293,7 +293,34 @@ PY
         fi
         printf 'QVAPAY_API_BASE_URL=%s\n' "${QVAPAY_API_BASE_URL:-https://api.qvapay.com}"
         webhook_secret_file="$app_root/webhook.secret"
-        if [[ ! -s $webhook_secret_file ]]; then
+        # QvaPay firma con el secreto que ya tenía TS. Se descifra de la
+        # SQLite de producción con la misma clave local; si no se puede, se
+        # conserva el secreto existente y el polling/SSE siguen cubriendo.
+        webhook_secret=$(python3 - "$prod_db" "$prod_env" <<'PY' 2>/dev/null || true
+import base64, re, sqlite3, sys
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+db, envfile = sys.argv[1], sys.argv[2]
+env = {}
+for line in open(envfile, encoding="utf-8"):
+    match = re.match(r"([A-Z0-9_]+)=(.*)", line.strip())
+    if match:
+        env[match.group(1)] = match.group(2).strip().strip('"')
+key = bytes.fromhex(env["LOCAL_ENCRYPTION_KEY"])
+con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+row = con.execute("select value from settings where key='market_feed_secret'").fetchone()
+con.close()
+if not row:
+    raise SystemExit(1)
+iv, tag, data = row[0].split(".")
+print(AESGCM(key).decrypt(base64.b64decode(iv), base64.b64decode(data) + base64.b64decode(tag), None).decode(), end="")
+PY
+)
+        if [[ -n $webhook_secret ]]; then
+          temporary_secret=$(mktemp "$app_root/webhook.secret.XXXXXX")
+          printf '%s' "$webhook_secret" > "$temporary_secret"
+          chmod 600 "$temporary_secret"
+          mv -f "$temporary_secret" "$webhook_secret_file"
+        elif [[ ! -s $webhook_secret_file ]]; then
           temporary_secret=$(mktemp "$app_root/webhook.secret.XXXXXX")
           openssl rand -hex 32 > "$temporary_secret"
           chmod 600 "$temporary_secret"
