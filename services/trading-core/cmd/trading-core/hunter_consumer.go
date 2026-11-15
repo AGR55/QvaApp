@@ -74,6 +74,7 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
+		consumer.reloadRuntime(ctx, time.Now())
 		events, err := repository.Claim(ctx, consumer.worker, postgres.NowMS(), 50)
 		if err != nil {
 			if ctx.Err() == nil {

@@ -172,6 +172,14 @@ type dashboardRiskUsage struct {
 
 type dashboardAvailability struct {
 	Fiat map[string]dashboardFiatAvailability `json:"fiat"`
+	Qusd dashboardQusdAvailability            `json:"qusd"`
+}
+
+type dashboardQusdAvailability struct {
+	Available float64 `json:"available"`
+	Committed float64 `json:"committed"`
+	Declared  float64 `json:"declared"`
+	Reported  float64 `json:"reported"`
 }
 
 type dashboardFiatAvailability struct {
@@ -318,6 +326,11 @@ func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSumma
 	}
 	if summary.CorePending > 0 {
 		snapshot.State.Active = int(summary.CorePending)
+	}
+	if balance, err := strconv.ParseFloat(summary.QvaBalance, 64); err == nil {
+		snapshot.Availability.Qusd = dashboardQusdAvailability{
+			Available: balance, Reported: balance,
+		}
 	}
 	return snapshot
 }
