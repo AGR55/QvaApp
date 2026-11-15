@@ -21,7 +21,8 @@ balance:      producción 495.2 → shadow 495.2
 transactions: producción 12 → shadow 20 (ventana de 20)
 market:       producción 5  → shadow 12 (incluye monedas fuera de market_config)
 operations:   producción 1  → shadow 50 (operaciones locales importadas + P2P)
-history:                       shadow ya registra snapshots cada 5 min
+history:                       500 puntos (3.232 importados + snapshots nuevos)
+chat:                          200 con mensajes reales de QvaPay
 ```
 
 Además:
@@ -32,8 +33,8 @@ Además:
   `EDGE_MUTATIONS_LIVE=true`; por defecto sigue en shadow.
 - El dashboard ya lee balance, ofertas, transacciones, mercado y operaciones
   en vivo, y registra historial.
-- Faltan chat remoto, `payment-preview` real, conciliación completa y el
-  ensayo de corte.
+- El chat ya es real contra QvaPay (lectura y envío de texto).
+- Faltan `payment-preview` real, conciliación completa y el ensayo de corte.
 - `payment-preview` devuelve 503 porque necesita perfil/oferta en vivo.
 - El chat del edge es local; no habla con el chat remoto de QvaPay.
 - El webhook QvaPay del edge está activo con HMAC, pero el webhook de Telegram
