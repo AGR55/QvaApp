@@ -13,6 +13,7 @@ archive=${1:?Falta el archivo de release}
 revision=${2:?Falta la revisión Git}
 
 readonly app_root="/opt/qvaapply-f3-shadow"
+export F3_MARKET_ICONS_DIR="$app_root/market-icons"
 readonly prod_root="/opt/qvaapply"
 readonly shadow_port=8090
 release_dir="$app_root/releases/$revision"
@@ -299,7 +300,6 @@ if [[ -s "$app_root/web-extras.json" ]]; then
 fi
 install -d -m 755 "$app_root/market-icons"
 chown 65532:65532 "$app_root/market-icons" 2>/dev/null || true
-export F3_MARKET_ICONS_DIR="$app_root/market-icons"
 
 ln -sfn "$release_dir" "$app_root/current.next"
 mv -Tf "$app_root/current.next" "$app_root/current"
