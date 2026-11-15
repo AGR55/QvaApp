@@ -33,6 +33,11 @@ type ReconciliationReport struct {
 	PeerUUID    string `json:"peerUuid,omitempty"`
 	ProfileUUID string `json:"profileUuid,omitempty"`
 	HasDetails  bool   `json:"hasDetails"`
+	OfferType   string `json:"offerType,omitempty"`
+	OfferKind   string `json:"offerKind,omitempty"`
+	Available   string `json:"available,omitempty"`
+	OrderMin    string `json:"orderMin,omitempty"`
+	OrderMax    string `json:"orderMax,omitempty"`
 	CheckedAt   int64  `json:"checkedAt"`
 }
 
@@ -70,6 +75,11 @@ func (reconciler *Reconciler) Check(ctx context.Context, uuid, order string) (Re
 		PeerUUID:    peer,
 		ProfileUUID: profile,
 		HasDetails:  len(offer.Details) > 0,
+		OfferType:   offer.Type,
+		OfferKind:   offer.OfferKind,
+		Available:   offer.AvailableAmount.Format(8),
+		OrderMin:    offer.OrderMin.Format(8),
+		OrderMax:    offer.OrderMax.Format(8),
 		CheckedAt:   reconciler.now().UnixMilli(),
 	}
 	if reconciler.Store != nil {

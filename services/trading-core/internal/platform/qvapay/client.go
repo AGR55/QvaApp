@@ -156,6 +156,8 @@ type Offer struct {
 	Status          string          `json:"status"`
 	AvailableAmount decimal.Value   `json:"available_amount"`
 	ReservedAmount  decimal.Value   `json:"reserved_amount"`
+	OrderMin        decimal.Value   `json:"order_min"`
+	OrderMax        decimal.Value   `json:"order_max"`
 	User            json.RawMessage `json:"User"`
 	Peer            json.RawMessage `json:"Peer"`
 	OwnerUUID       string          `json:"owner_uuid"`
@@ -212,6 +214,8 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		Status          any             `json:"status"`
 		AvailableAmount any             `json:"available_amount"`
 		ReservedAmount  any             `json:"reserved_amount"`
+		OrderMin        any             `json:"order_min"`
+		OrderMax        any             `json:"order_max"`
 		User            json.RawMessage `json:"User"`
 		Peer            json.RawMessage `json:"Peer"`
 		OwnerUUID       string          `json:"owner_uuid"`
@@ -243,6 +247,14 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+	orderMin, err := optionalDecimal("order_min", raw.OrderMin)
+	if err != nil {
+		return err
+	}
+	orderMax, err := optionalDecimal("order_max", raw.OrderMax)
+	if err != nil {
+		return err
+	}
 
 	*o = Offer{
 		UUID:            scalarString(raw.UUID),
@@ -254,6 +266,8 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		Status:          scalarString(raw.Status),
 		AvailableAmount: available,
 		ReservedAmount:  reserved,
+		OrderMin:        orderMin,
+		OrderMax:        orderMax,
 		User:            raw.User,
 		Peer:            raw.Peer,
 		OwnerUUID:       raw.OwnerUUID,
