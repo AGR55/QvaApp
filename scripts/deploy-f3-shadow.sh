@@ -256,7 +256,15 @@ PY
         printf 'EDGE_TRUSTED_ORIGIN=%s\n' "$trusted_origin"
         printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
         printf 'EDGE_MUTATIONS_ENABLED=true\n'
-        printf 'EDGE_QVAPAY_WEBHOOK_ENABLED=false\n' 
+        webhook_secret_file="$app_root/webhook.secret"
+        if [[ ! -s $webhook_secret_file ]]; then
+          temporary_secret=$(mktemp "$app_root/webhook.secret.XXXXXX")
+          openssl rand -hex 32 > "$temporary_secret"
+          chmod 600 "$temporary_secret"
+          mv -f "$temporary_secret" "$webhook_secret_file"
+        fi
+        printf 'EDGE_QVAPAY_WEBHOOK_ENABLED=true\n'
+        printf 'EDGE_QVAPAY_WEBHOOK_SECRET=%s\n' "$(tr -d '\r\n' < "$webhook_secret_file")"
         push_public=$(sed -n 's/^WEB_PUSH_PUBLIC_KEY=//p' "$push_env" | tail -n 1 | tr -d '\r')
         if [[ -n $push_public ]]; then
           printf 'EDGE_PUSH_PUBLIC_KEY=%s\n' "$push_public"
