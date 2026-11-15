@@ -272,6 +272,44 @@ func (api *MobileAuthAPI) receiptOutcomes(
 	writeJSON(w, http.StatusOK, map[string]any{"data": receipts})
 }
 
+// AuthorizeRead valida una credencial Bearer de operador con scope read y
+// consume una lectura del límite. Si falla, ya escribió la respuesta JSON y
+// devuelve false. Lo usan las APIs móviles que comparten este esquema de auth.
+func (api *MobileAuthAPI) AuthorizeRead(w http.ResponseWriter, r *http.Request) bool {
+	if api == nil {
+		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
+			Error: mobileOperatorCredentialError,
+		})
+		return false
+	}
+	token, ok := mobileBearerToken(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
+			Error: mobileOperatorCredentialError,
+		})
+		return false
+	}
+	snapshot, err := api.snapshot()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+		return false
+	}
+	record, ok := mobileAuthOperator(snapshot.Operators, token)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
+			Error: mobileOperatorCredentialError,
+		})
+		return false
+	}
+	if !api.allowRead(record.rateKey(), api.now()) {
+		writeJSON(w, http.StatusTooManyRequests, mobileAuthErrorResponse{
+			Error: mobileOperatorRateLimitError,
+		})
+		return false
+	}
+	return true
+}
+
 // writeCredentialError elige el mensaje 401 correspondiente a la ruta.
 func (api *MobileAuthAPI) writeCredentialError(w http.ResponseWriter, path string) {
 	message := mobileDeviceCredentialError

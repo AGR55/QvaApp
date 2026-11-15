@@ -225,6 +225,17 @@ def export_analytics_fees(connection: sqlite3.Connection) -> list[dict[str, Any]
     return items
 
 
+def export_operational_health(connection: sqlite3.Connection) -> Any:
+    """Estado de salud que el monitor TS guarda ya serializado en settings."""
+    for row in rows(connection, "SELECT value FROM settings WHERE key = 'operational_health'"):
+        try:
+            value = json.loads(row["value"])
+        except (TypeError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+    return None
+
+
 def export_audit_log(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     """Últimas filas de telemetría usadas por /api/hunting/diagnostics.
 
@@ -352,6 +363,7 @@ def main() -> int:
             "analyticsFees": export_analytics_fees(connection),
             "auditLog": export_audit_log(connection),
             "analytics": export_analytics(connection),
+            "operationalHealth": export_operational_health(connection),
         }
     finally:
         connection.close()

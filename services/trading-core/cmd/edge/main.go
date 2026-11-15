@@ -91,6 +91,7 @@ func run(logger *slog.Logger) error {
 	var dashboardRead *edge.DashboardReadAPI
 	var tradingAnalytics *edge.TradingAnalyticsAPI
 	var huntingDiagnostics *edge.HuntingDiagnosticsAPI
+	var mobileInsights *edge.MobileInsightsAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -121,6 +122,10 @@ func run(logger *slog.Logger) error {
 				Sessions: manager,
 				File:     cfg.DashboardFile,
 			}
+			mobileInsights = &edge.MobileInsightsAPI{
+				Auth: mobileAuth,
+				File: cfg.DashboardFile,
+			}
 			configAPI = &edge.ConfigAPI{
 				Sessions:      manager,
 				PublicPushKey: cfg.PublicPushKey,
@@ -149,6 +154,10 @@ func run(logger *slog.Logger) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if session != nil && r.URL.Path == "/api/session" {
 			session.ServeHTTP(w, r)
+			return
+		}
+		if mobileInsights != nil && r.URL.Path == "/api/mobile/insights" {
+			mobileInsights.ServeHTTP(w, r)
 			return
 		}
 		if r.URL.Path == "/api/mobile/device-check" ||
