@@ -125,8 +125,9 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 	}
 	if live.Pool != nil {
 		rows, err := live.Pool.Query(ctx, `
-			SELECT operation_id, state, qusd_amount, fiat_amount, updated_at
-			FROM shadow.core_operations
+			SELECT uuid, offer_type, coin, amount, receive, rate, state,
+			       auto_applied, created_at, updated_at, order_uuid
+			FROM shadow.local_operations
 			ORDER BY updated_at DESC LIMIT 50`)
 		if err == nil {
 			existing := make(map[string]struct{}, len(snapshot.Operations))
@@ -136,24 +137,27 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 				}
 			}
 			for rows.Next() {
-				var id, state, qusd, fiat string
-				var updated int64
-				if rows.Scan(&id, &state, &qusd, &fiat, &updated) != nil {
+				var id, offerType, coin, state string
+				var amount, receive, rate float64
+				var auto bool
+				var created, updated int64
+				var order *string
+				if rows.Scan(&id, &offerType, &coin, &amount, &receive, &rate, &state,
+					&auto, &created, &updated, &order) != nil {
 					continue
 				}
 				if _, ok := existing[id]; ok {
 					continue
 				}
-				amount, _ := strconv.ParseFloat(qusd, 64)
-				receive, _ := strconv.ParseFloat(fiat, 64)
-				rate := 0.0
-				if amount > 0 {
-					rate = receive / amount
+				orderUUID := ""
+				if order != nil {
+					orderUUID = *order
 				}
 				snapshot.Operations = append(snapshot.Operations, map[string]any{
-					"uuid": id, "coin": "", "offerType": "", "amount": amount,
-					"receive": receive, "rate": rate, "state": state,
-					"createdAt": updated, "updatedAt": updated,
+					"uuid": id, "offerType": offerType, "coin": coin,
+					"amount": amount, "receive": receive, "rate": rate,
+					"state": state, "autoApplied": auto, "orderUuid": orderUUID,
+					"createdAt": created, "updatedAt": updated,
 				})
 			}
 			rows.Close()

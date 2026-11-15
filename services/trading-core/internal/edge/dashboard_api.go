@@ -358,7 +358,9 @@ func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSumma
 		}
 	}
 	if api.Live != nil {
-		live := api.Live.Snapshot(ctx)
+		liveCtx, cancelLive := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancelLive()
+		live := api.Live.Snapshot(liveCtx)
 		if live.Live {
 			snapshot.Balance = live.Balance
 			snapshot.OwnOffers = liveAnyList(live.OwnOffers)

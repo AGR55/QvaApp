@@ -126,3 +126,20 @@ CREATE TABLE IF NOT EXISTS shadow.live_dashboard_history (
   open_offers integer NOT NULL,
   active_operations integer NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow.local_operations (
+  uuid text PRIMARY KEY,
+  offer_type text NOT NULL DEFAULT '',
+  coin text NOT NULL DEFAULT '',
+  amount double precision NOT NULL DEFAULT 0,
+  receive double precision NOT NULL DEFAULT 0,
+  rate double precision NOT NULL DEFAULT 0,
+  state text NOT NULL DEFAULT '',
+  auto_applied boolean NOT NULL DEFAULT false,
+  cancel_at bigint,
+  created_at bigint NOT NULL DEFAULT 0,
+  updated_at bigint NOT NULL DEFAULT 0,
+  order_uuid text,
+  reference_rate double precision,
+  counterparty_id text
+);
