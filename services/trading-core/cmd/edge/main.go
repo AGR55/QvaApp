@@ -89,6 +89,8 @@ func run(logger *slog.Logger) error {
 	var operators *edge.OperatorsAPI
 	var operations *edge.OperationsAPI
 	var dashboardRead *edge.DashboardReadAPI
+	var tradingAnalytics *edge.TradingAnalyticsAPI
+	var huntingDiagnostics *edge.HuntingDiagnosticsAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -108,6 +110,14 @@ func run(logger *slog.Logger) error {
 				File:     cfg.ChatThreadsFile,
 			}
 			dashboardRead = &edge.DashboardReadAPI{
+				Sessions: manager,
+				File:     cfg.DashboardFile,
+			}
+			tradingAnalytics = &edge.TradingAnalyticsAPI{
+				Sessions: manager,
+				File:     cfg.DashboardFile,
+			}
+			huntingDiagnostics = &edge.HuntingDiagnosticsAPI{
 				Sessions: manager,
 				File:     cfg.DashboardFile,
 			}
@@ -153,6 +163,14 @@ func run(logger *slog.Logger) error {
 			r.URL.Path == "/api/analytics/fees" ||
 			strings.HasPrefix(r.URL.Path, "/api/offers/rebalance/")) {
 			dashboardRead.ServeHTTP(w, r)
+			return
+		}
+		if tradingAnalytics != nil && r.URL.Path == "/api/trading-analytics" {
+			tradingAnalytics.ServeHTTP(w, r)
+			return
+		}
+		if huntingDiagnostics != nil && r.URL.Path == "/api/hunting/diagnostics" {
+			huntingDiagnostics.ServeHTTP(w, r)
 			return
 		}
 		if operators != nil && r.URL.Path == "/api/mobile/operators" {

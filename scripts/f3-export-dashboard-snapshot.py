@@ -225,6 +225,117 @@ def export_analytics_fees(connection: sqlite3.Connection) -> list[dict[str, Any]
     return items
 
 
+def export_audit_log(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Últimas filas de telemetría usadas por /api/hunting/diagnostics.
+
+    Se consulta por acción para aprovechar el índice (action, id DESC) y se
+    acota a 5000 filas por acción. El handler aplica la ventana de horas.
+    """
+    actions = (
+        "market_feed_processed",
+        "offer_apply_timing",
+        "market_feed_processing_error",
+    )
+    by_id: dict[int, dict[str, Any]] = {}
+    for action in actions:
+        for row in rows(
+            connection,
+            "SELECT id, created_at, action, offer_uuid, detail FROM audit_log"
+            " WHERE action = ? ORDER BY id DESC LIMIT 5000",
+            (action,),
+        ):
+            by_id[int(row["id"])] = {
+                "id": int(row["id"]),
+                "createdAt": integer(row["created_at"]),
+                "action": text(row["action"]),
+                "uuid": text(row["offer_uuid"]) or "",
+                "detail": text(row["detail"]) or "",
+            }
+    return [by_id[key] for key in sorted(by_id, reverse=True)]
+
+
+def export_analytics(connection: sqlite3.Connection) -> dict[str, Any]:
+    account = ""
+    for row in rows(connection, "SELECT value FROM settings WHERE key = 'analytics_account_uuid'"):
+        account = text(row["value"]) or ""
+        break
+
+    transactions: list[Any] = []
+    for row in rows(
+        connection,
+        "SELECT payload_json FROM analytics_transactions"
+        " ORDER BY created_at DESC LIMIT 5000",
+    ):
+        try:
+            value = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            transactions.append(value)
+
+    offers: list[Any] = []
+    for row in rows(
+        connection,
+        "SELECT payload_json FROM analytics_offers"
+        " ORDER BY completed_at DESC LIMIT 5000",
+    ):
+        try:
+            value = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            continue
+        if isinstance(value, dict):
+            offers.append(value)
+
+    fees = [
+        {
+            "uuid": text(row["offer_uuid"]),
+            "grossQusd": number(row["gross_qusd"]),
+            "feeQusd": number(row["fee_qusd"]),
+            "evidence": text(row["evidence"]) or "",
+            "version": integer(row["version"]) or 0,
+            "updatedAt": integer(row["updated_at"]) or 0,
+        }
+        for row in rows(
+            connection,
+            "SELECT offer_uuid, gross_qusd, fee_qusd, evidence, version, updated_at"
+            " FROM analytics_fee_evidence ORDER BY updated_at DESC LIMIT 5000",
+        )
+    ]
+
+    fiat_movements = [
+        {
+            "uuid": text(row["operation_uuid"]),
+            "direction": text(row["direction"]),
+            "amount": number(row["amount"]),
+        }
+        for row in rows(
+            connection,
+            "SELECT operation_uuid, direction, amount FROM fiat_ledger LIMIT 5000",
+        )
+    ]
+
+    markets = [
+        {
+            "code": text(row["code"]),
+            "label": text(row["label"]),
+            "currency": text(row["currency"]),
+        }
+        for row in rows(
+            connection,
+            "SELECT code, label, currency FROM market_config ORDER BY code",
+        )
+    ]
+
+    return {
+        "accountUuid": account,
+        "transactions": transactions,
+        "offers": offers,
+        "fees": fees,
+        "fiatMovements": fiat_movements,
+        "markets": markets,
+    }
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print("Uso: f3-export-dashboard-snapshot.py <sqlite>", file=sys.stderr)
@@ -239,6 +350,8 @@ def main() -> int:
             "rebalanceJobs": export_rebalance_jobs(connection),
             "marketObservations": export_market_observations(connection),
             "analyticsFees": export_analytics_fees(connection),
+            "auditLog": export_audit_log(connection),
+            "analytics": export_analytics(connection),
         }
     finally:
         connection.close()

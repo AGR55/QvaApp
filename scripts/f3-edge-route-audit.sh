@@ -264,6 +264,11 @@ route_is_interesting() {
 
     while IFS= read -r route; do
       [[ -n "${route}" ]] || continue
+      # live_api.go sirve el parámetro :coin a partir de un prefijo. Se
+      # representa como ruta paramétrica para compararla con el TS.
+      if [[ "${route}" == "/api/live/markets/" ]]; then
+        route="/api/live/markets/:param"
+      fi
       route_is_interesting "${route}" || continue
       for method in "${methods[@]}"; do
         printf '%s %s\n' "${method}" "${route}"
