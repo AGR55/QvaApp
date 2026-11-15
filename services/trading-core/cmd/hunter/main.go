@@ -776,6 +776,8 @@ func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		service.metrics(w)
 	case r.Method == http.MethodGet && r.URL.Path == "/candidates":
 		service.latest(w)
+	case r.Method == http.MethodPost && r.URL.Path == "/feed":
+		service.feed(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 	}
