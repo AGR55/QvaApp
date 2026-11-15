@@ -115,6 +115,8 @@ func run(logger *slog.Logger) error {
 	var marketIcons *edge.MarketIconsAPI
 	var decisionEvents *edge.DecisionEventsAPI
 	var simulation *edge.SimulationAPI
+	var mobileAdmin *edge.MobileAdminAPI
+	var pushSubscriptions *edge.PushSubscriptionsAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -157,10 +159,23 @@ func run(logger *slog.Logger) error {
 				Sessions: manager, MobileAuth: mobileAuth, File: cfg.ExtrasFile,
 				TrustedOrigin: cfg.TrustedOrigin,
 			}
+			mobileAdmin = &edge.MobileAdminAPI{
+				Sessions: manager, MobileAuth: mobileAuth,
+				DashboardFile: cfg.DashboardFile, OperatorsFile: cfg.OperatorsFile,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
+			pushSubscriptions = &edge.PushSubscriptionsAPI{
+				Sessions: manager, PublicKey: cfg.PublicPushKey,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
 			if writePool != nil {
 				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
 				decisionEvents.Dismissals = &edge.PostgresDismissalStore{Pool: writePool}
 				simulation.Runtime = &runtimeconfig.Repository{Pool: writePool}
+				mobileStore := &edge.PostgresMobileCredentialStore{Pool: writePool}
+				mobileAuth.Overlay = mobileStore
+				mobileAdmin.Store = mobileStore
+				pushSubscriptions.Store = &edge.PostgresPushStore{Pool: writePool}
 			}
 			if cfg.IconsDir != "" {
 				marketIcons = &edge.MarketIconsAPI{
@@ -227,6 +242,18 @@ func run(logger *slog.Logger) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if session != nil && r.URL.Path == "/api/session" {
 			session.ServeHTTP(w, r)
+			return
+		}
+		if pushSubscriptions != nil && (r.URL.Path == "/api/push/subscriptions" || r.URL.Path == "/api/push/public-key") {
+			pushSubscriptions.ServeHTTP(w, r)
+			return
+		}
+		if mobileAdmin != nil && (r.URL.Path == "/api/mobile/devices" ||
+			strings.HasPrefix(r.URL.Path, "/api/mobile/devices/") ||
+			r.URL.Path == "/api/mobile/operators" ||
+			strings.HasPrefix(r.URL.Path, "/api/mobile/operators/") ||
+			r.URL.Path == "/api/mobile/push-device") {
+			mobileAdmin.ServeHTTP(w, r)
 			return
 		}
 		if mobileInsights != nil && r.URL.Path == "/api/mobile/insights" {

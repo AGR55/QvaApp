@@ -54,3 +54,31 @@ CREATE TABLE IF NOT EXISTS shadow.decision_dismissals (
   id bigint PRIMARY KEY,
   dismissed_at bigint NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS shadow.mobile_devices (
+  id text PRIMARY KEY,
+  label text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  created_at bigint NOT NULL,
+  revoked_at bigint,
+  last_seen_at bigint
+);
+
+CREATE TABLE IF NOT EXISTS shadow.mobile_operators (
+  id text PRIMARY KEY,
+  label text NOT NULL,
+  token_hash text NOT NULL UNIQUE,
+  scopes jsonb NOT NULL DEFAULT '["read","actions"]'::jsonb,
+  created_at bigint NOT NULL,
+  revoked_at bigint,
+  read_rate_window_at bigint NOT NULL DEFAULT 0,
+  read_rate_count integer NOT NULL DEFAULT 0,
+  write_rate_window_at bigint NOT NULL DEFAULT 0,
+  write_rate_count integer NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS shadow.chat_push_devices (
+  operator_id text PRIMARY KEY,
+  token text NOT NULL UNIQUE,
+  updated_at bigint NOT NULL
+);

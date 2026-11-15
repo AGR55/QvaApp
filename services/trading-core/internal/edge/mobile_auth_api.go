@@ -2,6 +2,7 @@ package edge
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
@@ -103,6 +104,53 @@ func (record mobileAuthRecord) rateKey() string {
 	return record.TokenHash
 }
 
+// MobileDevice es la proyección pública de un dispositivo móvil emparejado. El
+// hash del token se conserva para persistirlo, pero nunca se serializa.
+type MobileDevice struct {
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	TokenHash string `json:"-"`
+	CreatedAt int64  `json:"createdAt"`
+	RevokedAt *int64 `json:"revokedAt"`
+}
+
+// MobileOperator es la proyección pública de un operador móvil emparejado. El
+// hash del token se conserva para persistirlo, pero nunca se serializa.
+type MobileOperator struct {
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	TokenHash string   `json:"-"`
+	Scopes    []string `json:"scopes"`
+	CreatedAt int64    `json:"createdAt"`
+	RevokedAt *int64   `json:"revokedAt"`
+}
+
+// MobileCredential es la credencial mínima que necesita la validación Bearer.
+// Solo se usa en memoria: no tiene campos serializables.
+type MobileCredential struct {
+	ID        string   `json:"-"`
+	TokenHash string   `json:"-"`
+	Scopes    []string `json:"-"`
+	Revoked   bool     `json:"-"`
+}
+
+// MobileCredentialStore es la persistencia de dispositivos, operadores y
+// tokens de notificación móviles. Devices y Operators devuelven proyecciones
+// públicas; CredentialDevices y CredentialOperators devuelven los hashes que
+// usa MobileAuthAPI para validar el Bearer.
+type MobileCredentialStore interface {
+	Devices(ctx context.Context) ([]MobileDevice, error)
+	Operators(ctx context.Context) ([]MobileOperator, error)
+	CreateDevice(ctx context.Context, device MobileDevice) error
+	CreateOperator(ctx context.Context, operator MobileOperator) error
+	RevokeDevice(ctx context.Context, id string, now int64) (bool, error)
+	RevokeOperator(ctx context.Context, id string, now int64) (bool, error)
+	CredentialDevices(ctx context.Context) ([]MobileCredential, error)
+	CredentialOperators(ctx context.Context) ([]MobileCredential, error)
+	PutChatPushDevice(ctx context.Context, operatorID, token string, now int64) error
+	DeleteChatPushDevice(ctx context.Context, operatorID string) error
+}
+
 // mobileAuthReadWindow es la ventana fija de lecturas de un operador.
 type mobileAuthReadWindow struct {
 	start time.Time
@@ -131,9 +179,15 @@ type mobileAuthReadWindow struct {
 // El límite de 60 lecturas por minuto del operador vive en memoria y se
 // protege con un mutex. Now permite inyectar el reloj en las pruebas; nil usa
 // time.Now.
+//
+// Overlay es opcional: añade las credenciales activas persistidas en Postgres a
+// las del snapshot. Si falla, la autenticación sigue funcionando solo con el
+// archivo; el error se descarta a propósito porque este tipo no tiene logger y
+// el cliente nunca debe ver detalles de persistencia.
 type MobileAuthAPI struct {
-	File string
-	Now  func() time.Time
+	File    string
+	Overlay MobileCredentialStore
+	Now     func() time.Time
 
 	mu    sync.Mutex
 	reads map[string]mobileAuthReadWindow
@@ -176,7 +230,7 @@ func (api *MobileAuthAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	snapshot, err := api.snapshot()
+	snapshot, err := api.snapshotContext(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
 		return
@@ -272,42 +326,53 @@ func (api *MobileAuthAPI) receiptOutcomes(
 	writeJSON(w, http.StatusOK, map[string]any{"data": receipts})
 }
 
-// AuthorizeRead valida una credencial Bearer de operador con scope read y
-// consume una lectura del límite. Si falla, ya escribió la respuesta JSON y
-// devuelve false. Lo usan las APIs móviles que comparten este esquema de auth.
-func (api *MobileAuthAPI) AuthorizeRead(w http.ResponseWriter, r *http.Request) bool {
+// AuthorizeOperatorRead valida una credencial Bearer de operador con scope read
+// y consume una lectura del límite. Devuelve el id del operador autenticado. Si
+// falla, ya escribió la respuesta JSON y devuelve ok=false.
+func (api *MobileAuthAPI) AuthorizeOperatorRead(
+	w http.ResponseWriter,
+	r *http.Request,
+) (string, bool) {
 	if api == nil {
 		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
 			Error: mobileOperatorCredentialError,
 		})
-		return false
+		return "", false
 	}
 	token, ok := mobileBearerToken(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
 			Error: mobileOperatorCredentialError,
 		})
-		return false
+		return "", false
 	}
-	snapshot, err := api.snapshot()
+	snapshot, err := api.snapshotContext(r.Context())
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
-		return false
+		return "", false
 	}
 	record, ok := mobileAuthOperator(snapshot.Operators, token)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, mobileAuthErrorResponse{
 			Error: mobileOperatorCredentialError,
 		})
-		return false
+		return "", false
 	}
 	if !api.allowRead(record.rateKey(), api.now()) {
 		writeJSON(w, http.StatusTooManyRequests, mobileAuthErrorResponse{
 			Error: mobileOperatorRateLimitError,
 		})
-		return false
+		return "", false
 	}
-	return true
+	return record.ID, true
+}
+
+// AuthorizeRead valida una credencial Bearer de operador con scope read y
+// consume una lectura del límite. Si falla, ya escribió la respuesta JSON y
+// devuelve false. Lo usan las APIs móviles que comparten este esquema de auth.
+func (api *MobileAuthAPI) AuthorizeRead(w http.ResponseWriter, r *http.Request) bool {
+	_, ok := api.AuthorizeOperatorRead(w, r)
+	return ok
 }
 
 // writeCredentialError elige el mensaje 401 correspondiente a la ruta.
@@ -391,10 +456,71 @@ func mobileAuthOperator(records []mobileAuthRecord, token string) (mobileAuthRec
 	return found, matched == 1
 }
 
-// snapshot lee y valida el documento privado. Nunca devuelve el error de E/S al
-// cliente ni incluye la ruta en un mensaje. Un archivo ausente o vacío es un
-// snapshot vacío: sin credenciales, toda petición termina en 401.
-func (api *MobileAuthAPI) snapshot() (mobileAuthSnapshot, error) {
+// snapshotContext lee y valida el documento privado y, si Overlay está
+// configurado, añade sus credenciales activas. Nunca devuelve el error de E/S
+// al cliente ni incluye la ruta en un mensaje. Un archivo ausente o vacío es un
+// snapshot vacío: sin credenciales, toda petición termina en 401. Un fallo de
+// Overlay se ignora para no romper la autenticación basada en archivo.
+func (api *MobileAuthAPI) snapshotContext(ctx context.Context) (mobileAuthSnapshot, error) {
+	snapshot, err := api.fileSnapshot()
+	if err != nil {
+		return mobileAuthSnapshot{}, err
+	}
+	api.mergeCredentials(ctx, &snapshot)
+	return snapshot, nil
+}
+
+// mergeCredentials añade los dispositivos y operadores activos de Overlay que
+// aún no estén en el snapshot. Deduplica por tokenHash para que una credencial
+// presente en ambos orígenes no consuma dos veces el cupo del operador.
+func (api *MobileAuthAPI) mergeCredentials(ctx context.Context, snapshot *mobileAuthSnapshot) {
+	if api.Overlay == nil {
+		return
+	}
+	if credentials, err := api.Overlay.CredentialDevices(ctx); err == nil {
+		snapshot.Devices = mobileAuthAppendCredentials(snapshot.Devices, credentials, false)
+	}
+	if credentials, err := api.Overlay.CredentialOperators(ctx); err == nil {
+		snapshot.Operators = mobileAuthAppendCredentials(snapshot.Operators, credentials, true)
+	}
+}
+
+// mobileAuthAppendCredentials convierte credenciales no revocadas en registros
+// del snapshot. scoped controla si se conservan los scopes del operador.
+func mobileAuthAppendCredentials(
+	records []mobileAuthRecord,
+	credentials []MobileCredential,
+	scoped bool,
+) []mobileAuthRecord {
+	seen := make(map[string]struct{}, len(records))
+	for _, record := range records {
+		if record.TokenHash != "" {
+			seen[record.TokenHash] = struct{}{}
+		}
+	}
+	for _, credential := range credentials {
+		if credential.Revoked || credential.TokenHash == "" {
+			continue
+		}
+		if _, duplicate := seen[credential.TokenHash]; duplicate {
+			continue
+		}
+		scopes := credential.Scopes
+		if !scoped {
+			scopes = nil
+		}
+		records = append(records, mobileAuthRecord{
+			ID:        credential.ID,
+			TokenHash: credential.TokenHash,
+			Scopes:    scopes,
+		})
+		seen[credential.TokenHash] = struct{}{}
+	}
+	return records
+}
+
+// fileSnapshot lee y valida únicamente el documento privado del disco.
+func (api *MobileAuthAPI) fileSnapshot() (mobileAuthSnapshot, error) {
 	if api.File == "" {
 		return mobileAuthSnapshot{}, nil
 	}

@@ -297,6 +297,16 @@ route_is_interesting() {
     printf 'POST /api/decision-events/dismiss-all\n'
     printf 'POST /api/decision-events/:param/dismiss\n'
   fi
+  if [[ -r "${EDGE_DIR}/mobile_admin_api.go" ]]; then
+    printf 'GET /api/mobile/devices\nPOST /api/mobile/devices\nDELETE /api/mobile/devices/:param\n'
+    printf 'GET /api/mobile/operators\nPOST /api/mobile/operators\nDELETE /api/mobile/operators/:param\n'
+    printf 'POST /api/mobile/push-device\nDELETE /api/mobile/push-device\n'
+  fi
+  if [[ -r "${EDGE_DIR}/push_subscriptions_api.go" ]]; then
+    printf 'POST /api/push/subscriptions\nDELETE /api/push/subscriptions\n'
+  fi
+  # El shell sirve el fallback SPA de navegación del dashboard.
+  printf 'GET /dashboard/:wildcard\n'
 
   # StaticRoutes declara sus prefijos en un slice; se sintetizan las rutas
   # paramétricas que resolve() atiende realmente.
