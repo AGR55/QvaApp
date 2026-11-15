@@ -145,10 +145,16 @@ func (live *LiveDashboard) now() time.Time {
 }
 
 func liveOfferMap(offer qvapay.Offer, updatedAt int64) map[string]any {
+	amount := decimalFloat(offer.Amount)
+	receive := decimalFloat(offer.Receive)
+	rate := decimalFloat(offer.Rate)
+	if rate == 0 && amount > 0 {
+		rate = receive / amount
+	}
 	return map[string]any{
 		"uuid": offer.UUID, "type": offer.Type, "coin": offer.Coin,
-		"amount": decimalFloat(offer.Amount), "receive": decimalFloat(offer.Receive),
-		"rate": decimalFloat(offer.Rate), "status": offer.Status,
+		"amount": amount, "receive": receive,
+		"rate": rate, "status": offer.Status,
 		"availableAmount": decimalFloat(offer.AvailableAmount),
 		"reservedAmount":  decimalFloat(offer.ReservedAmount),
 		"offerKind":       "fixed", "updatedAt": updatedAt,

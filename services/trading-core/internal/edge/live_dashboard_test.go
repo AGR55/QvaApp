@@ -35,7 +35,7 @@ func (fake *fakeLiveReader) Transactions(context.Context, int, int) (qvapay.Tran
 func TestLiveDashboardSnapshotAndCache(t *testing.T) {
 	reader := &fakeLiveReader{
 		offers: []qvapay.Offer{
-			{UUID: "offer-1", Type: "sell", Coin: "CLASICA", Amount: decimal.MustParse("10"), Receive: decimal.MustParse("11"), Rate: decimal.MustParse("1.1"), Status: "open"},
+			{UUID: "offer-1", Type: "sell", Coin: "CLASICA", Amount: decimal.MustParse("10"), Receive: decimal.MustParse("11"), Status: "open"},
 			{UUID: "offer-2", Type: "buy", Coin: "BANK_CUP", Amount: decimal.MustParse("5"), Receive: decimal.MustParse("5500"), Rate: decimal.MustParse("1100"), Status: "open"},
 		},
 		txs: []qvapay.Transaction{{UUID: "tx-1", Amount: decimal.MustParse("2"), Description: "Pago", Status: "paid", CreatedAt: "2026-11-15T10:00:00Z"}},
@@ -46,6 +46,9 @@ func TestLiveDashboardSnapshotAndCache(t *testing.T) {
 	snapshot := live.Snapshot(context.Background())
 	if !snapshot.Live || snapshot.Balance != 123.45 {
 		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if snapshot.OwnOffers[0]["rate"].(float64) != 1.1 {
+		t.Fatalf("rate derivada = %v", snapshot.OwnOffers[0]["rate"])
 	}
 	if len(snapshot.OwnOffers) != 1 || len(snapshot.Transactions) != 1 {
 		t.Fatalf("own=%d tx=%d", len(snapshot.OwnOffers), len(snapshot.Transactions))
