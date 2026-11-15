@@ -27,13 +27,13 @@ func NewCoreOperationRepository(pool *pgxpool.Pool) *CoreOperationRepository {
 	return &CoreOperationRepository{pool: pool}
 }
 
-// Create inserta una operación nueva. Solo acepta operaciones en estado
-// created y falla si el operation_id ya existe.
+// Create inserta una operación nueva en created o reserved. El consumidor
+// crea directamente en reserved para ahorrar una transición y reducir latencia.
 func (repository *CoreOperationRepository) Create(ctx context.Context, operation core.Operation) error {
-	if operation.State != core.StateCreated {
+	if operation.State != core.StateCreated && operation.State != core.StateReserved {
 		return fmt.Errorf(
-			"operación core %q: solo se puede crear en estado %q, recibido %q",
-			operation.ID, core.StateCreated, operation.State,
+			"operación core %q: solo se puede crear en %q o %q, recibido %q",
+			operation.ID, core.StateCreated, core.StateReserved, operation.State,
 		)
 	}
 	tag, err := repository.pool.Exec(ctx, `

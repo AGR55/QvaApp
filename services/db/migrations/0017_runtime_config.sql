@@ -162,3 +162,14 @@ CREATE TABLE IF NOT EXISTS shadow.fiat_ledger (
 
 CREATE INDEX IF NOT EXISTS idx_fiat_ledger_coin_created
   ON shadow.fiat_ledger (coin, created_at DESC);
+
+-- Índices para el camino caliente del consumidor: evitar scans al comprobar
+-- ofertas activas y al listar operaciones vencidas.
+CREATE INDEX IF NOT EXISTS idx_shadow_core_decisions_offer
+  ON shadow.core_decisions (offer_uuid);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_local_operations_state_created
+  ON shadow.local_operations (state, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_hunter_events_due_created
+  ON shadow.hunter_events (state, available_at, created_at);

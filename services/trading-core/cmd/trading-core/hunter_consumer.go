@@ -48,6 +48,22 @@ type hunterConsumer struct {
 	trader         *autoTrader
 	reconciler     *operationReconciler
 	notifier       *operationNotifier
+	applyQueue     chan executionTask
+
+	balanceMu    sync.Mutex
+	balanceValue decimal.Value
+	balanceAt    time.Time
+	usageMu      sync.Mutex
+	usageValue   core.Usage
+	usageAt      time.Time
+}
+
+type executionTask struct {
+	eventID  string
+	payload  hunterPayload
+	amount   decimal.Value
+	receive  decimal.Value
+	flexible bool
 }
 
 type hunterPayload struct {
@@ -85,6 +101,7 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		operationRepo: postgres.NewCoreOperationRepository(pool),
 		localOps:      postgres.NewLocalOperationRepository(pool),
 	}
+	consumer.applyQueue = make(chan executionTask, 1024)
 	consumer.trader = buildAutoTrader(logger)
 	consumer.notifier = newOperationNotifier()
 	if token, ok := decryptQvaToken(logger); ok {
@@ -159,11 +176,23 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 	if consumer.reconciler != nil {
 		go consumer.reconciler.loop(ctx)
 	}
-	ticker := time.NewTicker(time.Second)
+	if consumer.trader != nil {
+		workers := applyConcurrency()
+		for index := 0; index < workers; index++ {
+			go consumer.applyWorker(ctx)
+		}
+		consumer.logger.Info("ejecución de applies en paralelo", "workers", workers)
+	}
+	wake := make(chan struct{}, 1)
+	if databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); databaseURL != "" {
+		go listenHunterEvents(ctx, databaseURL, wake, consumer.logger)
+	}
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	lastPending := time.Time{}
 	for {
 		consumer.reloadRuntime(ctx, time.Now())
-		events, err := repository.Claim(ctx, consumer.worker, postgres.NowMS(), 50)
+		events, err := repository.Claim(ctx, consumer.worker, postgres.NowMS(), 100)
 		if err != nil {
 			if ctx.Err() == nil {
 				consumer.logger.Warn("claim de hunter_events falló", "error", err)
@@ -173,13 +202,52 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 				consumer.consume(ctx, repository, event)
 			}
 		}
-		if pending, err := repository.Pending(ctx); err == nil {
-			consumer.pending.Store(pending)
+		if time.Since(lastPending) > 5*time.Second {
+			lastPending = time.Now()
+			if pending, err := repository.Pending(ctx); err == nil {
+				consumer.pending.Store(pending)
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
+		case <-wake:
 		case <-ticker.C:
+		}
+	}
+}
+
+func applyConcurrency() int {
+	raw := strings.TrimSpace(os.Getenv("CORE_APPLY_CONCURRENCY"))
+	if raw == "" {
+		return 3
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 3
+	}
+	if value > 6 {
+		return 6
+	}
+	return value
+}
+
+func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case task := <-consumer.applyQueue:
+			state, err := consumer.trader.Execute(
+				ctx, consumer.operationRepo, task.eventID, task.payload.OfferUUID,
+				task.amount, task.flexible)
+			if err != nil {
+				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err)
+			} else if state == core.StateConfirmed {
+				consumer.applied.Add(1)
+			}
+			consumer.invalidateBalance()
+			consumer.recordLocalOperation(ctx, task.payload, task.eventID, task.amount, task.receive, time.Now().UnixMilli())
 		}
 	}
 }
@@ -208,10 +276,7 @@ func (consumer *hunterConsumer) consume(
 	amount, _ := decimal.Parse(payload.Amount)
 	receive, _ := decimal.Parse(payload.Receive)
 	rate, _ := decimal.Parse(payload.Rate)
-	balance, err := consumer.shadowRepo.LatestQvapayBalance(ctx)
-	if err != nil {
-		balance = decimal.Zero()
-	}
+	balance := consumer.currentBalance(ctx)
 	nowMS := postgres.NowMS()
 	if active, activeErr := consumer.operationRepo.ActiveForOffer(ctx, payload.OfferUUID); activeErr == nil && active {
 		consumer.persistBlockedEvent(ctx, repository, event, payload,
@@ -292,23 +357,24 @@ func (consumer *hunterConsumer) consume(
 		if operationErr != nil {
 			consumer.logger.Warn("crear operación shadow falló", "event_id", event.EventID, "error", operationErr)
 		} else {
+			operation.State = core.StateReserved
+			operation.UpdatedAt = now
 			if err := consumer.operationRepo.Create(ctx, operation); err != nil {
 				consumer.logger.Debug("operación shadow ya existía", "event_id", event.EventID)
-			}
-			if _, err := consumer.operationRepo.Transition(ctx, event.EventID, core.StateReserved, now); err != nil {
-				consumer.logger.Warn("reservar operación shadow falló", "event_id", event.EventID, "error", err)
 			} else {
 				consumer.operations.Add(1)
+				consumer.invalidateUsage()
 				if consumer.trader != nil {
-					state, executeErr := consumer.trader.Execute(
-						ctx, consumer.operationRepo, event.EventID, payload.OfferUUID,
-						amount, payload.OfferKind == "flexible")
-					if executeErr != nil {
-						consumer.logger.Warn("autotrade falló", "event_id", event.EventID, "error", executeErr)
-					} else if state == core.StateConfirmed {
-						consumer.applied.Add(1)
+					task := executionTask{
+						eventID: event.EventID, payload: payload,
+						amount: amount, receive: receive,
+						flexible: payload.OfferKind == "flexible",
 					}
-					consumer.recordLocalOperation(ctx, payload, event.EventID, amount, receive, now)
+					select {
+					case consumer.applyQueue <- task:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}
@@ -510,9 +576,45 @@ func remaining(limit, used decimal.Value) decimal.Value {
 	return left
 }
 
-// currentUsage lee el consumo persistido. Si falla, devuelve ceros y deja que
-// los límites por operación sigan aplicando.
+// currentBalance cachea el saldo QUSD unos milisegundos para no consultar la
+// base en cada evento. Se invalida después de cada aplicación.
+func (consumer *hunterConsumer) currentBalance(ctx context.Context) decimal.Value {
+	now := time.Now()
+	consumer.balanceMu.Lock()
+	if !consumer.balanceAt.IsZero() && now.Sub(consumer.balanceAt) < 500*time.Millisecond {
+		value := consumer.balanceValue
+		consumer.balanceMu.Unlock()
+		return value
+	}
+	consumer.balanceMu.Unlock()
+	value, err := consumer.shadowRepo.LatestQvapayBalance(ctx)
+	if err != nil {
+		value = decimal.Zero()
+	}
+	consumer.balanceMu.Lock()
+	consumer.balanceValue = value
+	consumer.balanceAt = now
+	consumer.balanceMu.Unlock()
+	return value
+}
+
+func (consumer *hunterConsumer) invalidateBalance() {
+	consumer.balanceMu.Lock()
+	consumer.balanceAt = time.Time{}
+	consumer.balanceMu.Unlock()
+}
+
+// currentUsage cachea el consumo de riesgo un cuarto de segundo. Las
+// operaciones nuevas invalidan la caché para no sobrepasar exposición.
 func (consumer *hunterConsumer) currentUsage(ctx context.Context, nowMS int64) core.Usage {
+	now := time.Now()
+	consumer.usageMu.Lock()
+	if !consumer.usageAt.IsZero() && now.Sub(consumer.usageAt) < 250*time.Millisecond {
+		usage := consumer.usageValue
+		consumer.usageMu.Unlock()
+		return usage
+	}
+	consumer.usageMu.Unlock()
 	dayStart := nowMS - nowMS%86_400_000
 	usage, err := consumer.operationRepo.Usage(ctx, dayStart)
 	if err != nil {
@@ -521,7 +623,17 @@ func (consumer *hunterConsumer) currentUsage(ctx context.Context, nowMS int64) c
 		}
 		return core.Usage{}
 	}
+	consumer.usageMu.Lock()
+	consumer.usageValue = usage
+	consumer.usageAt = now
+	consumer.usageMu.Unlock()
 	return usage
+}
+
+func (consumer *hunterConsumer) invalidateUsage() {
+	consumer.usageMu.Lock()
+	consumer.usageAt = time.Time{}
+	consumer.usageMu.Unlock()
 }
 
 // persistBlockedEvent cierra el evento sin aplicar y sin reintentarlo.
