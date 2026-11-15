@@ -55,6 +55,24 @@ Además:
 - Logs, notificaciones, recuperación, iconos, analítica y simulación.
 - Backup SQLite optimizado: `VACUUM INTO`, 54 s, 10,8 s CPU, `quick_check` OK.
 
+## Ensayos ejecutados
+
+- **Conmutación Nginx → edge → rollback**: el dominio sirvió el edge con login,
+  configuración (5 mercados) y dashboard (4 ofertas propias, 50 operaciones,
+  balance real). Después se restauró Nginx y TS volvió a running; ambos 200.
+- **Mutación real controlada**: con TS congelado y `EDGE_MUTATIONS_LIVE=true`,
+  `PUT /api/offers/22549487...` (edición no-op con los mismos importes) devolvió
+  204. La oferta siguió en 20/330. Después se restauró `LIVE=false` y TS.
+- **Pago asistido real**: 200 con contraparte, destino y fingerprint.
+- **Conciliación real**: 200 con estado/importes/aplicado de QvaPay.
+
+## Bloqueo principal restante: motor autónomo
+
+El borde ya sirve web, configuración, lecturas y mutaciones bajo bandera, pero
+**el bucle autónomo de caza y aplicación sigue siendo TS**. El hunter Go publica
+eventos y el core shadow decide, pero no aplica ofertas ni ejecuta el ciclo
+completo de dinero. Apagar TS hoy detendría la operación automática.
+
 ## Condición mínima para apagar TS
 
 1. Dashboard completo en Go: `ownOffers`, `operations`, `transactions`,
