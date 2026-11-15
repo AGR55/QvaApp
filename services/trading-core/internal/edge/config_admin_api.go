@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -157,7 +158,7 @@ func (api *ConfigAdminAPI) authenticated(r *http.Request) (string, bool) {
 }
 
 func (api *ConfigAdminAPI) mutationAllowed(w http.ResponseWriter, r *http.Request, cookie string) bool {
-	if api.TrustedOrigin == "" || r.Header.Get("Origin") != api.TrustedOrigin {
+	if !edgeOriginAllowed(r, api.TrustedOrigin) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"error": "Origen de solicitud no autorizado."})
 		return false
 	}
@@ -427,4 +428,23 @@ func decodeConfigBody(w http.ResponseWriter, r *http.Request, target any) bool {
 		return false
 	}
 	return true
+}
+
+// edgeOriginAllowed acepta el origen configurado o una petición same-origin.
+// La segunda comprobación permite servir el panel por otro puerto/host sin
+// relajar la protección CSRF: el navegador solo envía Origin en peticiones
+// cross-origin y el Host debe coincidir con el de la propia petición.
+func edgeOriginAllowed(r *http.Request, trusted string) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return false
+	}
+	if trusted != "" && origin == trusted {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, r.Host)
 }

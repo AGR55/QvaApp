@@ -330,10 +330,7 @@ func (api *MarketSourceAPI) authenticated(r *http.Request) (string, bool) {
 // originAllowed exige igualdad textual con TrustedOrigin. Sin origen
 // configurado no se acepta ninguna mutación.
 func (api *MarketSourceAPI) originAllowed(r *http.Request) bool {
-	if api.TrustedOrigin == "" {
-		return false
-	}
-	return r.Header.Get("Origin") == api.TrustedOrigin
+	return edgeOriginAllowed(r, api.TrustedOrigin)
 }
 
 func (api *MarketSourceAPI) now() time.Time {
