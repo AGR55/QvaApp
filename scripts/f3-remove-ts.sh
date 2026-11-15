@@ -19,6 +19,14 @@ if (( now < end )) && [[ "${F3_FORCE:-}" != "yes" ]]; then
   exit 3
 fi
 
+echo "== comprobación final de vigilancia"
+if [[ -x /usr/local/sbin/qvaapply-watch ]]; then
+  /usr/local/sbin/qvaapply-watch || {
+    echo "La comprobación de vigilancia falló; no se retira TS." >&2
+    exit 8
+  }
+fi
+
 echo "== comprobaciones previas"
 [[ "$(docker inspect -f '{{.State.Status}}' qvaapply 2>/dev/null || echo missing)" == "exited" ]] ||
   { echo "TS no está detenido" >&2; exit 4; }
