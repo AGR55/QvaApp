@@ -153,9 +153,24 @@ Tests puros: `NextOfferToRefresh`, `DueForCancel`, `ShouldAutoCancel`.
 
 Script listo: `scripts/f3-remove-ts.sh`. Exige `F3_CONFIRM_REMOVE=yes` y que
 haya pasado `2026-11-29T20:28:49Z` (o `F3_FORCE=yes` con autorización). Antes de
-borrar verifica TS detenido, Nginx al edge, dominio 200 y cero operaciones
-inciertas; archiva config y SQLite en `/opt/qvaapply-archive` y retira el
-contenedor/imagen. Los backups y la auditoría se conservan.
+borrar ejecuta la comprobación completa de vigilancia; archiva config y SQLite
+en `/opt/qvaapply-archive` y retira el contenedor/imagen. Los backups y la
+auditoría se conservan.
+
+Validación en seco ejecutada el 2026-11-15:
+
+```text
+F3_DRY_RUN=yes /usr/local/sbin/qvaapply-remove-ts
+  watch check        0 fallos, 0 avisos
+  contenedor         /qvaapply exited
+  imagen             sha256:ab97bb11...
+  archivo previsto   /opt/qvaapply-archive/qvaapply-ts-<timestamp>.tar.gz
+  dry-run            no se archivó ni se borró nada
+```
+
+El timer `qvaapply-remove-ts.timer` está armado para el **2026-11-30 08:00 UTC**
+y ejecutará el mismo camino con `F3_CONFIRM_REMOVE=yes`. Si la vigilancia falla,
+el servicio termina en error y no borra nada.
 
 ## Tareas posteriores a la vigilancia
 
