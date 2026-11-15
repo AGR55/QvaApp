@@ -450,8 +450,8 @@ func (runtime *telegramRuntime) huntingPanelWith(ctx context.Context, notice str
 		}
 		fmt.Fprintf(&builder, "%s %s\n• Compra: %s · mediana %s · %s ofertas\n• Venta: %s · mediana %s · %s ofertas\n\n",
 			icon, asString(market["label"]),
-			marketStatus(market, "huntBuyEnabled"), medianText(average["medianBuy"]), countText(average["count"]),
-			marketStatus(market, "huntSellEnabled"), medianText(average["medianSell"]), countText(average["count"]))
+			effectiveStatus(market, "huntBuyEnabled", buyRunning), medianText(average["medianBuy"]), countText(average["count"]),
+			effectiveStatus(market, "huntSellEnabled", sellRunning), medianText(average["medianSell"]), countText(average["count"]))
 	}
 	if notice != "" {
 		builder.WriteString(notice)
@@ -496,14 +496,18 @@ func (runtime *telegramRuntime) marketPanelWith(ctx context.Context, code, notic
 	dashboard, _ := runtime.edge.dashboard(ctx)
 	averages := asMap(dashboard["averages"])
 	average := asMap(averages[asString(market["code"])])
+	hunting := asMap(config["hunting"])
+	buyRunning := asBool(hunting["buyRunning"])
+	sellRunning := asBool(hunting["sellRunning"])
 	buyEnabled := asBool(market["huntBuyEnabled"])
 	sellEnabled := asBool(market["huntSellEnabled"])
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "🪙 %s (%s)\n\n", asString(market["label"]), asString(market["code"]))
+	fmt.Fprintf(&builder, "Global: compra %s · venta %s\n", statusWord(buyRunning), statusWord(sellRunning))
 	fmt.Fprintf(&builder, "• Compra: %s · mediana %s · %s ofertas\n",
-		marketStatus(market, "huntBuyEnabled"), medianText(average["medianBuy"]), countText(average["count"]))
+		effectiveStatus(market, "huntBuyEnabled", buyRunning), medianText(average["medianBuy"]), countText(average["count"]))
 	fmt.Fprintf(&builder, "• Venta: %s · mediana %s · %s ofertas\n\n",
-		marketStatus(market, "huntSellEnabled"), medianText(average["medianSell"]), countText(average["count"]))
+		effectiveStatus(market, "huntSellEnabled", sellRunning), medianText(average["medianSell"]), countText(average["count"]))
 	fmt.Fprintf(&builder, "Compra ≤ %s · Venta ≥ %s\n", rateText(asFloat(market["buyMaxRate"])), rateText(asFloat(market["sellMinRate"])))
 	fmt.Fprintf(&builder, "Máx %s QUSD · fee %s%% · fiat %s %s\n\n",
 		money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])),
@@ -631,6 +635,16 @@ func statusWord(enabled bool) string {
 
 func marketStatus(market map[string]any, key string) string {
 	return statusWord(asBool(market[key]))
+}
+
+func effectiveStatus(market map[string]any, key string, global bool) string {
+	if !asBool(market[key]) {
+		return "detenida"
+	}
+	if !global {
+		return "detenida (global)"
+	}
+	return "activa"
 }
 
 func toggleLabel(label string, enabled bool) string {
