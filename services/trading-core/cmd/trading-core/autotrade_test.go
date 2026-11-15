@@ -142,7 +142,7 @@ func TestReconcilerTransitionsUncertain(t *testing.T) {
 				reader: &fakeOfferReader{offer: qvapay.Offer{Status: tc.status}},
 				repo:   repo, now: func() time.Time { return time.Unix(1_700_000_000, 0) },
 			}
-			reconciler.reconcileOne(context.Background(), "op-1", "offer-1", "")
+			reconciler.reconcileOne(context.Background(), "op-1", "offer-1", "", string(core.StateUncertain))
 			if repo.operation.State != tc.state {
 				t.Fatalf("state=%s, se esperaba %s", repo.operation.State, tc.state)
 			}
@@ -262,5 +262,35 @@ func TestLocalOperationStateMapping(t *testing.T) {
 		if got := localOperationState(state); got != expected {
 			t.Fatalf("%s -> %q, se esperaba %q", state, got, expected)
 		}
+	}
+}
+
+type fakeLocalOps struct {
+	state string
+	calls int
+}
+
+func (fake *fakeLocalOps) SetState(_ context.Context, _ string, state string, _ int64) error {
+	fake.state = state
+	fake.calls++
+	return nil
+}
+
+func TestReconcilerRefreshesConfirmedLocalState(t *testing.T) {
+	operation := reservedOperation(t)
+	operation, _ = operation.Transition(core.StateSubmitted, 3000)
+	operation, _ = operation.Transition(core.StateConfirmed, 4000)
+	repo := &fakeOperationRepo{operation: operation}
+	local := &fakeLocalOps{}
+	reconciler := &operationReconciler{
+		reader: &fakeOfferReader{offer: qvapay.Offer{Status: "paid"}},
+		repo:   repo, localOps: local, now: func() time.Time { return time.Unix(1_700_000_000, 0) },
+	}
+	reconciler.reconcileOne(context.Background(), "op-1", "offer-1", "", string(core.StateConfirmed))
+	if local.state != "paid" || local.calls != 1 {
+		t.Fatalf("local = %+v", local)
+	}
+	if repo.operation.State != core.StateConfirmed {
+		t.Fatalf("no debía transicionar el core: %s", repo.operation.State)
 	}
 }
