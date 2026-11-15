@@ -633,10 +633,6 @@ func statusWord(enabled bool) string {
 	return "detenida"
 }
 
-func marketStatus(market map[string]any, key string) string {
-	return statusWord(asBool(market[key]))
-}
-
 func effectiveStatus(market map[string]any, key string, global bool) string {
 	if !asBool(market[key]) {
 		return "detenida"
