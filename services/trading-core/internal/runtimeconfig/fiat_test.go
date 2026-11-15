@@ -42,3 +42,28 @@ func TestValidateFiatMovement(t *testing.T) {
 		}
 	}
 }
+
+func TestOperationFiatMovement(t *testing.T) {
+	cases := []struct {
+		offerType string
+		status    string
+		receive   float64
+		fee       float64
+		direction string
+		amount    float64
+		ok        bool
+	}{
+		{"sell", "paid", 10, 0.08, "debit", 10.08, true},
+		{"sell", "completed", 10, 0.08, "debit", 10.08, true},
+		{"sell", "processing", 10, 0.08, "", 0, false},
+		{"buy", "completed", 10, 0.08, "credit", 10, true},
+		{"buy", "paid", 10, 0.08, "", 0, false},
+		{"sell", "paid", 0, 0.08, "", 0, false},
+	}
+	for index, tc := range cases {
+		direction, amount, ok := operationFiatMovement(tc.offerType, tc.status, tc.receive, tc.fee)
+		if direction != tc.direction || amount != tc.amount || ok != tc.ok {
+			t.Fatalf("caso %d: %q %v %v", index, direction, amount, ok)
+		}
+	}
+}

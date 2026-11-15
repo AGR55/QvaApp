@@ -88,7 +88,9 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
 			consumer.reconciler = &operationReconciler{
 				pool: pool, reader: reader, repo: consumer.operationRepo,
-				localOps: consumer.localOps, logger: logger,
+				localOps: consumer.localOps,
+				fiat:     &runtimeconfig.Repository{Pool: pool},
+				logger:   logger,
 			}
 			logger.Info("conciliador QvaPay habilitado")
 		} else {

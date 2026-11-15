@@ -12,6 +12,7 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/riskpolicy"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 )
 
@@ -266,8 +267,14 @@ func TestLocalOperationStateMapping(t *testing.T) {
 }
 
 type fakeLocalOps struct {
-	state string
-	calls int
+	state  string
+	calls  int
+	record postgres.LocalOperation
+	found  bool
+}
+
+func (fake *fakeLocalOps) Get(_ context.Context, _ string) (postgres.LocalOperation, bool, error) {
+	return fake.record, fake.found, nil
 }
 
 func (fake *fakeLocalOps) SetState(_ context.Context, _ string, state string, _ int64) error {
@@ -276,19 +283,51 @@ func (fake *fakeLocalOps) SetState(_ context.Context, _ string, state string, _ 
 	return nil
 }
 
+type fakeOperationFiat struct {
+	debits    int
+	credits   int
+	reversals int
+}
+
+func (fake *fakeOperationFiat) RecordOperationFiat(
+	_ context.Context, _, _, offerType string, _ float64, _, _ string, _ int64,
+) (bool, error) {
+	if offerType == "sell" {
+		fake.debits++
+	} else {
+		fake.credits++
+	}
+	return true, nil
+}
+
+func (fake *fakeOperationFiat) ReverseOperationFiat(
+	_ context.Context, _, _, _ string, _ float64, _ string, _ int64,
+) (bool, error) {
+	fake.reversals++
+	return true, nil
+}
+
 func TestReconcilerRefreshesConfirmedLocalState(t *testing.T) {
 	operation := reservedOperation(t)
 	operation, _ = operation.Transition(core.StateSubmitted, 3000)
 	operation, _ = operation.Transition(core.StateConfirmed, 4000)
 	repo := &fakeOperationRepo{operation: operation}
-	local := &fakeLocalOps{}
+	local := &fakeLocalOps{
+		found: true,
+		record: postgres.LocalOperation{
+			UUID: "offer-1", OfferType: "sell", Coin: "CLASICA",
+			State: "applied", Receive: 10.6,
+		},
+	}
+	fiat := &fakeOperationFiat{}
 	reconciler := &operationReconciler{
 		reader: &fakeOfferReader{offer: qvapay.Offer{Status: "paid"}},
-		repo:   repo, localOps: local, now: func() time.Time { return time.Unix(1_700_000_000, 0) },
+		repo:   repo, localOps: local, fiat: fiat,
+		now: func() time.Time { return time.Unix(1_700_000_000, 0) },
 	}
 	reconciler.reconcileOne(context.Background(), "op-1", "offer-1", "", string(core.StateConfirmed))
-	if local.state != "paid" || local.calls != 1 {
-		t.Fatalf("local = %+v", local)
+	if local.state != "paid" || local.calls != 1 || fiat.debits != 1 {
+		t.Fatalf("local = %+v fiat = %+v", local, fiat)
 	}
 	if repo.operation.State != core.StateConfirmed {
 		t.Fatalf("no debía transicionar el core: %s", repo.operation.State)

@@ -122,6 +122,82 @@ func AdjustFiatBalance(config *Config, coin, direction string, amount float64) e
 	return fmt.Errorf("mercado %q no configurado para movimiento fiat", coin)
 }
 
+// RecordOperationFiat registra el movimiento que corresponde al estado remoto
+// de una operación. Es idempotente por clave (orden u oferta).
+func (repository *Repository) RecordOperationFiat(
+	ctx context.Context,
+	coin, key, offerType string,
+	receive float64,
+	status, source string,
+	now int64,
+) (bool, error) {
+	fee, err := repository.marketFee(ctx, coin)
+	if err != nil {
+		return false, err
+	}
+	direction, amount, ok := operationFiatMovement(offerType, status, receive, fee)
+	if !ok {
+		return false, nil
+	}
+	return repository.ApplyFiatMovement(ctx, FiatMovement{
+		Key: key, Coin: coin, Direction: direction, Amount: amount,
+		Source: source, At: now,
+	})
+}
+
+// ReverseOperationFiat revierte un débito previo (cancelación tras pago).
+func (repository *Repository) ReverseOperationFiat(
+	ctx context.Context,
+	coin, key, offerType string,
+	receive float64,
+	source string,
+	now int64,
+) (bool, error) {
+	fee, err := repository.marketFee(ctx, coin)
+	if err != nil {
+		return false, err
+	}
+	amount := receive
+	if offerType == "sell" {
+		amount += fee
+	}
+	if amount <= 0 {
+		return false, nil
+	}
+	return repository.ApplyFiatMovement(ctx, FiatMovement{
+		Key: "reversal:" + key, Coin: coin, Direction: "credit", Amount: amount,
+		Source: source, At: now,
+	})
+}
+
+// operationFiatMovement traduce el estado remoto a un movimiento fiat.
+func operationFiatMovement(offerType, status string, receive, fee float64) (string, float64, bool) {
+	if receive <= 0 {
+		return "", 0, false
+	}
+	switch {
+	case offerType == "sell" && (status == "paid" || status == "completed"):
+		return "debit", receive + fee, true
+	case offerType == "buy" && status == "completed":
+		return "credit", receive, true
+	default:
+		return "", 0, false
+	}
+}
+
+func (repository *Repository) marketFee(ctx context.Context, coin string) (float64, error) {
+	config, _, err := repository.Load(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, market := range config.Markets {
+		if market.Code == coin {
+			return market.OutgoingTransferFee, nil
+		}
+	}
+	return 0, fmt.Errorf("mercado %q no configurado para movimiento fiat", coin)
+}
+
 func validateFiatMovement(movement FiatMovement) error {
 	if strings.TrimSpace(movement.Key) == "" {
 		return errors.New("movimiento fiat sin clave idempotente")

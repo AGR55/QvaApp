@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 )
 
@@ -15,15 +17,22 @@ type offerReader interface {
 	Offer(ctx context.Context, uuid string) (qvapay.Offer, error)
 }
 
-type localOperationUpdater interface {
+type localOperationStore interface {
+	Get(ctx context.Context, uuid string) (postgres.LocalOperation, bool, error)
 	SetState(ctx context.Context, uuid, state string, now int64) error
+}
+
+type operationFiat interface {
+	RecordOperationFiat(ctx context.Context, coin, key, offerType string, receive float64, status, source string, now int64) (bool, error)
+	ReverseOperationFiat(ctx context.Context, coin, key, offerType string, receive float64, source string, now int64) (bool, error)
 }
 
 type operationReconciler struct {
 	pool     *pgxpool.Pool
 	reader   offerReader
 	repo     operationTransitioner
-	localOps localOperationUpdater
+	localOps localOperationStore
+	fiat     operationFiat
 	logger   *slog.Logger
 	now      func() time.Time
 }
@@ -131,20 +140,60 @@ func (reconciler *operationReconciler) reconcileOne(
 		}
 	}
 	if reconciler.localOps != nil {
-		localState := "reconciled"
-		switch status {
-		case "paid":
-			localState = "paid"
-		case "completed":
-			localState = "completed"
-		case "processing":
-			localState = "applied"
-		case "open", "cancelled", "canceled", "rejected":
-			localState = "cancelled"
+		now := reconciler.timestamp()
+		local, found, err := reconciler.localOps.Get(ctx, offerUUID)
+		if err != nil {
+			if reconciler.logger != nil {
+				reconciler.logger.Warn("no se pudo leer la operación local", "operation_id", operationID, "error", err)
+			}
+			return
 		}
-		if err := reconciler.localOps.SetState(ctx, offerUUID, localState, reconciler.timestamp()); err != nil &&
-			reconciler.logger != nil {
-			reconciler.logger.Warn("no se pudo actualizar el estado local", "operation_id", operationID, "error", err)
+		if found && reconciler.fiat != nil {
+			key := orderUUID
+			if key == "" {
+				key = offerUUID
+			}
+			normalized := strings.ToLower(status)
+			var fiatErr error
+			switch {
+			case local.OfferType == "sell" && (normalized == "paid" || normalized == "completed"):
+				_, fiatErr = reconciler.fiat.RecordOperationFiat(
+					ctx, local.Coin, key, "sell", local.Receive, normalized,
+					"Conciliación QvaPay", now)
+			case local.OfferType == "buy" && normalized == "completed":
+				_, fiatErr = reconciler.fiat.RecordOperationFiat(
+					ctx, local.Coin, key, "buy", local.Receive, normalized,
+					"Conciliación QvaPay", now)
+			case local.OfferType == "sell" && local.State == "paid" &&
+				(normalized == "open" || normalized == "cancelled" || normalized == "canceled" || normalized == "rejected"):
+				_, fiatErr = reconciler.fiat.ReverseOperationFiat(
+					ctx, local.Coin, key, "sell", local.Receive,
+					"Reversión por cancelación QvaPay", now)
+			}
+			if fiatErr != nil {
+				if reconciler.logger != nil {
+					reconciler.logger.Warn("no se pudo registrar el movimiento fiat",
+						"operation_id", operationID, "error", fiatErr)
+				}
+				return
+			}
+		}
+		if found {
+			localState := "reconciled"
+			switch normalizedStatus(status) {
+			case "paid":
+				localState = "paid"
+			case "completed":
+				localState = "completed"
+			case "processing":
+				localState = "applied"
+			case "open", "cancelled", "canceled", "rejected":
+				localState = "cancelled"
+			}
+			if err := reconciler.localOps.SetState(ctx, offerUUID, localState, now); err != nil &&
+				reconciler.logger != nil {
+				reconciler.logger.Warn("no se pudo actualizar el estado local", "operation_id", operationID, "error", err)
+			}
 		}
 	}
 	if reconciler.logger != nil {
@@ -158,4 +207,8 @@ func (reconciler *operationReconciler) timestamp() int64 {
 		return reconciler.now().UnixMilli()
 	}
 	return time.Now().UnixMilli()
+}
+
+func normalizedStatus(status string) string {
+	return strings.ToLower(strings.TrimSpace(status))
 }

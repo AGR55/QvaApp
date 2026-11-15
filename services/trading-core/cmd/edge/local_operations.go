@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/edge"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
@@ -42,33 +41,14 @@ type runtimeFiatMover struct {
 	repo *runtimeconfig.Repository
 }
 
-func (mover *runtimeFiatMover) fee(ctx context.Context, coin string) (float64, error) {
-	config, _, err := mover.repo.Load(ctx)
-	if err != nil {
-		return 0, err
-	}
-	for _, market := range config.Markets {
-		if market.Code == coin {
-			return market.OutgoingTransferFee, nil
-		}
-	}
-	return 0, errors.New("mercado no configurado para movimiento fiat")
-}
-
 func (mover *runtimeFiatMover) DebitOperation(
 	ctx context.Context,
 	operation edge.OperationRecord,
 	key, source string,
 	now int64,
 ) error {
-	fee, err := mover.fee(ctx, operation.Coin)
-	if err != nil {
-		return err
-	}
-	_, err = mover.repo.ApplyFiatMovement(ctx, runtimeconfig.FiatMovement{
-		Key: key, Coin: operation.Coin, Direction: "debit",
-		Amount: operation.Receive + fee, Source: source, At: now,
-	})
+	_, err := mover.repo.RecordOperationFiat(ctx, operation.Coin, key, "sell",
+		operation.Receive, "paid", source, now)
 	return err
 }
 
@@ -78,10 +58,8 @@ func (mover *runtimeFiatMover) CreditOperation(
 	key, source string,
 	now int64,
 ) error {
-	_, err := mover.repo.ApplyFiatMovement(ctx, runtimeconfig.FiatMovement{
-		Key: key, Coin: operation.Coin, Direction: "credit",
-		Amount: operation.Receive, Source: source, At: now,
-	})
+	_, err := mover.repo.RecordOperationFiat(ctx, operation.Coin, key, "buy",
+		operation.Receive, "completed", source, now)
 	return err
 }
 
@@ -91,13 +69,7 @@ func (mover *runtimeFiatMover) ReverseOperation(
 	key, source string,
 	now int64,
 ) error {
-	fee, err := mover.fee(ctx, operation.Coin)
-	if err != nil {
-		return err
-	}
-	_, err = mover.repo.ApplyFiatMovement(ctx, runtimeconfig.FiatMovement{
-		Key: key, Coin: operation.Coin, Direction: "credit",
-		Amount: operation.Receive + fee, Source: source, At: now,
-	})
+	_, err := mover.repo.ReverseOperationFiat(ctx, operation.Coin, key, "sell",
+		operation.Receive, source, now)
 	return err
 }
