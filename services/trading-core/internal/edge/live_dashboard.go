@@ -164,8 +164,8 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 		}
 		if _, err := live.Pool.Exec(ctx, `
 			INSERT INTO shadow.live_dashboard_history(created_at, qusd_balance, open_offers, active_operations)
-			SELECT $1, $2, $3, $4
-			WHERE NOT EXISTS (SELECT 1 FROM shadow.live_dashboard_history WHERE created_at > $1 - 300000)`,
+			SELECT $1::bigint, $2::double precision, $3::integer, $4::integer
+			WHERE NOT EXISTS (SELECT 1 FROM shadow.live_dashboard_history WHERE created_at > $1::bigint - 300000)`,
 			snapshot.UpdatedAt, snapshot.Balance, len(snapshot.OwnOffers), len(snapshot.Operations)); err == nil {
 			historyRows, err := live.Pool.Query(ctx, `
 				SELECT created_at, qusd_balance, open_offers, active_operations
