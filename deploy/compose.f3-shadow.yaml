@@ -167,6 +167,7 @@ services:
       EDGE_CHAT_THREADS_FILE: /data/chat-threads.json
       EDGE_MOBILE_AUTH_FILE: /data/mobile-auth.json
       EDGE_DASHBOARD_SNAPSHOT_FILE: /data/dashboard-snapshot.json
+      EDGE_OPERATIONAL_HEALTH_FILE: /data/operational-health.json
       DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
     entrypoint: ["/edge"]
     volumes:
@@ -175,6 +176,7 @@ services:
       - ${F3_CHAT_THREADS_FILE:-/dev/null}:/data/chat-threads.json:ro
       - ${F3_MOBILE_AUTH_FILE:-/dev/null}:/data/mobile-auth.json:ro
       - ${F3_DASHBOARD_SNAPSHOT_FILE:-/dev/null}:/data/dashboard-snapshot.json:ro
+      - ${F3_OPERATIONAL_HEALTH_FILE:-/dev/null}:/data/operational-health.json:ro
     ports:
       - "127.0.0.1:8093:8093"
     networks:

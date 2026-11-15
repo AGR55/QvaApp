@@ -39,6 +39,7 @@ type config struct {
 	ChatThreadsFile string
 	MobileAuthFile  string
 	DashboardFile   string
+	HealthFile      string
 	TrustedOrigin   string
 	EncryptionKey   string
 }
@@ -180,8 +181,9 @@ func run(logger *slog.Logger) error {
 					dashboard.Settings = &edge.PostgresReaderStore{Pool: writePool}
 				}
 				observability = &edge.ObservabilityAPI{
-					Sessions: manager,
-					Store:    &edge.PostgresObservabilityStore{Pool: pool},
+					Sessions:   manager,
+					Store:      &edge.PostgresObservabilityStore{Pool: pool},
+					HealthFile: cfg.HealthFile,
 				}
 				live = &edge.LiveAPI{
 					Sessions: manager,
@@ -342,6 +344,7 @@ func loadConfig() (config, error) {
 		ChatThreadsFile: strings.TrimSpace(os.Getenv("EDGE_CHAT_THREADS_FILE")),
 		MobileAuthFile:  strings.TrimSpace(os.Getenv("EDGE_MOBILE_AUTH_FILE")),
 		DashboardFile:   strings.TrimSpace(os.Getenv("EDGE_DASHBOARD_SNAPSHOT_FILE")),
+		HealthFile:      strings.TrimSpace(os.Getenv("EDGE_OPERATIONAL_HEALTH_FILE")),
 	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {

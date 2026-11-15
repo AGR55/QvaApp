@@ -254,6 +254,15 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     printf '%s\n' "$dashboard_snapshot" > "$temporary_dashboard"
     chmod 644 "$temporary_dashboard"
     mv -f "$temporary_dashboard" "$app_root/dashboard-snapshot.json"
+    python3 - "$app_root/dashboard-snapshot.json" "$app_root/operational-health.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    snapshot = json.load(source)
+health = snapshot.get("operationalHealth") or {}
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(health, target, ensure_ascii=False, separators=(",", ":"))
+PY
+    chmod 644 "$app_root/operational-health.json"
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
   fi
@@ -274,6 +283,9 @@ if [[ -s "$app_root/mobile-auth.json" ]]; then
 fi
 if [[ -s "$app_root/dashboard-snapshot.json" ]]; then
   export F3_DASHBOARD_SNAPSHOT_FILE="$app_root/dashboard-snapshot.json"
+fi
+if [[ -s "$app_root/operational-health.json" ]]; then
+  export F3_OPERATIONAL_HEALTH_FILE="$app_root/operational-health.json"
 fi
 
 ln -sfn "$release_dir" "$app_root/current.next"

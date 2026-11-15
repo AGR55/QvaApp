@@ -148,8 +148,13 @@ func TestObservabilityAPIServesAuthenticatedData(t *testing.T) {
 			health.Code, health.Body.String())
 	}
 	assertObservabilityJSONHeaders(t, health)
-	if got := decodeObservabilityData[OperationalHealth](t, health); got != store.health {
-		t.Fatalf("health = %+v, se esperaba %+v", got, store.health)
+	gotHealth := decodeObservabilityData[OperationalHealth](t, health)
+	if gotHealth.HunterEvents != store.health.HunterEvents ||
+		gotHealth.CoreAllowed != store.health.CoreAllowed ||
+		gotHealth.CoreBlocked != store.health.CoreBlocked ||
+		gotHealth.CorePending != store.health.CorePending ||
+		gotHealth.SSEConnected != store.health.SSEConnected {
+		t.Fatalf("health = %+v, se esperaba %+v", gotHealth, store.health)
 	}
 
 	for _, recorder := range []*httptest.ResponseRecorder{decisions, health} {

@@ -2,8 +2,10 @@ package edge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -39,13 +41,16 @@ type DecisionEvent struct {
 // stream SSE del proceso edge; como ese estado vive en memoria y no en
 // Postgres, PostgresObservabilityStore lo devuelve siempre false.
 type OperationalHealth struct {
-	HunterEvents        int64 `json:"hunterEvents"`
-	CoreAllowed         int64 `json:"coreAllowed"`
-	CoreBlocked         int64 `json:"coreBlocked"`
-	CorePending         int64 `json:"corePending"`
-	InvariantViolations int64 `json:"invariantViolations"`
-	InvariantAgeSeconds int64 `json:"invariantAgeSeconds"`
-	SSEConnected        bool  `json:"sseConnected"`
+	HunterEvents        int64          `json:"hunterEvents"`
+	CoreAllowed         int64          `json:"coreAllowed"`
+	CoreBlocked         int64          `json:"coreBlocked"`
+	CorePending         int64          `json:"corePending"`
+	InvariantViolations int64          `json:"invariantViolations"`
+	InvariantAgeSeconds int64          `json:"invariantAgeSeconds"`
+	SSEConnected        bool           `json:"sseConnected"`
+	CheckedAt           int64          `json:"checkedAt"`
+	Checks              []any          `json:"checks"`
+	Incidents           map[string]any `json:"incidents"`
 }
 
 // ObservabilityStore es la fuente de datos de solo lectura del panel de
@@ -67,9 +72,10 @@ type ObservabilityStore interface {
 // limit se recorta al rango 1..100; valores ausentes o no numéricos usan 20.
 // Cualquier otro método responde 405 y cualquier otra ruta 404, siempre JSON.
 type ObservabilityAPI struct {
-	Sessions *SessionManager
-	Store    ObservabilityStore
-	Now      func() time.Time
+	Sessions   *SessionManager
+	Store      ObservabilityStore
+	HealthFile string
+	Now        func() time.Time
 }
 
 // observabilityResponse envuelve todos los datos en una clave "data" para
@@ -150,6 +156,32 @@ func (api *ObservabilityAPI) health(w http.ResponseWriter, ctx context.Context) 
 	if err != nil {
 		writeObservabilityUnavailable(w)
 		return
+	}
+	if health.Checks == nil {
+		health.Checks = []any{}
+	}
+	if health.Incidents == nil {
+		health.Incidents = map[string]any{}
+	}
+	if api.HealthFile != "" {
+		if raw, err := os.ReadFile(api.HealthFile); err == nil {
+			var stored struct {
+				CheckedAt int64          `json:"checkedAt"`
+				Checks    []any          `json:"checks"`
+				Incidents map[string]any `json:"incidents"`
+			}
+			if json.Unmarshal(raw, &stored) == nil {
+				if stored.CheckedAt > 0 {
+					health.CheckedAt = stored.CheckedAt
+				}
+				if stored.Checks != nil {
+					health.Checks = stored.Checks
+				}
+				if stored.Incidents != nil {
+					health.Incidents = stored.Incidents
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, observabilityResponse{Data: health})
 }
