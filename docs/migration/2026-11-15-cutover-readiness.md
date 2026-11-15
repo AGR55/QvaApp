@@ -2,9 +2,12 @@
 
 ## Decisión
 
-**No se ejecutó el cutover.** El edge cubre las 109 rutas HTTP, pero todavía no
-es un reemplazo funcional del monolito TS. Apagar TS hoy dejaría la web sin
-datos operativos y las mutaciones no llegarían a QvaPay.
+**Cutover ejecutado el 2026-11-15 a las 20:28 UTC.** El edge sirve el dominio,
+TS está detenido, el motor Go opera en real y la web funciona. El detalle y la
+vigilancia están en `2026-11-15-cutover-watch.md`.
+
+Las secciones siguientes conservan la evidencia de las brechas que se fueron
+cerrando antes del corte.
 
 ## Evidencia de la brecha
 
