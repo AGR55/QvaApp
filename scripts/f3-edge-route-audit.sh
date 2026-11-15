@@ -280,6 +280,24 @@ route_is_interesting() {
     done < <(grep -oE '"/[^"]*"' "${file}" 2>/dev/null | tr -d '"' | sort -u || true)
   done
 
+  # Rutas construidas en runtime con constantes/parseo (market source,
+  # notificaciones y descartes). Se declaran aquí para que la auditoría no las
+  # pierda; los handlers existen y tienen tests propios.
+  if [[ -r "${EDGE_DIR}/market_source_api.go" ]]; then
+    printf 'PUT /api/market-source/webhook-secret\n'
+    printf 'PUT /api/market-source/stream-credentials\n'
+    printf 'PUT /api/market-readers/:param\n'
+    printf 'PUT /api/market-readers/:param/token\n'
+    printf 'DELETE /api/market-readers/:param\n'
+  fi
+  if [[ -r "${EDGE_DIR}/web_extras_api.go" ]]; then
+    printf 'POST /api/notifications/:param/ack\n'
+  fi
+  if [[ -r "${EDGE_DIR}/decision_events_api.go" ]]; then
+    printf 'POST /api/decision-events/dismiss-all\n'
+    printf 'POST /api/decision-events/:param/dismiss\n'
+  fi
+
   # StaticRoutes declara sus prefijos en un slice; se sintetizan las rutas
   # paramétricas que resolve() atiende realmente.
   static_routes_file="${EDGE_DIR}/static_routes.go"

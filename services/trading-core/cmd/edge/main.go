@@ -41,6 +41,7 @@ type config struct {
 	DashboardFile   string
 	HealthFile      string
 	ExtrasFile      string
+	CooperativeFile string
 	IconsDir        string
 	TrustedOrigin   string
 	EncryptionKey   string
@@ -206,6 +207,7 @@ func run(logger *slog.Logger) error {
 					Sessions: manager,
 					Store:    &edge.PostgresDashboardStore{Pool: pool},
 				}
+				dashboard.CooperativeFile = cfg.CooperativeFile
 				if writePool != nil {
 					dashboard.Runtime = &runtimeconfig.Repository{Pool: writePool}
 					dashboard.Settings = &edge.PostgresReaderStore{Pool: writePool}
@@ -396,6 +398,7 @@ func loadConfig() (config, error) {
 		DashboardFile:   strings.TrimSpace(os.Getenv("EDGE_DASHBOARD_SNAPSHOT_FILE")),
 		HealthFile:      strings.TrimSpace(os.Getenv("EDGE_OPERATIONAL_HEALTH_FILE")),
 		ExtrasFile:      strings.TrimSpace(os.Getenv("EDGE_WEB_EXTRAS_FILE")),
+		CooperativeFile: strings.TrimSpace(os.Getenv("EDGE_COOPERATIVE_FILE")),
 		IconsDir:        strings.TrimSpace(os.Getenv("EDGE_MARKET_ICONS_DIR")),
 	}
 	port, err := strconv.Atoi(cfg.Port)

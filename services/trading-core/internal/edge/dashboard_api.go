@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -95,11 +96,12 @@ type DashboardStore interface {
 // valor por defecto de cada ruta. Cualquier otro método responde 405 y
 // cualquier otra ruta 404, siempre JSON.
 type DashboardAPI struct {
-	Sessions *SessionManager
-	Store    DashboardStore
-	Runtime  *runtimeconfig.Repository
-	Settings SettingStore
-	Now      func() time.Time
+	Sessions        *SessionManager
+	Store           DashboardStore
+	Runtime         *runtimeconfig.Repository
+	Settings        SettingStore
+	CooperativeFile string
+	Now             func() time.Time
 }
 
 type dashboardWebSnapshot struct {
@@ -125,6 +127,8 @@ type dashboardWebSnapshot struct {
 	Workflows           []any                  `json:"workflows"`
 	MutationIntents     []any                  `json:"mutationIntents"`
 	CapitalReservations []any                  `json:"capitalReservations"`
+	CooperativeNetwork  map[string]any         `json:"cooperativeNetwork"`
+	CooperativeHunting  map[string]any         `json:"cooperativeHunting"`
 }
 
 type dashboardWebState struct {
@@ -323,6 +327,28 @@ func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSumma
 	if api.Settings != nil {
 		snapshot.State.Paused = api.boolSetting(ctx, "control.paused")
 		snapshot.Risk.Usage.EmergencyStop = api.boolSetting(ctx, "control.emergency_stop")
+	}
+	if api.CooperativeFile != "" {
+		if raw, err := os.ReadFile(api.CooperativeFile); err == nil {
+			var cooperative struct {
+				Network    map[string]any `json:"network"`
+				Executions []any          `json:"executions"`
+				QusdOwed   float64        `json:"qusdOwed"`
+			}
+			if json.Unmarshal(raw, &cooperative) == nil {
+				if cooperative.Network != nil {
+					snapshot.CooperativeNetwork = cooperative.Network
+				}
+				enabled := false
+				if value, ok := cooperative.Network["enabled"].(bool); ok {
+					enabled = value
+				}
+				snapshot.CooperativeHunting = map[string]any{
+					"enabled": enabled, "executions": cooperative.Executions,
+					"qusdOwed": cooperative.QusdOwed,
+				}
+			}
+		}
 	}
 	if summary.CorePending > 0 {
 		snapshot.State.Active = int(summary.CorePending)

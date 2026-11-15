@@ -270,6 +270,14 @@ PY
       printf '%s\n' "$web_extras" > "$temporary_extras"
       chmod 644 "$temporary_extras"
       mv -f "$temporary_extras" "$app_root/web-extras.json"
+      python3 - "$app_root/web-extras.json" "$app_root/cooperative.json" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    extras = json.load(source)
+with open(sys.argv[2], "w", encoding="utf-8") as target:
+    json.dump(extras.get("cooperative") or {}, target, ensure_ascii=False, separators=(",", ":"))
+PY
+      chmod 644 "$app_root/cooperative.json"
     fi
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
@@ -297,6 +305,9 @@ if [[ -s "$app_root/operational-health.json" ]]; then
 fi
 if [[ -s "$app_root/web-extras.json" ]]; then
   export F3_WEB_EXTRAS_FILE="$app_root/web-extras.json"
+fi
+if [[ -s "$app_root/cooperative.json" ]]; then
+  export F3_COOPERATIVE_FILE="$app_root/cooperative.json"
 fi
 install -d -m 755 "$app_root/market-icons"
 chown 65532:65532 "$app_root/market-icons" 2>/dev/null || true

@@ -144,6 +144,33 @@ def export_recovery(connection: sqlite3.Connection) -> dict[str, Any]:
     return {"items": items, "blocked": bool(items)}
 
 
+def export_cooperative(connection: sqlite3.Connection) -> dict[str, Any]:
+    resources: dict[str, Any] = {}
+    for row in rows(
+        connection,
+        "SELECT resource_key, payload_json FROM remote_resource_cache"
+        " WHERE resource_key IN ('cooperative-network','cooperative-executions')",
+    ):
+        try:
+            resources[text(row["resource_key"]) or ""] = json.loads(row["payload_json"])
+        except (TypeError, ValueError):
+            continue
+    owed = 0.0
+    for row in rows(connection, "SELECT value FROM settings WHERE key = 'cooperative_qusd_owed'"):
+        try:
+            owed = float(row["value"] or 0)
+        except (TypeError, ValueError):
+            owed = 0.0
+        break
+    network = resources.get("cooperative-network")
+    executions = resources.get("cooperative-executions")
+    return {
+        "network": network if isinstance(network, dict) else {},
+        "executions": executions if isinstance(executions, list) else [],
+        "qusdOwed": owed,
+    }
+
+
 def export_decision_events(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     return [
         {
@@ -220,6 +247,7 @@ def main() -> int:
             "recovery": export_recovery(connection),
             "decisionEvents": export_decision_events(connection),
             "simulation": export_simulation(connection),
+            "cooperative": export_cooperative(connection),
         }
     finally:
         connection.close()

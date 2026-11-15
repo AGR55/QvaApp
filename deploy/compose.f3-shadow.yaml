@@ -169,6 +169,7 @@ services:
       EDGE_DASHBOARD_SNAPSHOT_FILE: /data/dashboard-snapshot.json
       EDGE_OPERATIONAL_HEALTH_FILE: /data/operational-health.json
       EDGE_WEB_EXTRAS_FILE: /data/web-extras.json
+      EDGE_COOPERATIVE_FILE: /data/cooperative.json
       EDGE_MARKET_ICONS_DIR: /data/market-icons
       DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
     entrypoint: ["/edge"]
@@ -180,6 +181,7 @@ services:
       - ${F3_DASHBOARD_SNAPSHOT_FILE:-/dev/null}:/data/dashboard-snapshot.json:ro
       - ${F3_OPERATIONAL_HEALTH_FILE:-/dev/null}:/data/operational-health.json:ro
       - ${F3_WEB_EXTRAS_FILE:-/dev/null}:/data/web-extras.json:ro
+      - ${F3_COOPERATIVE_FILE:-/dev/null}:/data/cooperative.json:ro
       - ${F3_MARKET_ICONS_DIR:?F3_MARKET_ICONS_DIR requerida}:/data/market-icons:rw
     ports:
       - "127.0.0.1:8093:8093"
