@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/hunter"
@@ -215,8 +216,9 @@ func run(logger *slog.Logger) error {
 	service := &service{
 		logger: logger, cfg: cfg, pool: pool,
 		vault: vaultClient, baseURL: cfg.BaseURL,
-		runtime: &runtimeconfig.Repository{Pool: pool},
-		ready:   make(chan struct{}),
+		runtime:     &runtimeconfig.Repository{Pool: pool},
+		ready:       make(chan struct{}),
+		streamQueue: make(chan *pollResult, 4096),
 	}
 	// Sin configuración runtime el planificador conserva el intervalo de la
 	// variable de entorno.
@@ -241,6 +243,7 @@ func run(logger *slog.Logger) error {
 	go func() { serveErr <- server.ListenAndServe() }()
 	go service.loop(ctx)
 	go service.runtimeLoop(ctx)
+	go service.batchLoop(ctx)
 
 	logger.Info("hunter iniciado", "port", cfg.Port, "poll_ms", cfg.PollMS, "config", cfg.ConfigFile)
 	select {
@@ -333,6 +336,8 @@ type service struct {
 	streamLastAt       atomic.Int64
 	streamLastLagMS    atomic.Int64
 	streamLastDecision atomic.Int64
+	streamQueue        chan *pollResult
+	persistBatches     atomic.Uint64
 }
 
 func (service *service) startStream(ctx context.Context, logger *slog.Logger) {
@@ -435,10 +440,7 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	if decision.Decision == "auto_buy" || decision.Decision == "manual_sell" {
 		result.Candidates = 1
 	}
-	if err := service.persist(ctx, result); err != nil {
-		service.streamErrors.Add(1)
-		service.logger.Warn("persistir evento SSE falló", "error", err)
-	}
+	service.enqueue(result)
 	service.streamLastAt.Store(result.PolledAt)
 	service.streamLastLagMS.Store(lag)
 	service.streamLastDecision.Store(time.Since(started).Microseconds())
@@ -563,66 +565,163 @@ func (service *service) record(result *pollResult) {
 	}
 }
 
+func (service *service) enqueue(result *pollResult) {
+	select {
+	case service.streamQueue <- result:
+	default:
+		// La cola está llena: se persiste en línea para no perder un candidato.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := service.persist(ctx, result); err != nil {
+			service.streamErrors.Add(1)
+			service.logger.Warn("persistir evento SSE falló", "error", err)
+		}
+	}
+}
+
+// batchLoop agrupa eventos SSE y los persiste en una sola transacción. El
+// lector SSE nunca espera por la base: solo evalúa y encola.
+func (service *service) batchLoop(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Millisecond)
+	defer ticker.Stop()
+	batch := make([]*pollResult, 0, 256)
+	flush := func() {
+		if len(batch) == 0 {
+			return
+		}
+		flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err := service.persistBatch(flushCtx, batch)
+		cancel()
+		if err != nil {
+			service.streamErrors.Add(1)
+			service.logger.Warn("persistir lote SSE falló", "eventos", len(batch), "error", err)
+			for _, result := range batch {
+				retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				if retryErr := service.persist(retryCtx, result); retryErr != nil {
+					service.logger.Warn("reintento de persistencia SSE falló", "error", retryErr)
+				}
+				retryCancel()
+			}
+		}
+		batch = batch[:0]
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			flush()
+			return
+		case result := <-service.streamQueue:
+			batch = append(batch, result)
+			if len(batch) >= 256 {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		}
+	}
+}
+
 func (service *service) persist(ctx context.Context, result *pollResult) error {
+	return service.persistBatch(ctx, []*pollResult{result})
+}
+
+func (service *service) persistBatch(ctx context.Context, results []*pollResult) error {
+	if len(results) == 0 {
+		return nil
+	}
 	tx, err := service.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	polledAt := time.Now().Unix()
+	offers, candidates, latency := 0, 0, int64(0)
+	source := "stream-batch"
+	errorText := ""
+	for _, result := range results {
+		offers += result.Offers
+		candidates += result.Candidates
+		if result.LatencyMS > latency {
+			latency = result.LatencyMS
+		}
+		if result.Error != "" && errorText == "" {
+			errorText = result.Error
+		}
+	}
+	if len(results) == 1 {
+		source = results[0].Source
+		polledAt = results[0].PolledAt
+	}
 	var pollID int64
-	err = tx.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 		INSERT INTO shadow.hunter_polls (polled_at, latency_ms, offers, candidates, source, error)
 		VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''))
 		RETURNING poll_id`,
-		result.PolledAt, result.LatencyMS, result.Offers, result.Candidates, result.Source, result.Error,
-	).Scan(&pollID)
-	if err != nil {
+		polledAt, latency, offers, candidates, source, errorText,
+	).Scan(&pollID); err != nil {
 		return err
 	}
-	for _, evaluation := range result.Evaluations {
-		_, err = tx.Exec(ctx, `
-			INSERT INTO shadow.hunter_candidates
-				(poll_id, offer_uuid, coin, side, rate, median, decision, reason, observed_at, source)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			ON CONFLICT (poll_id, offer_uuid) DO UPDATE SET
-				coin = excluded.coin, side = excluded.side, rate = excluded.rate,
-				median = excluded.median, decision = excluded.decision, reason = excluded.reason`,
-			pollID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
-			evaluation.Rate.Format(8), evaluation.Median.Format(8),
-			evaluation.Decision, evaluation.Reason, result.PolledAt, result.Source,
-		)
-		if err != nil {
+
+	batch := &pgx.Batch{}
+	for _, result := range results {
+		for _, evaluation := range result.Evaluations {
+			if evaluation.Decision == "ignored" {
+				continue
+			}
+			batch.Queue(`
+				INSERT INTO shadow.hunter_candidates
+					(poll_id, offer_uuid, coin, side, rate, median, decision, reason, observed_at, source)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				ON CONFLICT (poll_id, offer_uuid) DO UPDATE SET
+					coin = excluded.coin, side = excluded.side, rate = excluded.rate,
+					median = excluded.median, decision = excluded.decision, reason = excluded.reason`,
+				pollID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
+				evaluation.Rate.Format(8), evaluation.Median.Format(8),
+				evaluation.Decision, evaluation.Reason, result.PolledAt, result.Source,
+			)
+			if evaluation.Decision != "auto_buy" && evaluation.Decision != "manual_sell" {
+				continue
+			}
+			payload, err := json.Marshal(evaluation)
+			if err != nil {
+				return err
+			}
+			sum := sha256.Sum256([]byte(evaluation.OfferUUID + "|" + evaluation.Decision + "|" + evaluation.Rate.Format(8)))
+			eventID := "hunter-" + hex.EncodeToString(sum[:16])
+			batch.Queue(`
+				INSERT INTO shadow.hunter_events
+					(event_id, offer_uuid, coin, side, decision, rate, payload_json,
+					 state, available_at, created_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
+				ON CONFLICT (event_id) DO NOTHING`,
+				eventID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
+				evaluation.Decision, evaluation.Rate.Format(8), string(payload),
+				time.Now().UnixMilli(), result.PolledAt,
+			)
+			service.events.Add(1)
+		}
+	}
+	if batch.Len() > 0 {
+		br := tx.SendBatch(ctx, batch)
+		for index := 0; index < batch.Len(); index++ {
+			if _, err := br.Exec(); err != nil {
+				_ = br.Close()
+				return err
+			}
+		}
+		if err := br.Close(); err != nil {
 			return err
 		}
-		if evaluation.Decision != "auto_buy" && evaluation.Decision != "manual_sell" {
-			continue
-		}
-		payload, err := json.Marshal(evaluation)
-		if err != nil {
-			return err
-		}
-		sum := sha256.Sum256([]byte(evaluation.OfferUUID + "|" + evaluation.Decision + "|" + evaluation.Rate.Format(8)))
-		eventID := "hunter-" + hex.EncodeToString(sum[:16])
-		_, err = tx.Exec(ctx, `
-			INSERT INTO shadow.hunter_events
-				(event_id, offer_uuid, coin, side, decision, rate, payload_json,
-				 state, available_at, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-			ON CONFLICT (event_id) DO NOTHING`,
-			eventID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
-			evaluation.Decision, evaluation.Rate.Format(8), string(payload),
-			time.Now().UnixMilli(), result.PolledAt,
-		)
-		if err != nil {
-			return err
-		}
-		service.events.Add(1)
+	}
+	if _, err := tx.Exec(ctx, "NOTIFY hunter_events"); err != nil {
+		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
-	// Retención local: no dejar crecer la tabla indefinidamente.
-	if service.polls.Load()%600 == 0 {
+	service.persistBatches.Add(1)
+	if service.persistBatches.Load()%600 == 0 {
 		_, _ = service.pool.Exec(ctx, `DELETE FROM shadow.hunter_polls WHERE polled_at < $1`,
 			time.Now().Add(-24*time.Hour).Unix())
 	}
@@ -677,6 +776,8 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_connected Feed SSE conectado (1/0).\n# TYPE hunter_stream_connected gauge\nhunter_stream_connected %d\n", boolInt(service.streamConnected.Load()))
 	fmt.Fprintf(w, "# HELP hunter_stream_raw_events_total Eventos SSE recibidos (incluye init).\n# TYPE hunter_stream_raw_events_total counter\nhunter_stream_raw_events_total %d\n", service.streamRaw.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_events_total Eventos SSE oportunidad recibidos.\n# TYPE hunter_stream_events_total counter\nhunter_stream_events_total %d\n", service.streamEvents.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_queue_depth Eventos SSE pendientes de persistir.\n# TYPE hunter_stream_queue_depth gauge\nhunter_stream_queue_depth %d\n", len(service.streamQueue))
+	fmt.Fprintf(w, "# HELP hunter_batches_total Lotes de persistencia confirmados.\n# TYPE hunter_batches_total counter\nhunter_batches_total %d\n", service.persistBatches.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE acumulados.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_consecutive_errors Errores SSE desde la última conexión.\n# TYPE hunter_stream_consecutive_errors gauge\nhunter_stream_consecutive_errors %d\n", service.streamConsecutive.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_event_timestamp_seconds Último evento SSE (Unix).\n# TYPE hunter_stream_last_event_timestamp_seconds gauge\nhunter_stream_last_event_timestamp_seconds %d\n", service.streamLastAt.Load())

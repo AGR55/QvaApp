@@ -187,12 +187,12 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 	if databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL")); databaseURL != "" {
 		go listenHunterEvents(ctx, databaseURL, wake, consumer.logger)
 	}
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	lastPending := time.Time{}
 	for {
 		consumer.reloadRuntime(ctx, time.Now())
-		events, err := repository.Claim(ctx, consumer.worker, postgres.NowMS(), 100)
+		events, err := repository.Claim(ctx, consumer.worker, postgres.NowMS(), 500)
 		if err != nil {
 			if ctx.Err() == nil {
 				consumer.logger.Warn("claim de hunter_events falló", "error", err)
