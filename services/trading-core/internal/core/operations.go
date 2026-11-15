@@ -27,6 +27,8 @@ const (
 	StateUncertain OperationState = "uncertain"
 	// StateReconciled es el estado terminal de una operación incierta resuelta.
 	StateReconciled OperationState = "reconciled"
+	// StateDryRun marca una simulación del motor autónomo. No es dinero real.
+	StateDryRun OperationState = "dry_run"
 )
 
 // Operation es una operación shadow del core. Es un valor inmutable: cada
@@ -99,7 +101,7 @@ func (op Operation) Transition(next OperationState, now int64) (Operation, error
 // Terminal indica si la operación alcanzó un estado sin salidas.
 func (op Operation) Terminal() bool {
 	switch op.State {
-	case StateConfirmed, StateRejected, StateReconciled:
+	case StateConfirmed, StateRejected, StateReconciled, StateDryRun:
 		return true
 	default:
 		return false
@@ -115,7 +117,7 @@ func (op Operation) RequiresReconciliation() bool {
 func (state OperationState) valid() bool {
 	switch state {
 	case StateCreated, StateReserved, StateSubmitted, StateConfirmed,
-		StateRejected, StateUncertain, StateReconciled:
+		StateRejected, StateUncertain, StateReconciled, StateDryRun:
 		return true
 	default:
 		return false
@@ -129,7 +131,7 @@ func canTransition(from, to OperationState) bool {
 	case StateReserved:
 		return to == StateSubmitted
 	case StateSubmitted:
-		return to == StateConfirmed || to == StateRejected || to == StateUncertain
+		return to == StateConfirmed || to == StateRejected || to == StateUncertain || to == StateDryRun
 	case StateUncertain:
 		return to == StateReconciled || to == StateRejected
 	default:

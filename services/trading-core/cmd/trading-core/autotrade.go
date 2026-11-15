@@ -68,14 +68,14 @@ func (trader *autoTrader) Execute(
 	}
 
 	if trader.dryRun {
-		confirmed, err := repository.Transition(ctx, operationID, core.StateConfirmed, trader.timestamp())
+		simulated, err := repository.Transition(ctx, operationID, core.StateDryRun, trader.timestamp())
 		if err != nil {
 			return "", err
 		}
 		if trader.logger != nil {
-			trader.logger.Info("autotrade dry-run confirmado", "operation_id", operationID, "offer_uuid", offerUUID)
+			trader.logger.Info("autotrade dry-run simulado", "operation_id", operationID, "offer_uuid", offerUUID)
 		}
-		return confirmed.State, nil
+		return simulated.State, nil
 	}
 
 	if trader.executor == nil {

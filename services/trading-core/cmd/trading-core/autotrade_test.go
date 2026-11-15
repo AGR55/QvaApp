@@ -54,7 +54,7 @@ func TestAutoTraderDryRunDoesNotCallQvaPay(t *testing.T) {
 	executor := &fakeExecutor{}
 	trader := &autoTrader{dryRun: true, executor: executor}
 	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"))
-	if err != nil || state != core.StateConfirmed || executor.calls != 0 {
+	if err != nil || state != core.StateDryRun || executor.calls != 0 {
 		t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
 	}
 }
