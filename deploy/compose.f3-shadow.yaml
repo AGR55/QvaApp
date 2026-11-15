@@ -50,6 +50,8 @@ services:
     container_name: qvaapply-f3-shadow-trading-core
     restart: unless-stopped
     stop_grace_period: 15s
+    env_file:
+      - ${F3_CORE_ENV:-/dev/null}
     depends_on:
       postgres:
         condition: service_healthy

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,8 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
@@ -40,6 +43,8 @@ type hunterConsumer struct {
 	operations     atomic.Uint64
 	failed         atomic.Uint64
 	pending        atomic.Int64
+	applied        atomic.Uint64
+	trader         *autoTrader
 }
 
 type hunterPayload struct {
@@ -61,12 +66,56 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	if configErr != nil {
 		logger.Warn("configuración core no disponible; el consumidor fallará eventos", "error", configErr)
 	}
-	return &hunterConsumer{
+	consumer := &hunterConsumer{
 		pool: pool, logger: logger, worker: worker, config: config,
 		configErr: configErr, runtime: &runtimeconfig.Repository{Pool: pool},
 		shadowRepo:    postgres.NewShadowRepository(pool),
 		operationRepo: postgres.NewCoreOperationRepository(pool),
 	}
+	consumer.trader = buildAutoTrader(logger)
+	return consumer
+}
+
+func buildAutoTrader(logger *slog.Logger) *autoTrader {
+	enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CORE_AUTOTRADE")))
+	if !enabled {
+		return nil
+	}
+	dryRun := true
+	if raw := strings.TrimSpace(os.Getenv("CORE_AUTOTRADE_DRY_RUN")); raw != "" {
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			logger.Warn("CORE_AUTOTRADE_DRY_RUN inválido; se usa true", "error", err)
+		} else {
+			dryRun = parsed
+		}
+	}
+	trader := &autoTrader{dryRun: dryRun, logger: logger}
+	if dryRun {
+		logger.Info("autotrade habilitado en dry-run")
+		return trader
+	}
+	tokenCipher := strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT"))
+	key := strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY"))
+	if tokenCipher == "" || key == "" {
+		logger.Warn("autotrade live deshabilitado: faltan token o clave")
+		return nil
+	}
+	vaultClient, err := vault.New(key)
+	if err != nil {
+		logger.Warn("autotrade live deshabilitado: clave inválida", "error", err)
+		return nil
+	}
+	token, err := vaultClient.Decrypt(tokenCipher)
+	if err != nil {
+		logger.Warn("autotrade live deshabilitado: token inválido", "error", err)
+		return nil
+	}
+	client := qvapay.NewMutationClient(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token)
+	client.Enable()
+	trader.executor = &qvapayTradeExecutor{client: client}
+	logger.Info("autotrade LIVE habilitado")
+	return trader
 }
 
 func (consumer *hunterConsumer) run(ctx context.Context) {
@@ -191,6 +240,14 @@ func (consumer *hunterConsumer) consume(
 				consumer.logger.Warn("reservar operación shadow falló", "event_id", event.EventID, "error", err)
 			} else {
 				consumer.operations.Add(1)
+				if consumer.trader != nil {
+					state, executeErr := consumer.trader.Execute(ctx, consumer.operationRepo, event.EventID, payload.OfferUUID, amount)
+					if executeErr != nil {
+						consumer.logger.Warn("autotrade falló", "event_id", event.EventID, "error", executeErr)
+					} else if state == core.StateConfirmed {
+						consumer.applied.Add(1)
+					}
+				}
 			}
 		}
 	} else {

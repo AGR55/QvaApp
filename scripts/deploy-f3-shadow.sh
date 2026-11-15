@@ -14,6 +14,7 @@ revision=${2:?Falta la revisión Git}
 
 readonly app_root="/opt/qvaapply-f3-shadow"
 export F3_MARKET_ICONS_DIR="$app_root/market-icons"
+export F3_CORE_ENV="${F3_CORE_ENV:-/dev/null}"
 readonly prod_root="/opt/qvaapply"
 readonly shadow_port=8090
 release_dir="$app_root/releases/$revision"
@@ -350,6 +351,18 @@ with open(sys.argv[2], "w", encoding="utf-8") as target:
 PY
       chmod 644 "$app_root/cooperative.json"
     fi
+    core_env="$app_root/core.env"
+    temporary_core=$(mktemp "$app_root/core.env.XXXXXX")
+    {
+      printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
+      printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
+      printf 'QVAPAY_API_BASE_URL=%s\n' "${QVAPAY_API_BASE_URL:-https://api.qvapay.com}"
+      printf 'CORE_AUTOTRADE=true\n'
+      printf 'CORE_AUTOTRADE_DRY_RUN=true\n'
+    } > "$temporary_core"
+    chmod 600 "$temporary_core"
+    mv -f "$temporary_core" "$core_env"
+    export F3_CORE_ENV="$core_env"
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
   fi
