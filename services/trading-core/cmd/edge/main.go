@@ -528,6 +528,8 @@ func loadConfig() (config, error) {
 	}
 	for name, target := range map[string]*bool{
 		"EDGE_MUTATIONS_ENABLED":      &cfg.MutationsEnabled,
+		"EDGE_MUTATIONS_LIVE":         &cfg.MutationsLive,
+		"EDGE_LIVE_DASHBOARD":         &cfg.LiveDashboard,
 		"EDGE_QVAPAY_WEBHOOK_ENABLED": &cfg.WebhookEnabled,
 	} {
 		if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
