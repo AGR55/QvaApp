@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -173,7 +174,11 @@ func (repository *HunterEventRepository) CompleteWithDecision(
 		return err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
-	_, err = tx.Exec(ctx, `
+
+	// Las tres escrituras se envían en un solo batch para no pagar tres
+	// round trips por evento en el camino caliente.
+	batch := &pgx.Batch{}
+	batch.Queue(`
 		INSERT INTO shadow.core_decisions
 			(event_id, offer_uuid, coin, side, hunter_decision, core_kind,
 			 allowed, amount, receive, rate, reason, checks_json, created_at)
@@ -189,11 +194,8 @@ func (repository *HunterEventRepository) CompleteWithDecision(
 		decision.Amount, decision.Receive, decision.Rate, decision.Reason,
 		decision.ChecksJSON, decision.CreatedAt,
 	)
-	if err != nil {
-		return err
-	}
 	if decision.Execution != nil {
-		_, err = tx.Exec(ctx, `
+		batch.Queue(`
 			INSERT INTO shadow.core_executions
 				(event_id, operation_id, qusd_amount, reserve_qusd, remaining_qusd,
 				 ledger_json, reason, created_at)
@@ -211,20 +213,27 @@ func (repository *HunterEventRepository) CompleteWithDecision(
 			decision.Execution.RemainingQusd, decision.Execution.LedgerJSON,
 			decision.Execution.Reason, decision.Execution.CreatedAt,
 		)
-		if err != nil {
-			return err
-		}
 	}
-	tag, err := tx.Exec(ctx, `
+	batch.Queue(`
 		UPDATE shadow.hunter_events
 		SET state = 'processed', processed_at = $2, last_error = NULL
 		WHERE event_id = $1 AND state = 'claimed'`,
 		decision.EventID, processedAt,
 	)
-	if err != nil {
-		return err
+	results := tx.SendBatch(ctx, batch)
+	var lastTag interface{ RowsAffected() int64 }
+	for index := 0; index < batch.Len(); index++ {
+		tag, execErr := results.Exec()
+		if execErr != nil {
+			_ = results.Close()
+			return execErr
+		}
+		lastTag = tag
 	}
-	if tag.RowsAffected() == 0 {
+	if closeErr := results.Close(); closeErr != nil {
+		return closeErr
+	}
+	if lastTag != nil && lastTag.RowsAffected() == 0 {
 		return fmt.Errorf("evento hunter %s no está reclamado", decision.EventID)
 	}
 	return tx.Commit(ctx)

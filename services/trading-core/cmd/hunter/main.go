@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -51,6 +52,7 @@ type config struct {
 	Token       string
 	AppID       string
 	AppSecret   string
+	FeedToken   string
 }
 
 type pollResult struct {
@@ -268,6 +270,7 @@ func loadConfig() (config, error) {
 		Token:       strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT")),
 		AppID:       strings.TrimSpace(os.Getenv("QVA_APP_ID_CIPHERTEXT")),
 		AppSecret:   strings.TrimSpace(os.Getenv("QVA_APP_SECRET_CIPHERTEXT")),
+		FeedToken:   strings.TrimSpace(os.Getenv("HUNTER_FEED_TOKEN")),
 	}
 	if cfg.DatabaseURL == "" {
 		return config{}, errors.New("falta DATABASE_URL")
@@ -392,13 +395,6 @@ func (service *service) handleStreamState(state qvapay.StreamState) {
 
 func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	service.streamRaw.Add(1)
-	service.offers.Add(1)
-	switch event.Event {
-	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
-	default:
-		return
-	}
-	service.streamEvents.Add(1)
 	var payload struct {
 		Data   json.RawMessage `json:"data"`
 		SentAt string          `json:"sent_at"`
@@ -414,6 +410,19 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 		service.logger.Warn("oferta SSE inválida", "event", event.Event, "error", err)
 		return
 	}
+	service.handleOffer(event.Event, offer, payload.SentAt, "stream")
+}
+
+// handleOffer es el camino común de SSE y webhook: evalúa y encola el evento
+// sin bloquear el lector con la base de datos.
+func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt, source string) {
+	service.offers.Add(1)
+	switch eventName {
+	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
+	default:
+		return
+	}
+	service.streamEvents.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	averages, err := service.source.Averages(ctx)
@@ -430,11 +439,11 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	started := time.Now()
 	decision := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
 	lag := int64(0)
-	if sentAt, err := time.Parse(time.RFC3339, payload.SentAt); err == nil {
-		lag = maxInt64(0, time.Since(sentAt).Milliseconds())
+	if parsed, err := time.Parse(time.RFC3339, sentAt); err == nil {
+		lag = maxInt64(0, time.Since(parsed).Milliseconds())
 	}
 	result := &pollResult{
-		PolledAt: time.Now().Unix(), LatencyMS: lag, Offers: 1, Source: "stream",
+		PolledAt: time.Now().Unix(), LatencyMS: lag, Offers: 1, Source: source,
 		Evaluations: []hunter.Evaluation{decision},
 	}
 	if decision.Decision == "auto_buy" || decision.Decision == "manual_sell" {
@@ -726,6 +735,35 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 			time.Now().Add(-24*time.Hour).Unix())
 	}
 	return nil
+}
+
+func (service *service) feed(w http.ResponseWriter, r *http.Request) {
+	if service.cfg.FeedToken != "" && r.Header.Get("X-Hunter-Feed-Token") != service.cfg.FeedToken {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthorized"})
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil || len(body) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "bad_request"})
+		return
+	}
+	var payload struct {
+		Event  string          `json:"event"`
+		Data   json.RawMessage `json:"data"`
+		SentAt string          `json:"sent_at"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil || payload.Event == "" || len(payload.Data) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "invalid_event"})
+		return
+	}
+	var offer qvapay.Offer
+	if err := json.Unmarshal(payload.Data, &offer); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "invalid_offer"})
+		return
+	}
+	service.streamRaw.Add(1)
+	service.handleOffer(payload.Event, offer, payload.SentAt, "webhook")
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
 }
 
 func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {

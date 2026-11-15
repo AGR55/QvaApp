@@ -130,6 +130,15 @@ if [[ ! -s $notifier_secret_file ]]; then
 fi
 chmod 600 "$notifier_secret_file"
 notifier_secret=$(cat "$notifier_secret_file")
+hunter_feed_secret_file="$app_root/hunter-feed.secret"
+if [[ ! -s $hunter_feed_secret_file ]]; then
+  temporary_secret=$(mktemp "$app_root/hunter-feed.secret.XXXXXX")
+  openssl rand -hex 32 > "$temporary_secret"
+  chmod 600 "$temporary_secret"
+  mv -f "$temporary_secret" "$hunter_feed_secret_file"
+fi
+chmod 600 "$hunter_feed_secret_file"
+hunter_feed_secret=$(cat "$hunter_feed_secret_file")
 export F3_NOTIFIER_ENV="$push_env"
 
 # Valida la interpolación antes de construir.
@@ -236,6 +245,7 @@ PY
         printf 'QVA_APP_ID_CIPHERTEXT=%s\n' "$encrypted_app_id"
         printf 'QVA_APP_SECRET_CIPHERTEXT=%s\n' "$encrypted_app_secret"
       fi
+      printf 'HUNTER_FEED_TOKEN=%s\n' "$hunter_feed_secret"
     } > "$temporary_env"
     chmod 600 "$temporary_env"
     mv -f "$temporary_env" "$hunter_env"
@@ -291,6 +301,8 @@ PY
         fi
         printf 'EDGE_QVAPAY_WEBHOOK_ENABLED=true\n'
         printf 'EDGE_QVAPAY_WEBHOOK_SECRET=%s\n' "$(tr -d '\r\n' < "$webhook_secret_file")"
+        printf 'HUNTER_FEED_URL=http://hunter:8091/feed\n'
+        printf 'HUNTER_FEED_TOKEN=%s\n' "$hunter_feed_secret"
         push_public=$(sed -n 's/^WEB_PUSH_PUBLIC_KEY=//p' "$push_env" | tail -n 1 | tr -d '\r')
         if [[ -n $push_public ]]; then
           printf 'EDGE_PUSH_PUBLIC_KEY=%s\n' "$push_public"
@@ -379,7 +391,7 @@ PY
     mv -f "$temporary_core" "$core_env"
     export F3_CORE_ENV="$core_env"
     hunter_enabled=true
-    unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin
+    unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password trusted_origin hunter_feed_secret
   fi
 fi
 # El notifier necesita Telegram y credenciales de panel para el bot. Se

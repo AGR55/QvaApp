@@ -53,6 +53,8 @@ type config struct {
 	LiveDashboard    bool
 	QvaToken         string
 	MutationBaseURL  string
+	HunterFeedURL    string
+	HunterFeedToken  string
 	WebhookEnabled   bool
 	WebhookSecret    string
 }
@@ -193,6 +195,8 @@ func run(logger *slog.Logger) error {
 			}
 			qvapayWebhook = &edge.QvapayWebhookAPI{
 				Enabled: cfg.WebhookEnabled, Secret: cfg.WebhookSecret,
+				ForwardURL: cfg.HunterFeedURL, ForwardToken: cfg.HunterFeedToken,
+				ForwardQueue: make(chan []byte, 1024), Logger: logger,
 			}
 			if writePool != nil {
 				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
@@ -212,6 +216,7 @@ func run(logger *slog.Logger) error {
 					repo: &runtimeconfig.Repository{Pool: writePool},
 				}
 				qvapayWebhook.Store = &edge.PostgresFeedEventStore{Pool: writePool}
+				go qvapayWebhook.RunForwarder(ctx)
 			}
 			if (cfg.MutationsLive || cfg.LiveDashboard) && cfg.QvaToken != "" && cfg.EncryptionKey != "" {
 				vaultClient, err := vault.New(cfg.EncryptionKey)
@@ -550,6 +555,8 @@ func loadConfig() (config, error) {
 		WebhookSecret:   strings.TrimSpace(os.Getenv("EDGE_QVAPAY_WEBHOOK_SECRET")),
 		QvaToken:        strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT")),
 		MutationBaseURL: envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"),
+		HunterFeedURL:   envOrDefault("HUNTER_FEED_URL", "http://hunter:8091/feed"),
+		HunterFeedToken: strings.TrimSpace(os.Getenv("HUNTER_FEED_TOKEN")),
 		EncryptionKey:   strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY")),
 		OperatorsFile:   strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
 		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),

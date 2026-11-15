@@ -1,6 +1,7 @@
 package edge
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -72,10 +74,15 @@ func (store *PostgresFeedEventStore) Upsert(
 // prefijo "sha256=" opcional. El cuerpo nunca se registra en logs y el secreto
 // solo se usa para calcular la firma.
 type QvapayWebhookAPI struct {
-	Enabled bool
-	Secret  string
-	Store   FeedEventStore
-	Now     func() time.Time
+	Enabled      bool
+	Secret       string
+	Store        FeedEventStore
+	Now          func() time.Time
+	ForwardURL   string
+	ForwardToken string
+	ForwardQueue chan []byte
+	ForwardHTTP  *http.Client
+	Logger       *slog.Logger
 }
 
 type qvapayWebhookEnvelope struct {
@@ -142,12 +149,66 @@ func (api *QvapayWebhookAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "No se pudo guardar el evento."})
 		return
 	}
+	api.enqueueForward(body)
 
 	writeJSON(w, http.StatusAccepted, qvapayWebhookResponse{
 		OK:       true,
 		Event:    event,
 		EventKey: eventKey,
 	})
+}
+
+// enqueueForward reenvía el cuerpo al hunter sin bloquear la respuesta a
+// QvaPay. Si la cola está llena se omite: SSE y polling siguen cubriendo.
+func (api *QvapayWebhookAPI) enqueueForward(body []byte) {
+	if api.ForwardURL == "" || api.ForwardQueue == nil {
+		return
+	}
+	copied := append([]byte(nil), body...)
+	select {
+	case api.ForwardQueue <- copied:
+	default:
+		if api.Logger != nil {
+			api.Logger.Warn("cola de reenvío del feed llena; evento omitido")
+		}
+	}
+}
+
+// RunForwarder envía los cuerpos del webhook al hunter para evaluación
+// inmediata. Un fallo se registra y no bloquea el webhook.
+func (api *QvapayWebhookAPI) RunForwarder(ctx context.Context) {
+	if api.ForwardURL == "" || api.ForwardQueue == nil {
+		return
+	}
+	client := api.ForwardHTTP
+	if client == nil {
+		client = &http.Client{Timeout: 2 * time.Second}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case body := <-api.ForwardQueue:
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost,
+				api.ForwardURL, bytes.NewReader(body))
+			if err != nil {
+				continue
+			}
+			request.Header.Set("Content-Type", "application/json")
+			if api.ForwardToken != "" {
+				request.Header.Set("X-Hunter-Feed-Token", api.ForwardToken)
+			}
+			response, err := client.Do(request)
+			if err != nil {
+				if api.Logger != nil && ctx.Err() == nil {
+					api.Logger.Warn("reenvío del feed al hunter falló", "error", err)
+				}
+				continue
+			}
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+			response.Body.Close()
+		}
+	}
 }
 
 func (api *QvapayWebhookAPI) now() time.Time {
