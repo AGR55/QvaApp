@@ -173,3 +173,9 @@ CREATE INDEX IF NOT EXISTS idx_shadow_local_operations_state_created
 
 CREATE INDEX IF NOT EXISTS idx_shadow_hunter_events_due_created
   ON shadow.hunter_events (state, available_at, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_hunter_candidates_observed
+  ON shadow.hunter_candidates (observed_at);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_hunter_polls_polled
+  ON shadow.hunter_polls (polled_at);

@@ -731,8 +731,9 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 	}
 	service.persistBatches.Add(1)
 	if service.persistBatches.Load()%600 == 0 {
-		_, _ = service.pool.Exec(ctx, `DELETE FROM shadow.hunter_polls WHERE polled_at < $1`,
-			time.Now().Add(-24*time.Hour).Unix())
+		cutoff := time.Now().Add(-24 * time.Hour).Unix()
+		_, _ = service.pool.Exec(ctx, `DELETE FROM shadow.hunter_candidates WHERE observed_at < $1`, cutoff)
+		_, _ = service.pool.Exec(ctx, `DELETE FROM shadow.hunter_polls WHERE polled_at < $1`, cutoff)
 	}
 	return nil
 }

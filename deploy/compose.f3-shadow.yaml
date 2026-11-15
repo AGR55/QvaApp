@@ -57,7 +57,7 @@ services:
         condition: service_healthy
     environment:
       PORT: "8090"
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       SHADOW_MODE: "true"
       SERVICE_NAME: trading-core-shadow
       CORE_CONFIG_FILE: /config/core-config.json
@@ -95,7 +95,7 @@ services:
     env_file:
       - ${F3_HUNTER_ENV:-/dev/null}
     environment:
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       HUNTER_CONFIG_FILE: /config/hunter-config.json
       HUNTER_POLL_MS: ${HUNTER_POLL_MS:-1000}
       PORT: "8091"
@@ -129,7 +129,7 @@ services:
       - ${F3_NOTIFIER_ENV:-/dev/null}
     environment:
       PORT: "8092"
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
     entrypoint: ["/notifier"]
     ports:
       - "127.0.0.1:8092:8092"
@@ -167,7 +167,7 @@ services:
       EDGE_WEB_EXTRAS_FILE: /data/web-extras.json
       EDGE_COOPERATIVE_FILE: /data/cooperative.json
       EDGE_MARKET_ICONS_DIR: /data/market-icons
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
     entrypoint: ["/edge"]
     volumes:
       - ../public:/static:ro
@@ -265,7 +265,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       SHADOW_MODE: "true"
     entrypoint: ["/shadow-replay"]
     command: ["-corpus", "/corpus"]
@@ -292,7 +292,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       SHADOW_MODE: "true"
     entrypoint: ["/shadow-audit"]
     networks:
@@ -313,7 +313,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       SHADOW_MODE: "true"
     entrypoint: ["/shadow-workflows"]
     networks:
@@ -334,7 +334,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       SHADOW_MODE: "true"
     entrypoint: ["/shadow-qvapay"]
     # El token cifrado y la clave se pasan solo en `docker compose run -e`;
