@@ -74,6 +74,7 @@ type qvapaySource struct {
 	mu         sync.Mutex
 	averages   map[string]qvapay.Average
 	averagesAt time.Time
+	ownUUID    string
 }
 
 func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
@@ -81,11 +82,62 @@ func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[stri
 	if err != nil {
 		return nil, nil, err
 	}
+	offers = source.withoutOwnOffers(ctx, offers)
 	averages, err := source.Averages(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
 	return offers, averages, nil
+}
+
+// withoutOwnOffers excluye las ofertas creadas por la propia cuenta. Si no se
+// puede resolver la identidad se devuelven todas: QvaPay rechazaría la
+// auto-aplicación, pero no se debe bloquear la caza por un fallo de lectura.
+func (source *qvapaySource) withoutOwnOffers(ctx context.Context, offers []qvapay.Offer) []qvapay.Offer {
+	own := source.ownIdentity(ctx)
+	if own == "" {
+		return offers
+	}
+	filtered := make([]qvapay.Offer, 0, len(offers))
+	for _, offer := range offers {
+		if offer.UUID == "" || offerCreator(offer) == own {
+			continue
+		}
+		filtered = append(filtered, offer)
+	}
+	return filtered
+}
+
+func (source *qvapaySource) ownIdentity(ctx context.Context) string {
+	source.mu.Lock()
+	if source.ownUUID != "" {
+		uuid := source.ownUUID
+		source.mu.Unlock()
+		return uuid
+	}
+	source.mu.Unlock()
+	user, err := source.client.User(ctx)
+	if err != nil {
+		return ""
+	}
+	source.mu.Lock()
+	source.ownUUID = strings.TrimSpace(user.UUID)
+	uuid := source.ownUUID
+	source.mu.Unlock()
+	return uuid
+}
+
+// offerCreator lee el UUID del creador de la oferta.
+func offerCreator(offer qvapay.Offer) string {
+	if len(offer.User) > 0 {
+		var object map[string]any
+		if json.Unmarshal(offer.User, &object) == nil {
+			if uuid, ok := object["uuid"].(string); ok {
+				return strings.TrimSpace(uuid)
+			}
+		}
+	}
+	return strings.TrimSpace(offer.OwnerUUID)
 }
 
 func (source *qvapaySource) Averages(ctx context.Context) (map[string]qvapay.Average, error) {

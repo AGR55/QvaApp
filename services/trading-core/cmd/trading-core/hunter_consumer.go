@@ -207,6 +207,11 @@ func (consumer *hunterConsumer) consume(
 		balance = decimal.Zero()
 	}
 	nowMS := postgres.NowMS()
+	if active, activeErr := consumer.operationRepo.ActiveForOffer(ctx, payload.OfferUUID); activeErr == nil && active {
+		consumer.persistBlockedEvent(ctx, repository, event, payload,
+			"Ya existe una operación activa para esta oferta", nowMS)
+		return
+	}
 	usage := consumer.currentUsage(ctx, nowMS)
 	sizedAmount, sizedReceive, sized, sizeReason := sizePayloadAmount(payload, config, usage, rate)
 	if sized {

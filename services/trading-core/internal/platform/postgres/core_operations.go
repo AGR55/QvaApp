@@ -95,6 +95,25 @@ func (repository *CoreOperationRepository) Transition(
 	return updated, nil
 }
 
+// ActiveForOffer indica si ya existe una operación en curso para la oferta.
+// Evita aplicar dos veces la misma oferta si el hunter la vuelve a publicar.
+func (repository *CoreOperationRepository) ActiveForOffer(
+	ctx context.Context,
+	offerUUID string,
+) (bool, error) {
+	var active bool
+	err := repository.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM shadow.core_operations o
+			JOIN shadow.core_decisions d ON d.event_id = o.operation_id
+			WHERE d.offer_uuid = $1
+			  AND o.state IN ('reserved', 'submitted', 'confirmed', 'uncertain')
+		)`, offerUUID,
+	).Scan(&active)
+	return active, err
+}
+
 // SetOrder persiste la orden flexible que devolvió QvaPay. Se escribe antes de
 // confirmar la operación para no perder la referencia de cancelación.
 func (repository *CoreOperationRepository) SetOrder(
