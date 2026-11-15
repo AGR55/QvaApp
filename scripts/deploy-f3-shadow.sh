@@ -146,6 +146,10 @@ fi
 # Siembra una única vez la configuración editable desde el SQLite de
 # producción. Los redeploys no sobrescriben cambios hechos desde el panel.
 if [[ -r /opt/qvaapply/data/qvaapply.sqlite ]]; then
+  readers_sql=$(python3 "$release_dir/scripts/f3-export-market-readers-sql.py" /opt/qvaapply/data/qvaapply.sqlite)
+  if [[ -n $readers_sql ]]; then
+    printf '%s\n' "$readers_sql" | docker exec -i qvaapply-f3-shadow-postgres psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 >/dev/null
+  fi
   runtime_config=$(python3 "$release_dir/scripts/f3-export-runtime-config.py" /opt/qvaapply/data/qvaapply.sqlite)
   if [[ -n $runtime_config ]]; then
     docker exec -i qvaapply-f3-shadow-postgres psql -U qvaapply -d qvaapply -v ON_ERROR_STOP=1 -v config="$runtime_config" <<'SQL'
