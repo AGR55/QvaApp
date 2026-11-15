@@ -93,3 +93,29 @@ CREATE TABLE IF NOT EXISTS shadow.analytics_fee_evidence (
   updated_at bigint NOT NULL,
   PRIMARY KEY (account_uuid, offer_uuid)
 );
+
+CREATE TABLE IF NOT EXISTS shadow.mutation_events (
+  id text PRIMARY KEY,
+  action text NOT NULL,
+  target text NOT NULL DEFAULT '',
+  payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+  actor text NOT NULL DEFAULT 'panel',
+  created_at bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shadow.chat_messages (
+  id text PRIMARY KEY,
+  operation_uuid text NOT NULL,
+  order_uuid text,
+  message text NOT NULL DEFAULT '',
+  attempt_id text,
+  direction text NOT NULL DEFAULT 'out',
+  created_at bigint NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS shadow.qvapay_feed_events (
+  event_key text PRIMARY KEY,
+  event text NOT NULL,
+  payload_json jsonb NOT NULL,
+  received_at bigint NOT NULL
+);

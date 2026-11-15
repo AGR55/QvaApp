@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -28,23 +29,26 @@ const (
 )
 
 type config struct {
-	Port            string
-	StaticDir       string
-	DatabaseURL     string
-	AdminPassword   string
-	SessionSecret   string
-	SecureCookies   bool
-	OperatorsFile   string
-	PublicPushKey   string
-	ChatThreadsFile string
-	MobileAuthFile  string
-	DashboardFile   string
-	HealthFile      string
-	ExtrasFile      string
-	CooperativeFile string
-	IconsDir        string
-	TrustedOrigin   string
-	EncryptionKey   string
+	Port             string
+	StaticDir        string
+	DatabaseURL      string
+	AdminPassword    string
+	SessionSecret    string
+	SecureCookies    bool
+	OperatorsFile    string
+	PublicPushKey    string
+	ChatThreadsFile  string
+	MobileAuthFile   string
+	DashboardFile    string
+	HealthFile       string
+	ExtrasFile       string
+	CooperativeFile  string
+	IconsDir         string
+	TrustedOrigin    string
+	EncryptionKey    string
+	MutationsEnabled bool
+	WebhookEnabled   bool
+	WebhookSecret    string
 }
 
 func main() {
@@ -118,6 +122,8 @@ func run(logger *slog.Logger) error {
 	var mobileAdmin *edge.MobileAdminAPI
 	var pushSubscriptions *edge.PushSubscriptionsAPI
 	var analyticsFees *edge.AnalyticsFeesAPI
+	var mutations *edge.MutationsAPI
+	var qvapayWebhook *edge.QvapayWebhookAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -173,6 +179,13 @@ func run(logger *slog.Logger) error {
 				Sessions: manager, File: cfg.ExtrasFile,
 				TrustedOrigin: cfg.TrustedOrigin,
 			}
+			mutations = &edge.MutationsAPI{
+				Enabled: cfg.MutationsEnabled, Sessions: manager, MobileAuth: mobileAuth,
+				TrustedOrigin: cfg.TrustedOrigin,
+			}
+			qvapayWebhook = &edge.QvapayWebhookAPI{
+				Enabled: cfg.WebhookEnabled, Secret: cfg.WebhookSecret,
+			}
 			if writePool != nil {
 				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
 				decisionEvents.Dismissals = &edge.PostgresDismissalStore{Pool: writePool}
@@ -183,6 +196,8 @@ func run(logger *slog.Logger) error {
 				pushSubscriptions.Store = &edge.PostgresPushStore{Pool: writePool}
 				webExtras.Settings = &edge.PostgresReaderStore{Pool: writePool}
 				analyticsFees.Store = &edge.PostgresFeeStore{Pool: writePool}
+				mutations.Store = &edge.PostgresMutationStore{Pool: writePool}
+				qvapayWebhook.Store = &edge.PostgresFeedEventStore{Pool: writePool}
 			}
 			if cfg.IconsDir != "" {
 				marketIcons = &edge.MarketIconsAPI{
@@ -249,6 +264,14 @@ func run(logger *slog.Logger) error {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if session != nil && r.URL.Path == "/api/session" {
 			session.ServeHTTP(w, r)
+			return
+		}
+		if qvapayWebhook != nil && r.URL.Path == "/webhooks/qvapay/p2p-feed" {
+			qvapayWebhook.ServeHTTP(w, r)
+			return
+		}
+		if mutations != nil && mutationPath(r.URL.Path, r.Method) {
+			mutations.ServeHTTP(w, r)
 			return
 		}
 		if analyticsFees != nil && r.URL.Path == "/api/analytics/fees" {
@@ -415,6 +438,29 @@ func run(logger *slog.Logger) error {
 	return server.Shutdown(shutdownCtx)
 }
 
+// mutationPath enruta solo las rutas que MutationsAPI reconoce. Evita
+// interceptar chats agregados, recuperación de evidencia o descartes, que
+// tienen handlers propios.
+func mutationPath(path, method string) bool {
+	switch {
+	case strings.HasPrefix(path, "/api/cooperative-network/"),
+		strings.HasPrefix(path, "/api/offers"),
+		strings.HasPrefix(path, "/api/workflows/"):
+		return true
+	case strings.HasPrefix(path, "/api/blocked-offers/"):
+		return strings.HasSuffix(path, "/preview") || strings.HasSuffix(path, "/apply")
+	case strings.HasPrefix(path, "/api/recovery/"):
+		return strings.HasSuffix(path, "/check") || strings.HasSuffix(path, "/resolve")
+	case strings.HasPrefix(path, "/api/operations/"):
+		return path != "/api/operations/chats" && path != "/api/operations/chats/unread"
+	case strings.HasPrefix(path, "/api/mobile/operations/"):
+		return path != "/api/mobile/operations/chats"
+	case path == "/api/mobile/payment-receipts":
+		return method == http.MethodPost
+	}
+	return false
+}
+
 func writeEdgeUnavailable(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -430,6 +476,7 @@ func loadConfig() (config, error) {
 		AdminPassword:   strings.TrimSpace(os.Getenv("EDGE_ADMIN_PASSWORD")),
 		SessionSecret:   strings.TrimSpace(os.Getenv("EDGE_SESSION_SECRET")),
 		TrustedOrigin:   strings.TrimSpace(os.Getenv("EDGE_TRUSTED_ORIGIN")),
+		WebhookSecret:   strings.TrimSpace(os.Getenv("EDGE_QVAPAY_WEBHOOK_SECRET")),
 		EncryptionKey:   strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY")),
 		OperatorsFile:   strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
 		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),
@@ -444,6 +491,18 @@ func loadConfig() (config, error) {
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {
 		return config{}, errors.New("PORT inválido")
+	}
+	for name, target := range map[string]*bool{
+		"EDGE_MUTATIONS_ENABLED":      &cfg.MutationsEnabled,
+		"EDGE_QVAPAY_WEBHOOK_ENABLED": &cfg.WebhookEnabled,
+	} {
+		if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
+			value, err := strconv.ParseBool(raw)
+			if err != nil {
+				return config{}, fmt.Errorf("%s inválido", name)
+			}
+			*target = value
+		}
 	}
 	if raw := strings.TrimSpace(os.Getenv("EDGE_SECURE_COOKIES")); raw != "" {
 		value, err := strconv.ParseBool(raw)

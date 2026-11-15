@@ -255,6 +255,8 @@ PY
         printf 'EDGE_SECURE_COOKIES=false\n'
         printf 'EDGE_TRUSTED_ORIGIN=%s\n' "$trusted_origin"
         printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
+        printf 'EDGE_MUTATIONS_ENABLED=true\n'
+        printf 'EDGE_QVAPAY_WEBHOOK_ENABLED=false\n' 
         push_public=$(sed -n 's/^WEB_PUSH_PUBLIC_KEY=//p' "$push_env" | tail -n 1 | tr -d '\r')
         if [[ -n $push_public ]]; then
           printf 'EDGE_PUSH_PUBLIC_KEY=%s\n' "$push_public"

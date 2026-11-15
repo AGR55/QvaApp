@@ -311,8 +311,46 @@ route_is_interesting() {
   if [[ -r "${EDGE_DIR}/push_subscriptions_api.go" ]]; then
     printf 'POST /api/push/subscriptions\nDELETE /api/push/subscriptions\n'
   fi
+  if [[ -r "${EDGE_DIR}/qvapay_webhook_api.go" ]]; then
+    printf 'POST /webhooks/qvapay/p2p-feed\n'
+  fi
+  if [[ -r "${EDGE_DIR}/mutations_api.go" ]]; then
+    cat <<'ROUTES'
+DELETE /api/cooperative-network/contributions/:param
+PUT /api/cooperative-network/contributions
+PUT /api/cooperative-network/hunting
+POST /api/cooperative-network/reconcile
+POST /api/cooperative-network/executions/check
+POST /api/cooperative-network/executions/:param/distributed
+DELETE /api/offers/:param
+PUT /api/offers/:param
+POST /api/offers/rebalance/preview
+POST /api/offers/rebalance/apply
+POST /api/operations/:param/:param
+POST /api/mobile/operations/:param/:param
+GET /api/operations/:param/chat
+GET /api/operations/:param/chat/sends/:param
+GET /api/operations/:param/chat/images/:param
+POST /api/operations/:param/chat
+POST /api/operations/:param/chat/read
+POST /api/operations/:param/chat/images
+GET /api/mobile/operations/:param/chat
+GET /api/mobile/operations/:param/chat/sends/:param
+GET /api/mobile/operations/:param/chat/images/:param
+POST /api/mobile/operations/:param/chat
+POST /api/mobile/operations/:param/chat/read
+POST /api/mobile/operations/:param/chat/images
+GET /api/mobile/operations/:param/payment-preview
+POST /api/mobile/payment-receipts
+POST /api/blocked-offers/:param/apply
+POST /api/blocked-offers/:param/preview
+POST /api/recovery/:param/check
+POST /api/recovery/:param/resolve
+POST /api/workflows/:param/reconcile
+ROUTES
+  fi
   # El shell sirve el fallback SPA de navegación del dashboard.
-  printf 'GET /dashboard/:wildcard\n'
+  printf 'GET /dashboard/*\n'
 
   # StaticRoutes declara sus prefijos en un slice; se sintetizan las rutas
   # paramétricas que resolve() atiende realmente.
