@@ -80,6 +80,22 @@ La consola muestra los logs reales (120 eventos, niveles y componentes) y la
 notificación “Aplicación confirmada” de producción. El panel de recuperación
 lee las 3 intenciones reales; las acciones de conciliación siguen en TS.
 
+## Simulación, descartes y red cooperativa
+
+| Ruta | Estado |
+| --- | --- |
+| `POST /api/hunting/simulate` | Simulación real sobre 5.000 observaciones del feed |
+| `POST /api/mobile/simulate` | Misma simulación con Bearer de operador |
+| `GET /api/decision-events` | 1.158 decisiones reales, filtros y paginación |
+| `POST /api/decision-events/:id/dismiss` | Descarte persistido en `shadow.decision_dismissals` |
+| `POST /api/decision-events/dismiss-all` | Descarte masivo hasta un id |
+| Lectura cooperativa | `cooperativeNetwork`/`cooperativeHunting` en `/api/dashboard` |
+
+Evidencia de la simulación en el navegador: 25 ofertas distintas, 5 excluidas
+por importe/rango, 2 propias y 2 con entrega antigua. La auditoría muestra 137
+ofertas bloqueadas y el descarte de una dejó 136 pendientes. La red cooperativa
+muestra HTTP/NATS conectados y 44.89 QUSD pendientes de repartir.
+
 ## Lo que falta y requiere tu intervención
 
 1. **Cuentas lectoras**: pulsa “Añadir cuenta lectora” y pega un token QvaPay
