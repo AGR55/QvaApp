@@ -17,6 +17,10 @@ func (fake *fakeReconcileReader) Offer(context.Context, string) (qvapay.Offer, e
 	return fake.offer, nil
 }
 
+func (fake *fakeReconcileReader) User(context.Context) (qvapay.User, error) {
+	return qvapay.User{UUID: "profile-1"}, nil
+}
+
 func TestReconcilerApplied(t *testing.T) {
 	store := newMutationsTestStore()
 	reconciler := &Reconciler{

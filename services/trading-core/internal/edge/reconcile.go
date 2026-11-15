@@ -11,6 +11,7 @@ import (
 // ReconcileReader es la lectura QvaPay necesaria para conciliar una mutación.
 type ReconcileReader interface {
 	Offer(ctx context.Context, uuid string) (qvapay.Offer, error)
+	User(ctx context.Context) (qvapay.User, error)
 }
 
 // Reconciler consulta el estado remoto de una oferta/orden y registra la
@@ -22,13 +23,17 @@ type Reconciler struct {
 }
 
 type ReconciliationReport struct {
-	UUID      string `json:"uuid"`
-	OrderUUID string `json:"orderUuid,omitempty"`
-	Status    string `json:"status"`
-	Amount    string `json:"amount"`
-	Receive   string `json:"receive"`
-	Applied   bool   `json:"applied"`
-	CheckedAt int64  `json:"checkedAt"`
+	UUID        string `json:"uuid"`
+	OrderUUID   string `json:"orderUuid,omitempty"`
+	Status      string `json:"status"`
+	Amount      string `json:"amount"`
+	Receive     string `json:"receive"`
+	Applied     bool   `json:"applied"`
+	OwnerUUID   string `json:"ownerUuid,omitempty"`
+	PeerUUID    string `json:"peerUuid,omitempty"`
+	ProfileUUID string `json:"profileUuid,omitempty"`
+	HasDetails  bool   `json:"hasDetails"`
+	CheckedAt   int64  `json:"checkedAt"`
 }
 
 func (reconciler *Reconciler) Check(ctx context.Context, uuid, order string) (ReconciliationReport, error) {
@@ -42,6 +47,7 @@ func (reconciler *Reconciler) Check(ctx context.Context, uuid, order string) (Re
 	status := offer.Status
 	amount := offer.Amount
 	receive := offer.Receive
+	peer := offerPeerUUID(offer)
 	if order != "" {
 		child := findOrder(offer.Orders, order)
 		if child == nil {
@@ -50,12 +56,21 @@ func (reconciler *Reconciler) Check(ctx context.Context, uuid, order string) (Re
 		status = child.Status
 		amount = child.Amount
 		receive = child.Receive
+		peer = offerRawUUID(child.Taker, "uuid")
+	}
+	profile := ""
+	if user, err := reconciler.Reader.User(ctx); err == nil {
+		profile = user.UUID
 	}
 	report := ReconciliationReport{
 		UUID: uuid, OrderUUID: order, Status: status,
 		Amount: amount.Format(8), Receive: receive.Format(8),
-		Applied:   status == "processing" || status == "paid" || status == "completed" || status == "applied",
-		CheckedAt: reconciler.now().UnixMilli(),
+		Applied:     status == "processing" || status == "paid" || status == "completed" || status == "applied",
+		OwnerUUID:   offerOwnerUUID(offer),
+		PeerUUID:    peer,
+		ProfileUUID: profile,
+		HasDetails:  len(offer.Details) > 0,
+		CheckedAt:   reconciler.now().UnixMilli(),
 	}
 	if reconciler.Store != nil {
 		payload := []byte(fmt.Sprintf(`{"status":%q,"applied":%t}`, status, report.Applied))
