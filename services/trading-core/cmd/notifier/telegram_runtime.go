@@ -252,7 +252,7 @@ func (runtime *telegramRuntime) marketsText(ctx context.Context) (string, notifi
 		}
 		fmt.Fprintf(&builder, "%s %s (%s)\n  compra ≤ %s · venta ≥ %s\n  máx %s QUSD · fee %s%% · fiat %s %s\n\n",
 			icon, asString(market["label"]), asString(market["code"]),
-			money(asFloat(market["buyMaxRate"])), money(asFloat(market["sellMinRate"])),
+			rateText(asFloat(market["buyMaxRate"])), rateText(asFloat(market["sellMinRate"])),
 			money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])),
 			money(asFloat(market["fiatBalance"])), asString(market["currency"]))
 	}
@@ -322,8 +322,8 @@ func (runtime *telegramRuntime) strategyText(ctx context.Context) (string, notif
 		}
 		market := asMap(item)
 		fmt.Fprintf(&builder, "• %s: compra ≤ %s · venta ≥ %s · fiat %s %s\n",
-			asString(market["label"]), money(asFloat(market["buyMaxRate"])),
-			money(asFloat(market["sellMinRate"])), money(asFloat(market["fiatBalance"])),
+			asString(market["label"]), rateText(asFloat(market["buyMaxRate"])),
+			rateText(asFloat(market["sellMinRate"])), money(asFloat(market["fiatBalance"])),
 			asString(market["currency"]))
 	}
 	risk := asMap(config["risk"])
@@ -508,7 +508,7 @@ func (runtime *telegramRuntime) setRate(ctx context.Context, args []string) (str
 	if err := runtime.edge.send(ctx, http.MethodPut, "/api/hunting", map[string]any{"market": market}); err != nil {
 		return "❌ " + err.Error(), mainMenu()
 	}
-	return fmt.Sprintf("✅ %s: %s actualizado a %s.", code, side, money(rate)), mainMenu()
+	return fmt.Sprintf("✅ %s: %s actualizado a %s.", code, side, rateText(rate)), mainMenu()
 }
 
 func (runtime *telegramRuntime) setMarketNumber(ctx context.Context, args []string, field, label string) (string, notifier.InlineKeyboard) {
@@ -684,6 +684,11 @@ func boolValue(config map[string]any, key string) bool {
 
 func money(value float64) string {
 	return strconv.FormatFloat(value, 'f', 2, 64)
+}
+
+// rateText conserva la precisión de tasas y precios sin ceros innecesarios.
+func rateText(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
 func timestamp(milliseconds float64) string {
