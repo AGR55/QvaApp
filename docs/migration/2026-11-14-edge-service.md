@@ -87,8 +87,41 @@ Rutas autenticadas:
 
 `shadow-qvapay` ahora persiste las últimas 20 transacciones read-only en
 `shadow.qvapay_transactions`. Verificado en VPS: 20 filas y ambas rutas 200.
-La auditoría estática actualiza a **12/109 rutas exactas**; siguen 97
-pendientes.
+
+## Configuración, operadores y chats
+
+Rutas autenticadas por cookie:
+
+- `GET /api/config`, `/api/config-revisions`, `/api/market-source`, `/api/audit`
+- `GET /api/notifications`, `/api/logs`, `/api/recovery`, `/api/openapi.json`
+- `GET /api/push/public-key` (503 si no hay VAPID configurada)
+- `GET /api/mobile/operators` (solo campos públicos)
+- `GET /api/operations/chats` y `/api/mobile/operations/chats`
+- `GET /api/mobile/devices`
+- `GET /api/fiat-history?coin=CUP&page=1`
+- `GET /api/offers/rebalance/:id`
+- `GET /api/market-analytics?coin=CLASICA`
+- `GET /api/analytics/fees?page=1`
+
+Credenciales móviles con `Authorization: Bearer`:
+
+- `GET /api/mobile/device-check`
+- `GET /api/mobile/operator-check` (60 lecturas/minuto por operador)
+- `GET /api/mobile/receipt-outcomes`
+
+Los hashes viven en `/opt/qvaapply-f3-shadow/mobile-auth.json` (600,
+propiedad de UID 65532); el edge solo compara `sha256(token)` y nunca los
+devuelve ni los registra. El resto de datos sale de snapshots públicos
+generados en el deploy (`operators.json`, `chat-threads.json`,
+`dashboard-snapshot.json`), sin tokens, teléfonos ni contenido de chat.
+
+Verificado en VPS: rutas de lectura 200 con login, 401 sin sesión; dispositivo
+u operador inválido 401; snapshot con 2 dispositivos, 2 operadores y 100
+comprobantes, sin `tokenHash` en la respuesta.
+
+La auditoría estática actualiza a **33/109 rutas exactas**; siguen 76
+pendientes, en su mayoría mutaciones (`POST/PUT/DELETE`) fuera del alcance
+read-only y rutas de chat que dependen del servicio remoto.
 
 ## Limitación actual
 

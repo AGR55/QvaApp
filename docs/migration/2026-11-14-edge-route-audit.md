@@ -57,33 +57,30 @@ Salida del script en el commit de trabajo de esta auditoría:
 
 ```text
 Rutas TS únicas:          109
-Rutas edge únicas:        16
-Cubiertas exactamente:    11
-Rutas TS no cubiertas:    98
-Rutas edge extra:         5 (la auditoría estática no cuenta los prefijos
-estáticos P4 implementados en `static_routes.go`)
+Rutas edge únicas:        39
+Cubiertas exactamente:    33
+Rutas TS no cubiertas:    76
+Rutas edge extra:         6 (incluye `GET /:wildcard`; los prefijos estáticos
+P4 de `static_routes.go` no se cuentan como rutas exactas)
 ```
 
-### Rutas cubiertas exactamente (11)
+La extracción Go ahora considera cualquier literal `/api/...` y descarta los
+prefijos de dispatch que terminan en `/`. Antes sólo miraba `/api/mobile/*` y
+`/api/live/*`, por lo que las rutas de configuración y observabilidad ya
+implementadas no aparecían.
 
-```text
-DELETE /api/session
-GET    /api/dashboard
-GET    /api/live/balance
-GET    /api/live/operations
-GET    /api/live/own-offers
-GET    /api/mobile/alerts
-GET    /api/mobile/markets
-GET    /api/mobile/operations
-GET    /api/mobile/overview
-GET    /api/session
-POST   /api/session
-```
+### Rutas cubiertas exactamente (33)
 
-### Rutas edge extra (5)
+La lista completa la emite el script. Incluye sesión, dashboard/live,
+observabilidad, configuración, operadores, chats (metadatos), dispositivos,
+historial fiat, rebalanceos, analítica de mercado, comisiones y verificación de
+credenciales móviles.
+
+### Rutas edge extra (6)
 
 ```text
 GET /api/edge/summary
+GET /api/mobile
 GET /healthz
 GET /metrics
 GET /readyz
@@ -95,35 +92,22 @@ GET /:wildcard    # shell estático / fallback SPA
 no equivale a las rutas estáticas específicas del monolito (`/`, `/dashboard/*`,
 `/icons/:name`, etc.).
 
-### Rutas TS no cubiertas (98)
+### Rutas TS no cubiertas (76)
 
-La lista completa la emite el script. Agrupada por área:
+La lista completa la emite el script. La mayoría son mutaciones
+(`POST/PUT/DELETE`) fuera del alcance read-only. Las lecturas que siguen
+pendientes dependen de datos remotos o de read models complejos:
 
-- **Estáticos y web:** `GET /`, `GET /dashboard/*`, `GET /service-worker.js`,
-  `GET /auth/:name`, `GET /icons/:name`, `GET /logo/:name`,
-  `GET /market-icons/:name`.
-- **Sesión:** no hay pendientes; las tres rutas de sesión están cubiertas.
-- **Dashboard/live:** `GET /api/live/markets/:coin`, `GET /api/live/transactions`.
-- **Móvil (sólo lectura):** `GET /api/mobile/device-check`,
-  `GET /api/mobile/devices`, `GET /api/mobile/operators`,
-  `GET /api/mobile/operator-check`, `GET /api/mobile/insights`,
-  `GET /api/mobile/payment-receipts`, `GET /api/mobile/receipt-outcomes`,
-  `GET /api/mobile/operations/:uuid/payment-preview`,
-  `GET /api/mobile/operations/chats`, `GET /api/mobile/operations/:uuid/chat`,
-  `GET /api/mobile/operations/:uuid/chat/images/:messageId`,
-  `GET /api/mobile/operations/:uuid/chat/sends/:attemptId`.
-- **Operaciones/chats (web):** `GET /api/operations/chats`,
-  `GET /api/operations/chats/unread`, `GET /api/operations/:uuid/chat`,
-  `GET /api/operations/:uuid/chat/images/:messageId`,
-  `GET /api/operations/:uuid/chat/sends/:attemptId`.
-- **Configuración y observabilidad (lectura):** `GET /api/config`,
-  `GET /api/config-revisions`, `GET /api/market-source`, `GET /api/notifications`,
-  `GET /api/audit`, `GET /api/operational-health`, `GET /api/logs`,
-  `GET /api/recovery`, `GET /api/openapi.json`, `GET /api/push/public-key`.
-- **Analítica (lectura):** `GET /api/market-analytics`,
-  `GET /api/trading-analytics`, `GET /api/analytics/fees`,
-  `GET /api/fiat-history`, `GET /api/hunting/diagnostics`,
-  `GET /api/decision-events`, `GET /api/offers/rebalance/:id`.
+- **Estáticos P4:** implementados en `static_routes.go`, pero la extracción
+  estática no los compara uno a uno.
+- **Chats por operación:** `GET /api/operations/:uuid/chat`,
+  `.../chat/sends/:attemptId`, `.../chat/images/:messageId` y sus variantes
+  móviles; requieren el servicio remoto de chat, que no está en el shadow.
+- **Analítica avanzada:** `GET /api/trading-analytics`,
+  `GET /api/hunting/diagnostics`, `GET /api/mobile/insights`.
+- **Pagos asistidos:** `GET /api/mobile/operations/:uuid/payment-preview`,
+  `GET /api/mobile/payment-receipts`.
+- **Resto (lectura):** `GET /api/operations/chats/unread`.
 - **Mutaciones (no portadas):** el resto son `POST`, `PUT` y `DELETE` de
   configuración, ofertas, market readers, recovery, workflows, contribuciones,
   push subscriptions, blocked offers, simulaciones y webhooks.
