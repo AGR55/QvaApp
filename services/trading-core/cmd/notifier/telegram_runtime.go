@@ -54,11 +54,14 @@ func (runtime *telegramRuntime) Run(ctx context.Context) {
 	}
 }
 
-func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Update) {
+// handle procesa un update y devuelve la respuesta enviada. El webhook interno
+// reutiliza el mismo camino para diagnóstico.
+func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Update) (string, bool) {
 	chat := strconv.FormatInt(update.ChatID, 10)
 	if update.ChatID != runtime.adminChatID {
-		_ = runtime.client.SendMessage(ctx, chat, "⛔ Chat no autorizado.")
-		return
+		text := "⛔ Chat no autorizado."
+		_ = runtime.client.SendMessage(ctx, chat, text)
+		return text, true
 	}
 	text := update.Text
 	if data := update.CallbackData; data != "" {
@@ -69,15 +72,18 @@ func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Upda
 	}
 	command, ok := notifier.ParseCommand(text)
 	if !ok {
-		return
+		return "", false
 	}
 	reply, keyboard := runtime.dispatch(ctx, command)
 	if strings.TrimSpace(reply) == "" {
-		return
+		return "", false
 	}
-	if err := runtime.client.SendMenu(ctx, chat, truncate(reply, 3900), keyboard); err != nil {
+	reply = truncate(reply, 3900)
+	if err := runtime.client.SendMenu(ctx, chat, reply, keyboard); err != nil {
 		runtime.logger.Warn("telegram respuesta falló", "error", err)
+		return reply, false
 	}
+	return reply, true
 }
 
 func (runtime *telegramRuntime) dispatch(ctx context.Context, command notifier.Command) (string, notifier.InlineKeyboard) {

@@ -176,6 +176,7 @@ func run(logger *slog.Logger) error {
 			client: client, edge: newEdgeClient(cfg.EdgeURL, cfg.EdgeOrigin, cfg.EdgePassword),
 			adminChatID: cfg.AdminChatID, logger: logger,
 		}
+		service.telegram = runtime
 		go runtime.Run(ctx)
 		logger.Info("telegram long polling habilitado", "edge", cfg.EdgeURL)
 	} else if cfg.PollingEnabled {
@@ -211,6 +212,7 @@ type service struct {
 	pushAPI      *notifier.PushAPI
 	pushService  *notifier.PushService
 	webhookAdmin *notifier.WebhookAdmin
+	telegram     *telegramRuntime
 	requests     atomic.Uint64
 	sent         atomic.Uint64
 	deduped      atomic.Uint64
@@ -319,6 +321,14 @@ func (service *service) telegramUpdate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "invalid_update"})
 		return
+	}
+	if service.telegram != nil {
+		reply, handled := service.telegram.handle(r.Context(), update)
+		if handled {
+			service.sent.Add(1)
+			writeJSON(w, http.StatusAccepted, map[string]any{"status": "handled", "reply": reply})
+			return
+		}
 	}
 	result := notifier.HandleUpdate(update, notifier.Authorization{AdminChatID: service.cfg.AdminChatID})
 	menu := notifier.MenuForAction(result.Decision.Action, result.Decision.Mutation)
