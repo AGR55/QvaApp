@@ -56,6 +56,33 @@ type LiveMutations interface {
 	ConfirmReceived(ctx context.Context, offerUUID, order string) error
 }
 
+// OperationRecord es la vista mínima de una operación local para aplicar
+// acciones y contabilizar fiat.
+type OperationRecord struct {
+	UUID      string
+	OfferType string
+	Coin      string
+	State     string
+	OrderUUID string
+	Amount    float64
+	Receive   float64
+	Rate      float64
+}
+
+// OperationStore lee y actualiza las operaciones locales.
+type OperationStore interface {
+	Get(ctx context.Context, uuid string) (OperationRecord, bool, error)
+	SetState(ctx context.Context, uuid, state string, now int64) error
+}
+
+// FiatMover registra los movimientos fiat de una operación. Es idempotente por
+// clave (orden o UUID de oferta).
+type FiatMover interface {
+	DebitOperation(ctx context.Context, operation OperationRecord, key, source string, now int64) error
+	CreditOperation(ctx context.Context, operation OperationRecord, key, source string, now int64) error
+	ReverseOperation(ctx context.Context, operation OperationRecord, key, source string, now int64) error
+}
+
 // LiveChat ejecuta el chat real de QvaPay. Si es nil, el chat es local.
 type LiveChat interface {
 	ListChat(ctx context.Context, operationUUID, order string) ([]ChatMessage, error)
@@ -87,6 +114,8 @@ type MutationsAPI struct {
 	Live          LiveMutations
 	Chat          LiveChat
 	Reconcile     *Reconciler
+	Operations    OperationStore
+	Fiat          FiatMover
 	TrustedOrigin string
 	Now           func() time.Time
 }
@@ -1096,6 +1125,35 @@ func (api *MutationsAPI) operationAction(
 	}
 	if api.Live != nil && route.action != "ack" {
 		order := r.URL.Query().Get("order")
+		var operation OperationRecord
+		var found bool
+		if api.Operations != nil {
+			loaded, exists, err := api.Operations.Get(ctx, route.id)
+			if err != nil {
+				_ = api.Store.Record(ctx, "operation_lookup_failed", route.id, mutationPayload(raw), actor, api.now().UnixMilli())
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "No se pudo leer la operación."})
+				return
+			}
+			operation, found = loaded, exists
+		}
+		if found {
+			switch route.action {
+			case "paid":
+				if operation.OfferType != "sell" || (operation.State != "applied" && operation.State != "acknowledged") {
+					writeJSON(w, http.StatusConflict, map[string]any{"error": "La operación no permite marcar pago en su estado actual."})
+					return
+				}
+			case "received":
+				if operation.OfferType != "buy" ||
+					(operation.State != "applied" && operation.State != "acknowledged" && operation.State != "paid") {
+					writeJSON(w, http.StatusConflict, map[string]any{"error": "La operación no permite confirmar recepción en su estado actual."})
+					return
+				}
+			}
+			if order == "" && operation.OrderUUID != "" {
+				order = operation.OrderUUID
+			}
+		}
 		var err error
 		switch route.action {
 		case "paid":
@@ -1114,11 +1172,68 @@ func (api *MutationsAPI) operationAction(
 			writeJSON(w, http.StatusBadGateway, map[string]any{"error": "QvaPay rechazó la operación."})
 			return
 		}
+		if found {
+			if err := api.afterOperationAction(ctx, operation, route.action, actor); err != nil {
+				_ = api.Store.Record(ctx, "operation_fiat_failed", route.id, mutationPayload(raw), actor, api.now().UnixMilli())
+				writeJSON(w, http.StatusBadGateway, map[string]any{"error": "La operación se aplicó, pero no se pudo registrar el saldo fiat."})
+				return
+			}
+		}
 	}
 	if !api.record(ctx, w, "operation_"+route.action, route.id, raw, actor) {
 		return
 	}
 	writeMutationNoContent(w)
+}
+
+// afterOperationAction persiste el estado local y el movimiento fiat. El
+// ledger es idempotente: un reintento no duplica el débito ni el crédito.
+func (api *MutationsAPI) afterOperationAction(
+	ctx context.Context,
+	operation OperationRecord,
+	action, actor string,
+) error {
+	now := api.now().UnixMilli()
+	key := operation.OrderUUID
+	if key == "" {
+		key = operation.UUID
+	}
+	source := "Acción " + action + " desde el panel (" + actor + ")"
+	// El movimiento fiat va primero: si falla, el estado local se queda en el
+	// valor anterior y la acción puede reintentarse. El ledger es idempotente,
+	// así que un reintento no duplica el débito/crédito.
+	if api.Fiat != nil {
+		switch {
+		case action == "paid" && operation.OfferType == "sell":
+			if err := api.Fiat.DebitOperation(ctx, operation, key, source, now); err != nil {
+				return err
+			}
+		case action == "received" && operation.OfferType == "buy":
+			if err := api.Fiat.CreditOperation(ctx, operation, key, source, now); err != nil {
+				return err
+			}
+		case action == "cancel" && operation.OfferType == "sell" && operation.State == "paid":
+			if err := api.Fiat.ReverseOperation(ctx, operation, "reversal:"+key, source, now); err != nil {
+				return err
+			}
+		}
+	}
+	if api.Operations == nil {
+		return nil
+	}
+	state := operation.State
+	switch action {
+	case "paid":
+		state = "paid"
+	case "received":
+		state = "completed"
+	case "cancel":
+		state = "cancelled"
+	}
+	if state == operation.State {
+		return nil
+	}
+	return api.Operations.SetState(ctx, operation.UUID, state, now)
 }
 
 func (api *MutationsAPI) workflowReconcile(

@@ -148,3 +148,17 @@ CREATE TABLE IF NOT EXISTS shadow.local_operations (
 -- una aplicación real. Es idempotente para reaplicar la migración.
 ALTER TABLE shadow.core_operations
   ADD COLUMN IF NOT EXISTS order_uuid text NOT NULL DEFAULT '';
+
+-- Movimientos fiat posteriores al corte. La clave es la orden (o la oferta si
+-- la orden no existe) para que reintentos y conciliaciones no dupliquen.
+CREATE TABLE IF NOT EXISTS shadow.fiat_ledger (
+  operation_uuid text PRIMARY KEY,
+  coin text NOT NULL,
+  direction text NOT NULL CHECK (direction IN ('debit', 'credit')),
+  amount numeric(20,8) NOT NULL CHECK (amount > 0),
+  source text NOT NULL DEFAULT '',
+  created_at bigint NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_fiat_ledger_coin_created
+  ON shadow.fiat_ledger (coin, created_at DESC);

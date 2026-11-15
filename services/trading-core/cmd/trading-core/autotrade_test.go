@@ -248,3 +248,19 @@ func TestAutoTraderFixedOfferNeedsNoOrder(t *testing.T) {
 		t.Fatalf("una oferta fija no debe persistir orden: %+v", repo.orders)
 	}
 }
+
+func TestLocalOperationStateMapping(t *testing.T) {
+	cases := map[core.OperationState]string{
+		core.StateConfirmed:  "applied",
+		core.StateDryRun:     "dry_run",
+		core.StateRejected:   "rejected",
+		core.StateUncertain:  "uncertain",
+		core.StateReconciled: "completed",
+		core.StateReserved:   "",
+	}
+	for state, expected := range cases {
+		if got := localOperationState(state); got != expected {
+			t.Fatalf("%s -> %q, se esperaba %q", state, got, expected)
+		}
+	}
+}

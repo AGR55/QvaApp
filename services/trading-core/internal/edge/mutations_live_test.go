@@ -151,3 +151,128 @@ func TestMutationsAPILiveChat(t *testing.T) {
 		t.Fatalf("chat post: %d %+v %s", post.Code, chat.sent, post.Body.String())
 	}
 }
+
+type fakeOperationStore struct {
+	record OperationRecord
+	found  bool
+	state  string
+}
+
+func (store *fakeOperationStore) Get(context.Context, string) (OperationRecord, bool, error) {
+	if !store.found {
+		return OperationRecord{}, false, nil
+	}
+	return store.record, true, nil
+}
+
+func (store *fakeOperationStore) SetState(_ context.Context, _ string, state string, _ int64) error {
+	store.state = state
+	return nil
+}
+
+type fakeFiatMover struct {
+	debits    []string
+	credits   []string
+	reversals []string
+}
+
+func (mover *fakeFiatMover) DebitOperation(_ context.Context, operation OperationRecord, key, _ string, _ int64) error {
+	mover.debits = append(mover.debits, operation.UUID+":"+key)
+	return nil
+}
+
+func (mover *fakeFiatMover) CreditOperation(_ context.Context, operation OperationRecord, key, _ string, _ int64) error {
+	mover.credits = append(mover.credits, operation.UUID+":"+key)
+	return nil
+}
+
+func (mover *fakeFiatMover) ReverseOperation(_ context.Context, operation OperationRecord, key, _ string, _ int64) error {
+	mover.reversals = append(mover.reversals, operation.UUID+":"+key)
+	return nil
+}
+
+func TestMutationsAPIPaidRecordsFiat(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	live := &fakeLiveMutations{}
+	operations := &fakeOperationStore{found: true, record: OperationRecord{
+		UUID: "op-1", OfferType: "sell", Coin: "CLASICA", State: "applied",
+		OrderUUID: "order-1", Amount: 10, Receive: 10.6,
+	}}
+	fiat := &fakeFiatMover{}
+	api.Live, api.Operations, api.Fiat = live, operations, fiat
+
+	recorder := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/paid?order=order-1",
+		body: `{"reference":"tx-1"}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("paid: %d %s", recorder.Code, recorder.Body.String())
+	}
+	if operations.state != "paid" || len(fiat.debits) != 1 || fiat.debits[0] != "op-1:order-1" {
+		t.Fatalf("state=%q debits=%+v", operations.state, fiat.debits)
+	}
+}
+
+func TestMutationsAPIReceivedRecordsCredit(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	api.Live = &fakeLiveMutations{}
+	operations := &fakeOperationStore{found: true, record: OperationRecord{
+		UUID: "op-1", OfferType: "buy", Coin: "CLASICA", State: "applied",
+		OrderUUID: "order-1", Amount: 10, Receive: 11,
+	}}
+	fiat := &fakeFiatMover{}
+	api.Operations, api.Fiat = operations, fiat
+
+	recorder := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/received",
+		body: `{}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("received: %d %s", recorder.Code, recorder.Body.String())
+	}
+	if operations.state != "completed" || len(fiat.credits) != 1 {
+		t.Fatalf("state=%q credits=%+v", operations.state, fiat.credits)
+	}
+}
+
+func TestMutationsAPICancelAfterPaidReverses(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	api.Live = &fakeLiveMutations{}
+	operations := &fakeOperationStore{found: true, record: OperationRecord{
+		UUID: "op-1", OfferType: "sell", Coin: "CLASICA", State: "paid",
+		OrderUUID: "order-1", Amount: 10, Receive: 10.6,
+	}}
+	fiat := &fakeFiatMover{}
+	api.Operations, api.Fiat = operations, fiat
+
+	recorder := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/cancel",
+		body: `{}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("cancel: %d %s", recorder.Code, recorder.Body.String())
+	}
+	if operations.state != "cancelled" || len(fiat.reversals) != 1 {
+		t.Fatalf("state=%q reversals=%+v", operations.state, fiat.reversals)
+	}
+}
+
+func TestMutationsAPIPaidRejectsBuyOperation(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	live := &fakeLiveMutations{}
+	operations := &fakeOperationStore{found: true, record: OperationRecord{
+		UUID: "op-1", OfferType: "buy", Coin: "CLASICA", State: "applied",
+	}}
+	api.Live, api.Operations = live, operations
+
+	recorder := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/paid",
+		body: `{"reference":"tx-1"}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("paid buy: %d", recorder.Code)
+	}
+	if len(live.paids) != 0 {
+		t.Fatalf("no debía llamar a QvaPay: %+v", live.paids)
+	}
+}

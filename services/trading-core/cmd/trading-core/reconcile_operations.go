@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 )
 
@@ -16,11 +17,12 @@ type offerReader interface {
 }
 
 type operationReconciler struct {
-	pool   *pgxpool.Pool
-	reader offerReader
-	repo   operationTransitioner
-	logger *slog.Logger
-	now    func() time.Time
+	pool     *pgxpool.Pool
+	reader   offerReader
+	repo     operationTransitioner
+	localOps *postgres.LocalOperationRepository
+	logger   *slog.Logger
+	now      func() time.Time
 }
 
 type uncertainOperation struct {
@@ -109,6 +111,23 @@ func (reconciler *operationReconciler) reconcileOne(ctx context.Context, operati
 			reconciler.logger.Warn("transición de conciliación falló", "operation_id", operationID, "state", target, "error", err)
 		}
 		return
+	}
+	if reconciler.localOps != nil {
+		localState := "reconciled"
+		switch status {
+		case "paid":
+			localState = "paid"
+		case "completed":
+			localState = "completed"
+		case "processing":
+			localState = "applied"
+		case "open", "cancelled", "canceled", "rejected":
+			localState = "cancelled"
+		}
+		if err := reconciler.localOps.SetState(ctx, offerUUID, localState, reconciler.timestamp()); err != nil &&
+			reconciler.logger != nil {
+			reconciler.logger.Warn("no se pudo actualizar el estado local", "operation_id", operationID, "error", err)
+		}
 	}
 	if reconciler.logger != nil {
 		reconciler.logger.Info("operación conciliada",

@@ -100,28 +100,32 @@ type Evaluation struct {
 	Reason    string
 	// OfferKind y el rango permiten que el core dimensione ofertas flexibles
 	// en vez de rechazarlas por superar el máximo del mercado.
-	OfferKind string
-	Available decimal.Value
-	OrderMin  decimal.Value
-	OrderMax  decimal.Value
+	OfferKind      string
+	Available      decimal.Value
+	OrderMin       decimal.Value
+	OrderMax       decimal.Value
+	OfferType      string
+	CounterpartyID string
 }
 
 // MarshalJSON expone tasas como texto decimal estable, sin serializar big.Rat.
 func (e Evaluation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		OfferUUID string `json:"offerUuid"`
-		Coin      string `json:"coin"`
-		Side      string `json:"side"`
-		Amount    string `json:"amount"`
-		Receive   string `json:"receive"`
-		Rate      string `json:"rate"`
-		Median    string `json:"median"`
-		Decision  string `json:"decision"`
-		Reason    string `json:"reason"`
-		OfferKind string `json:"offerKind,omitempty"`
-		Available string `json:"available,omitempty"`
-		OrderMin  string `json:"orderMin,omitempty"`
-		OrderMax  string `json:"orderMax,omitempty"`
+		OfferUUID      string `json:"offerUuid"`
+		Coin           string `json:"coin"`
+		Side           string `json:"side"`
+		Amount         string `json:"amount"`
+		Receive        string `json:"receive"`
+		Rate           string `json:"rate"`
+		Median         string `json:"median"`
+		Decision       string `json:"decision"`
+		Reason         string `json:"reason"`
+		OfferKind      string `json:"offerKind,omitempty"`
+		Available      string `json:"available,omitempty"`
+		OrderMin       string `json:"orderMin,omitempty"`
+		OrderMax       string `json:"orderMax,omitempty"`
+		OfferType      string `json:"offerType,omitempty"`
+		CounterpartyID string `json:"counterpartyId,omitempty"`
 	}{
 		OfferUUID: e.OfferUUID, Coin: e.Coin, Side: e.Side,
 		Amount: e.Amount.Format(8), Receive: e.Receive.Format(8),
@@ -129,6 +133,7 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		Decision: e.Decision, Reason: e.Reason,
 		OfferKind: e.OfferKind, Available: e.Available.Format(8),
 		OrderMin: e.OrderMin.Format(8), OrderMax: e.OrderMax.Format(8),
+		OfferType: e.OfferType, CounterpartyID: e.CounterpartyID,
 	})
 }
 
@@ -140,17 +145,19 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 		available = offer.Amount
 	}
 	evaluation := Evaluation{
-		OfferUUID: offer.UUID,
-		Coin:      offer.Coin,
-		Amount:    offer.Amount,
-		Receive:   offer.Receive,
-		Rate:      decimal.Zero(),
-		Median:    decimal.Zero(),
-		Decision:  "ignored",
-		OfferKind: offer.OfferKind,
-		Available: available,
-		OrderMin:  offer.OrderMin,
-		OrderMax:  offer.OrderMax,
+		OfferUUID:      offer.UUID,
+		Coin:           offer.Coin,
+		Amount:         offer.Amount,
+		Receive:        offer.Receive,
+		Rate:           decimal.Zero(),
+		Median:         decimal.Zero(),
+		Decision:       "ignored",
+		OfferKind:      offer.OfferKind,
+		Available:      available,
+		OrderMin:       offer.OrderMin,
+		OrderMax:       offer.OrderMax,
+		OfferType:      offer.Type,
+		CounterpartyID: offerCounterparty(offer),
 	}
 	if offer.Status != "open" || offer.Amount.Sign() <= 0 || offer.Receive.Sign() <= 0 {
 		evaluation.Reason = "Oferta no abierta o importes no positivos"
@@ -276,4 +283,22 @@ func number(value any) (decimal.Value, bool) {
 	default:
 		return decimal.Zero(), false
 	}
+}
+
+// offerCounterparty devuelve el creador de la oferta, que es la contraparte de
+// la operación. Si no viene en User, usa Peer.
+func offerCounterparty(offer qvapay.Offer) string {
+	for _, raw := range []json.RawMessage{offer.User, offer.Peer} {
+		if len(raw) == 0 {
+			continue
+		}
+		var object map[string]any
+		if json.Unmarshal(raw, &object) != nil {
+			continue
+		}
+		if uuid, ok := object["uuid"].(string); ok && strings.TrimSpace(uuid) != "" {
+			return strings.TrimSpace(uuid)
+		}
+	}
+	return ""
 }

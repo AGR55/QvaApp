@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/edge"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
@@ -204,6 +205,12 @@ func run(logger *slog.Logger) error {
 				webExtras.Settings = &edge.PostgresReaderStore{Pool: writePool}
 				analyticsFees.Store = &edge.PostgresFeeStore{Pool: writePool}
 				mutations.Store = &edge.PostgresMutationStore{Pool: writePool}
+				mutations.Operations = &localOperationAdapter{
+					repo: postgres.NewLocalOperationRepository(writePool),
+				}
+				mutations.Fiat = &runtimeFiatMover{
+					repo: &runtimeconfig.Repository{Pool: writePool},
+				}
 				qvapayWebhook.Store = &edge.PostgresFeedEventStore{Pool: writePool}
 			}
 			if (cfg.MutationsLive || cfg.LiveDashboard) && cfg.QvaToken != "" && cfg.EncryptionKey != "" {

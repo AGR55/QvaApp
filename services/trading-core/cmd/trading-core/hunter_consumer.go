@@ -36,6 +36,7 @@ type hunterConsumer struct {
 	worker         string
 	shadowRepo     *postgres.ShadowRepository
 	operationRepo  *postgres.CoreOperationRepository
+	localOps       *postgres.LocalOperationRepository
 	processed      atomic.Uint64
 	allowed        atomic.Uint64
 	blocked        atomic.Uint64
@@ -58,10 +59,12 @@ type hunterPayload struct {
 	Rate      string `json:"rate"`
 	// Metadatos de ofertas por rango: el core dimensiona el importe antes de
 	// decidir en vez de aplicar el total publicado.
-	OfferKind string `json:"offerKind,omitempty"`
-	Available string `json:"available,omitempty"`
-	OrderMin  string `json:"orderMin,omitempty"`
-	OrderMax  string `json:"orderMax,omitempty"`
+	OfferKind      string `json:"offerKind,omitempty"`
+	Available      string `json:"available,omitempty"`
+	OrderMin       string `json:"orderMin,omitempty"`
+	OrderMax       string `json:"orderMax,omitempty"`
+	OfferType      string `json:"offerType,omitempty"`
+	CounterpartyID string `json:"counterpartyId,omitempty"`
 }
 
 func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
@@ -78,12 +81,14 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		configErr: configErr, runtime: &runtimeconfig.Repository{Pool: pool},
 		shadowRepo:    postgres.NewShadowRepository(pool),
 		operationRepo: postgres.NewCoreOperationRepository(pool),
+		localOps:      postgres.NewLocalOperationRepository(pool),
 	}
 	consumer.trader = buildAutoTrader(logger)
 	if token, ok := decryptQvaToken(logger); ok {
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
 			consumer.reconciler = &operationReconciler{
-				pool: pool, reader: reader, repo: consumer.operationRepo, logger: logger,
+				pool: pool, reader: reader, repo: consumer.operationRepo,
+				localOps: consumer.localOps, logger: logger,
 			}
 			logger.Info("conciliador QvaPay habilitado")
 		} else {
@@ -292,12 +297,87 @@ func (consumer *hunterConsumer) consume(
 					} else if state == core.StateConfirmed {
 						consumer.applied.Add(1)
 					}
+					consumer.recordLocalOperation(ctx, payload, event.EventID, amount, receive, now)
 				}
 			}
 		}
 	} else {
 		consumer.blocked.Add(1)
 	}
+}
+
+// recordLocalOperation publica la operación del motor Go en la tabla que lee
+// el panel. Así las ofertas aplicadas por Go son visibles y accionables sin TS.
+func (consumer *hunterConsumer) recordLocalOperation(
+	ctx context.Context,
+	payload hunterPayload,
+	operationID string,
+	amount, receive decimal.Value,
+	now int64,
+) {
+	if consumer.localOps == nil {
+		return
+	}
+	operation, err := consumer.operationRepo.Get(ctx, operationID)
+	if err != nil {
+		if consumer.logger != nil {
+			consumer.logger.Warn("no se pudo leer la operación para el panel", "operation_id", operationID, "error", err)
+		}
+		return
+	}
+	state := localOperationState(operation.State)
+	if state == "" {
+		return
+	}
+	offerType := payload.OfferType
+	if offerType == "" {
+		switch payload.Side {
+		case "buy":
+			offerType = "sell"
+		case "sell":
+			offerType = "buy"
+		}
+	}
+	rate := 0.0
+	amountFloat := decimalFloat(amount)
+	receiveFloat := decimalFloat(receive)
+	if amountFloat > 0 {
+		rate = receiveFloat / amountFloat
+	}
+	err = consumer.localOps.Upsert(ctx, postgres.LocalOperation{
+		UUID: payload.OfferUUID, OfferType: offerType, Coin: payload.Coin,
+		Amount: amountFloat, Receive: receiveFloat, Rate: rate,
+		State: state, AutoApplied: true, OrderUUID: operation.OrderUUID,
+		CounterpartyID: payload.CounterpartyID, CreatedAt: now, UpdatedAt: now,
+	})
+	if err != nil && consumer.logger != nil {
+		consumer.logger.Warn("no se pudo publicar la operación en el panel", "operation_id", operationID, "error", err)
+	}
+}
+
+func localOperationState(state core.OperationState) string {
+	switch state {
+	case core.StateConfirmed:
+		return "applied"
+	case core.StateDryRun:
+		return "dry_run"
+	case core.StateRejected:
+		return "rejected"
+	case core.StateUncertain:
+		return "uncertain"
+	case core.StateReconciled:
+		return "completed"
+	default:
+		return ""
+	}
+}
+
+func decimalFloat(value decimal.Value) float64 {
+	parsed, err := strconv.ParseFloat(value.Format(8), 64)
+	if err != nil {
+		return 0
+	}
+	return parsed
 }
 
 // sizePayloadAmount calcula el importe ejecutable de una oferta por rango.
