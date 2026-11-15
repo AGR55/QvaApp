@@ -119,6 +119,46 @@ func (repository *CoreOperationRepository) CountByState(
 	return counts, rows.Err()
 }
 
+// Usage devuelve la exposición y el volumen ya usados, calculados desde las
+// operaciones persistentes. dailySinceMS marca el inicio del día en UTC.
+func (repository *CoreOperationRepository) Usage(
+	ctx context.Context,
+	dailySinceMS int64,
+) (core.Usage, error) {
+	var exposureText, dailyText string
+	var active int64
+	err := repository.pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(SUM(qusd_amount::numeric) FILTER (
+				WHERE state IN ('reserved', 'submitted', 'uncertain')
+			), 0)::text,
+			COALESCE(SUM(qusd_amount::numeric) FILTER (
+				WHERE state IN ('confirmed', 'reconciled') AND updated_at >= $1
+			), 0)::text,
+			COUNT(*) FILTER (
+				WHERE state IN ('reserved', 'submitted', 'uncertain')
+			)
+		FROM shadow.core_operations`,
+		dailySinceMS,
+	).Scan(&exposureText, &dailyText, &active)
+	if err != nil {
+		return core.Usage{}, err
+	}
+	exposure, err := decimal.Parse(exposureText)
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("exposición core inválida: %w", err)
+	}
+	daily, err := decimal.Parse(dailyText)
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("volumen diario core inválido: %w", err)
+	}
+	return core.Usage{
+		ConcurrentQusdExposure: exposure,
+		DailyAppliedQusd:       daily,
+		ActiveOperations:       decimal.FromInt(active),
+	}, nil
+}
+
 // load lee una operación y su versión actual. Los importes se persisten como
 // texto y se reconstruyen con decimal.Parse, sin pasar por float64.
 func (repository *CoreOperationRepository) load(

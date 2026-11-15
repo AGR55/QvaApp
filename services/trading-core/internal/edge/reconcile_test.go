@@ -25,7 +25,7 @@ func TestReconcilerApplied(t *testing.T) {
 	store := newMutationsTestStore()
 	reconciler := &Reconciler{
 		Reader: &fakeReconcileReader{offer: qvapay.Offer{
-			UUID: "op-1", Status: "processing",
+			UUID: "op-1", Coin: "CLASICA", Status: "processing",
 			Amount: decimal.MustParse("10"), Receive: decimal.MustParse("11"),
 		}},
 		Store: store,
@@ -35,7 +35,7 @@ func TestReconcilerApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	if !report.Applied || report.Status != "processing" || report.Amount != "10.00000000" {
+	if !report.Applied || report.Status != "processing" || report.Coin != "CLASICA" || report.Amount != "10.00000000" {
 		t.Fatalf("report = %+v", report)
 	}
 	if len(store.records) != 1 || store.records[0].action != "reconciliation_checked" {

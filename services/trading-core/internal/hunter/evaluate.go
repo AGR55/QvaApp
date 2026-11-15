@@ -98,6 +98,12 @@ type Evaluation struct {
 	Median    decimal.Value
 	Decision  string
 	Reason    string
+	// OfferKind y el rango permiten que el core dimensione ofertas flexibles
+	// en vez de rechazarlas por superar el máximo del mercado.
+	OfferKind string
+	Available decimal.Value
+	OrderMin  decimal.Value
+	OrderMax  decimal.Value
 }
 
 // MarshalJSON expone tasas como texto decimal estable, sin serializar big.Rat.
@@ -112,17 +118,27 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		Median    string `json:"median"`
 		Decision  string `json:"decision"`
 		Reason    string `json:"reason"`
+		OfferKind string `json:"offerKind,omitempty"`
+		Available string `json:"available,omitempty"`
+		OrderMin  string `json:"orderMin,omitempty"`
+		OrderMax  string `json:"orderMax,omitempty"`
 	}{
 		OfferUUID: e.OfferUUID, Coin: e.Coin, Side: e.Side,
 		Amount: e.Amount.Format(8), Receive: e.Receive.Format(8),
 		Rate: e.Rate.Format(8), Median: e.Median.Format(8),
 		Decision: e.Decision, Reason: e.Reason,
+		OfferKind: e.OfferKind, Available: e.Available.Format(8),
+		OrderMin: e.OrderMin.Format(8), OrderMax: e.OrderMax.Format(8),
 	})
 }
 
 // Evaluate clasifica una oferta P2P. decision puede ser auto_buy,
 // manual_sell, blocked o ignored.
 func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard decimal.Value) Evaluation {
+	available := offer.AvailableAmount
+	if available.Sign() <= 0 {
+		available = offer.Amount
+	}
 	evaluation := Evaluation{
 		OfferUUID: offer.UUID,
 		Coin:      offer.Coin,
@@ -131,6 +147,10 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 		Rate:      decimal.Zero(),
 		Median:    decimal.Zero(),
 		Decision:  "ignored",
+		OfferKind: offer.OfferKind,
+		Available: available,
+		OrderMin:  offer.OrderMin,
+		OrderMax:  offer.OrderMax,
 	}
 	if offer.Status != "open" || offer.Amount.Sign() <= 0 || offer.Receive.Sign() <= 0 {
 		evaluation.Reason = "Oferta no abierta o importes no positivos"
@@ -159,7 +179,10 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 			evaluation.Reason = "Cacería de compra detenida"
 			return evaluation
 		}
-		if market.PurchaseMaxQusd.Sign() > 0 && offer.Amount.Cmp(market.PurchaseMaxQusd) > 0 {
+		// Una oferta flexible puede publicar más QUSD de los que el mercado
+		// permite por operación: el core la dimensiona en vez de descartarla.
+		if offer.OfferKind != "flexible" && market.PurchaseMaxQusd.Sign() > 0 &&
+			offer.Amount.Cmp(market.PurchaseMaxQusd) > 0 {
 			evaluation.Reason = fmt.Sprintf("Supera límite de %s QUSD por compra", market.PurchaseMaxQusd.Compact())
 			return evaluation
 		}

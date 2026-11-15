@@ -24,6 +24,7 @@ type Reconciler struct {
 
 type ReconciliationReport struct {
 	UUID        string `json:"uuid"`
+	Coin        string `json:"coin,omitempty"`
 	OrderUUID   string `json:"orderUuid,omitempty"`
 	Status      string `json:"status"`
 	Amount      string `json:"amount"`
@@ -68,7 +69,7 @@ func (reconciler *Reconciler) Check(ctx context.Context, uuid, order string) (Re
 		profile = user.UUID
 	}
 	report := ReconciliationReport{
-		UUID: uuid, OrderUUID: order, Status: status,
+		UUID: uuid, Coin: offer.Coin, OrderUUID: order, Status: status,
 		Amount: amount.Format(8), Receive: receive.Format(8),
 		Applied:     status == "processing" || status == "paid" || status == "completed" || status == "applied",
 		OwnerUUID:   offerOwnerUUID(offer),

@@ -56,6 +56,12 @@ type hunterPayload struct {
 	Amount    string `json:"amount"`
 	Receive   string `json:"receive"`
 	Rate      string `json:"rate"`
+	// Metadatos de ofertas por rango: el core dimensiona el importe antes de
+	// decidir en vez de aplicar el total publicado.
+	OfferKind string `json:"offerKind,omitempty"`
+	Available string `json:"available,omitempty"`
+	OrderMin  string `json:"orderMin,omitempty"`
+	OrderMax  string `json:"orderMax,omitempty"`
 }
 
 func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
@@ -195,10 +201,25 @@ func (consumer *hunterConsumer) consume(
 	if err != nil {
 		balance = decimal.Zero()
 	}
+	nowMS := postgres.NowMS()
+	usage := consumer.currentUsage(ctx, nowMS)
+	sizedAmount, sizedReceive, sized, sizeReason := sizePayloadAmount(payload, config, usage, rate)
+	if sized {
+		if sizedAmount.Sign() <= 0 {
+			consumer.persistBlockedEvent(ctx, repository, event, payload, sizeReason, nowMS)
+			return
+		}
+		amount = sizedAmount
+		receive = sizedReceive
+		consumer.logger.Info("oferta dimensionada",
+			"event_id", event.EventID, "offer_uuid", payload.OfferUUID,
+			"qusd", amount.Format(2), "fiat", receive.Format(2), "reason", sizeReason)
+	}
 	result, err := core.Decide(core.Event{
 		OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
 		Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
-	}, config, balance, postgres.NowMS())
+		Usage: usage,
+	}, config, balance, nowMS)
 	if err != nil {
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
@@ -275,6 +296,110 @@ func (consumer *hunterConsumer) consume(
 	} else {
 		consumer.blocked.Add(1)
 	}
+}
+
+// sizePayloadAmount calcula el importe ejecutable de una oferta por rango.
+// Devuelve sized=false para ofertas fijas o eventos sin metadatos de rango.
+func sizePayloadAmount(
+	payload hunterPayload,
+	config core.Config,
+	usage core.Usage,
+	rate decimal.Value,
+) (decimal.Value, decimal.Value, bool, string) {
+	if payload.Side != "buy" {
+		return decimal.Zero(), decimal.Zero(), false, ""
+	}
+	if payload.OfferKind != "flexible" && strings.TrimSpace(payload.Available) == "" {
+		return decimal.Zero(), decimal.Zero(), false, ""
+	}
+	if rate.Sign() <= 0 {
+		return decimal.Zero(), decimal.Zero(), true, "tasa inválida para dimensionar la oferta"
+	}
+	available, _ := decimal.Parse(strings.TrimSpace(payload.Available))
+	if available.Sign() <= 0 {
+		available, _ = decimal.Parse(strings.TrimSpace(payload.Amount))
+	}
+	orderMin, _ := decimal.Parse(strings.TrimSpace(payload.OrderMin))
+	orderMax, _ := decimal.Parse(strings.TrimSpace(payload.OrderMax))
+	market := config.Markets[payload.Coin]
+	size, err := core.SizeTake(core.TakeInput{
+		AvailableQusd:     available,
+		OrderMin:          orderMin,
+		OrderMax:          orderMax,
+		FiatAvailable:     config.Fiat[payload.Coin],
+		OutgoingFee:       market.OutgoingFee,
+		Rate:              rate,
+		PerOperationMax:   config.Limits.MaxQusdPerOperation,
+		MarketMaxQusd:     market.PurchaseMaxQusd,
+		ExposureRemaining: remaining(config.Limits.MaxConcurrentQusdExposure, usage.ConcurrentQusdExposure),
+		DailyRemaining:    remaining(config.Limits.MaxDailyAppliedQusd, usage.DailyAppliedQusd),
+	})
+	if err != nil {
+		return decimal.Zero(), decimal.Zero(), true, err.Error()
+	}
+	if size.Amount.Sign() <= 0 {
+		return decimal.Zero(), decimal.Zero(), true, size.Reason
+	}
+	return size.Amount, size.Amount.Mul(rate), true, size.Reason
+}
+
+// remaining devuelve cuánto margen queda de un límite. Cero significa sin
+// tope configurado y no se recorta.
+func remaining(limit, used decimal.Value) decimal.Value {
+	if limit.Sign() <= 0 {
+		return decimal.Zero()
+	}
+	left := limit.Sub(used)
+	if left.Sign() < 0 {
+		return decimal.Zero()
+	}
+	return left
+}
+
+// currentUsage lee el consumo persistido. Si falla, devuelve ceros y deja que
+// los límites por operación sigan aplicando.
+func (consumer *hunterConsumer) currentUsage(ctx context.Context, nowMS int64) core.Usage {
+	dayStart := nowMS - nowMS%86_400_000
+	usage, err := consumer.operationRepo.Usage(ctx, dayStart)
+	if err != nil {
+		if consumer.logger != nil && ctx.Err() == nil {
+			consumer.logger.Warn("no se pudo leer el uso de riesgo", "error", err)
+		}
+		return core.Usage{}
+	}
+	return usage
+}
+
+// persistBlockedEvent cierra el evento sin aplicar y sin reintentarlo.
+func (consumer *hunterConsumer) persistBlockedEvent(
+	ctx context.Context,
+	repository *postgres.HunterEventRepository,
+	event postgres.HunterEvent,
+	payload hunterPayload,
+	reason string,
+	nowMS int64,
+) {
+	result := core.Result{Kind: "blocked", Allowed: false, Reasons: []string{reason}}
+	checksJSON, _ := json.Marshal(result.Checks)
+	amount, _ := decimal.Parse(payload.Amount)
+	receive, _ := decimal.Parse(payload.Receive)
+	rate, _ := decimal.Parse(payload.Rate)
+	if err := repository.CompleteWithDecision(ctx, postgres.CoreDecision{
+		EventID: event.EventID, OfferUUID: payload.OfferUUID, Coin: payload.Coin,
+		Side: payload.Side, HunterDecision: payload.Decision, CoreKind: result.Kind,
+		Allowed: false, Amount: amount.Format(8), Receive: receive.Format(8),
+		Rate: rate.Format(8), Reason: reason, ChecksJSON: string(checksJSON),
+		CreatedAt: nowMS,
+	}, nowMS); err != nil {
+		consumer.failed.Add(1)
+		_ = repository.Fail(ctx, event.EventID, event.Attempts, nowMS, err.Error())
+		consumer.logger.Warn("persistir bloqueo por dimensionado falló", "event_id", event.EventID, "error", err)
+		return
+	}
+	consumer.processed.Add(1)
+	consumer.blocked.Add(1)
+	consumer.logger.Info("oferta no aplicable por dimensionado",
+		"event_id", event.EventID, "offer_uuid", payload.OfferUUID, "reason", reason)
 }
 
 func validateHunterPayload(payload string) error {

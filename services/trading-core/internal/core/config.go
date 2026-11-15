@@ -126,6 +126,16 @@ type Event struct {
 	Amount    decimal.Value
 	Receive   decimal.Value
 	Rate      decimal.Value
+	// Uso ya consumido, leído de las operaciones persistidas. Si queda en cero
+	// el riesgo solo aplica los límites por operación.
+	Usage Usage
+}
+
+// Usage es el consumo vigente de los cortafuegos globales.
+type Usage struct {
+	ConcurrentQusdExposure decimal.Value
+	DailyAppliedQusd       decimal.Value
+	ActiveOperations       decimal.Value
 }
 
 // Result es la decisión del core shadow.
@@ -200,8 +210,10 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 		PriceReason:           "Decisión del hunter: " + event.Decision,
 		ExpectedMarginPercent: expectedMargin,
 		QusdBalance:           qusdBalance, FiatAvailable: config.Fiat[event.Coin],
-		ConcurrentQusdExposure: decimal.Zero(), DailyAppliedQusd: decimal.Zero(),
-		ActiveOperations: decimal.Zero(), ConsecutiveErrors: decimal.Zero(),
+		ConcurrentQusdExposure: event.Usage.ConcurrentQusdExposure,
+		DailyAppliedQusd:       event.Usage.DailyAppliedQusd,
+		ActiveOperations:       event.Usage.ActiveOperations,
+		ConsecutiveErrors:      decimal.Zero(),
 	}
 	decision, err := riskpolicy.Evaluate(context)
 	if err != nil {
