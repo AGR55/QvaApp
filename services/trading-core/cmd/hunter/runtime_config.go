@@ -240,6 +240,7 @@ func (service *service) reloadRuntimeConfig(ctx context.Context) {
 			mapped := hunterConfigFromRuntime(config)
 			service.configMu.Lock()
 			service.config = mapped
+			service.configVersion.Store(version)
 			service.runtimeConfig = config
 			service.runtimeLoaded = true
 			service.configMu.Unlock()

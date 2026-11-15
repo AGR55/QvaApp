@@ -43,9 +43,16 @@ type sessionLoginRequest struct {
 
 // sessionResponse es la representación pública de una sesión autenticada. El
 // CSRF sólo se incluye en GET para que el cliente pueda reenviarlo.
-type sessionResponse struct {
+type sessionData struct {
 	Authenticated bool   `json:"authenticated"`
-	CSRF          string `json:"csrf,omitempty"`
+	CSRFToken     string `json:"csrfToken,omitempty"`
+	ExpiresAt     int64  `json:"expiresAt,omitempty"`
+}
+
+type sessionResponse struct {
+	Authenticated bool        `json:"authenticated"`
+	CSRF          string      `json:"csrf,omitempty"`
+	Data          sessionData `json:"data"`
 }
 
 func (h *SessionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +93,10 @@ func (h *SessionHandler) getSession(w http.ResponseWriter, r *http.Request) {
 		h.writeUnauthenticated(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, sessionResponse{Authenticated: true, CSRF: session.CSRF})
+	writeJSON(w, http.StatusOK, sessionResponse{
+		Authenticated: true, CSRF: session.CSRF,
+		Data: sessionData{Authenticated: true, CSRFToken: session.CSRF, ExpiresAt: session.ExpiresAt.UnixMilli()},
+	})
 }
 
 // postSession valida la contraseña en tiempo constante y emite una sesión
@@ -125,7 +135,10 @@ func (h *SessionHandler) postSession(w http.ResponseWriter, r *http.Request) {
 	ttl := h.cookieTTL()
 	http.SetCookie(w, SessionCookie(token, h.SecureCookies, ttl))
 	http.SetCookie(w, CSRFCookie(csrf, h.SecureCookies, ttl))
-	writeJSON(w, http.StatusOK, sessionResponse{Authenticated: true})
+	writeJSON(w, http.StatusOK, sessionResponse{
+		Authenticated: true, CSRF: csrf,
+		Data: sessionData{Authenticated: true, CSRFToken: csrf, ExpiresAt: time.Now().Add(ttl).UnixMilli()},
+	})
 }
 
 // deleteSession exige sesión y CSRF válidos (cabecera, formulario o query) y

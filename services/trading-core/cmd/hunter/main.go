@@ -247,8 +247,9 @@ type service struct {
 
 	// pollInterval y paused los refresca runtimeLoop cada 5 s. El intervalo
 	// está en milisegundos; 0 significa sin poll (solo SSE).
-	pollInterval atomic.Int64
-	paused       atomic.Bool
+	pollInterval  atomic.Int64
+	paused        atomic.Bool
+	configVersion atomic.Int64
 	// lastPollAttemptMS marca el intento de poll para el planificador, en
 	// milisegundos. lastPollAt sigue en segundos para métricas y readyz.
 	lastPollAttemptMS atomic.Int64
@@ -631,6 +632,9 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_last_decision_us Decisión local del último evento SSE (µs).\n# TYPE hunter_stream_last_decision_us gauge\nhunter_stream_last_decision_us %d\n", service.streamLastDecision.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_latency_ms Latencia del último fetch o delivery lag SSE.\n# TYPE hunter_last_latency_ms gauge\nhunter_last_latency_ms %d\n", service.lastLatency.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_poll_timestamp_seconds Último poll (Unix).\n# TYPE hunter_last_poll_timestamp_seconds gauge\nhunter_last_poll_timestamp_seconds %d\n", service.lastPollAt.Load())
+	fmt.Fprintf(w, "# HELP hunter_runtime_config_version Versión de configuración aplicada.\n# TYPE hunter_runtime_config_version gauge\nhunter_runtime_config_version %d\n", service.configVersion.Load())
+	fmt.Fprintf(w, "# HELP hunter_runtime_paused Automatización pausada por el panel (1/0).\n# TYPE hunter_runtime_paused gauge\nhunter_runtime_paused %d\n", boolInt(service.paused.Load()))
+	fmt.Fprintf(w, "# HELP hunter_poll_interval_ms Intervalo de polling efectivo.\n# TYPE hunter_poll_interval_ms gauge\nhunter_poll_interval_ms %d\n", service.pollInterval.Load())
 }
 
 func (service *service) latest(w http.ResponseWriter) {

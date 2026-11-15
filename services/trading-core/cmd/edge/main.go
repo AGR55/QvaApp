@@ -175,6 +175,10 @@ func run(logger *slog.Logger) error {
 					Sessions: manager,
 					Store:    &edge.PostgresDashboardStore{Pool: pool},
 				}
+				if writePool != nil {
+					dashboard.Runtime = &runtimeconfig.Repository{Pool: writePool}
+					dashboard.Settings = &edge.PostgresReaderStore{Pool: writePool}
+				}
 				observability = &edge.ObservabilityAPI{
 					Sessions: manager,
 					Store:    &edge.PostgresObservabilityStore{Pool: pool},

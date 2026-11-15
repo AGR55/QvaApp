@@ -2,12 +2,15 @@ package edge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
 const (
@@ -94,7 +97,91 @@ type DashboardStore interface {
 type DashboardAPI struct {
 	Sessions *SessionManager
 	Store    DashboardStore
+	Runtime  *runtimeconfig.Repository
+	Settings SettingStore
 	Now      func() time.Time
+}
+
+type dashboardWebSnapshot struct {
+	DashboardSummary
+	GeneratedAt         int64                  `json:"generatedAt"`
+	State               dashboardWebState      `json:"state"`
+	Markets             []runtimeconfig.Market `json:"markets"`
+	Strategy            dashboardStrategy      `json:"strategy"`
+	Risk                dashboardRisk          `json:"risk"`
+	Availability        dashboardAvailability  `json:"availability"`
+	Rankings            dashboardRankings      `json:"rankings"`
+	Alerts              []any                  `json:"alerts"`
+	Operations          []any                  `json:"operations"`
+	OwnOffers           []any                  `json:"ownOffers"`
+	Transactions        []any                  `json:"transactions"`
+	Market              map[string]any         `json:"market"`
+	Budget              map[string]any         `json:"budget"`
+	Averages            map[string]any         `json:"averages"`
+	Freshness           map[string]any         `json:"freshness"`
+	MarketHistory       []any                  `json:"marketHistory"`
+	Hunting             any                    `json:"hunting"`
+	Automation          any                    `json:"automation"`
+	Workflows           []any                  `json:"workflows"`
+	MutationIntents     []any                  `json:"mutationIntents"`
+	CapitalReservations []any                  `json:"capitalReservations"`
+}
+
+type dashboardWebState struct {
+	Paused         bool                    `json:"paused"`
+	Active         int                     `json:"active"`
+	Fiat           map[string]float64      `json:"fiat"`
+	MutationBudget dashboardMutationBudget `json:"mutationBudget"`
+	ScanCoverage   dashboardScanCoverage   `json:"scanCoverage"`
+}
+
+type dashboardMutationBudget struct {
+	ApplyReadyAt int64 `json:"applyReadyAt"`
+}
+
+type dashboardScanCoverage struct {
+	At      int64    `json:"at"`
+	Markets []string `json:"markets"`
+}
+
+type dashboardStrategy struct {
+	BuyMax  map[string]float64 `json:"buyMax"`
+	SellMin map[string]float64 `json:"sellMin"`
+}
+
+type dashboardRisk struct {
+	Limits dashboardRiskLimits `json:"limits"`
+	Usage  dashboardRiskUsage  `json:"usage"`
+}
+
+type dashboardRiskLimits struct {
+	MaxQusdPerOperation       float64 `json:"maxQusdPerOperation"`
+	MaxConcurrentQusdExposure float64 `json:"maxConcurrentQusdExposure"`
+	MaxDailyAppliedQusd       float64 `json:"maxDailyAppliedQusd"`
+	MaxConcurrentOperations   int     `json:"maxConcurrentOperations"`
+	MinQusdReserve            float64 `json:"minQusdReserve"`
+}
+
+type dashboardRiskUsage struct {
+	ExposureQusd       float64 `json:"exposureQusd"`
+	DailyAppliedQusd   float64 `json:"dailyAppliedQusd"`
+	ActiveOperations   int64   `json:"activeOperations"`
+	UnresolvedMutation bool    `json:"unresolvedMutation"`
+	EmergencyStop      bool    `json:"emergencyStop"`
+}
+
+type dashboardAvailability struct {
+	Fiat map[string]dashboardFiatAvailability `json:"fiat"`
+}
+
+type dashboardFiatAvailability struct {
+	Available float64 `json:"available"`
+	Committed float64 `json:"committed"`
+}
+
+type dashboardRankings struct {
+	Potential []any `json:"potential"`
+	Rotation  []any `json:"rotation"`
 }
 
 // dashboardResponse envuelve todos los datos en una clave "data" para poder
@@ -168,7 +255,90 @@ func (api *DashboardAPI) summary(w http.ResponseWriter, ctx context.Context) {
 		writeDashboardUnavailable(w)
 		return
 	}
-	writeJSON(w, http.StatusOK, dashboardResponse{Data: summary})
+	writeJSON(w, http.StatusOK, dashboardResponse{Data: api.webSnapshot(ctx, summary)})
+}
+
+// webSnapshot amplía el resumen mínimo con la forma que consume el panel web
+// completo (public/dashboard). Las secciones que aún no tienen read model en
+// el edge viajan vacías para que la interfaz pueda renderizar y operar la
+// configuración sin bloquearse.
+func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSummary) dashboardWebSnapshot {
+	now := api.now()
+	snapshot := dashboardWebSnapshot{
+		DashboardSummary: summary,
+		GeneratedAt:      now.UnixMilli(),
+		State: dashboardWebState{
+			MutationBudget: dashboardMutationBudget{},
+			ScanCoverage:   dashboardScanCoverage{Markets: []string{}},
+		},
+		Markets:             []runtimeconfig.Market{},
+		Strategy:            dashboardStrategy{BuyMax: map[string]float64{}, SellMin: map[string]float64{}},
+		Availability:        dashboardAvailability{Fiat: map[string]dashboardFiatAvailability{}},
+		Rankings:            dashboardRankings{Potential: []any{}, Rotation: []any{}},
+		Alerts:              []any{},
+		Operations:          []any{},
+		OwnOffers:           []any{},
+		Transactions:        []any{},
+		Market:              map[string]any{},
+		Budget:              map[string]any{},
+		Averages:            map[string]any{},
+		Freshness:           map[string]any{},
+		MarketHistory:       []any{},
+		Workflows:           []any{},
+		MutationIntents:     []any{},
+		CapitalReservations: []any{},
+	}
+	if api.Runtime != nil {
+		if config, _, err := api.Runtime.Load(ctx); err == nil {
+			snapshot.Markets = config.Markets
+			snapshot.Hunting = config.Hunting
+			snapshot.Automation = config.Automation
+			for _, market := range config.Markets {
+				snapshot.Strategy.BuyMax[market.Code] = market.BuyMaxRate
+				snapshot.Strategy.SellMin[market.Code] = market.SellMinRate
+				snapshot.Availability.Fiat[market.Code] = dashboardFiatAvailability{
+					Available: market.FiatBalance,
+				}
+			}
+			snapshot.Risk = dashboardRisk{
+				Limits: dashboardRiskLimits{
+					MaxQusdPerOperation:       config.Risk.MaxQusdPerOperation,
+					MaxConcurrentQusdExposure: config.Risk.MaxConcurrentQusdExposure,
+					MaxDailyAppliedQusd:       config.Risk.MaxDailyAppliedQusd,
+					MaxConcurrentOperations:   config.Risk.MaxConcurrentOperations,
+					MinQusdReserve:            config.Risk.MinQusdReserve,
+				},
+				Usage: dashboardRiskUsage{ActiveOperations: summary.CorePending},
+			}
+		}
+	}
+	if api.Settings != nil {
+		snapshot.State.Paused = api.boolSetting(ctx, "control.paused")
+		snapshot.Risk.Usage.EmergencyStop = api.boolSetting(ctx, "control.emergency_stop")
+	}
+	if summary.CorePending > 0 {
+		snapshot.State.Active = int(summary.CorePending)
+	}
+	return snapshot
+}
+
+func (api *DashboardAPI) boolSetting(ctx context.Context, key string) bool {
+	raw, ok, err := api.Settings.GetSetting(ctx, key)
+	if err != nil || !ok {
+		return false
+	}
+	var value bool
+	if json.Unmarshal(raw, &value) != nil {
+		return false
+	}
+	return value
+}
+
+func (api *DashboardAPI) now() time.Time {
+	if api.Now != nil {
+		return api.Now()
+	}
+	return time.Now()
 }
 
 func (api *DashboardAPI) offers(w http.ResponseWriter, ctx context.Context, limit int) {
