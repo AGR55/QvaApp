@@ -124,11 +124,11 @@ Verificado en VPS: rutas de lectura 200 con login, 401 sin sesión; dispositivo
 u operador inválido 401; snapshot con 2 dispositivos, 2 operadores y 100
 comprobantes, sin `tokenHash` en la respuesta.
 
-La auditoría estática actualiza a **46/109 rutas exactas**; siguen 63
-pendientes: 55 mutaciones (`POST/PUT/DELETE`) fuera del alcance read-only, las
-rutas de chat por operación, `payment-preview` y el fallback
-`/dashboard/:wildcard`. El chat y el preview dependen del servicio remoto de
-QvaPay/chat y no se replican en el shadow.
+La auditoría estática actualiza a **52/109 rutas exactas**; siguen 57
+pendientes, casi todas mutaciones de dinero, chat remoto, `payment-preview` y
+el fallback `/dashboard/:wildcard`. La configuración editable y las cuentas
+lectoras ya están activas; ver
+`docs/migration/2026-11-15-editable-runtime-config.md`.
 
 ## Limitación actual
 
