@@ -160,6 +160,12 @@ la ventana de cutover, mientras TS siga siendo la autoridad del saldo.
 
 ## Idempotencia y conciliación
 
+- La respuesta de `apply` se valida: UUID de orden, importe exacto solicitado y
+  recepción positiva. Cualquier desviación deja la operación en `uncertain`.
+- El UUID de la orden se persiste en `shadow.core_operations.order_uuid` antes
+  de confirmar, para poder cancelar y conciliar la operación real.
+- El conciliador usa el estado de esa orden concreta si está presente; si la
+  orden no aparece en QvaPay, conserva `uncertain` en vez de adivinar.
 - Una operación ya `confirmed` no vuelve a llamar a QvaPay.
 - Un error ambiguo del apply deja la operación en `uncertain`.
 - El conciliador consulta QvaPay cada 30 s:
