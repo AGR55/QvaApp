@@ -124,9 +124,9 @@ Verificado en VPS: rutas de lectura 200 con login, 401 sin sesión; dispositivo
 u operador inválido 401; snapshot con 2 dispositivos, 2 operadores y 100
 comprobantes, sin `tokenHash` en la respuesta.
 
-La auditoría estática actualiza a **71/109 rutas exactas**; siguen 38
-pendientes: mutaciones de dinero, chat remoto, `payment-preview`, webhook y
-el envío real de push. La configuración editable y las cuentas
+La auditoría estática actualiza a **75/109 rutas exactas**; siguen 34
+pendientes: mutaciones de dinero, chat remoto, `payment-preview`, preview de
+ofertas bloqueadas, webhook y el envío real de push. La configuración editable y las cuentas
 lectoras ya están activas; ver
 `docs/migration/2026-11-15-editable-runtime-config.md`.
 

@@ -128,6 +128,32 @@ DELETE push subscription        = 204
 /dashboard/app.js               = 200
 ```
 
+## Evidencia, descartes y comisiones
+
+| Ruta | Estado |
+| --- | --- |
+| `POST /api/recovery/:intentId/evidence` | Añade evidencia al aviso y la persiste |
+| `POST /api/recovery/:intentId/acknowledge` | Reconoce el aviso |
+| `POST /api/blocked-offers/:uuid/dismiss` | Descarta las decisiones bloqueadas de una oferta |
+| `GET/POST /api/analytics/fees` | Consulta y registra evidencia de comisión con versión |
+
+La evidencia y el reconocimiento viven en `shadow.runtime_settings`; las
+comisiones en `shadow.analytics_fee_evidence`; los descartes en
+`shadow.decision_dismissals`. Ninguna de estas rutas mueve dinero.
+
+Evidencia VPS:
+
+```text
+GET  /api/recovery                       = 3 intenciones
+POST /api/recovery/<id>/evidence         = 200, evidencia 5 → 8
+POST /api/recovery/<id>/acknowledge      = 200, acknowledged=true
+GET  /api/analytics/fees                 = 20 compras
+POST /api/analytics/fees                 = 200, version 0 → 1 → 2
+POST /api/blocked-offers/<uuid>/dismiss  = 204, bloqueadas 137 → 136
+```
+
+Después limpié los registros de prueba para dejar el shadow como estaba.
+
 ## Lo que falta y requiere tu intervención
 
 1. **Cuentas lectoras**: pulsa “Añadir cuenta lectora” y pega un token QvaPay
