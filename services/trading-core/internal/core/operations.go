@@ -40,7 +40,10 @@ type Operation struct {
 	State      OperationState
 	QusdAmount decimal.Value
 	FiatAmount decimal.Value
-	UpdatedAt  int64
+	// OrderUUID identifica la orden flexible creada en QvaPay. Es opaco y se
+	// conserva para poder cancelar o conciliar la operación real.
+	OrderUUID string
+	UpdatedAt int64
 }
 
 // NewOperation crea una operación en estado created. El ID es opaco y se

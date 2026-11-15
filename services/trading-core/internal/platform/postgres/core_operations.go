@@ -38,12 +38,12 @@ func (repository *CoreOperationRepository) Create(ctx context.Context, operation
 	}
 	tag, err := repository.pool.Exec(ctx, `
 		INSERT INTO shadow.core_operations
-			(operation_id, state, qusd_amount, fiat_amount, updated_at, created_at)
-		VALUES ($1, $2, $3, $4, $5, $5)
+			(operation_id, state, qusd_amount, fiat_amount, order_uuid, updated_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
 		ON CONFLICT (operation_id) DO NOTHING`,
 		operation.ID, string(operation.State),
 		operation.QusdAmount.Format(8), operation.FiatAmount.Format(8),
-		operation.UpdatedAt,
+		operation.OrderUUID, operation.UpdatedAt,
 	)
 	if err != nil {
 		return err
@@ -93,6 +93,25 @@ func (repository *CoreOperationRepository) Transition(
 		return core.Operation{}, fmt.Errorf("operación core %q: %w", id, ErrCoreOperationConflict)
 	}
 	return updated, nil
+}
+
+// SetOrder persiste la orden flexible que devolvió QvaPay. Se escribe antes de
+// confirmar la operación para no perder la referencia de cancelación.
+func (repository *CoreOperationRepository) SetOrder(
+	ctx context.Context,
+	id, orderUUID string,
+) error {
+	tag, err := repository.pool.Exec(ctx, `
+		UPDATE shadow.core_operations SET order_uuid = $2 WHERE operation_id = $1`,
+		id, orderUUID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("operación core %q no existe", id)
+	}
+	return nil
 }
 
 // CountByState cuenta las operaciones agrupadas por estado.
@@ -165,15 +184,15 @@ func (repository *CoreOperationRepository) load(
 	ctx context.Context,
 	id string,
 ) (core.Operation, int, error) {
-	var state, qusdText, fiatText string
+	var state, qusdText, fiatText, orderUUID string
 	var updatedAt int64
 	var version int
 	err := repository.pool.QueryRow(ctx, `
-		SELECT state, qusd_amount, fiat_amount, updated_at, version
+		SELECT state, qusd_amount, fiat_amount, COALESCE(order_uuid, ''), updated_at, version
 		FROM shadow.core_operations
 		WHERE operation_id = $1`,
 		id,
-	).Scan(&state, &qusdText, &fiatText, &updatedAt, &version)
+	).Scan(&state, &qusdText, &fiatText, &orderUUID, &updatedAt, &version)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return core.Operation{}, 0, fmt.Errorf("operación core %q no existe: %w", id, err)
@@ -191,6 +210,7 @@ func (repository *CoreOperationRepository) load(
 	return core.Operation{
 		ID:         id,
 		State:      core.OperationState(state),
+		OrderUUID:  orderUUID,
 		QusdAmount: qusd,
 		FiatAmount: fiat,
 		UpdatedAt:  updatedAt,

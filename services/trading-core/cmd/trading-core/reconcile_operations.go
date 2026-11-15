@@ -26,6 +26,7 @@ type operationReconciler struct {
 type uncertainOperation struct {
 	operationID string
 	offerUUID   string
+	orderUUID   string
 }
 
 func (reconciler *operationReconciler) loop(ctx context.Context) {
@@ -46,7 +47,7 @@ func (reconciler *operationReconciler) runOnce(ctx context.Context) {
 		return
 	}
 	rows, err := reconciler.pool.Query(ctx, `
-		SELECT o.operation_id, d.offer_uuid
+		SELECT o.operation_id, d.offer_uuid, COALESCE(o.order_uuid, '')
 		FROM shadow.core_operations o
 		JOIN shadow.core_decisions d ON d.event_id = o.operation_id
 		WHERE o.state = 'uncertain'
@@ -58,17 +59,17 @@ func (reconciler *operationReconciler) runOnce(ctx context.Context) {
 	pending := make([]uncertainOperation, 0, 20)
 	for rows.Next() {
 		var item uncertainOperation
-		if rows.Scan(&item.operationID, &item.offerUUID) == nil {
+		if rows.Scan(&item.operationID, &item.offerUUID, &item.orderUUID) == nil {
 			pending = append(pending, item)
 		}
 	}
 	rows.Close()
 	for _, item := range pending {
-		reconciler.reconcileOne(ctx, item.operationID, item.offerUUID)
+		reconciler.reconcileOne(ctx, item.operationID, item.offerUUID, item.orderUUID)
 	}
 }
 
-func (reconciler *operationReconciler) reconcileOne(ctx context.Context, operationID, offerUUID string) {
+func (reconciler *operationReconciler) reconcileOne(ctx context.Context, operationID, offerUUID, orderUUID string) {
 	offer, err := reconciler.reader.Offer(ctx, offerUUID)
 	if err != nil {
 		if reconciler.logger != nil {
@@ -76,8 +77,26 @@ func (reconciler *operationReconciler) reconcileOne(ctx context.Context, operati
 		}
 		return
 	}
+	status := offer.Status
+	if orderUUID != "" {
+		found := false
+		for _, order := range offer.Orders {
+			if order.UUID == orderUUID {
+				status = order.Status
+				found = true
+				break
+			}
+		}
+		if !found {
+			if reconciler.logger != nil {
+				reconciler.logger.Warn("la orden no aparece en QvaPay; se conserva incierta",
+					"operation_id", operationID, "order_uuid", orderUUID)
+			}
+			return
+		}
+	}
 	target := core.OperationState("")
-	switch offer.Status {
+	switch status {
 	case "processing", "paid", "completed", "applied":
 		target = core.StateReconciled
 	case "open", "cancelled", "canceled", "rejected":
@@ -92,7 +111,8 @@ func (reconciler *operationReconciler) reconcileOne(ctx context.Context, operati
 		return
 	}
 	if reconciler.logger != nil {
-		reconciler.logger.Info("operación conciliada", "operation_id", operationID, "state", target, "remote_status", offer.Status)
+		reconciler.logger.Info("operación conciliada",
+			"operation_id", operationID, "state", target, "remote_status", status, "order_uuid", orderUUID)
 	}
 }
 

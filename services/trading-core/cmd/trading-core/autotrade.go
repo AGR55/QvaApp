@@ -1,9 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
@@ -12,20 +16,54 @@ import (
 )
 
 type tradeExecutor interface {
-	Apply(ctx context.Context, offerUUID string, amount *decimal.Value) error
+	Apply(ctx context.Context, offerUUID string, amount *decimal.Value) (string, error)
 }
 
 type qvapayTradeExecutor struct {
 	client *qvapay.MutationClient
 }
 
-func (executor *qvapayTradeExecutor) Apply(ctx context.Context, offerUUID string, amount *decimal.Value) error {
-	_, err := executor.client.Apply(ctx, offerUUID, amount)
-	return err
+// Apply envía la orden flexible y exige que QvaPay devuelva el UUID de la
+// orden, el importe solicitado exacto y una recepción positiva. Si la respuesta
+// no coincide, la operación queda incierta: el dinero pudo haberse movido.
+func (executor *qvapayTradeExecutor) Apply(ctx context.Context, offerUUID string, amount *decimal.Value) (string, error) {
+	result, err := executor.client.Apply(ctx, offerUUID, amount)
+	if err != nil {
+		return "", err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(result.Body))
+	decoder.UseNumber()
+	var body struct {
+		Order   string      `json:"order"`
+		Amount  json.Number `json:"amount"`
+		Receive json.Number `json:"receive"`
+	}
+	if len(result.Body) > 0 {
+		if err := decoder.Decode(&body); err != nil {
+			return "", fmt.Errorf("respuesta de aplicación inválida: %w", err)
+		}
+	}
+	order := strings.TrimSpace(body.Order)
+	if order == "" {
+		return "", errors.New("QvaPay no devolvió el UUID de la orden")
+	}
+	if amount == nil {
+		return "", errors.New("aplicación sin importe solicitado")
+	}
+	applied, err := decimal.Parse(body.Amount.String())
+	if err != nil || applied.Cmp(*amount) != 0 {
+		return "", fmt.Errorf("QvaPay aplicó %q y se solicitaron %s", body.Amount.String(), amount.Format(8))
+	}
+	receive, err := decimal.Parse(body.Receive.String())
+	if err != nil || receive.Sign() <= 0 {
+		return "", errors.New("QvaPay no devolvió una recepción positiva")
+	}
+	return order, nil
 }
 
 type operationTransitioner interface {
 	Get(ctx context.Context, id string) (core.Operation, error)
+	SetOrder(ctx context.Context, id, orderUUID string) error
 	Transition(ctx context.Context, id string, state core.OperationState, now int64) (core.Operation, error)
 }
 
@@ -81,26 +119,36 @@ func (trader *autoTrader) Execute(
 	if trader.executor == nil {
 		return "", errors.New("executor QvaPay no configurado")
 	}
-	if err := trader.executor.Apply(ctx, offerUUID, &amount); err != nil {
+	orderUUID, applyErr := trader.executor.Apply(ctx, offerUUID, &amount)
+	if applyErr != nil {
 		target := core.StateUncertain
 		var mutationError *qvapay.MutationError
-		if errors.As(err, &mutationError) && mutationError.Status >= 400 && mutationError.Status < 500 {
+		if errors.As(applyErr, &mutationError) && mutationError.Status >= 400 && mutationError.Status < 500 {
 			target = core.StateRejected
 		}
 		if _, transitionErr := repository.Transition(ctx, operationID, target, trader.timestamp()); transitionErr != nil {
-			return "", errors.Join(err, transitionErr)
+			return "", errors.Join(applyErr, transitionErr)
 		}
 		if trader.logger != nil {
-			trader.logger.Warn("aplicación QvaPay falló", "operation_id", operationID, "state", target, "error", err)
+			trader.logger.Warn("aplicación QvaPay falló", "operation_id", operationID, "state", target, "error", applyErr)
 		}
 		return target, nil
+	}
+	if err := repository.SetOrder(ctx, operationID, orderUUID); err != nil {
+		// La orden existe en QvaPay pero no se pudo persistir: se marca incierta
+		// para que el conciliador la resuelva con la referencia remota.
+		if _, transitionErr := repository.Transition(ctx, operationID, core.StateUncertain, trader.timestamp()); transitionErr != nil {
+			return "", errors.Join(err, transitionErr)
+		}
+		return core.StateUncertain, err
 	}
 	confirmed, err := repository.Transition(ctx, operationID, core.StateConfirmed, trader.timestamp())
 	if err != nil {
 		return "", err
 	}
 	if trader.logger != nil {
-		trader.logger.Info("aplicación QvaPay confirmada", "operation_id", operationID, "offer_uuid", offerUUID)
+		trader.logger.Info("aplicación QvaPay confirmada",
+			"operation_id", operationID, "offer_uuid", offerUUID, "order_uuid", orderUUID)
 	}
 	return confirmed.State, nil
 }

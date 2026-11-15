@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -14,10 +17,17 @@ import (
 
 type fakeOperationRepo struct {
 	operation core.Operation
+	orders    []string
 }
 
 func (repo *fakeOperationRepo) Get(context.Context, string) (core.Operation, error) {
 	return repo.operation, nil
+}
+
+func (repo *fakeOperationRepo) SetOrder(_ context.Context, _ string, orderUUID string) error {
+	repo.orders = append(repo.orders, orderUUID)
+	repo.operation.OrderUUID = orderUUID
+	return nil
 }
 
 func (repo *fakeOperationRepo) Transition(_ context.Context, _ string, state core.OperationState, now int64) (core.Operation, error) {
@@ -31,11 +41,15 @@ func (repo *fakeOperationRepo) Transition(_ context.Context, _ string, state cor
 type fakeExecutor struct {
 	calls int
 	err   error
+	order string
 }
 
-func (executor *fakeExecutor) Apply(context.Context, string, *decimal.Value) error {
+func (executor *fakeExecutor) Apply(context.Context, string, *decimal.Value) (string, error) {
 	executor.calls++
-	return executor.err
+	if executor.err != nil {
+		return "", executor.err
+	}
+	return executor.order, nil
 }
 
 func reservedOperation(t *testing.T) core.Operation {
@@ -74,11 +88,14 @@ func TestAutoTraderLiveOutcomes(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &fakeOperationRepo{operation: reservedOperation(t)}
-			executor := &fakeExecutor{err: tc.err}
+			executor := &fakeExecutor{err: tc.err, order: "order-1"}
 			trader := &autoTrader{executor: executor}
 			state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"))
 			if err != nil || state != tc.state || executor.calls != 1 {
 				t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
+			}
+			if tc.state == core.StateConfirmed && len(repo.orders) != 1 {
+				t.Fatalf("orden no persistida: %+v", repo.orders)
 			}
 		})
 	}
@@ -98,7 +115,7 @@ func TestAutoTraderConfirmedIsIdempotent(t *testing.T) {
 	operation, _ = operation.Transition(core.StateSubmitted, 3000)
 	operation, _ = operation.Transition(core.StateConfirmed, 4000)
 	repo := &fakeOperationRepo{operation: operation}
-	executor := &fakeExecutor{}
+	executor := &fakeExecutor{order: "order-1"}
 	trader := &autoTrader{executor: executor}
 	state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"))
 	if err != nil || state != core.StateConfirmed || executor.calls != 0 {
@@ -125,7 +142,7 @@ func TestReconcilerTransitionsUncertain(t *testing.T) {
 				reader: &fakeOfferReader{offer: qvapay.Offer{Status: tc.status}},
 				repo:   repo, now: func() time.Time { return time.Unix(1_700_000_000, 0) },
 			}
-			reconciler.reconcileOne(context.Background(), "op-1", "offer-1")
+			reconciler.reconcileOne(context.Background(), "op-1", "offer-1", "")
 			if repo.operation.State != tc.state {
 				t.Fatalf("state=%s, se esperaba %s", repo.operation.State, tc.state)
 			}
@@ -176,5 +193,45 @@ func TestSizePayloadAmountIgnoresFixedOffers(t *testing.T) {
 	payload := hunterPayload{OfferUUID: "o", Coin: "CLASICA", Side: "buy", Amount: "10", Receive: "11", Rate: "1.1"}
 	if _, _, sized, _ := sizePayloadAmount(payload, core.Config{}, core.Usage{}, decimal.MustParse("1.1")); sized {
 		t.Fatal("una oferta fija no debe dimensionarse")
+	}
+}
+
+func TestQvapayTradeExecutorValidatesResponse(t *testing.T) {
+	const offerUUID = "a617538e-e8a0-4797-bafe-3e8c00aa5cda"
+	const orderUUID = "9c190663-340f-4b39-b237-bf0365f5cfe7"
+
+	cases := []struct {
+		name    string
+		body    string
+		amount  string
+		wantErr bool
+	}{
+		{"ok", `{"order":"` + orderUUID + `","amount":5,"receive":5.5}`, "5", false},
+		{"sin orden", `{"amount":5,"receive":5.5}`, "5", true},
+		{"importe distinto", `{"order":"` + orderUUID + `","amount":4,"receive":5.5}`, "5", true},
+		{"recepción cero", `{"order":"` + orderUUID + `","amount":5,"receive":0}`, "5", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, tc.body)
+			}))
+			defer server.Close()
+			client := qvapay.NewMutationClient(server.URL, "token")
+			client.Enable()
+			executor := &qvapayTradeExecutor{client: client}
+			amount := decimal.MustParse(tc.amount)
+			order, err := executor.Apply(context.Background(), offerUUID, &amount)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("se esperaba error, order=%q", order)
+				}
+				return
+			}
+			if err != nil || order != orderUUID {
+				t.Fatalf("order=%q err=%v", order, err)
+			}
+		})
 	}
 }
