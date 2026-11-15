@@ -385,7 +385,7 @@ else
   fi
 fi
 
-if ! row=$(psql_query "SELECT (SELECT count(*) FROM shadow.core_operations), count(*) FILTER (WHERE state NOT IN ('created','reserved','submitted','confirmed','rejected','uncertain','reconciled')), coalesce(string_agg(state || '=' || operation_count, ', ' ORDER BY state), '-') FROM (SELECT state, count(*) AS operation_count FROM shadow.core_operations GROUP BY state) grouped;"); then
+if ! row=$(psql_query "SELECT (SELECT count(*) FROM shadow.core_operations), count(*) FILTER (WHERE state NOT IN ('created','reserved','submitted','confirmed','rejected','uncertain','reconciled','dry_run')), coalesce(string_agg(state || '=' || operation_count, ', ' ORDER BY state), '-') FROM (SELECT state, count(*) AS operation_count FROM shadow.core_operations GROUP BY state) grouped;"); then
   fail "shadow.core_operations: no se pudo consultar"
 elif [[ -z $row ]]; then
   fail "shadow.core_operations: consulta sin datos"
