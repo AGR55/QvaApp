@@ -29,6 +29,15 @@ func (fake *fakeLiveReader) Offers(_ context.Context, params url.Values) ([]qvap
 	return fake.offers, nil
 }
 
+func (fake *fakeLiveReader) Offer(_ context.Context, uuid string) (qvapay.Offer, error) {
+	for _, offer := range fake.offers {
+		if offer.UUID == uuid {
+			return offer, nil
+		}
+	}
+	return qvapay.Offer{}, nil
+}
+
 func (fake *fakeLiveReader) Transactions(context.Context, int, int) (qvapay.TransactionPage, error) {
 	return qvapay.TransactionPage{Transactions: fake.txs}, nil
 }

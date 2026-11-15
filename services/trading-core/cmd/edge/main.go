@@ -130,6 +130,7 @@ func run(logger *slog.Logger) error {
 	var mutations *edge.MutationsAPI
 	var qvapayWebhook *edge.QvapayWebhookAPI
 	var liveReader edge.LiveReader
+	var paymentPreview *edge.PaymentPreviewAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -299,6 +300,12 @@ func run(logger *slog.Logger) error {
 	if liveReader != nil && dashboard != nil {
 		dashboard.Live = &edge.LiveDashboard{Reader: liveReader, Pool: writePool}
 	}
+	if liveReader != nil && writePool != nil {
+		paymentPreview = &edge.PaymentPreviewAPI{
+			MobileAuth: mobileAuth, Reader: liveReader,
+			Store: &edge.PostgresPaymentOperationStore{Pool: writePool},
+		}
+	}
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if session != nil && r.URL.Path == "/api/session" {
 			session.ServeHTTP(w, r)
@@ -306,6 +313,11 @@ func run(logger *slog.Logger) error {
 		}
 		if qvapayWebhook != nil && r.URL.Path == "/webhooks/qvapay/p2p-feed" {
 			qvapayWebhook.ServeHTTP(w, r)
+			return
+		}
+		if paymentPreview != nil && strings.HasPrefix(r.URL.Path, "/api/mobile/operations/") &&
+			strings.HasSuffix(r.URL.Path, "/payment-preview") {
+			paymentPreview.ServeHTTP(w, r)
 			return
 		}
 		if mutations != nil && mutationPath(r.URL.Path, r.Method) {

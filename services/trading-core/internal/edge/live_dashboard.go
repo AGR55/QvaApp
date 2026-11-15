@@ -18,6 +18,7 @@ import (
 type LiveReader interface {
 	User(ctx context.Context) (qvapay.User, error)
 	Offers(ctx context.Context, params url.Values) ([]qvapay.Offer, error)
+	Offer(ctx context.Context, uuid string) (qvapay.Offer, error)
 	Transactions(ctx context.Context, page, take int) (qvapay.TransactionPage, error)
 }
 

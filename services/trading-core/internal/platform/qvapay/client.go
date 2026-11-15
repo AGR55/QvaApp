@@ -158,6 +158,45 @@ type Offer struct {
 	ReservedAmount  decimal.Value   `json:"reserved_amount"`
 	User            json.RawMessage `json:"User"`
 	Peer            json.RawMessage `json:"Peer"`
+	OwnerUUID       string          `json:"owner_uuid"`
+	OfferKind       string          `json:"offer_kind"`
+	Details         map[string]any  `json:"details"`
+	Orders          []OfferOrder    `json:"Orders"`
+}
+
+// OfferOrder es una orden hija de una oferta flexible.
+type OfferOrder struct {
+	UUID    string
+	Status  string
+	Amount  decimal.Value
+	Receive decimal.Value
+	Taker   json.RawMessage
+}
+
+func (o *OfferOrder) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		UUID    any             `json:"uuid"`
+		Status  any             `json:"status"`
+		Amount  any             `json:"amount"`
+		Receive any             `json:"receive"`
+		Taker   json.RawMessage `json:"Taker"`
+	}
+	if err := decodeJSON(data, &raw); err != nil {
+		return err
+	}
+	amount, err := optionalDecimal("order.amount", raw.Amount)
+	if err != nil {
+		return err
+	}
+	receive, err := optionalDecimal("order.receive", raw.Receive)
+	if err != nil {
+		return err
+	}
+	*o = OfferOrder{
+		UUID: scalarString(raw.UUID), Status: scalarString(raw.Status),
+		Amount: amount, Receive: receive, Taker: raw.Taker,
+	}
+	return nil
 }
 
 // UnmarshalJSON decodifica los decimales sin pasar por float64. Los campos
@@ -175,6 +214,10 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		ReservedAmount  any             `json:"reserved_amount"`
 		User            json.RawMessage `json:"User"`
 		Peer            json.RawMessage `json:"Peer"`
+		OwnerUUID       string          `json:"owner_uuid"`
+		OfferKind       string          `json:"offer_kind"`
+		Details         map[string]any  `json:"details"`
+		Orders          []OfferOrder    `json:"Orders"`
 	}
 	if err := decodeJSON(data, &raw); err != nil {
 		return err
@@ -213,6 +256,10 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		ReservedAmount:  reserved,
 		User:            raw.User,
 		Peer:            raw.Peer,
+		OwnerUUID:       raw.OwnerUUID,
+		OfferKind:       raw.OfferKind,
+		Details:         raw.Details,
+		Orders:          raw.Orders,
 	}
 	return nil
 }
