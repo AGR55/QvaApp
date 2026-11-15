@@ -16,11 +16,11 @@ activity, balance, discoveredMarkets, history, integrity,
 recoverableWorkflows, recoveryNoticeCount, unresolvedMutations,
 workflowOffers
 
-ownOffers:    producción 4  → shadow 0
-operations:   producción 1  → shadow 0
-transactions: producción 12 → shadow 0
-market:       producción 5  → shadow 0
-markets:      producción 5  → shadow 5
+ownOffers:    producción 4  → shadow 4 (mismo rate/amount)
+balance:      producción 495.2 → shadow 495.2
+transactions: producción 12 → shadow 20 (ventana de 20)
+market:       producción 5  → shadow 12 (incluye monedas fuera de market_config)
+operations:   producción 1  → shadow 46 (core_operations, aún no es el modelo local)
 ```
 
 Además:
