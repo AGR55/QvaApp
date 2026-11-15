@@ -124,7 +124,7 @@ Verificado en VPS: rutas de lectura 200 con login, 401 sin sesión; dispositivo
 u operador inválido 401; snapshot con 2 dispositivos, 2 operadores y 100
 comprobantes, sin `tokenHash` en la respuesta.
 
-La auditoría estática actualiza a **52/109 rutas exactas**; siguen 57
+La auditoría estática actualiza a **53/109 rutas exactas**; siguen 56
 pendientes, casi todas mutaciones de dinero, chat remoto, `payment-preview` y
 el fallback `/dashboard/:wildcard`. La configuración editable y las cuentas
 lectoras ya están activas; ver

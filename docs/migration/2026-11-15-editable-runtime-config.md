@@ -59,6 +59,27 @@ Guardar desde el navegador cambió `automation.scanIntervalSeconds` de 3 a 4 y
 luego se restauró a 3; ambas revisiones quedaron auditadas y el hunter aplicó
 las versiones.
 
+## Logs, notificaciones, recuperación e iconos
+
+También quedaron activas estas superficies que no mueven dinero:
+
+| Ruta | Estado |
+| --- | --- |
+| `GET /api/logs` | 5.000 eventos reales con filtros de nivel, componente, texto y período |
+| `GET /api/notifications` | Notificaciones pendientes reales; excluye las reconocidas |
+| `POST /api/notifications/:id/ack` | Persiste el reconocimiento en `shadow.notification_acks` |
+| `GET /api/recovery` | Intenciones `submitted`/`uncertain` con evidencia y avisos |
+| `POST /api/market-icons` | Icono validado, escrito de forma atómica y servido |
+
+Los iconos se guardan en `/opt/qvaapply-f3-shadow/market-icons` (volumen
+escribible, UID 65532) y se sirven en `/market-icons/:name`; si no existe en el
+volumen se usa el asset público del repositorio. SVG con scripts/eventos se
+rechaza.
+
+La consola muestra los logs reales (120 eventos, niveles y componentes) y la
+notificación “Aplicación confirmada” de producción. El panel de recuperación
+lee las 3 intenciones reales; las acciones de conciliación siguen en TS.
+
 ## Lo que falta y requiere tu intervención
 
 1. **Cuentas lectoras**: pulsa “Añadir cuenta lectora” y pega un token QvaPay
