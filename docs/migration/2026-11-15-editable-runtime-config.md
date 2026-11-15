@@ -96,6 +96,38 @@ por importe/rango, 2 propias y 2 con entrega antigua. La auditoría muestra 137
 ofertas bloqueadas y el descarte de una dejó 136 pendientes. La red cooperativa
 muestra HTTP/NATS conectados y 44.89 QUSD pendientes de repartir.
 
+## Emparejamiento móvil y suscripciones Push
+
+| Ruta | Estado |
+| --- | --- |
+| `GET/POST /api/mobile/devices` | Lista combinada y alta con token mostrado una vez |
+| `DELETE /api/mobile/devices/:id` | Revocación inmediata |
+| `GET/POST /api/mobile/operators` | Lista combinada y alta con scopes |
+| `DELETE /api/mobile/operators/:id` | Revocación inmediata |
+| `POST/DELETE /api/mobile/push-device` | Token FCM por operador (Bearer) |
+| `POST/DELETE/GET /api/push/subscriptions` | Suscripciones Web Push persistidas |
+| `GET /api/push/public-key` | 503 hasta configurar VAPID |
+
+Los tokens se generan con `crypto/rand`, se guardan como SHA-256 y nunca se
+devuelven de nuevo. `MobileAuthAPI` combina el snapshot privado con las
+credenciales creadas en Postgres, por lo que un alta funciona sin redeploy.
+
+Evidencia VPS:
+
+```text
+POST /api/mobile/devices       = 201
+device-check con token nuevo    = 200
+DELETE dispositivo              = 204
+device-check después            = 401
+POST /api/mobile/operators      = 201
+operator-check                  = 200 {"ok":true,"scopes":[...]}
+POST /api/mobile/push-device    = 200
+POST /api/push/subscriptions    = 201
+GET  /api/push/subscriptions    = 1 endpoint
+DELETE push subscription        = 204
+/dashboard/app.js               = 200
+```
+
 ## Lo que falta y requiere tu intervención
 
 1. **Cuentas lectoras**: pulsa “Añadir cuenta lectora” y pega un token QvaPay
