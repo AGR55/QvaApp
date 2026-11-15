@@ -45,6 +45,7 @@ type hunterConsumer struct {
 	pending        atomic.Int64
 	applied        atomic.Uint64
 	trader         *autoTrader
+	reconciler     *operationReconciler
 }
 
 type hunterPayload struct {
@@ -73,7 +74,36 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		operationRepo: postgres.NewCoreOperationRepository(pool),
 	}
 	consumer.trader = buildAutoTrader(logger)
+	if token, ok := decryptQvaToken(logger); ok {
+		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
+			consumer.reconciler = &operationReconciler{
+				pool: pool, reader: reader, repo: consumer.operationRepo, logger: logger,
+			}
+			logger.Info("conciliador QvaPay habilitado")
+		} else {
+			logger.Warn("conciliador QvaPay deshabilitado", "error", err)
+		}
+	}
 	return consumer
+}
+
+func decryptQvaToken(logger *slog.Logger) (string, bool) {
+	tokenCipher := strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT"))
+	key := strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY"))
+	if tokenCipher == "" || key == "" {
+		return "", false
+	}
+	vaultClient, err := vault.New(key)
+	if err != nil {
+		logger.Warn("token QvaPay no disponible: clave inválida", "error", err)
+		return "", false
+	}
+	token, err := vaultClient.Decrypt(tokenCipher)
+	if err != nil {
+		logger.Warn("token QvaPay no disponible: descifrado falló", "error", err)
+		return "", false
+	}
+	return token, true
 }
 
 func buildAutoTrader(logger *slog.Logger) *autoTrader {
@@ -95,20 +125,9 @@ func buildAutoTrader(logger *slog.Logger) *autoTrader {
 		logger.Info("autotrade habilitado en dry-run")
 		return trader
 	}
-	tokenCipher := strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT"))
-	key := strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY"))
-	if tokenCipher == "" || key == "" {
-		logger.Warn("autotrade live deshabilitado: faltan token o clave")
-		return nil
-	}
-	vaultClient, err := vault.New(key)
-	if err != nil {
-		logger.Warn("autotrade live deshabilitado: clave inválida", "error", err)
-		return nil
-	}
-	token, err := vaultClient.Decrypt(tokenCipher)
-	if err != nil {
-		logger.Warn("autotrade live deshabilitado: token inválido", "error", err)
+	token, ok := decryptQvaToken(logger)
+	if !ok {
+		logger.Warn("autotrade live deshabilitado: token no disponible")
 		return nil
 	}
 	client := qvapay.NewMutationClient(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token)
@@ -120,6 +139,9 @@ func buildAutoTrader(logger *slog.Logger) *autoTrader {
 
 func (consumer *hunterConsumer) run(ctx context.Context) {
 	repository := postgres.NewHunterEventRepository(consumer.pool)
+	if consumer.reconciler != nil {
+		go consumer.reconciler.loop(ctx)
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
