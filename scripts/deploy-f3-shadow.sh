@@ -267,7 +267,7 @@ PY
         printf 'EDGE_TRUSTED_ORIGIN=%s\n' "$trusted_origin"
         printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"
         printf 'EDGE_MUTATIONS_ENABLED=true\n'
-        printf 'EDGE_MUTATIONS_LIVE=false\n'
+        printf 'EDGE_MUTATIONS_LIVE=%s\n' "$existing_edge_live"
         printf 'EDGE_LIVE_DASHBOARD=true\n'
         if [[ -n ${encrypted_token:-} ]]; then
           printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
@@ -362,7 +362,7 @@ PY
       printf 'QVA_TOKEN_CIPHERTEXT=%s\n' "$encrypted_token"
       printf 'QVAPAY_API_BASE_URL=%s\n' "${QVAPAY_API_BASE_URL:-https://api.qvapay.com}"
       printf 'CORE_AUTOTRADE=true\n'
-      printf 'CORE_AUTOTRADE_DRY_RUN=true\n'
+      printf 'CORE_AUTOTRADE_DRY_RUN=%s\n' "$existing_core_dry"
     } > "$temporary_core"
     chmod 600 "$temporary_core"
     mv -f "$temporary_core" "$core_env"
