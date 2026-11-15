@@ -362,7 +362,8 @@ func run(logger *slog.Logger) error {
 			return
 		}
 		if decisionEvents != nil && (r.URL.Path == "/api/decision-events" ||
-			strings.HasPrefix(r.URL.Path, "/api/decision-events/")) {
+			strings.HasPrefix(r.URL.Path, "/api/decision-events/") ||
+			(strings.HasPrefix(r.URL.Path, "/api/blocked-offers/") && strings.HasSuffix(r.URL.Path, "/dismiss"))) {
 			decisionEvents.ServeHTTP(w, r)
 			return
 		}
