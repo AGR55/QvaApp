@@ -82,6 +82,17 @@ hunter_event -> core.Decide -> reserved -> submitted -> dry_run
 - Evento sintético procesado: decisión `apply`, operación `dry_run`, sin llamada
   a QvaPay.
 
+## Idempotencia y conciliación
+
+- Una operación ya `confirmed` no vuelve a llamar a QvaPay.
+- Un error ambiguo del apply deja la operación en `uncertain`.
+- El conciliador consulta QvaPay cada 30 s:
+  - `processing/paid/completed/applied` → `reconciled`;
+  - `open/cancelled/rejected` → `rejected`;
+  - error de red → conserva `uncertain`.
+- Prueba real: operación sintética `uncertain` sobre la oferta 890c... pasó a
+  `reconciled` con `remote_status=completed`; después se limpió el registro.
+
 ## Bloqueo principal restante: aplicación real controlada
 
 El borde ya sirve web, configuración, lecturas y mutaciones bajo bandera, pero
