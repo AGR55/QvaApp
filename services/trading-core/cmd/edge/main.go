@@ -36,6 +36,7 @@ type config struct {
 	PublicPushKey   string
 	ChatThreadsFile string
 	MobileAuthFile  string
+	DashboardFile   string
 }
 
 func main() {
@@ -87,6 +88,7 @@ func run(logger *slog.Logger) error {
 	var configAPI *edge.ConfigAPI
 	var operators *edge.OperatorsAPI
 	var operations *edge.OperationsAPI
+	var dashboardRead *edge.DashboardReadAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
 	if cfg.AdminPassword != "" && cfg.SessionSecret != "" {
 		manager, err := edge.NewSessionManager([]byte(cfg.SessionSecret), 12*time.Hour)
@@ -104,6 +106,10 @@ func run(logger *slog.Logger) error {
 			operations = &edge.OperationsAPI{
 				Sessions: manager,
 				File:     cfg.ChatThreadsFile,
+			}
+			dashboardRead = &edge.DashboardReadAPI{
+				Sessions: manager,
+				File:     cfg.DashboardFile,
 			}
 			configAPI = &edge.ConfigAPI{
 				Sessions:      manager,
@@ -137,6 +143,14 @@ func run(logger *slog.Logger) error {
 		}
 		if r.URL.Path == "/api/mobile/device-check" || r.URL.Path == "/api/mobile/operator-check" {
 			mobileAuth.ServeHTTP(w, r)
+			return
+		}
+		if dashboardRead != nil && (r.URL.Path == "/api/mobile/devices" ||
+			r.URL.Path == "/api/fiat-history" ||
+			r.URL.Path == "/api/market-analytics" ||
+			r.URL.Path == "/api/analytics/fees" ||
+			strings.HasPrefix(r.URL.Path, "/api/offers/rebalance/")) {
+			dashboardRead.ServeHTTP(w, r)
 			return
 		}
 		if operators != nil && r.URL.Path == "/api/mobile/operators" {
@@ -223,6 +237,7 @@ func loadConfig() (config, error) {
 		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),
 		ChatThreadsFile: strings.TrimSpace(os.Getenv("EDGE_CHAT_THREADS_FILE")),
 		MobileAuthFile:  strings.TrimSpace(os.Getenv("EDGE_MOBILE_AUTH_FILE")),
+		DashboardFile:   strings.TrimSpace(os.Getenv("EDGE_DASHBOARD_SNAPSHOT_FILE")),
 	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {

@@ -220,6 +220,16 @@ if [[ -r $prod_env && -r $prod_db ]]; then
     chown 65532:65532 "$temporary_mobile_auth"
     chmod 600 "$temporary_mobile_auth"
     mv -f "$temporary_mobile_auth" "$app_root/mobile-auth.json"
+    # Snapshot público para rutas GET de lectura del dashboard. El exportador
+    # solo emite campos visibles y nunca tokens, hashes, teléfonos ni chats.
+    dashboard_snapshot=$(python3 "$release_dir/scripts/f3-export-dashboard-snapshot.py" "$prod_db")
+    if [[ -z $dashboard_snapshot ]]; then
+      dashboard_snapshot='{"generatedAt":0,"devices":[],"receipts":[],"fiatHistory":[],"rebalanceJobs":[],"marketObservations":[],"analyticsFees":[]}'
+    fi
+    temporary_dashboard=$(mktemp "$app_root/dashboard-snapshot.XXXXXX")
+    printf '%s\n' "$dashboard_snapshot" > "$temporary_dashboard"
+    chmod 644 "$temporary_dashboard"
+    mv -f "$temporary_dashboard" "$app_root/dashboard-snapshot.json"
     hunter_enabled=true
     unset local_key encrypted_token encrypted_app_id encrypted_app_secret edge_password
   fi
@@ -237,6 +247,9 @@ if [[ -s "$app_root/chat-threads.json" ]]; then
 fi
 if [[ -s "$app_root/mobile-auth.json" ]]; then
   export F3_MOBILE_AUTH_FILE="$app_root/mobile-auth.json"
+fi
+if [[ -s "$app_root/dashboard-snapshot.json" ]]; then
+  export F3_DASHBOARD_SNAPSHOT_FILE="$app_root/dashboard-snapshot.json"
 fi
 
 ln -sfn "$release_dir" "$app_root/current.next"

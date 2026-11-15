@@ -58,6 +58,7 @@ required_paths=(
   scripts/f3-shadow-workflows.sh
   scripts/f3-shadow-qvapay.sh
   scripts/f3-shadow-tail.sh
+  scripts/f3-export-dashboard-snapshot.py
   scripts/f3-shadow-invariants.sh
   scripts/f3-shadow-soak.sh
   scripts/f3-shadow-soak-report.sh
@@ -169,6 +170,7 @@ for required_member in \
   scripts/f3-shadow-workflows.sh \
   scripts/f3-shadow-qvapay.sh \
   scripts/f3-shadow-tail.sh \
+  scripts/f3-export-dashboard-snapshot.py \
   scripts/f3-shadow-invariants.sh \
   scripts/f3-shadow-soak.sh \
   scripts/f3-shadow-soak-report.sh \
