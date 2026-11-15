@@ -128,13 +128,40 @@ nginx -t && systemctl reload nginx
 docker start qvaapply
 ```
 
+## Bucles de mantenimiento portados
+
+El edge ejecuta desde `a2958f9`:
+
+- **Refresco de ofertas propias**: cada `offerRefreshIntervalMinutes` (4 min),
+  una edición como máximo cada `offerRefreshSpacingSeconds` (10 s), priorizando
+  la oferta más antigua. Evidencia real:
+
+  ```text
+  oferta propia refrescada 52b3c773-e5ac-4cde-8487-70359f8ced20
+  oferta propia refrescada 22549487-33a4-420f-8397-21727bc4b3f5
+  oferta propia refrescada aff332d6-6fe5-4226-b056-17495ae46396
+  ```
+
+- **Autocancelación por vencimiento**: cada 30 s revisa operaciones
+  `applied`/`acknowledged` con antigüedad mayor a `autoCancelMinutes` (60 min).
+  Antes de cancelar exige que QvaPay siga en `processing`; si ya está
+  `paid`/`completed`, no la toca. Usa el mismo `order_uuid` de la operación.
+
+Tests puros: `NextOfferToRefresh`, `DueForCancel`, `ShouldAutoCancel`.
+
+## Retirada de TS
+
+Script listo: `scripts/f3-remove-ts.sh`. Exige `F3_CONFIRM_REMOVE=yes` y que
+haya pasado `2026-11-29T20:28:49Z` (o `F3_FORCE=yes` con autorización). Antes de
+borrar verifica TS detenido, Nginx al edge, dominio 200 y cero operaciones
+inciertas; archiva config y SQLite en `/opt/qvaapply-archive` y retira el
+contenedor/imagen. Los backups y la auditoría se conservan.
+
 ## Tareas posteriores a la vigilancia
 
 1. Confirmar 14 días sin fallos críticos.
-2. Borrar el contenedor y la imagen de TS, y retirar su compose/systemd.
-3. Archivar `/opt/qvaapply` y conservar el backup SQLite.
-4. Portar el refresco automático de ofertas propias (hoy se gestionan desde el
-   panel) y la cancelación automática por vencimiento.
-5. Validar un ciclo pagado completo (`paid` + `received`) con el ledger fiat.
-6. Telegram/FCM: no estaban configurados en producción (`TELEGRAM_BOT_TOKEN`
+2. Ejecutar `scripts/f3-remove-ts.sh` con `F3_CONFIRM_REMOVE=yes`.
+3. Validar un ciclo pagado manual completo (`paid` + `received`) con el ledger
+   fiat; el automático ya se validó en `f0612b27`.
+4. Telegram/FCM: no estaban configurados en producción (`TELEGRAM_BOT_TOKEN`
    vacío, sin credenciales FCM), así que no hay regresión respecto a TS.
