@@ -287,3 +287,31 @@ func TestStaticRoutesNilFilesFallsBackToDir(t *testing.T) {
 		t.Fatalf("body = %q", body)
 	}
 }
+
+func TestStaticRoutesServesUploadedMarketIcons(t *testing.T) {
+	staticDir := t.TempDir()
+	iconDir := t.TempDir()
+	writeStaticRouteFixture(t, iconDir, "uploaded.png", "PNG-UPLOADED")
+	handler := NewStaticRoutes(staticDir)
+	handler.IconDir = iconDir
+
+	request := httptest.NewRequest(http.MethodGet, "/market-icons/uploaded.png", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (cuerpo %q)", recorder.Code, recorder.Body.String())
+	}
+	if got := recorder.Body.String(); got != "PNG-UPLOADED" {
+		t.Fatalf("cuerpo = %q", got)
+	}
+	if got := recorder.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("nosniff = %q", got)
+	}
+
+	missing := httptest.NewRequest(http.MethodGet, "/market-icons/missing.png", nil)
+	missingRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(missingRecorder, missing)
+	if missingRecorder.Code != http.StatusNotFound {
+		t.Fatalf("icono ausente: %d", missingRecorder.Code)
+	}
+}

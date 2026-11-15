@@ -49,6 +49,16 @@ func (s *StaticRoutes) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.IconDir != "" && strings.HasPrefix(rel, "market-icons/") {
+		iconRel := strings.TrimPrefix(rel, "market-icons/")
+		iconPath := filepath.Join(s.IconDir, filepath.FromSlash(iconRel))
+		if info, err := os.Lstat(iconPath); err == nil && info.Mode().IsRegular() {
+			w.Header().Set("Cache-Control", staticCacheControl(iconRel))
+			http.ServeFile(w, r, iconPath)
+			return
+		}
+	}
+
 	// Lstat (no Stat) rechaza symlinks: sólo se publican archivos regulares
 	// dentro de Dir, nunca enlaces que puedan apuntar fuera del árbol.
 	info, err := os.Lstat(filepath.Join(s.Dir, filepath.FromSlash(rel)))
