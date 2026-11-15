@@ -120,6 +120,44 @@ fondos cero. Para probarla con dinero real hace falta:
 2. declarar el saldo MLC real de la cuenta;
 3. autorizar un importe y una ventana de congelamiento de TS.
 
+## Segunda oferta de prueba (CLASICA)
+
+Oferta `a617538e-...`, del mismo contraparte:
+
+```text
+coin CLASICA · sell · flexible
+amount 235 · receive 259.44 · tasa 1.104 fiat/QUSD
+available 200 · rango 5–200
+```
+
+Resultado del motor en dry-run:
+
+```text
+importe dimensionado = 40.17 QUSD
+fiat                 = 44.35
+decisión             = blocked
+motivo               = "El margen esperado no alcanza el mínimo configurado."
+operaciones creadas  = 0
+```
+
+La tasa 1.104 supera el máximo de compra configurado (1.071) y el mínimo de
+venta (1.096), por lo que comprarla genera pérdida. El guardián la bloquea
+antes de crear cualquier operación. Esto coincide con el oráculo TS
+(`sizeFlexibleTake` usa `effectiveRate > buyMaxRate` y `evaluateRisk` exige
+margen mínimo).
+
+## Saldos fiat desactualizados
+
+El seed de `shadow.runtime_config` usaba `ON CONFLICT DO NOTHING`: los saldos
+fiat quedaban congelados en el primer despliegue. En la prueba, el panel decía
+`CLASICA = 166.84` cuando producción tenía `44.44`, lo que habría intentado
+aplicar 151 QUSD en vez de 40.17.
+
+Se añadió `scripts/f3-sync-fiat-balances.py`, que actualiza solo `fiatBalance`
+desde `settings.fiat_balance:*` de producción, conserva el resto de la
+configuración y admite `--dry-run`. Debe ejecutarse antes de cada ensayo y en
+la ventana de cutover, mientras TS siga siendo la autoridad del saldo.
+
 ## Idempotencia y conciliación
 
 - Una operación ya `confirmed` no vuelve a llamar a QvaPay.

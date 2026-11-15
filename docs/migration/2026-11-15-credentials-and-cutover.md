@@ -119,14 +119,49 @@ capital, publica contribuciones cooperativas o resuelve conciliaciones sigue
 cuando `EDGE_MUTATIONS_LIVE=true` y el token está disponible. No se habilita desde una
 ruta web ni desde una variable de entorno.
 
-Para un cutover controlado:
+### Qué es la ventana de congelamiento
+
+Es el intervalo en que se detiene el bot TS para que no compita con Go por la
+misma oferta. Si ambos motores ven la misma oferta, TS puede aplicarla primero
+y Go recibiría un rechazo, o se podrían generar dos intentos sobre la misma
+contraparte.
+
+```bash
+# 1. Sincronizar saldos fiat reales al panel Go
+python3 scripts/f3-sync-fiat-balances.py
+
+# 2. Backup
+systemctl start qvaapply-backup.service
+
+# 3. Abrir la ventana: TS deja de cazar y aplicar
+docker stop qvaapply
+
+# 4. Habilitar dinero real en Go (core y edge)
+#    core.env:   CORE_AUTOTRADE_DRY_RUN=false
+#    edge.env:   EDGE_MUTATIONS_LIVE=true
+docker compose ... up -d trading-core edge
+
+# 5. Aplicar la oferta/acción autorizada y verificar QvaPay
+
+# 6. Rollback inmediato si algo falla
+#    CORE_AUTOTRADE_DRY_RUN=true, EDGE_MUTATIONS_LIVE=false
+docker start qvaapply
+```
+
+Duración recomendada: 2–5 minutos para una sola aplicación; 15–30 minutos si
+además se conmuta Nginx para revisar la web. Durante la ventana la web solo
+sigue disponible si Nginx apunta al edge.
+
+### Procedimiento completo
 
 1. Backup de `/opt/qvaapply/data` y del SQLite.
-2. Congelar automatización y drenar operaciones.
-3. Activar el adaptador de mutaciones en una release explícita.
-4. Conmutar Nginx al edge.
-5. Vigilar métricas y logs durante 14 días.
-6. Rollback: devolver Nginx al TS y dejar el adaptador deshabilitado.
+2. `scripts/f3-sync-fiat-balances.py` para que el dimensionado use saldos reales.
+3. Congelar TS (`docker stop qvaapply`) y drenar operaciones.
+4. Activar `CORE_AUTOTRADE_DRY_RUN=false` y `EDGE_MUTATIONS_LIVE=true`.
+5. Conmutar Nginx al edge si se quiere mantener la web.
+6. Vigilar métricas y logs durante 14 días.
+7. Rollback: devolver Nginx al TS, `docker start qvaapply`, y dejar ambas
+   banderas en modo seguro.
 
 Sin ese procedimiento, las rutas financieras del edge no deben habilitarse.
 
