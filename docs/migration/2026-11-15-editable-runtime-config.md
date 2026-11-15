@@ -154,6 +154,42 @@ POST /api/blocked-offers/<uuid>/dismiss  = 204, bloqueadas 137 → 136
 
 Después limpié los registros de prueba para dejar el shadow como estaba.
 
+## Superficie completa y banderas de seguridad
+
+La auditoría ya cubre **109/109 rutas**. Las operaciones que en TS mueven dinero
+(ofertas, operaciones, rebalanceos, cooperativa, recuperación, workflows,
+ofertas bloqueadas) existen en el edge con estas garantías:
+
+- `EDGE_MUTATIONS_ENABLED=true` sólo en shadow.
+- Validan cookie/CSRF/Origen o Bearer de operador.
+- Registran la intención en `shadow.mutation_events` y mensajes de chat en
+  `shadow.chat_messages`.
+- **No llaman a QvaPay ni ejecutan mutaciones reales.** El adaptador
+  `internal/platform/qvapay/mutations.go` sigue deshabilitado y sólo se activa
+  en el cutover.
+- `payment-preview` responde 503 hasta que exista QvaPay en vivo.
+- El webhook QvaPay está activo con HMAC (`EDGE_QVAPAY_WEBHOOK_SECRET`,
+  generado una vez en `/opt/qvaapply-f3-shadow/webhook.secret`) y guarda en
+  `shadow.qvapay_feed_events`.
+
+Evidencia:
+
+```text
+POST /api/offers                         = 201
+PUT/DELETE /api/offers/:uuid             = 204
+POST /api/offers/rebalance/preview       = 200
+POST /api/offers/rebalance/apply         = 202
+POST /api/operations/:uuid/ack           = 204
+POST /api/workflows/:id/reconcile        = 200
+PUT /api/cooperative-network/hunting     = 204
+POST /api/cooperative-network/reconcile  = 204
+POST /api/blocked-offers/:uuid/preview   = 200 execution=shadow
+POST /api/recovery/:id/check             = 200 shadow_review
+POST /api/mobile/operations/:uuid/paid   = 204
+GET  /api/mobile/.../payment-preview     = 503
+POST /webhooks/qvapay/p2p-feed (HMAC)    = 202
+```
+
 ## Lo que falta y requiere tu intervención
 
 1. **Cuentas lectoras**: pulsa “Añadir cuenta lectora” y pega un token QvaPay

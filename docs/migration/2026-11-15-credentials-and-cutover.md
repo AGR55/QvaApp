@@ -132,11 +132,11 @@ Sin ese procedimiento, las rutas financieras del edge no deben habilitarse.
 ## 8. Estado de paridad
 
 ```text
-Auditoría estática: 75/109 rutas exactas
-Pendientes: 34
+Auditoría estática: 109/109 rutas
 ```
 
-Las 34 restantes son mutaciones de dinero, chat remoto, `payment-preview`,
-preview/aplicación de ofertas bloqueadas, comprobación/resolución remota de
-conciliaciones, webhook y cutover. No son bloqueos de credenciales: son
-operaciones que deben ejecutarse en una ventana autorizada.
+Toda la superficie HTTP existe. Las mutaciones financieras están en modo
+shadow (`EDGE_MUTATIONS_ENABLED=true`) y registran intenciones sin llamar a
+QvaPay. Para ejecutar dinero real sigue haciendo falta la ventana de cutover y
+habilitar el adaptador de mutaciones; el chat y `payment-preview` requieren el
+servicio remoto en vivo.

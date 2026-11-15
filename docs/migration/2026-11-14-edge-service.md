@@ -124,9 +124,10 @@ Verificado en VPS: rutas de lectura 200 con login, 401 sin sesión; dispositivo
 u operador inválido 401; snapshot con 2 dispositivos, 2 operadores y 100
 comprobantes, sin `tokenHash` en la respuesta.
 
-La auditoría estática actualiza a **75/109 rutas exactas**; siguen 34
-pendientes: mutaciones de dinero, chat remoto, `payment-preview`, preview de
-ofertas bloqueadas, webhook y el envío real de push. La configuración editable y las cuentas
+La auditoría estática cubre **109/109 rutas** declaradas por el monolito. Las
+mutaciones financieras del edge están detrás de `EDGE_MUTATIONS_ENABLED` y
+registran en shadow; no llaman a QvaPay ni mueven dinero. El webhook QvaPay
+está detrás de `EDGE_QVAPAY_WEBHOOK_ENABLED` y firma HMAC. La configuración editable y las cuentas
 lectoras ya están activas; ver
 `docs/migration/2026-11-15-editable-runtime-config.md`.
 
