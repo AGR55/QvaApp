@@ -9,7 +9,8 @@ persistencia lenta, un apply de QvaPay o una ráfaga de eventos bloquee el resto
 
 1. **Webhook P2P**: QvaPay → `/webhooks/qvapay/p2p-feed` (HMAC) → edge guarda
    `shadow.qvapay_feed_events` → cola interna → `POST http://hunter:8091/feed`
-   con `X-Hunter-Feed-Token`.
+   con `X-Hunter-Feed-Token`. El deploy descifra `market_feed_secret` de la
+   SQLite de TS y reutiliza ese mismo secreto: `secret_match=True`, 32 chars.
 2. **SSE**: feed de QvaPay conectado; cada evento se evalúa y se encola.
 3. **Polling de respaldo**: `HUNTER_POLL_MS=1000`; si SSE o webhook fallan, en
    ≤1 s se recuperan las ofertas.
@@ -69,8 +70,12 @@ Camino real de un webhook individual:
 
 ```text
 edge 202 → feed guardado → hunter /feed → core processed
-latencia webhook→core: 36 ms
+latencia webhook→core: 29 ms  (secreto real de TS, prueba firmada)
 ```
+
+Antes de reutilizar el secreto de TS, el edge usaba uno aleatorio y QvaPay
+habría rechazado los webhooks reales con 401. Ahora la firma de producción
+coincide y la prueba firmada devuelve 202.
 
 Aplicación real controlada con los workers paralelos:
 
