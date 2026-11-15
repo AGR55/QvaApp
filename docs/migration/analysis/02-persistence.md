@@ -331,7 +331,7 @@ Agrupación por invariante, no por conveniencia de dominio:
 | Transacción explícita | `BEGIN IMMEDIATE` | `src/store.ts:1746-1756` | `BEGIN; SELECT … FOR UPDATE` / `SERIALIZABLE` con reintentos |
 | FKs | `PRAGMA foreign_keys=ON` | `src/store.ts:361` | FKs reales dentro del servicio; referencias lógicas entre servicios con validación de aplicación |
 | Backup pre-migración | checkpoint + copia a `data/backups` | `src/store.ts:1732-1744` | Snapshot/PITR antes de cada migración |
-| Backup periódico | `sqlite3 .backup` diario 04:15 UTC, retención 14 días | `scripts/backup-vps.sh`, `deploy/qvaapply-backup.timer` | `pg_basebackup` + archivo WAL (WAL-G/pgBackRest), retención ≥14 días, copia externa cifrada |
+| Backup periódico | `sqlite3 VACUUM INTO` diario 04:15 UTC, CPUQuota 20%, retención 14 días | `scripts/backup-vps.sh`, `deploy/qvaapply-backup.timer` | `pg_basebackup` + archivo WAL (WAL-G/pgBackRest), retención ≥14 días, copia externa cifrada |
 | Restauración documentada | Parar proceso, conservar base dañada, copiar backup, permisos 600 | `docs/OPERATIONS.md:94-108` | Runbook de restore probado; objetivo RTO/RPO explícito |
 | Integridad de fichero | `PRAGMA integrity_check` (manual) | runbook | `pg_checksums`, `amcheck`, verificación de página |
 | Integridad de configuración | Cadena SHA-256 + epoch + worker read-only | `src/config-integrity.ts:13-43`, `src/config-integrity-monitor.ts:27-60` | Tabla + trigger/check + verificación en app y en job programado |

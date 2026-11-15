@@ -6,10 +6,16 @@ backup_dir="/opt/qvaapply/data/backups"
 
 [[ -f $database ]] || exit 0
 install -d -o 1000 -g 1000 -m 0700 "$backup_dir"
+exec 9>"$backup_dir/.backup.lock"
+flock -n 9 || exit 0
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 temporary="$backup_dir/.qvaapply-$timestamp.sqlite"
 destination="$backup_dir/qvaapply-$timestamp.sqlite"
-sqlite3 "$database" ".timeout 5000" ".backup '$temporary'"
+rm -f "$temporary"
+# VACUUM INTO toma un snapshot consistente en una sola pasada. El .backup
+# clásico reinicia cuando la fuente cambia y con escrituras cada 3 s puede
+# tardar horas.
+sqlite3 "$database" ".timeout 5000" "VACUUM INTO '$temporary'"
 chown 1000:1000 "$temporary"
 chmod 600 "$temporary"
 mv "$temporary" "$destination"
