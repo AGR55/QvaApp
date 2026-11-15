@@ -160,6 +160,9 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 	var priceDecision riskpolicy.PriceDecision
 	switch event.Side {
 	case "buy":
+		if !market.HuntBuy {
+			return Result{Kind: "blocked", Reasons: []string{"Cacería de compra detenida"}}, nil
+		}
 		side = riskpolicy.BuyQusd
 		requiredFiat = event.Receive.Add(market.OutgoingFee)
 		switch event.Decision {
@@ -173,6 +176,9 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 			priceDecision = riskpolicy.PriceIgnored
 		}
 	case "sell":
+		if !market.HuntSell {
+			return Result{Kind: "blocked", Reasons: []string{"Cacería de venta detenida"}}, nil
+		}
 		side = riskpolicy.SellQusd
 		requiredFiat = decimal.Zero()
 		switch event.Decision {

@@ -16,6 +16,7 @@ import (
 func runtimeConfigFixture() runtimeconfig.Config {
 	return runtimeconfig.Config{
 		Version: runtimeconfig.ConfigVersion,
+		Hunting: runtimeconfig.Hunting{BuyRunning: true, SellRunning: true},
 		Risk: runtimeconfig.Risk{
 			MaxQusdPerOperation:         25.5,
 			MaxConcurrentQusdExposure:   150,

@@ -15,6 +15,10 @@ func TestOfferCounterpartyUsesCreator(t *testing.T) {
 	if got := offerCounterparty(offer); got != "creator-1" {
 		t.Fatalf("counterparty = %q", got)
 	}
+	offer.User = json.RawMessage(`{"uuid":"creator-1","username":"@cryptobro"}`)
+	if got := offerCounterpartyName(offer); got != "cryptobro" {
+		t.Fatalf("counterparty name = %q", got)
+	}
 	offer.User = nil
 	if got := offerCounterparty(offer); got != "taker-1" {
 		t.Fatalf("fallback = %q", got)

@@ -66,3 +66,26 @@ func TestDecideInactiveMarket(t *testing.T) {
 		t.Fatalf("resultado inesperado: %+v", result)
 	}
 }
+
+func TestDecideHuntFlagsStopSide(t *testing.T) {
+	config := configForTest(t)
+	item := config.Markets["BANK_CUP"]
+	item.HuntBuy = false
+	item.HuntSell = false
+	config.Markets["BANK_CUP"] = item
+
+	buy, err := Decide(Event{
+		OfferUUID: "offer-buy", Coin: "BANK_CUP", Side: "buy", Decision: "auto_buy",
+		Amount: decimal.FromInt(1), Receive: decimal.FromInt(1), Rate: decimal.FromInt(1),
+	}, config, decimal.Zero(), 1)
+	if err != nil || buy.Kind != "blocked" {
+		t.Fatalf("compra detenida: %+v err=%v", buy, err)
+	}
+	sell, err := Decide(Event{
+		OfferUUID: "offer-sell", Coin: "BANK_CUP", Side: "sell", Decision: "manual_sell",
+		Amount: decimal.FromInt(1), Receive: decimal.FromInt(1), Rate: decimal.FromInt(1),
+	}, config, decimal.Zero(), 1)
+	if err != nil || sell.Kind != "blocked" {
+		t.Fatalf("venta detenida: %+v err=%v", sell, err)
+	}
+}

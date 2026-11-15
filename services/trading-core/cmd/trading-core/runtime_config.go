@@ -51,8 +51,8 @@ func coreConfigFromRuntime(config runtimeconfig.Config) core.Config {
 			PurchaseMaxQusd: decimalValueFromFloat(market.PurchaseMaxQusd),
 			SellFeePercent:  decimalValueFromFloat(market.SellFeePercent),
 			OutgoingFee:     decimalValueFromFloat(market.OutgoingTransferFee),
-			HuntBuy:         market.HuntBuyEnabled,
-			HuntSell:        market.HuntSellEnabled,
+			HuntBuy:         config.Hunting.BuyRunning && market.HuntBuyEnabled,
+			HuntSell:        config.Hunting.SellRunning && market.HuntSellEnabled,
 		}
 		result.Fiat[code] = decimalValueFromFloat(market.FiatBalance)
 	}

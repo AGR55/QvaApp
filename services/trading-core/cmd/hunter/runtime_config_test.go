@@ -12,6 +12,7 @@ import (
 func TestHunterConfigFromRuntime(t *testing.T) {
 	config := runtimeconfig.Config{
 		Automation: runtimeconfig.Automation{PriceGuardPercent: 12.5},
+		Hunting:    runtimeconfig.Hunting{BuyRunning: true, SellRunning: true},
 		Markets: []runtimeconfig.Market{
 			{
 				Code:                "USDT",
@@ -44,6 +45,18 @@ func TestHunterConfigFromRuntime(t *testing.T) {
 			"flags del mercado = active:%v huntBuy:%v huntSell:%v",
 			market.Active, market.HuntBuy, market.HuntSell,
 		)
+	}
+	globalOff := config
+	globalOff.Hunting = runtimeconfig.Hunting{BuyRunning: false, SellRunning: true}
+	globalOff.Markets = []runtimeconfig.Market{{
+		Code: "USDT", Active: true, HuntBuyEnabled: true, HuntSellEnabled: true,
+	}}
+	mappedOff := hunterConfigFromRuntime(globalOff)
+	if mappedOff.Markets["USDT"].HuntBuy {
+		t.Fatal("el interruptor global de compra debe detener el mercado")
+	}
+	if !mappedOff.Markets["USDT"].HuntSell {
+		t.Fatal("el interruptor global de venta debe seguir activo")
 	}
 	for name, pair := range map[string][2]string{
 		"BuyMaxRate":      {market.BuyMaxRate.Compact(), "1.25"},

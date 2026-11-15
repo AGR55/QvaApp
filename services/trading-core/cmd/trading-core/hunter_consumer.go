@@ -60,12 +60,13 @@ type hunterPayload struct {
 	Rate      string `json:"rate"`
 	// Metadatos de ofertas por rango: el core dimensiona el importe antes de
 	// decidir en vez de aplicar el total publicado.
-	OfferKind      string `json:"offerKind,omitempty"`
-	Available      string `json:"available,omitempty"`
-	OrderMin       string `json:"orderMin,omitempty"`
-	OrderMax       string `json:"orderMax,omitempty"`
-	OfferType      string `json:"offerType,omitempty"`
-	CounterpartyID string `json:"counterpartyId,omitempty"`
+	OfferKind        string `json:"offerKind,omitempty"`
+	Available        string `json:"available,omitempty"`
+	OrderMin         string `json:"orderMin,omitempty"`
+	OrderMax         string `json:"orderMax,omitempty"`
+	OfferType        string `json:"offerType,omitempty"`
+	CounterpartyID   string `json:"counterpartyId,omitempty"`
+	CounterpartyName string `json:"counterpartyName,omitempty"`
 }
 
 func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
@@ -400,6 +401,9 @@ func (consumer *hunterConsumer) notifyApplied(
 	} else {
 		builder.WriteString("🛒 Compra de QUSD aplicada\n\n")
 		fmt.Fprintf(&builder, "🌐 Mercado: %s\n", payload.Coin)
+		if payload.CounterpartyName != "" {
+			fmt.Fprintf(&builder, "👤 Contraparte: @%s\n", payload.CounterpartyName)
+		}
 		fmt.Fprintf(&builder, "💰 Importe: %s QUSD\n", amount.Format(2))
 		fmt.Fprintf(&builder, "💸 Debes enviar: %s %s\n", total.Format(2), currency)
 		fmt.Fprintf(&builder, "📈 Tasa: %s\n", payload.Rate)
