@@ -97,11 +97,13 @@ services:
     environment:
       DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
       HUNTER_CONFIG_FILE: /config/hunter-config.json
+      HUNTER_SPOOL_DIR: /var/lib/hunter-spool
       HUNTER_POLL_MS: ${HUNTER_POLL_MS:-1000}
       PORT: "8091"
     entrypoint: ["/hunter"]
     volumes:
       - ${F3_HUNTER_CONFIG_FILE:-../data/hunter-config.json}:/config/hunter-config.json:ro
+      - ${F3_HUNTER_DATA_DIR:-../data}/spool:/var/lib/hunter-spool:rw
     ports:
       - "127.0.0.1:8091:8091"
     networks:
@@ -246,6 +248,8 @@ services:
       - /migrations/0016_qvapay_transactions.sql
       - -f
       - /migrations/0017_runtime_config.sql
+      - -f
+      - /migrations/0018_service_delivery.sql
     networks:
       - shadow
     read_only: true

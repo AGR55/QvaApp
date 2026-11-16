@@ -1,7 +1,8 @@
 # Servicios Go — F1
 
 Workspace Go de la migración. `main` sigue ejecutando el monolito TypeScript;
-este árbol es el arranque de F1 y no se despliega todavía.
+los binarios F3 se despliegan en un entorno shadow aislado y no sustituyen
+producción ni habilitan mutaciones reales por defecto.
 
 ```text
 services/
@@ -101,6 +102,8 @@ node --import tsx parity/runner/run.ts \
 ## Persistencia F1
 - `services/db/` contiene el compose Postgres 16 aislado, el importador
   SQLite→Postgres, el runner de migraciones y el snapshot `schema/core-v1.sql`.
+- La migración `0018_service_delivery.sql` agrega el inbox durable de Telegram,
+  deduplicación persistente de notificaciones y outbox durable de webhooks QvaPay.
 - La importación se probó sobre una **copia** migrada a v31: **41 tablas,
   16.533 filas, 0 mismatches**, 41 PKs, 40 índices y 6 FKs.
 - Los 6 triggers SQLite están traducidos y verificados; el workflow

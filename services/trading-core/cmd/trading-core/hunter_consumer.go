@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -49,6 +50,8 @@ type hunterConsumer struct {
 	reconciler     *operationReconciler
 	notifier       *operationNotifier
 	applyQueue     chan executionTask
+	identityMu     sync.Mutex
+	ownerUUID      string
 
 	balanceMu    sync.Mutex
 	balanceValue decimal.Value
@@ -83,9 +86,10 @@ type hunterPayload struct {
 	OfferType        string `json:"offerType,omitempty"`
 	CounterpartyID   string `json:"counterpartyId,omitempty"`
 	CounterpartyName string `json:"counterpartyName,omitempty"`
+	ObservedAt       int64  `json:"observedAt"`
 }
 
-func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
+func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger, shadowMode bool) *hunterConsumer {
 	worker := strings.TrimSpace(os.Getenv("HUNTER_CONSUMER_WORKER"))
 	if worker == "" {
 		worker = "trading-core"
@@ -102,7 +106,7 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		localOps:      postgres.NewLocalOperationRepository(pool),
 	}
 	consumer.applyQueue = make(chan executionTask, 1024)
-	consumer.trader = buildAutoTrader(logger)
+	consumer.trader = buildAutoTrader(logger, shadowMode)
 	consumer.notifier = newOperationNotifier()
 	if token, ok := decryptQvaToken(logger); ok {
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
@@ -140,10 +144,14 @@ func decryptQvaToken(logger *slog.Logger) (string, bool) {
 	return token, true
 }
 
-func buildAutoTrader(logger *slog.Logger) *autoTrader {
+func buildAutoTrader(logger *slog.Logger, shadowMode bool) *autoTrader {
 	enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CORE_AUTOTRADE")))
 	if !enabled {
 		return nil
+	}
+	if shadowMode {
+		logger.Warn("autotrade bloqueado: SHADOW_MODE está activo")
+		return &autoTrader{dryRun: true, logger: logger}
 	}
 	dryRun := true
 	if raw := strings.TrimSpace(os.Getenv("CORE_AUTOTRADE_DRY_RUN")); raw != "" {
@@ -238,6 +246,15 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-consumer.applyQueue:
+			if !consumer.canApplyNow(ctx, task.payload) ||
+				consumer.trader != nil && !consumer.trader.dryRun && !consumer.offerStillEligible(ctx, task) {
+				consumer.logger.Warn("apply omitido: cacería pausada o control runtime no disponible", "event_id", task.eventID)
+				if _, err := consumer.operationRepo.Transition(ctx, task.eventID, core.StateRejected, postgres.NowMS()); err != nil {
+					consumer.logger.Warn("no se pudo cerrar operación bloqueada por pausa", "event_id", task.eventID, "error", err)
+				}
+				consumer.invalidateUsage()
+				continue
+			}
 			state, err := consumer.trader.Execute(
 				ctx, consumer.operationRepo, task.eventID, task.payload.OfferUUID,
 				task.amount, task.flexible)
@@ -250,6 +267,159 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 			consumer.recordLocalOperation(ctx, task.payload, task.eventID, task.amount, task.receive, time.Now().UnixMilli())
 		}
 	}
+}
+
+// offerStillEligible vuelve a leer la oferta remota para no aplicar una
+// cotización que cambió o se cerró mientras el evento esperaba en la cola.
+func (consumer *hunterConsumer) offerStillEligible(ctx context.Context, task executionTask) bool {
+	if consumer == nil || consumer.reconciler == nil || consumer.reconciler.reader == nil {
+		return false
+	}
+	offer, err := consumer.reconciler.reader.Offer(ctx, task.payload.OfferUUID)
+	if err != nil || offer.Status != "open" || offer.OnlyVIP == nil || *offer.OnlyVIP ||
+		offer.Pause != nil || offer.RequirementsMet != nil && !*offer.RequirementsMet {
+		return false
+	}
+	expectedType := "sell"
+	if task.payload.Side == "sell" {
+		expectedType = "buy"
+	}
+	if offer.Type != expectedType {
+		return false
+	}
+	ownerUUIDSelf := consumer.ownAccountUUID(ctx)
+	if ownerUUIDSelf == "" {
+		return false
+	}
+	ownerUUID := strings.TrimSpace(offer.OwnerUUID)
+	for _, party := range []json.RawMessage{offer.User, offer.Peer} {
+		var owner struct {
+			UUID string `json:"uuid"`
+		}
+		if len(party) > 0 && json.Unmarshal(party, &owner) == nil {
+			partyUUID := strings.TrimSpace(owner.UUID)
+			if partyUUID == ownerUUIDSelf {
+				return false
+			}
+			if ownerUUID == "" {
+				ownerUUID = partyUUID
+			}
+		}
+	}
+	if ownerUUID == "" || ownerUUID == ownerUUIDSelf {
+		return false
+	}
+	expectedRate, err := decimal.Parse(task.payload.Rate)
+	if err != nil || offer.Rate.Cmp(expectedRate) != 0 {
+		return false
+	}
+	available := offer.AvailableAmount
+	if available.Sign() <= 0 {
+		available = offer.Amount
+	}
+	if available.Cmp(task.amount) < 0 {
+		return false
+	}
+	if offer.OfferKind == "flexible" {
+		if offer.OrderMin.Sign() > 0 && task.amount.Cmp(offer.OrderMin) < 0 {
+			return false
+		}
+		if offer.OrderMax.Sign() > 0 && task.amount.Cmp(offer.OrderMax) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (consumer *hunterConsumer) ownAccountUUID(ctx context.Context) string {
+	consumer.identityMu.Lock()
+	defer consumer.identityMu.Unlock()
+	if consumer.ownerUUID != "" {
+		return consumer.ownerUUID
+	}
+	if consumer.reconciler == nil || consumer.reconciler.reader == nil {
+		return ""
+	}
+	user, err := consumer.reconciler.reader.User(ctx)
+	if err != nil {
+		return ""
+	}
+	consumer.ownerUUID = strings.TrimSpace(user.UUID)
+	return consumer.ownerUUID
+}
+
+// canApplyNow relee los interruptores persistidos justo antes del apply. La
+// caché del consumidor sirve para decidir candidatos, pero no para autorizar
+// una mutación que pudo quedar en cola mientras se pausaba la cacería.
+func (consumer *hunterConsumer) canApplyNow(ctx context.Context, payload hunterPayload) bool {
+	if consumer == nil || consumer.runtime == nil {
+		return false
+	}
+	var paused, emergency bool
+	if err := consumer.pool.QueryRow(ctx, `
+		SELECT
+			COALESCE((SELECT value::text IN ('true', '"true"', '1', '"1"') FROM shadow.runtime_settings WHERE key = 'control.paused'), false),
+			COALESCE((SELECT value::text IN ('true', '"true"', '1', '"1"') FROM shadow.runtime_settings WHERE key = 'control.emergency_stop'), false)
+	`).Scan(&paused, &emergency); err != nil || paused || emergency {
+		return false
+	}
+	config, _, err := consumer.runtime.Load(ctx)
+	maxQuoteAgeSeconds := 0.0
+	if err != nil {
+		if !errors.Is(err, runtimeconfig.ErrNotFound) {
+			return false
+		}
+		coreConfig, configErr := consumer.configSnapshot()
+		if configErr != nil {
+			return false
+		}
+		market, ok := coreConfig.Markets[payload.Coin]
+		if !ok || !market.Active {
+			return false
+		}
+		maxQuoteAgeSeconds, _ = strconv.ParseFloat(coreConfig.Limits.MaxQuoteAgeSeconds.Format(4), 64)
+		if payload.Side == "buy" {
+			if !market.HuntBuy {
+				return false
+			}
+		} else if payload.Side == "sell" {
+			if !market.HuntSell {
+				return false
+			}
+		} else {
+			return false
+		}
+	} else {
+		if payload.Side == "buy" && !config.Hunting.BuyRunning || payload.Side == "sell" && !config.Hunting.SellRunning {
+			return false
+		}
+		for _, market := range config.Markets {
+			if market.Code != payload.Coin {
+				continue
+			}
+			if !market.Active {
+				return false
+			}
+			if payload.Side == "buy" {
+				if !market.HuntBuyEnabled {
+					return false
+				}
+			} else if payload.Side == "sell" {
+				if !market.HuntSellEnabled {
+					return false
+				}
+			} else {
+				return false
+			}
+			maxQuoteAgeSeconds = config.Risk.MaxQuoteAgeSeconds
+			break
+		}
+	}
+	if payload.ObservedAt <= 0 || maxQuoteAgeSeconds <= 0 {
+		return false
+	}
+	age := time.Since(time.UnixMilli(payload.ObservedAt))
+	return age >= 0 && age <= time.Duration(maxQuoteAgeSeconds*float64(time.Second))
 }
 
 func (consumer *hunterConsumer) consume(
@@ -271,6 +441,11 @@ func (consumer *hunterConsumer) consume(
 	if configErr != nil {
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), "configuración core no disponible")
+		return
+	}
+	if !consumer.canApplyNow(ctx, payload) {
+		consumer.persistBlockedEvent(ctx, repository, event, payload,
+			"Cacería pausada, mercado desactivado o cotización vencida", postgres.NowMS())
 		return
 	}
 	amount, _ := decimal.Parse(payload.Amount)
@@ -299,7 +474,7 @@ func (consumer *hunterConsumer) consume(
 	result, err := core.Decide(core.Event{
 		OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
 		Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
-		Usage: usage,
+		Usage: usage, ObservedAt: payload.ObservedAt,
 	}, config, balance, nowMS)
 	if err != nil {
 		consumer.failed.Add(1)
@@ -315,6 +490,7 @@ func (consumer *hunterConsumer) consume(
 			Event: core.Event{
 				OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
 				Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
+				ObservedAt: payload.ObservedAt,
 			},
 			Result: result, AvailableQusd: balance,
 			ReserveQusd: config.Limits.MinQusdReserve,

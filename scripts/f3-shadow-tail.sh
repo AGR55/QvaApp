@@ -11,6 +11,7 @@
 set -Eeuo pipefail
 
 readonly app_root="/opt/qvaapply-f3-shadow"
+export F3_MARKET_ICONS_DIR="$app_root/market-icons"
 readonly prod_root="/opt/qvaapply"
 readonly prod_db="$prod_root/data/qvaapply.sqlite"
 readonly env_file="$app_root/.env"

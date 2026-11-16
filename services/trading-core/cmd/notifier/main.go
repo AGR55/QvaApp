@@ -1,9 +1,10 @@
-// Servicio notifier: recibe alertas internas y las envía a Telegram.
-// No hace long-polling, no procesa comandos y por defecto opera en dry-run.
+// Servicio notifier: envía alertas internas y procesa comandos de Telegram
+// mediante long polling o webhook durable. Por defecto opera en dry-run.
 package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,6 +105,31 @@ func loadConfig() (config, error) {
 		}
 		cfg.DryRun = value
 	}
+	if cfg.WebhookEnabled && cfg.TelegramSecret == "" {
+		return config{}, errors.New("NOTIFIER_TELEGRAM_SECRET requerido con TELEGRAM_WEBHOOK_ENABLED")
+	}
+	if cfg.WebhookEnabled && cfg.PollingEnabled {
+		return config{}, errors.New("TELEGRAM_WEBHOOK_ENABLED y TELEGRAM_POLLING_ENABLED son excluyentes")
+	}
+	if cfg.WebhookEnabled && cfg.DryRun {
+		return config{}, errors.New("TELEGRAM_WEBHOOK_ENABLED requiere NOTIFIER_DRY_RUN=false")
+	}
+	if cfg.WebhookEnabled && (cfg.Token == "" || cfg.WebhookURL == "") {
+		return config{}, errors.New("TELEGRAM_BOT_TOKEN y TELEGRAM_WEBHOOK_URL requeridos con TELEGRAM_WEBHOOK_ENABLED")
+	}
+	if cfg.WebhookEnabled && (cfg.AdminChatID == 0 || cfg.EdgePassword == "" || cfg.InternalKey == "" || cfg.DatabaseURL == "") {
+		return config{}, errors.New("webhook live requiere chat administrador, credenciales internas y Postgres")
+	}
+	if cfg.WebhookEnabled && len(cfg.TelegramSecret) > 256 {
+		return config{}, errors.New("NOTIFIER_TELEGRAM_SECRET excede 256 caracteres")
+	}
+	if !cfg.DryRun && (cfg.InternalKey == "" || cfg.DatabaseURL == "") {
+		return config{}, errors.New("modo live requiere NOTIFIER_INTERNAL_TOKEN y DATABASE_URL")
+	}
+	if cfg.PollingEnabled && !cfg.DryRun &&
+		(cfg.Token == "" || cfg.AdminChatID == 0 || cfg.EdgePassword == "") {
+		return config{}, errors.New("polling live requiere token Telegram, chat administrador y contraseña del edge")
+	}
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {
 		return config{}, fmt.Errorf("PORT inválido")
@@ -135,10 +161,19 @@ func run(logger *slog.Logger) error {
 	if cfg.DatabaseURL != "" {
 		pool, err = pgxpool.New(ctx, cfg.DatabaseURL)
 		if err == nil {
+			pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err = pool.Ping(pingCtx)
+			cancel()
+		}
+		if err == nil {
 			defer pool.Close()
 			pushStore = postgres.NewPushSubscriptionRepository(pool)
 		} else {
 			logger.Warn("Postgres push no disponible; usando store en memoria", "error", err)
+			if pool != nil {
+				pool.Close()
+				pool = nil
+			}
 		}
 	}
 	if pushStore == nil {
@@ -160,7 +195,8 @@ func run(logger *slog.Logger) error {
 	}
 	service := &service{
 		cfg: cfg, client: client, dedupe: notifier.NewDeduper(10 * time.Minute),
-		logger: logger, pushAPI: &notifier.PushAPI{Store: pushStore, InternalToken: cfg.InternalKey},
+		logger: logger, pool: pool,
+		pushAPI:     &notifier.PushAPI{Store: pushStore, InternalToken: cfg.InternalKey},
 		pushService: &notifier.PushService{Sender: pushSender, Store: pushStore, InternalToken: cfg.InternalKey},
 		webhookAdmin: &notifier.WebhookAdmin{
 			Client: client, InternalToken: cfg.InternalKey,
@@ -171,16 +207,22 @@ func run(logger *slog.Logger) error {
 			},
 		},
 	}
-	if cfg.PollingEnabled && !cfg.DryRun && cfg.Token != "" && cfg.AdminChatID != 0 && cfg.EdgePassword != "" {
+	if (cfg.PollingEnabled || cfg.WebhookEnabled) && !cfg.DryRun && cfg.Token != "" && cfg.AdminChatID != 0 && cfg.EdgePassword != "" && pool != nil && cfg.InternalKey != "" {
 		runtime := &telegramRuntime{
 			client: client, edge: newEdgeClient(cfg.EdgeURL, cfg.EdgeOrigin, cfg.EdgePassword),
+			inbox:       &telegramInbox{pool: pool},
 			adminChatID: cfg.AdminChatID, logger: logger,
 		}
 		service.telegram = runtime
-		go runtime.Run(ctx)
-		logger.Info("telegram long polling habilitado", "edge", cfg.EdgeURL)
-	} else if cfg.PollingEnabled {
-		logger.Warn("telegram polling no iniciado: faltan token, chat, contraseña del edge o dry-run activo")
+		if cfg.PollingEnabled {
+			go runtime.Run(ctx)
+			logger.Info("telegram long polling habilitado", "edge", cfg.EdgeURL)
+		} else {
+			go runtime.RunWebhookInbox(ctx)
+			logger.Info("procesador durable de webhook Telegram habilitado", "edge", cfg.EdgeURL)
+		}
+	} else if cfg.PollingEnabled || cfg.WebhookEnabled {
+		logger.Warn("Telegram no iniciado: requiere token, chat, contraseña del edge, Postgres, token interno y dry-run apagado")
 	}
 	server := &http.Server{
 		Addr: ":" + cfg.Port, Handler: service,
@@ -208,6 +250,7 @@ type service struct {
 	client *notifier.Client
 	dedupe *notifier.Deduper
 	logger *slog.Logger
+	pool   *pgxpool.Pool
 
 	pushAPI      *notifier.PushAPI
 	pushService  *notifier.PushService
@@ -239,14 +282,35 @@ func (service *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && r.URL.Path == "/telegram/update":
 		service.telegramUpdate(w, r)
 	case strings.HasPrefix(r.URL.Path, "/admin/telegram"):
+		if !service.authorizeInternal(w, r) {
+			return
+		}
 		service.webhookAdmin.ServeHTTP(w, r)
 	case r.URL.Path == "/push/subscriptions":
+		if !service.authorizeInternal(w, r) {
+			return
+		}
 		service.pushAPI.ServeHTTP(w, r)
 	case r.URL.Path == "/push/send":
+		if !service.authorizeInternal(w, r) {
+			return
+		}
 		service.pushService.ServeHTTP(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
 	}
+}
+
+func (service *service) authorizeInternal(w http.ResponseWriter, r *http.Request) bool {
+	if service.cfg.InternalKey == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "internal_auth_unconfigured"})
+		return false
+	}
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Notifier-Token")), []byte(service.cfg.InternalKey)) != 1 {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthorized"})
+		return false
+	}
+	return true
 }
 
 func (service *service) readyz(w http.ResponseWriter) {
@@ -254,16 +318,25 @@ func (service *service) readyz(w http.ResponseWriter) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "mode": "dry_run"})
 		return
 	}
-	if service.cfg.Token == "" || service.cfg.ChatID == "" {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "telegram sin token/chat"})
+	if service.pool == nil || service.cfg.InternalKey == "" || service.cfg.Token == "" || service.cfg.ChatID == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "telegram, Postgres o autenticación interna no configurados"})
+		return
+	}
+	if (service.cfg.PollingEnabled || service.cfg.WebhookEnabled) && service.telegram == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "procesador de Telegram no iniciado"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := service.pool.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "error": "Postgres no disponible"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (service *service) notify(w http.ResponseWriter, r *http.Request) {
-	if service.cfg.InternalKey != "" && r.Header.Get("X-Notifier-Token") != service.cfg.InternalKey {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthorized"})
+	if !service.authorizeInternal(w, r) {
 		return
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
@@ -281,14 +354,37 @@ func (service *service) notify(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "bad_request", "error": "texto inválido"})
 		return
 	}
-	if service.dedupe.Seen(request.DedupeKey) {
-		service.deduped.Add(1)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
-		return
-	}
 	if service.cfg.DryRun {
+		if service.dedupe.Seen(request.DedupeKey) {
+			service.deduped.Add(1)
+			writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
+			return
+		}
 		service.sent.Add(1)
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "dry_run"})
+		return
+	}
+	dedupeKey := strings.TrimSpace(request.DedupeKey)
+	if dedupeKey == "" || len(dedupeKey) > 200 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "dedupe_key_required"})
+		return
+	}
+	if service.pool == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "durable_dedupe_unavailable"})
+		return
+	}
+	claimCtx, claimCancel := context.WithTimeout(r.Context(), 2*time.Second)
+	claimed, err := service.claimNotification(claimCtx, dedupeKey)
+	claimCancel()
+	if err != nil {
+		service.errors.Add(1)
+		service.logger.Warn("reclamar clave de notificación falló", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "dedupe_store_unavailable"})
+		return
+	}
+	if !claimed {
+		service.deduped.Add(1)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "duplicate"})
 		return
 	}
 	chatID := strings.TrimSpace(request.ChatID)
@@ -308,7 +404,15 @@ func (service *service) notify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (service *service) telegramUpdate(w http.ResponseWriter, r *http.Request) {
-	if service.cfg.TelegramSecret != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != service.cfg.TelegramSecret {
+	if !service.cfg.WebhookEnabled {
+		writeJSON(w, http.StatusNotFound, map[string]string{"status": "not_found"})
+		return
+	}
+	if service.cfg.TelegramSecret == "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "webhook_secret_unavailable"})
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Telegram-Bot-Api-Secret-Token")), []byte(service.cfg.TelegramSecret)) != 1 {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"status": "unauthorized"})
 		return
 	}
@@ -322,37 +426,18 @@ func (service *service) telegramUpdate(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"status": "invalid_update"})
 		return
 	}
-	if service.telegram != nil {
-		reply, handled := service.telegram.handle(r.Context(), update)
-		if handled {
-			service.sent.Add(1)
-			writeJSON(w, http.StatusAccepted, map[string]any{"status": "handled", "reply": reply})
-			return
-		}
-	}
-	result := notifier.HandleUpdate(update, notifier.Authorization{AdminChatID: service.cfg.AdminChatID})
-	menu := notifier.MenuForAction(result.Decision.Action, result.Decision.Mutation)
-	payload := map[string]any{
-		"updateId": result.UpdateID, "chatId": result.ChatID,
-		"action": result.Decision.Action, "mutation": result.Decision.Mutation,
-		"reply": result.Reply, "menu": menu,
-	}
-	if service.cfg.DryRun {
-		service.sent.Add(1)
-		writeJSON(w, http.StatusAccepted, payload)
+	if service.telegram == nil || service.telegram.inbox == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "telegram_processor_unavailable"})
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	if err := service.client.SendMenu(ctx, strconv.FormatInt(result.ChatID, 10), result.Reply,
-		notifier.KeyboardFromMenu(menu)); err != nil {
+	_, stored, err := service.telegram.inbox.Store(r.Context(), []json.RawMessage{body})
+	if err != nil || !stored {
 		service.errors.Add(1)
-		service.logger.Warn("respuesta Telegram falló", "error", err)
-		writeJSON(w, http.StatusBadGateway, map[string]string{"status": "telegram_error"})
+		service.logger.Warn("no se pudo persistir update de webhook Telegram", "error", err)
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "telegram_inbox_unavailable"})
 		return
 	}
-	service.sent.Add(1)
-	writeJSON(w, http.StatusAccepted, payload)
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "queued", "updateId": update.UpdateID})
 }
 
 func (service *service) metrics(w http.ResponseWriter) {

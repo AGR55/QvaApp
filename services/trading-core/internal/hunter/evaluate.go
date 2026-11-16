@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
@@ -107,6 +108,15 @@ type Evaluation struct {
 	OfferType        string
 	CounterpartyID   string
 	CounterpartyName string
+	ObservedAt       int64
+}
+
+func offerObservedAt(value string) int64 {
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	if err != nil {
+		return 0
+	}
+	return parsed.UnixMilli()
 }
 
 // MarshalJSON expone tasas como texto decimal estable, sin serializar big.Rat.
@@ -128,6 +138,7 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		OfferType        string `json:"offerType,omitempty"`
 		CounterpartyID   string `json:"counterpartyId,omitempty"`
 		CounterpartyName string `json:"counterpartyName,omitempty"`
+		ObservedAt       int64  `json:"observedAt"`
 	}{
 		OfferUUID: e.OfferUUID, Coin: e.Coin, Side: e.Side,
 		Amount: e.Amount.Format(8), Receive: e.Receive.Format(8),
@@ -137,6 +148,7 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		OrderMin: e.OrderMin.Format(8), OrderMax: e.OrderMax.Format(8),
 		OfferType: e.OfferType, CounterpartyID: e.CounterpartyID,
 		CounterpartyName: e.CounterpartyName,
+		ObservedAt:       e.ObservedAt,
 	})
 }
 
@@ -162,9 +174,18 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 		OfferType:        offer.Type,
 		CounterpartyID:   offerCounterparty(offer),
 		CounterpartyName: offerCounterpartyName(offer),
+		ObservedAt:       offerObservedAt(offer.UpdatedAt),
 	}
 	if offer.Status != "open" || offer.Amount.Sign() <= 0 || offer.Receive.Sign() <= 0 {
 		evaluation.Reason = "Oferta no abierta o importes no positivos"
+		return evaluation
+	}
+	if offer.OnlyVIP == nil || *offer.OnlyVIP {
+		evaluation.Reason = "Restricción VIP o indicador no disponible"
+		return evaluation
+	}
+	if offer.Pause != nil || offer.RequirementsMet != nil && !*offer.RequirementsMet {
+		evaluation.Reason = "Oferta pausada o no cumple los requisitos del anunciante"
 		return evaluation
 	}
 	rate, err := offer.Receive.Div(offer.Amount)
@@ -200,6 +221,14 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 		if market.BuyMaxRate.Sign() > 0 && rate.Cmp(market.BuyMaxRate) > 0 {
 			evaluation.Reason = fmt.Sprintf("Supera máximo de compra (%s)", market.BuyMaxRate.Compact())
 			return evaluation
+		}
+		if market.OutgoingFee.Sign() > 0 {
+			effectiveRate, err := offer.Receive.Add(market.OutgoingFee).Div(offer.Amount)
+			if err != nil || market.BuyMaxRate.Sign() > 0 && effectiveRate.Cmp(market.BuyMaxRate) > 0 {
+				evaluation.Decision = "blocked"
+				evaluation.Reason = fmt.Sprintf("La tasa efectiva %s supera el máximo de compra (%s)", effectiveRate.Compact(), market.BuyMaxRate.Compact())
+				return evaluation
+			}
 		}
 		median := average.MedianSell
 		if median.Sign() <= 0 {

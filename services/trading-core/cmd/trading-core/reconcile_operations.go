@@ -17,6 +17,7 @@ import (
 
 type offerReader interface {
 	Offer(ctx context.Context, uuid string) (qvapay.Offer, error)
+	User(ctx context.Context) (qvapay.User, error)
 }
 
 type localOperationStore interface {

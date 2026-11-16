@@ -19,6 +19,7 @@ import (
 type telegramRuntime struct {
 	client      *notifier.Client
 	edge        *edgeClient
+	inbox       *telegramInbox
 	adminChatID int64
 	logger      *slog.Logger
 
@@ -31,34 +32,112 @@ type telegramRuntime struct {
 }
 
 func (runtime *telegramRuntime) Run(ctx context.Context) {
+	if err := runtime.inbox.MarkInterruptedUncertain(ctx); err != nil {
+		runtime.logger.Error("no se pudo recuperar el inbox de Telegram; polling detenido", "error", err)
+		return
+	}
 	if err := runtime.client.DeleteWebhook(ctx); err != nil {
 		runtime.logger.Warn("telegram deleteWebhook falló", "error", err)
 	}
 	offset := int64(0)
 	for {
+		if err := runtime.processPending(ctx); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			runtime.logger.Warn("procesar inbox de Telegram falló", "error", err)
+			if !runtime.waitRetry(ctx) {
+				return
+			}
+			continue
+		}
 		updates, err := runtime.client.GetUpdates(ctx, offset, 30*time.Second)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			runtime.logger.Warn("telegram getUpdates falló", "error", err)
-			select {
-			case <-ctx.Done():
+			if !runtime.waitRetry(ctx) {
 				return
-			case <-time.After(3 * time.Second):
 			}
 			continue
 		}
-		for _, raw := range updates {
-			update, ok := notifier.ParseUpdate(raw)
-			if !ok {
-				continue
+		maxID, stored, err := runtime.inbox.Store(ctx, updates)
+		if err != nil {
+			runtime.logger.Error("no se pudieron guardar updates de Telegram; se reintentará el mismo offset", "error", err)
+			if !runtime.waitRetry(ctx) {
+				return
 			}
-			if update.UpdateID >= offset {
-				offset = update.UpdateID + 1
-			}
-			runtime.handle(ctx, update)
+			continue
 		}
+		if stored && maxID >= offset {
+			offset = maxID + 1
+		}
+	}
+}
+
+func (runtime *telegramRuntime) RunWebhookInbox(ctx context.Context) {
+	if err := runtime.inbox.MarkInterruptedUncertain(ctx); err != nil {
+		runtime.logger.Error("no se pudo recuperar el inbox de Telegram; worker detenido", "error", err)
+		return
+	}
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if err := runtime.processPending(ctx); err != nil && ctx.Err() == nil {
+			runtime.logger.Warn("procesar inbox de webhook Telegram falló", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (runtime *telegramRuntime) processPending(ctx context.Context) error {
+	for {
+		id, raw, err := runtime.inbox.Claim(ctx)
+		if err != nil {
+			return err
+		}
+		if raw == nil {
+			return nil
+		}
+		update, ok := notifier.ParseUpdate(raw)
+		if !ok {
+			if err := runtime.inbox.Finish(ctx, id, false); err != nil {
+				return err
+			}
+			runtime.logger.Warn("update de Telegram inválido guardado como incierto", "update_id", id)
+			continue
+		}
+		handled := false
+		func() {
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					runtime.logger.Error("panic procesando update Telegram; no se repetirá automáticamente", "update_id", id, "panic", recovered)
+				}
+			}()
+			_, handled = runtime.handle(ctx, update)
+		}()
+		if err := runtime.inbox.Finish(ctx, id, handled); err != nil {
+			return err
+		}
+		if !handled {
+			runtime.logger.Warn("update Telegram finalizado con resultado incierto para evitar repetir acciones", "update_id", id)
+		}
+	}
+}
+
+func (runtime *telegramRuntime) waitRetry(ctx context.Context) bool {
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 

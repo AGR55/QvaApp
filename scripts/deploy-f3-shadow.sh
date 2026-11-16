@@ -102,12 +102,13 @@ core_operations_migration_file="$release_dir/services/db/migrations/0014_core_op
 push_subscriptions_migration_file="$release_dir/services/db/migrations/0015_push_subscriptions.sql"
 transactions_migration_file="$release_dir/services/db/migrations/0016_qvapay_transactions.sql"
 runtime_config_migration_file="$release_dir/services/db/migrations/0017_runtime_config.sql"
+service_delivery_migration_file="$release_dir/services/db/migrations/0018_service_delivery.sql"
 if [[ ! -f $compose_file || ! -f $release_dir/services/trading-core/Dockerfile.binary ]]; then
   echo "El archivo de release no contiene el despliegue F3 esperado." >&2
   exit 2
 fi
-if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file || ! -f $core_executions_migration_file || ! -f $core_operations_migration_file || ! -f $push_subscriptions_migration_file || ! -f $transactions_migration_file || ! -f $runtime_config_migration_file ]]; then
-  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012/0013/0014/0015/0016/0017." >&2
+if [[ ! -f $migration_file || ! -f $invariants_migration_file || ! -f $soak_migration_file || ! -f $qvapay_migration_file || ! -f $offers_migration_file || ! -f $hunter_migration_file || ! -f $hunter_events_migration_file || ! -f $hunter_source_migration_file || ! -f $core_decisions_migration_file || ! -f $core_executions_migration_file || ! -f $core_operations_migration_file || ! -f $push_subscriptions_migration_file || ! -f $transactions_migration_file || ! -f $runtime_config_migration_file || ! -f $service_delivery_migration_file ]]; then
+  echo "El release no contiene las migraciones shadow 0004/0005/0006/0007/0008/0009/0010/0011/0012/0013/0014/0015/0016/0017/0018." >&2
   exit 2
 fi
 
@@ -237,6 +238,7 @@ PY
     "SELECT value FROM settings WHERE key = 'market_feed_app_secret';" | tr -d '\r')
   if [[ $local_key =~ ^[a-fA-F0-9]{64}$ && -n $encrypted_token ]]; then
     install -d -m 700 "$hunter_data_dir"
+    install -d -o 65532 -g 65532 -m 700 "$hunter_data_dir/spool"
     temporary_env=$(mktemp "$app_root/hunter.env.XXXXXX")
     {
       printf 'LOCAL_ENCRYPTION_KEY=%s\n' "$local_key"

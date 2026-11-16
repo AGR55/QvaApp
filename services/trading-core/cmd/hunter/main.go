@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -24,6 +25,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/AGR55/QvaApp/services/shared/decimal"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/hunting"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/hunter"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
@@ -34,6 +37,7 @@ const (
 	defaultPort     = "8091"
 	defaultPollMS   = 0
 	defaultConfig   = "/config/hunter-config.json"
+	defaultSpoolDir = "/var/lib/hunter-spool"
 	shutdownTimeout = 10 * time.Second
 
 	// pollTickInterval es la resolución del planificador. El intervalo real
@@ -53,9 +57,11 @@ type config struct {
 	AppID       string
 	AppSecret   string
 	FeedToken   string
+	SpoolDir    string
 }
 
 type pollResult struct {
+	SpoolID     string `json:"-"`
 	PolledAt    int64
 	LatencyMS   int64
 	Offers      int
@@ -71,17 +77,24 @@ type source interface {
 }
 
 type qvapaySource struct {
-	client     *qvapay.Client
-	readers    func(context.Context) []*qvapay.Client
-	index      atomic.Uint64
-	mu         sync.Mutex
-	averages   map[string]qvapay.Average
-	averagesAt time.Time
-	ownUUID    string
+	client           *qvapay.Client
+	readers          func(context.Context) []*qvapay.Client
+	index            atomic.Uint64
+	mu               sync.Mutex
+	averages         map[string]qvapay.Average
+	averagesAt       time.Time
+	refreshing       bool
+	ownUUID          string
+	eligibilityMu    sync.Mutex
+	eligibilityState *hunting.State
 }
 
 func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
-	offers, err := source.nextClient(ctx).Offers(ctx, nil)
+	params := url.Values{
+		"take": {"100"}, "page": {"1"}, "status": {"open"},
+		"orderBy": {"best_rate"}, "orderType": {"desc"},
+	}
+	offers, err := source.nextClient(ctx).Offers(ctx, params)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -98,12 +111,15 @@ func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[stri
 // auto-aplicación, pero no se debe bloquear la caza por un fallo de lectura.
 func (source *qvapaySource) withoutOwnOffers(ctx context.Context, offers []qvapay.Offer) []qvapay.Offer {
 	own := source.ownIdentity(ctx)
+	for _, offer := range offers {
+		source.recordOfferProfiles(offer, own, time.Now())
+	}
 	if own == "" {
 		return offers
 	}
 	filtered := make([]qvapay.Offer, 0, len(offers))
 	for _, offer := range offers {
-		if offer.UUID == "" || offerCreator(offer) == own {
+		if offer.UUID == "" || offerHasIdentity(offer, own) {
 			continue
 		}
 		filtered = append(filtered, offer)
@@ -127,38 +143,199 @@ func (source *qvapaySource) ownIdentity(ctx context.Context) string {
 	source.ownUUID = strings.TrimSpace(user.UUID)
 	uuid := source.ownUUID
 	source.mu.Unlock()
+	source.recordProfile(user.Profile, time.Now())
 	return uuid
 }
 
-// offerCreator lee el UUID del creador de la oferta.
-func offerCreator(offer qvapay.Offer) string {
-	if len(offer.User) > 0 {
-		var object map[string]any
-		if json.Unmarshal(offer.User, &object) == nil {
-			if uuid, ok := object["uuid"].(string); ok {
-				return strings.TrimSpace(uuid)
-			}
+func (source *qvapaySource) recordProfile(fields map[string]any, now time.Time) {
+	if len(fields) == 0 {
+		return
+	}
+	eligibility := profileEligibility(fields, now)
+	source.eligibilityMu.Lock()
+	defer source.eligibilityMu.Unlock()
+	if source.eligibilityState == nil {
+		source.eligibilityState = hunting.NewState()
+	}
+	source.eligibilityState.RecordEligibility(eligibility, decimal.FromInt(now.UnixMilli()))
+}
+
+func profileEligibility(fields map[string]any, now time.Time) hunting.Eligibility {
+	var result hunting.Eligibility
+	count, _ := fields["_count"].(map[string]any)
+	p2p, p2pOK := profileNumber(count["P2P"])
+	peer, peerOK := profileNumber(count["P2P_Peer"])
+	if p2pOK && peerOK {
+		completed := p2p.Add(peer)
+		result.Completed = &completed
+	}
+	if value, ok := profileNumber(firstProfileValue(fields["rating_avg"], fields["average_rating"])); ok {
+		result.Rating = &value
+	}
+	if value, ok := profileNumber(firstProfileValue(fields["trustscore"], fields["trust_score"])); ok {
+		result.TrustScore = &value
+	}
+	if raw, ok := fields["created_at"].(string); ok {
+		created, err := time.Parse(time.RFC3339Nano, raw)
+		if err == nil && !created.After(now) {
+			days := decimal.FromInt(int64(now.Sub(created) / (24 * time.Hour)))
+			result.AccountDays = &days
 		}
 	}
-	return strings.TrimSpace(offer.OwnerUUID)
+	switch kyc := fields["kyc"].(type) {
+	case bool:
+		value := decimal.Zero()
+		if kyc {
+			value = decimal.FromInt(1)
+		}
+		result.Kyc = &value
+	case string:
+		if kyc == "verified" {
+			value := decimal.FromInt(1)
+			result.Kyc = &value
+		}
+	}
+	return result
+}
+
+func firstProfileValue(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func profileNumber(value any) (decimal.Value, bool) {
+	if value == nil {
+		return decimal.Zero(), false
+	}
+	var text string
+	switch typed := value.(type) {
+	case json.Number:
+		text = typed.String()
+	case string:
+		text = strings.TrimSpace(typed)
+	case float64:
+		text = strconv.FormatFloat(typed, 'f', -1, 64)
+	default:
+		return decimal.Zero(), false
+	}
+	parsed, err := decimal.Parse(text)
+	return parsed, err == nil && parsed.Sign() >= 0
+}
+
+func profileUUID(raw json.RawMessage) string {
+	var profile map[string]any
+	if json.Unmarshal(raw, &profile) != nil {
+		return ""
+	}
+	uuid, _ := profile["uuid"].(string)
+	return strings.TrimSpace(uuid)
+}
+
+func (source *qvapaySource) recordOfferProfiles(offer qvapay.Offer, owner string, now time.Time) {
+	if owner == "" {
+		return
+	}
+	for _, raw := range []json.RawMessage{offer.User, offer.Peer} {
+		if profileUUID(raw) != owner {
+			continue
+		}
+		var profile map[string]any
+		if json.Unmarshal(raw, &profile) == nil {
+			source.recordProfile(profile, now)
+		}
+	}
+}
+
+func (source *qvapaySource) huntingRequirementReason(offer qvapay.Offer, now time.Time) (string, bool) {
+	if source == nil {
+		return "", false
+	}
+	source.eligibilityMu.Lock()
+	defer source.eligibilityMu.Unlock()
+	if source.eligibilityState == nil {
+		return "", false
+	}
+	return source.eligibilityState.Reason(hunting.Offer{
+		RequirementsMet: offer.RequirementsMet,
+		HasRequirements: len(offer.Requirements) > 0,
+		Requirements:    offer.Requirements,
+		OnlyKyc:         offer.OnlyKYC,
+	}, decimal.FromInt(now.UnixMilli()))
+}
+
+func offerHasIdentity(offer qvapay.Offer, uuid string) bool {
+	if uuid == "" {
+		return false
+	}
+	if strings.TrimSpace(offer.OwnerUUID) == uuid {
+		return true
+	}
+	for _, party := range []json.RawMessage{offer.User, offer.Peer} {
+		if profileUUID(party) == uuid {
+			return true
+		}
+	}
+	return false
 }
 
 func (source *qvapaySource) Averages(ctx context.Context) (map[string]qvapay.Average, error) {
 	source.mu.Lock()
-	defer source.mu.Unlock()
-	if len(source.averages) > 0 && time.Since(source.averagesAt) < 5*time.Minute {
-		return source.averages, nil
-	}
-	averages, err := source.nextClient(ctx).Averages(ctx)
-	if err != nil {
-		if len(source.averages) > 0 {
-			return source.averages, nil
+	age := time.Since(source.averagesAt)
+	if len(source.averages) > 0 && age < 5*time.Minute {
+		averages := source.averages
+		if !source.refreshing && age > 4*time.Minute {
+			source.refreshing = true
+			go source.refreshAverages()
 		}
+		source.mu.Unlock()
+		return averages, nil
+	}
+	if len(source.averages) > 0 {
+		if source.refreshing {
+			source.mu.Unlock()
+			return nil, errors.New("promedios vencidos; actualización en curso")
+		}
+		source.refreshing = true
+		source.mu.Unlock()
+		return source.fetchFreshAverages(ctx)
+	}
+	if source.refreshing {
+		source.mu.Unlock()
+		return nil, errors.New("promedios aún no disponibles; actualización en curso")
+	}
+	source.refreshing = true
+	source.mu.Unlock()
+	return source.fetchFreshAverages(ctx)
+}
+
+func (source *qvapaySource) fetchFreshAverages(ctx context.Context) (map[string]qvapay.Average, error) {
+	averages, err := source.nextClient(ctx).Averages(ctx)
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	source.refreshing = false
+	if err != nil {
 		return nil, err
 	}
 	source.averages = averages
 	source.averagesAt = time.Now()
 	return averages, nil
+}
+
+func (source *qvapaySource) refreshAverages() {
+	ctx, cancel := context.WithTimeout(context.Background(), pollTimeout)
+	defer cancel()
+	averages, err := source.nextClient(ctx).Averages(ctx)
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	source.refreshing = false
+	if err == nil {
+		source.averages = averages
+		source.averagesAt = time.Now()
+	}
 }
 
 // nextClient rota entre las cuentas lectoras habilitadas. Cada llamada avanza
@@ -211,16 +388,22 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
+	// El hunter puede arrancar sin Postgres para reproducir el spool local y
+	// seguir reteniendo eventos SSE durante una interrupción de la base.
 	if err := pool.Ping(ctx); err != nil {
-		return fmt.Errorf("postgres no responde: %w", err)
+		logger.Warn("postgres no responde al inicio; hunter conserva eventos en spool y reintentará persistir", "error", err)
 	}
 
 	service := &service{
-		logger: logger, cfg: cfg, pool: pool,
+		logger: logger, cfg: cfg, runCtx: ctx, pool: pool,
 		vault: vaultClient, baseURL: cfg.BaseURL,
 		runtime:     &runtimeconfig.Repository{Pool: pool},
 		ready:       make(chan struct{}),
 		streamQueue: make(chan *pollResult, 4096),
+	}
+	service.spool, err = openDurableSpool(cfg.SpoolDir)
+	if err != nil {
+		return err
 	}
 	// Sin configuración runtime el planificador conserva el intervalo de la
 	// variable de entorno.
@@ -234,8 +417,6 @@ func run(logger *slog.Logger) error {
 	reloadCtx, cancelReload := context.WithTimeout(ctx, runtimeReloadTimeout)
 	service.reloadRuntimeConfig(reloadCtx)
 	cancelReload()
-	service.startStream(ctx, logger)
-
 	server := &http.Server{
 		Addr: ":" + cfg.Port, Handler: service,
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
@@ -246,6 +427,8 @@ func run(logger *slog.Logger) error {
 	go service.loop(ctx)
 	go service.runtimeLoop(ctx)
 	go service.batchLoop(ctx)
+	go service.replaySpool(ctx)
+	service.startStream(ctx, logger)
 
 	logger.Info("hunter iniciado", "port", cfg.Port, "poll_ms", cfg.PollMS, "config", cfg.ConfigFile)
 	select {
@@ -271,6 +454,7 @@ func loadConfig() (config, error) {
 		AppID:       strings.TrimSpace(os.Getenv("QVA_APP_ID_CIPHERTEXT")),
 		AppSecret:   strings.TrimSpace(os.Getenv("QVA_APP_SECRET_CIPHERTEXT")),
 		FeedToken:   strings.TrimSpace(os.Getenv("HUNTER_FEED_TOKEN")),
+		SpoolDir:    envOrDefault("HUNTER_SPOOL_DIR", defaultSpoolDir),
 	}
 	if cfg.DatabaseURL == "" {
 		return config{}, errors.New("falta DATABASE_URL")
@@ -285,6 +469,9 @@ func loadConfig() (config, error) {
 	if err != nil || pollMS < 0 || pollMS > 60_000 || (pollMS > 0 && pollMS < 1000) {
 		return config{}, errors.New("HUNTER_POLL_MS debe ser 0 (SSE-only) o estar entre 1000 y 60000")
 	}
+	if pollMS > 0 && pollMS < 2400 {
+		pollMS = 2400 // no superar 25 lecturas de listado por minuto.
+	}
 	cfg.PollMS = pollMS
 	port, err := strconv.Atoi(cfg.Port)
 	if err != nil || port < 1 || port > 65535 {
@@ -294,14 +481,17 @@ func loadConfig() (config, error) {
 }
 
 type service struct {
-	logger  *slog.Logger
-	cfg     config
-	pool    *pgxpool.Pool
-	source  source
-	vault   *vault.Vault
-	baseURL string
-	runtime *runtimeconfig.Repository
-	ready   chan struct{}
+	logger    *slog.Logger
+	cfg       config
+	runCtx    context.Context
+	pool      *pgxpool.Pool
+	source    source
+	vault     *vault.Vault
+	baseURL   string
+	runtime   *runtimeconfig.Repository
+	ready     chan struct{}
+	readyOnce sync.Once
+	spool     *durableSpool
 
 	// pollInterval y paused los refresca runtimeLoop cada 5 s. El intervalo
 	// está en milisegundos; 0 significa sin poll (solo SSE).
@@ -416,6 +606,9 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 // handleOffer es el camino común de SSE y webhook: evalúa y encola el evento
 // sin bloquear el lector con la base de datos.
 func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt, source string) {
+	if service.paused.Load() {
+		return
+	}
 	service.offers.Add(1)
 	switch eventName {
 	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
@@ -425,6 +618,13 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	service.streamEvents.Add(1)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if source, ok := service.source.(*qvapaySource); ok {
+		owner := source.ownIdentity(ctx)
+		source.recordOfferProfiles(offer, owner, time.Now())
+		if owner != "" && offerHasIdentity(offer, owner) {
+			return
+		}
+	}
 	averages, err := service.source.Averages(ctx)
 	if err != nil {
 		service.streamErrors.Add(1)
@@ -438,9 +638,11 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	}
 	started := time.Now()
 	decision := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
+	service.applyHuntingRequirements(&decision, offer, time.Now())
 	lag := int64(0)
-	if parsed, err := time.Parse(time.RFC3339, sentAt); err == nil {
+	if parsed, err := time.Parse(time.RFC3339Nano, sentAt); err == nil {
 		lag = maxInt64(0, time.Since(parsed).Milliseconds())
+		decision.ObservedAt = parsed.UnixMilli()
 	}
 	result := &pollResult{
 		PolledAt: time.Now().Unix(), LatencyMS: lag, Offers: 1, Source: source,
@@ -455,6 +657,20 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	service.streamLastDecision.Store(time.Since(started).Microseconds())
 	service.candidates.Add(uint64(result.Candidates))
 	service.record(result)
+}
+
+func (service *service) applyHuntingRequirements(evaluation *hunter.Evaluation, offer qvapay.Offer, now time.Time) {
+	if evaluation == nil {
+		return
+	}
+	source, ok := service.source.(*qvapaySource)
+	if !ok {
+		return
+	}
+	if reason, blocked := source.huntingRequirementReason(offer, now); blocked {
+		evaluation.Decision = "ignored"
+		evaluation.Reason = reason
+	}
 }
 
 func boolInt(value bool) int {
@@ -545,6 +761,12 @@ func (service *service) poll(ctx context.Context) {
 			continue
 		}
 		evaluation := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
+		service.applyHuntingRequirements(&evaluation, offer, time.Now())
+		if evaluation.ObservedAt == 0 {
+			// La observación actual es el límite seguro disponible cuando la API
+			// no proporciona updated_at.
+			evaluation.ObservedAt = time.Now().UnixMilli()
+		}
 		result.Evaluations = append(result.Evaluations, evaluation)
 		if evaluation.Decision == "auto_buy" || evaluation.Decision == "manual_sell" {
 			result.Candidates++
@@ -565,16 +787,19 @@ func (service *service) record(result *pollResult) {
 	service.mu.Lock()
 	service.lastPoll = result
 	service.mu.Unlock()
-	select {
-	case <-service.ready:
-	default:
-		if result.Error == "" {
-			close(service.ready)
-		}
+	if result.Error == "" && service.ready != nil {
+		service.readyOnce.Do(func() { close(service.ready) })
 	}
 }
 
 func (service *service) enqueue(result *pollResult) {
+	if service.spool != nil {
+		if err := service.spool.Append(result); err != nil {
+			service.streamErrors.Add(1)
+			service.logger.Error("no se pudo asegurar el evento SSE en spool; se descarta antes de operar", "error", err)
+			return
+		}
+	}
 	select {
 	case service.streamQueue <- result:
 	default:
@@ -584,6 +809,18 @@ func (service *service) enqueue(result *pollResult) {
 		if err := service.persist(ctx, result); err != nil {
 			service.streamErrors.Add(1)
 			service.logger.Warn("persistir evento SSE falló", "error", err)
+			if service.runCtx != nil {
+				select {
+				case service.streamQueue <- result:
+					service.logger.Warn("evento SSE retenido en cola tras fallar persistencia directa")
+				case <-service.runCtx.Done():
+					service.logger.Warn("evento SSE no pudo conservarse durante el apagado")
+				}
+			}
+		} else if service.spool != nil {
+			if err := service.spool.Acknowledge([]*pollResult{result}); err != nil {
+				service.logger.Error("evento SSE guardado en Postgres pero no se pudo compactar el spool", "error", err)
+			}
 		}
 	}
 }
@@ -594,9 +831,14 @@ func (service *service) batchLoop(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Millisecond)
 	defer ticker.Stop()
 	batch := make([]*pollResult, 0, 256)
-	flush := func() {
+	retryAfter := time.Time{}
+	retryDelay := time.Second
+	flush := func() bool {
 		if len(batch) == 0 {
-			return
+			return true
+		}
+		if !retryAfter.IsZero() && time.Now().Before(retryAfter) {
+			return false
 		}
 		flushCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err := service.persistBatch(flushCtx, batch)
@@ -604,28 +846,55 @@ func (service *service) batchLoop(ctx context.Context) {
 		if err != nil {
 			service.streamErrors.Add(1)
 			service.logger.Warn("persistir lote SSE falló", "eventos", len(batch), "error", err)
-			for _, result := range batch {
-				retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
-				if retryErr := service.persist(retryCtx, result); retryErr != nil {
-					service.logger.Warn("reintento de persistencia SSE falló", "error", retryErr)
-				}
-				retryCancel()
+			retryAfter = time.Now().Add(retryDelay)
+			retryDelay *= 2
+			if retryDelay > 30*time.Second {
+				retryDelay = 30 * time.Second
+			}
+			return false
+		}
+		if service.spool != nil {
+			if err := service.spool.Acknowledge(batch); err != nil {
+				service.logger.Error("lote SSE guardado pero no se pudo compactar el spool", "error", err)
 			}
 		}
 		batch = batch[:0]
+		retryAfter = time.Time{}
+		retryDelay = time.Second
+		return true
 	}
 	for {
+		queue := (<-chan *pollResult)(service.streamQueue)
+		if len(batch) >= 256 {
+			queue = nil // conserva el lote fallido y deja que la cola acotada aplique backpressure.
+		}
 		select {
 		case <-ctx.Done():
-			flush()
+			retryAfter = time.Time{}
+			if !flush() && len(batch) > 0 {
+				service.logger.Error("eventos SSE pendientes al cerrar hunter con Postgres no disponible", "eventos", len(batch))
+			}
 			return
-		case result := <-service.streamQueue:
+		case result := <-queue:
 			batch = append(batch, result)
 			if len(batch) >= 256 {
 				flush()
 			}
 		case <-ticker.C:
 			flush()
+		}
+	}
+}
+
+func (service *service) replaySpool(ctx context.Context) {
+	if service.spool == nil {
+		return
+	}
+	for _, result := range service.spool.Pending() {
+		select {
+		case service.streamQueue <- result:
+		case <-ctx.Done():
+			return
 		}
 	}
 }
@@ -673,6 +942,7 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 	}
 
 	batch := &pgx.Batch{}
+	eventQueryIndexes := make(map[int]struct{})
 	for _, result := range results {
 		for _, evaluation := range result.Evaluations {
 			if evaluation.Decision == "ignored" {
@@ -696,8 +966,15 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 			if err != nil {
 				return err
 			}
-			sum := sha256.Sum256([]byte(evaluation.OfferUUID + "|" + evaluation.Decision + "|" + evaluation.Rate.Format(8)))
+			fingerprint := strings.Join([]string{
+				evaluation.OfferUUID, evaluation.Decision, evaluation.Rate.Format(8),
+				evaluation.Amount.Format(8), evaluation.Receive.Format(8),
+				evaluation.Available.Format(8), evaluation.OrderMin.Format(8), evaluation.OrderMax.Format(8),
+				strconv.FormatInt(result.PolledAt/300, 10), // permite reevaluar controles cada 5 min sin duplicar cada poll.
+			}, "|")
+			sum := sha256.Sum256([]byte(fingerprint))
 			eventID := "hunter-" + hex.EncodeToString(sum[:16])
+			eventQueryIndexes[batch.Len()] = struct{}{}
 			batch.Queue(`
 				INSERT INTO shadow.hunter_events
 					(event_id, offer_uuid, coin, side, decision, rate, payload_json,
@@ -708,15 +985,19 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 				evaluation.Decision, evaluation.Rate.Format(8), string(payload),
 				time.Now().UnixMilli(), result.PolledAt,
 			)
-			service.events.Add(1)
 		}
 	}
+	var eventsInserted uint64
 	if batch.Len() > 0 {
 		br := tx.SendBatch(ctx, batch)
 		for index := 0; index < batch.Len(); index++ {
-			if _, err := br.Exec(); err != nil {
+			tag, err := br.Exec()
+			if err != nil {
 				_ = br.Close()
 				return err
+			}
+			if _, isEventInsert := eventQueryIndexes[index]; isEventInsert && tag.RowsAffected() > 0 {
+				eventsInserted++
 			}
 		}
 		if err := br.Close(); err != nil {
@@ -729,6 +1010,7 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
+	service.events.Add(eventsInserted)
 	service.persistBatches.Add(1)
 	if service.persistBatches.Load()%600 == 0 {
 		cutoff := time.Now().Add(-24 * time.Hour).Unix()

@@ -75,7 +75,7 @@ func allowedTransition(from, to OperationState) bool {
 	case StateCreated:
 		return to == StateReserved
 	case StateReserved:
-		return to == StateSubmitted
+		return to == StateSubmitted || to == StateRejected
 	case StateSubmitted:
 		return to == StateConfirmed || to == StateRejected || to == StateUncertain
 	case StateUncertain:
@@ -229,6 +229,7 @@ func TestTransitionMatrix(t *testing.T) {
 
 func TestTransitionValidLifecycles(t *testing.T) {
 	paths := [][]OperationState{
+		{StateReserved, StateRejected},
 		{StateReserved, StateSubmitted, StateConfirmed},
 		{StateReserved, StateSubmitted, StateRejected},
 		{StateReserved, StateSubmitted, StateUncertain, StateReconciled},

@@ -132,7 +132,7 @@ func canTransition(from, to OperationState) bool {
 	case StateCreated:
 		return to == StateReserved
 	case StateReserved:
-		return to == StateSubmitted
+		return to == StateSubmitted || to == StateRejected
 	case StateSubmitted:
 		return to == StateConfirmed || to == StateRejected || to == StateUncertain || to == StateDryRun
 	case StateUncertain:

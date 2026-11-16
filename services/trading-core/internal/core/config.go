@@ -119,13 +119,14 @@ func LoadConfig(path string) (Config, error) {
 
 // Event es el candidato que llega desde hunter.
 type Event struct {
-	OfferUUID string
-	Coin      string
-	Side      string
-	Decision  string
-	Amount    decimal.Value
-	Receive   decimal.Value
-	Rate      decimal.Value
+	OfferUUID  string
+	Coin       string
+	Side       string
+	Decision   string
+	Amount     decimal.Value
+	Receive    decimal.Value
+	Rate       decimal.Value
+	ObservedAt int64
 	// Uso ya consumido, leído de las operaciones persistidas. Si queda en cero
 	// el riesgo solo aplica los límites por operación.
 	Usage Usage
@@ -165,6 +166,12 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 		}
 		side = riskpolicy.BuyQusd
 		requiredFiat = event.Receive.Add(market.OutgoingFee)
+		if market.BuyMaxRate.Sign() > 0 {
+			effectiveRate, err := requiredFiat.Div(event.Amount)
+			if err != nil || effectiveRate.Cmp(market.BuyMaxRate) > 0 {
+				return Result{Kind: "blocked", Reasons: []string{"La tasa efectiva supera el máximo de compra por la comisión de transferencia"}}, nil
+			}
+		}
 		switch event.Decision {
 		case "auto_buy":
 			priceDecision = riskpolicy.Eligible
@@ -204,13 +211,17 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 		expectedMargin = margin.Mul(decimal.FromInt(100))
 	}
 	now := decimal.FromInt(nowMS)
+	observedAt := decimal.FromInt(event.ObservedAt)
+	if event.ObservedAt <= 0 {
+		observedAt = decimal.Zero()
+	}
 	context := riskpolicy.Context{
 		Now: now,
 		Opportunity: riskpolicy.Opportunity{
 			UUID: event.OfferUUID, Market: event.Coin, Side: side,
 			QusdAmount: event.Amount, RequiredFiat: requiredFiat,
 			QuotedRate: event.Rate, ReferenceRate: event.Rate,
-			ObservedAt: now,
+			ObservedAt: observedAt,
 		},
 		Limits: config.Limits, PriceDecision: priceDecision,
 		PriceReason:           "Decisión del hunter: " + event.Decision,

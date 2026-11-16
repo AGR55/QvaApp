@@ -84,12 +84,13 @@ func (e *ConnectionError) Unwrap() error { return e.Err }
 
 // User es el perfil autenticado. Balance siempre queda informado.
 type User struct {
-	UUID      string        `json:"uuid"`
-	Username  string        `json:"username"`
-	Name      string        `json:"name"`
-	Email     string        `json:"email"`
-	Balance   decimal.Value `json:"balance"`
-	Available decimal.Value `json:"available"`
+	UUID      string         `json:"uuid"`
+	Username  string         `json:"username"`
+	Name      string         `json:"name"`
+	Email     string         `json:"email"`
+	Balance   decimal.Value  `json:"balance"`
+	Available decimal.Value  `json:"available"`
+	Profile   map[string]any `json:"-"`
 }
 
 // UnmarshalJSON acepta balance como número JSON o string decimal y conserva el
@@ -140,6 +141,7 @@ func (u *User) UnmarshalJSON(data []byte) error {
 		Email:     raw.Email,
 		Balance:   balance,
 		Available: available,
+		Profile:   profileFields(data),
 	}
 	return nil
 }
@@ -147,25 +149,30 @@ func (u *User) UnmarshalJSON(data []byte) error {
 // Offer es una oferta P2P. User y Peer se conservan como JSON crudo para no
 // imponer un esquema a datos que el cliente solo reenvía o inspecciona.
 type Offer struct {
-	UUID            string          `json:"uuid"`
-	Type            string          `json:"type"`
-	Coin            string          `json:"coin"`
-	Amount          decimal.Value   `json:"amount"`
-	Receive         decimal.Value   `json:"receive"`
-	Rate            decimal.Value   `json:"rate"`
-	Status          string          `json:"status"`
-	AvailableAmount decimal.Value   `json:"available_amount"`
-	ReservedAmount  decimal.Value   `json:"reserved_amount"`
-	OrderMin        decimal.Value   `json:"order_min"`
-	OrderMax        decimal.Value   `json:"order_max"`
-	User            json.RawMessage `json:"User"`
-	Peer            json.RawMessage `json:"Peer"`
-	OwnerUUID       string          `json:"owner_uuid"`
-	OfferKind       string          `json:"offer_kind"`
-	Details         map[string]any  `json:"details"`
-	Orders          []OfferOrder    `json:"Orders"`
-	Message         string          `json:"message"`
-	UpdatedAt       string          `json:"updated_at"`
+	UUID            string                   `json:"uuid"`
+	Type            string                   `json:"type"`
+	Coin            string                   `json:"coin"`
+	Amount          decimal.Value            `json:"amount"`
+	Receive         decimal.Value            `json:"receive"`
+	Rate            decimal.Value            `json:"rate"`
+	Status          string                   `json:"status"`
+	AvailableAmount decimal.Value            `json:"available_amount"`
+	ReservedAmount  decimal.Value            `json:"reserved_amount"`
+	OrderMin        decimal.Value            `json:"order_min"`
+	OrderMax        decimal.Value            `json:"order_max"`
+	User            json.RawMessage          `json:"User"`
+	Peer            json.RawMessage          `json:"Peer"`
+	OwnerUUID       string                   `json:"owner_uuid"`
+	OfferKind       string                   `json:"offer_kind"`
+	OnlyVIP         *bool                    `json:"only_vip"`
+	RequirementsMet *bool                    `json:"requirements_met"`
+	Pause           any                      `json:"pause"`
+	OnlyKYC         bool                     `json:"only_kyc"`
+	Requirements    map[string]decimal.Value `json:"requirements,omitempty"`
+	Details         map[string]any           `json:"details"`
+	Orders          []OfferOrder             `json:"Orders"`
+	Message         string                   `json:"message"`
+	UpdatedAt       string                   `json:"updated_at"`
 }
 
 // OfferOrder es una orden hija de una oferta flexible.
@@ -222,6 +229,11 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		Peer            json.RawMessage `json:"Peer"`
 		OwnerUUID       string          `json:"owner_uuid"`
 		OfferKind       string          `json:"offer_kind"`
+		OnlyVIP         any             `json:"only_vip"`
+		RequirementsMet any             `json:"requirements_met"`
+		Pause           any             `json:"pause"`
+		OnlyKYC         any             `json:"only_kyc"`
+		Requirements    map[string]any  `json:"requirements"`
 		Details         map[string]any  `json:"details"`
 		Orders          []OfferOrder    `json:"Orders"`
 		Message         any             `json:"message"`
@@ -259,6 +271,21 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+	requirements := make(map[string]decimal.Value, 4)
+	for _, key := range []string{"min_completed", "min_rating", "min_account_days", "min_trustscore"} {
+		value, exists := raw.Requirements[key]
+		if !exists || isMissingNumber(value) {
+			continue
+		}
+		parsed, parseErr := optionalNonNegativeDecimal("requirements."+key, value)
+		if parseErr == nil {
+			requirements[key] = parsed
+		}
+	}
+	onlyKYC := false
+	if parsed := explicitBool(raw.OnlyKYC); parsed != nil {
+		onlyKYC = *parsed
+	}
 
 	*o = Offer{
 		UUID:            scalarString(raw.UUID),
@@ -276,10 +303,53 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 		Peer:            raw.Peer,
 		OwnerUUID:       raw.OwnerUUID,
 		OfferKind:       raw.OfferKind,
+		OnlyVIP:         explicitBool(raw.OnlyVIP),
+		RequirementsMet: explicitBool(raw.RequirementsMet),
+		Pause:           raw.Pause,
+		OnlyKYC:         onlyKYC,
+		Requirements:    requirements,
 		Details:         raw.Details,
 		Orders:          raw.Orders,
 		Message:         scalarString(raw.Message),
 		UpdatedAt:       scalarString(raw.UpdatedAt),
+	}
+	return nil
+}
+
+func profileFields(data []byte) map[string]any {
+	var fields map[string]any
+	if err := decodeJSON(data, &fields); err != nil || fields == nil {
+		return nil
+	}
+	if nested, ok := fields["data"].(map[string]any); ok {
+		for key, value := range nested {
+			if _, exists := fields[key]; !exists {
+				fields[key] = value
+			}
+		}
+	}
+	return fields
+}
+
+func explicitBool(value any) *bool {
+	switch typed := value.(type) {
+	case bool:
+		return &typed
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil && (parsed == 0 || parsed == 1) {
+			result := parsed == 1
+			return &result
+		}
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "false", "0":
+			result := false
+			return &result
+		case "true", "1":
+			result := true
+			return &result
+		}
 	}
 	return nil
 }

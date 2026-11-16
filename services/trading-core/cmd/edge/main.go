@@ -141,7 +141,11 @@ func run(logger *slog.Logger) error {
 	var pushSubscriptions *edge.PushSubscriptionsAPI
 	var analyticsFees *edge.AnalyticsFeesAPI
 	var mutations *edge.MutationsAPI
-	var qvapayWebhook *edge.QvapayWebhookAPI
+	qvapayWebhook := &edge.QvapayWebhookAPI{
+		Enabled: cfg.WebhookEnabled, Secret: cfg.WebhookSecret,
+		ForwardURL: cfg.HunterFeedURL, ForwardToken: cfg.HunterFeedToken,
+		ForwardQueue: make(chan []byte, 1024), Logger: logger,
+	}
 	var liveReader edge.LiveReader
 	var paymentPreview *edge.PaymentPreviewAPI
 	mobileAuth := &edge.MobileAuthAPI{File: cfg.MobileAuthFile}
@@ -203,11 +207,6 @@ func run(logger *slog.Logger) error {
 				Enabled: cfg.MutationsEnabled, Sessions: manager, MobileAuth: mobileAuth,
 				TrustedOrigin: cfg.TrustedOrigin,
 			}
-			qvapayWebhook = &edge.QvapayWebhookAPI{
-				Enabled: cfg.WebhookEnabled, Secret: cfg.WebhookSecret,
-				ForwardURL: cfg.HunterFeedURL, ForwardToken: cfg.HunterFeedToken,
-				ForwardQueue: make(chan []byte, 1024), Logger: logger,
-			}
 			if writePool != nil {
 				webExtras.Acks = &edge.PostgresAckStore{Pool: writePool}
 				decisionEvents.Dismissals = &edge.PostgresDismissalStore{Pool: writePool}
@@ -225,7 +224,9 @@ func run(logger *slog.Logger) error {
 				mutations.Fiat = &runtimeFiatMover{
 					repo: &runtimeconfig.Repository{Pool: writePool},
 				}
-				qvapayWebhook.Store = &edge.PostgresFeedEventStore{Pool: writePool}
+				feedStore := &edge.PostgresFeedEventStore{Pool: writePool}
+				qvapayWebhook.Store = feedStore
+				qvapayWebhook.ForwardStore = feedStore
 				go qvapayWebhook.RunForwarder(ctx)
 			}
 			if (cfg.MutationsLive || cfg.LiveDashboard) && cfg.QvaToken != "" && cfg.EncryptionKey != "" {

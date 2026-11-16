@@ -104,11 +104,16 @@ func TestAutoTraderLiveOutcomes(t *testing.T) {
 
 type fakeOfferReader struct {
 	offer qvapay.Offer
+	user  qvapay.User
 	err   error
 }
 
 func (reader *fakeOfferReader) Offer(context.Context, string) (qvapay.Offer, error) {
 	return reader.offer, reader.err
+}
+
+func (reader *fakeOfferReader) User(context.Context) (qvapay.User, error) {
+	return reader.user, reader.err
 }
 
 func TestAutoTraderConfirmedIsIdempotent(t *testing.T) {

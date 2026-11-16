@@ -12,9 +12,15 @@ import (
 
 func testService() *service {
 	return &service{
-		cfg:    config{DryRun: true, ChatID: "123"},
+		cfg:    config{DryRun: true, ChatID: "123", InternalKey: "secret"},
 		dedupe: notifier.NewDeduper(time.Minute),
 	}
+}
+
+func notifyHTTPRequest(payload []byte) *http.Request {
+	request := httptest.NewRequest(http.MethodPost, "/notify", bytes.NewReader(payload))
+	request.Header.Set("X-Notifier-Token", "secret")
+	return request
 }
 
 func TestNotifyDryRunAndDedupe(t *testing.T) {
@@ -22,7 +28,7 @@ func TestNotifyDryRunAndDedupe(t *testing.T) {
 	payload := []byte(`{"text":"hola","dedupeKey":"key-1"}`)
 	for index, want := range []int{http.StatusAccepted, http.StatusOK} {
 		recorder := httptest.NewRecorder()
-		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/notify", bytes.NewReader(payload)))
+		handler.ServeHTTP(recorder, notifyHTTPRequest(payload))
 		if recorder.Code != want {
 			t.Fatalf("intento %d status = %d, quiero %d: %s", index, recorder.Code, want, recorder.Body.String())
 		}
@@ -42,27 +48,49 @@ func TestNotifyRequiresInternalToken(t *testing.T) {
 	}
 }
 
-func TestTelegramUpdateDryRun(t *testing.T) {
+func TestTelegramUpdateDisabled(t *testing.T) {
 	service := testService()
-	service.cfg.AdminChatID = 123
 	body := []byte(`{"update_id":1,"message":{"chat":{"id":123},"from":{"id":123,"is_bot":false},"text":"/status"}}`)
 	recorder := httptest.NewRecorder()
 	service.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/telegram/update", bytes.NewReader(body)))
-	if recorder.Code != http.StatusAccepted {
+	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
 	}
-	if !bytes.Contains(recorder.Body.Bytes(), []byte(`"action":"status"`)) {
-		t.Fatalf("respuesta inesperada: %s", recorder.Body.String())
+}
+
+func TestTelegramUpdateRequiresSecret(t *testing.T) {
+	service := testService()
+	service.cfg.WebhookEnabled = true
+	body := []byte(`{"update_id":1,"message":{"chat":{"id":123},"from":{"id":123,"is_bot":false},"text":"/status"}}`)
+	recorder := httptest.NewRecorder()
+	service.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/telegram/update", bytes.NewReader(body)))
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 
 func TestTelegramUpdateSecret(t *testing.T) {
 	service := testService()
+	service.cfg.WebhookEnabled = true
 	service.cfg.TelegramSecret = "secreto"
 	body := []byte(`{"update_id":1,"message":{"chat":{"id":123},"from":{"id":123,"is_bot":false},"text":"/status"}}`)
 	recorder := httptest.NewRecorder()
 	service.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/telegram/update", bytes.NewReader(body)))
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d", recorder.Code)
+	}
+}
+
+func TestTelegramUpdateRequiresProcessor(t *testing.T) {
+	service := testService()
+	service.cfg.WebhookEnabled = true
+	service.cfg.TelegramSecret = "secreto"
+	body := []byte(`{"update_id":1,"message":{"chat":{"id":123},"from":{"id":123,"is_bot":false},"text":"/status"}}`)
+	request := httptest.NewRequest(http.MethodPost, "/telegram/update", bytes.NewReader(body))
+	request.Header.Set("X-Telegram-Bot-Api-Secret-Token", "secreto")
+	recorder := httptest.NewRecorder()
+	service.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d: %s", recorder.Code, recorder.Body.String())
 	}
 }

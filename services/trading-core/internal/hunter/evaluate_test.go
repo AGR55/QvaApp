@@ -16,9 +16,11 @@ func market() Market {
 }
 
 func offer(offerType, amount, receive string) qvapay.Offer {
+	notVIP := false
 	return qvapay.Offer{
 		UUID: "offer-1", Coin: "BANK_CUP", Type: offerType, Status: "open",
 		Amount: decimal.MustParse(amount), Receive: decimal.MustParse(receive),
+		OnlyVIP: &notVIP,
 	}
 }
 
