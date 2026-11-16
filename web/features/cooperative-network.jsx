@@ -142,7 +142,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
           </div>
           <div>
             <dt>NATS</dt>
-            <dd><ConnectionDot connected={network.natsConnected} /></dd>
+            <dd>{network.natsConnected ? <ConnectionDot connected /> : <span className="network-optional">Informativo</span>}</dd>
           </div>
           <div>
             <dt>Última respuesta</dt>
@@ -210,8 +210,8 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
                   </dl>
                   <form id={formId} className="network-market-form" onSubmit={(event) => { event.preventDefault(); void publish(market); }}>
                     <label htmlFor={`${market.code}-minimal`}>
-                      Cantidad mínima
-                      <span>QUSD que aceptas como mínimo</span>
+                      <span className="network-minimal-title">Cantidad mínima</span>
+                      <span className="network-minimal-hint">QUSD que aceptas como mínimo</span>
                     </label>
                     <Input
                       id={`${market.code}-minimal`}

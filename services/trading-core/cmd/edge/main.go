@@ -346,6 +346,22 @@ func run(logger *slog.Logger) error {
 			live.Observations = &edge.PostgresMarketObservationStore{Pool: writePool}
 		}
 		dashboard.Live = live
+		// Mantiene el snapshot caliente y alimenta el histórico de la gráfica
+		// aunque nadie tenga el panel abierto.
+		go func() {
+			ticker := time.NewTicker(20 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					warmCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					live.Snapshot(warmCtx)
+					cancel()
+				}
+			}
+		}()
 	}
 	if dashboardRead != nil && writePool != nil {
 		dashboardRead.Pool = writePool

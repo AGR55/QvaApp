@@ -114,6 +114,12 @@ func (live *LiveDashboard) recordMarketObservations(
 	live.recordAt = now
 	live.recordMu.Unlock()
 
+	// Retención semanal: el histórico solo alimenta una gráfica de 24 h y
+	// las comparaciones recientes. Se poda de forma best-effort.
+	if store, ok := live.Observations.(*PostgresMarketObservationStore); ok && now.Unix()%3600 < 30 {
+		_, _ = store.deleteBefore(ctx, now.Add(-7*24*time.Hour).UnixMilli())
+	}
+
 	for coin, average := range averages {
 		observation := MarketObservation{
 			CreatedAt: now.UnixMilli(), Coin: coin,
@@ -142,4 +148,18 @@ func (live *LiveDashboard) recordMarketObservations(
 			live.Logger.Warn("no se pudo guardar la observación de mercado", "coin", coin, "error", err)
 		}
 	}
+}
+
+// deleteBefore poda observaciones antiguas. Ignora el error: la gráfica no
+// debe fallar si la base rechaza la limpieza.
+func (store *PostgresMarketObservationStore) deleteBefore(ctx context.Context, cutoffMS int64) (int64, error) {
+	if store == nil || store.Pool == nil {
+		return 0, nil
+	}
+	tag, err := store.Pool.Exec(ctx,
+		`DELETE FROM shadow.market_observations WHERE created_at < $1`, cutoffMS)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
