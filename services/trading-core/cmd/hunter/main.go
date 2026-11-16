@@ -80,6 +80,7 @@ type qvapaySource struct {
 	client           *qvapay.Client
 	readers          func(context.Context) []*qvapay.Client
 	index            atomic.Uint64
+	side             atomic.Uint64
 	mu               sync.Mutex
 	averages         map[string]qvapay.Average
 	averagesAt       time.Time
@@ -90,8 +91,15 @@ type qvapaySource struct {
 }
 
 func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
+	// QvaPay exige un lado explícito para ordenar por best_rate. Alternamos
+	// `sell` (prioridad: compramos QUSD) y `buy` en cada vuelta para mantener
+	// una sola lectura de listado por ciclo y respetar la cuota de ~25/min.
+	offerType := "sell"
+	if source.side.Add(1)%2 == 0 {
+		offerType = "buy"
+	}
 	params := url.Values{
-		"take": {"100"}, "page": {"1"}, "status": {"open"},
+		"take": {"100"}, "page": {"1"}, "type": {offerType}, "status": {"open"},
 		"orderBy": {"best_rate"}, "orderType": {"desc"},
 	}
 	offers, err := source.nextClient(ctx).Offers(ctx, params)
