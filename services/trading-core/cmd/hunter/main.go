@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -76,11 +77,19 @@ type source interface {
 	Averages(context.Context) (map[string]qvapay.Average, error)
 }
 
+// offerTarget identifica una consulta de listado válida para best_rate: QvaPay
+// exige lado y moneda explícitos al ordenar por tasa.
+type offerTarget struct {
+	Coin string
+	Side string
+}
+
 type qvapaySource struct {
 	client           *qvapay.Client
 	readers          func(context.Context) []*qvapay.Client
+	targets          func() []offerTarget
 	index            atomic.Uint64
-	side             atomic.Uint64
+	targetIndex      atomic.Uint64
 	mu               sync.Mutex
 	averages         map[string]qvapay.Average
 	averagesAt       time.Time
@@ -91,16 +100,16 @@ type qvapaySource struct {
 }
 
 func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[string]qvapay.Average, error) {
-	// QvaPay exige un lado explícito para ordenar por best_rate. Alternamos
-	// `sell` (prioridad: compramos QUSD) y `buy` en cada vuelta para mantener
-	// una sola lectura de listado por ciclo y respetar la cuota de ~25/min.
-	offerType := "sell"
-	if source.side.Add(1)%2 == 0 {
-		offerType = "buy"
-	}
+	// Una sola lectura de listado por ciclo (~25/min) rota entre mercados y
+	// lados para poder ordenar por best_rate sin superar la cuota de QvaPay.
+	target := source.nextTarget()
 	params := url.Values{
-		"take": {"100"}, "page": {"1"}, "type": {offerType}, "status": {"open"},
-		"orderBy": {"best_rate"}, "orderType": {"desc"},
+		"take": {"100"}, "page": {"1"}, "type": {target.Side}, "status": {"open"},
+	}
+	if target.Coin != "" {
+		params.Set("coin", target.Coin)
+		params.Set("orderBy", "best_rate")
+		params.Set("orderType", "desc")
 	}
 	offers, err := source.nextClient(ctx).Offers(ctx, params)
 	if err != nil {
@@ -112,6 +121,18 @@ func (source *qvapaySource) Fetch(ctx context.Context) ([]qvapay.Offer, map[stri
 		return nil, nil, err
 	}
 	return offers, averages, nil
+}
+
+func (source *qvapaySource) nextTarget() offerTarget {
+	if source.targets != nil {
+		targets := source.targets()
+		if len(targets) > 0 {
+			index := source.targetIndex.Add(1) - 1
+			return targets[index%uint64(len(targets))]
+		}
+	}
+	// Sin configuración de mercados se mantiene una lectura global válida.
+	return offerTarget{Side: "sell"}
 }
 
 // withoutOwnOffers excluye las ofertas creadas por la propia cuenta. Si no se
@@ -416,7 +437,9 @@ func run(logger *slog.Logger) error {
 	// Sin configuración runtime el planificador conserva el intervalo de la
 	// variable de entorno.
 	service.pollInterval.Store(int64(cfg.PollMS))
-	service.source = &qvapaySource{client: client, readers: service.readerClients}
+	service.source = &qvapaySource{
+		client: client, readers: service.readerClients, targets: service.offerTargets,
+	}
 	if err := service.loadConfig(); err != nil {
 		logger.Warn("configuración hunter no disponible; el servicio seguirá sin mercados", "error", err)
 	}
@@ -746,6 +769,29 @@ func (service *service) currentConfig() hunter.Config {
 	service.configMu.RLock()
 	defer service.configMu.RUnlock()
 	return service.config
+}
+
+// offerTargets enumera los pares mercado/lado que la cacería necesita. El
+// orden es estable para repartir la cuota entre todos ellos de forma justa.
+func (service *service) offerTargets() []offerTarget {
+	config := service.currentConfig()
+	codes := make([]string, 0, len(config.Markets))
+	for code := range config.Markets {
+		codes = append(codes, code)
+	}
+	sort.Strings(codes)
+	targets := make([]offerTarget, 0, 2*len(codes))
+	for _, code := range codes {
+		if market := config.Markets[code]; market.Active && market.HuntBuy {
+			targets = append(targets, offerTarget{Coin: code, Side: "sell"})
+		}
+	}
+	for _, code := range codes {
+		if market := config.Markets[code]; market.Active && market.HuntSell {
+			targets = append(targets, offerTarget{Coin: code, Side: "buy"})
+		}
+	}
+	return targets
 }
 
 func (service *service) poll(ctx context.Context) {
