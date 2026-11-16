@@ -1678,7 +1678,7 @@ tbody td small {
 }
 .market-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   border: 1px solid var(--line);
   border-radius: var(--r-card);
   background: var(--surface);
@@ -4872,4 +4872,18 @@ td {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+@media (max-width: 1200px) {
+  .market-grid:has(> :nth-child(5)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* El acceso React usa el mismo ritmo que la página pública. */
+.login-panel-inner {
+  gap: 20px;
+}
+.login-brand-lockup {
+  margin-bottom: 0;
 }
