@@ -816,11 +816,9 @@ func (service *service) poll(ctx context.Context) {
 		}
 		evaluation := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
 		service.applyHuntingRequirements(&evaluation, offer, time.Now())
-		if evaluation.ObservedAt == 0 {
-			// La observación actual es el límite seguro disponible cuando la API
-			// no proporciona updated_at.
-			evaluation.ObservedAt = time.Now().UnixMilli()
-		}
+		// En polling la cotización se acaba de leer: la antigüedad relevante es
+		// desde esta observación, no el updated_at histórico de la oferta.
+		evaluation.ObservedAt = time.Now().UnixMilli()
 		result.Evaluations = append(result.Evaluations, evaluation)
 		if evaluation.Decision == "auto_buy" || evaluation.Decision == "manual_sell" {
 			result.Candidates++
