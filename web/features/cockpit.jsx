@@ -33,6 +33,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
     <div className="page-stack">
       <ViewHead
         title="Cockpit"
+        description="Estado operativo, liquidez y límites en una sola lectura."
       />
       <section className="control-deck" aria-label="Controles operativos">
         <div>
@@ -73,10 +74,12 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
       ) : null}
       <div className="freshness-row">
         <Freshness
+          label="Balance"
           state={resources.balance}
           cachedAt={data.freshness?.balance}
         />
         <Freshness
+          label="Ofertas"
           state={resources.ownOffers}
           cachedAt={data.freshness?.ownOffers}
         />

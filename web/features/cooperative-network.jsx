@@ -116,6 +116,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
     <div className="view-stack cooperative-network-view">
       <ViewHead
         title="Cacerías conjuntas"
+        description="Comparte liquidez con otros bots y publica tu capacidad por mercado."
         meta={(
           <Button type="button" variant="outline" disabled={!network.enabled || busy === "reconcile"} onClick={() => void reconcile()}>
             <RefreshCw aria-hidden="true" /> Reconectar

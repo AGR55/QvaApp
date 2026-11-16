@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Activity, CheckCircle2, Clock3, ShieldAlert, TrendingDown, TrendingUp, WalletCards, XCircle } from "lucide-react";
+import { Activity, CheckCircle2, Clock3, ShieldAlert, Trash2, TrendingDown, TrendingUp, WalletCards, XCircle } from "lucide-react";
 import { Empty, Panel, Skeleton, ViewHead } from "../components/common.jsx";
 import { Button } from "../components/ui.jsx";
 import {
@@ -27,6 +27,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog.tsx";
 import { requestJson } from "../lib/http.js";
+import { kindLabel, stateLabel } from "../lib/labels.js";
 import { RecoveryPanel } from "./recovery-panel.jsx";
 
 export function Audit({ data, onChanged }) {
@@ -150,6 +151,7 @@ export function Audit({ data, onChanged }) {
     <div className="page-stack audit-view">
     <ViewHead
       title="Auditoría"
+      description="Salud del sistema, ofertas bloqueadas y recuperación manual de intenciones."
     />
     <div className="audit-layout">
       <div className="audit-main">
@@ -160,15 +162,16 @@ export function Audit({ data, onChanged }) {
             <Health label="Mutaciones pendientes" ok={!data.risk.usage.unresolvedMutation} value={data.risk.usage.unresolvedMutation ? "En conciliación" : "Ninguna"} />
             <Health label="Parada de emergencia" ok={!data.risk.usage.emergencyStop} value={data.risk.usage.emergencyStop ? "Activada" : "Desactivada"} />
           </dl></Panel>
-          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{item.state}</small></li>)}</ol> : <Empty title="Sin reservas" icon={WalletCards}>No hay capital apartado por operaciones.</Empty>}</Panel>
+          <Panel title="Reservas de capital">{data.capitalReservations?.length ? <ol className="audit-list">{data.capitalReservations.map((item) => <li key={item.workflowId}><span>{item.market}</span><strong>{item.amount} QUSD</strong><small>{stateLabel(item.state)}</small></li>)}</ol> : <Empty title="Sin reservas" icon={WalletCards}>No hay capital apartado por operaciones.</Empty>}</Panel>
         </div>
-        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{item.kind}</span><strong>{item.state}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty title="Sin intenciones remotas" icon={Clock3}>No hay acciones remotas pendientes de reconciliar.</Empty>}</Panel>
+        <Panel title="Intenciones remotas">{data.mutationIntents?.length ? <ol className="audit-list">{data.mutationIntents.map((item) => <li key={item.intentId}><span>{kindLabel(item.kind)}</span><strong>{stateLabel(item.state)}</strong><small>{item.operationUuid || "sin UUID"} · {new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty title="Sin intenciones remotas" icon={Clock3}>No hay acciones remotas pendientes de reconciliar.</Empty>}</Panel>
         <RecoveryPanel onChanged={onChanged} />
         <Panel title="Registro de auditoría">{data.activity?.length ? <ol className="audit-list timeline-list">{data.activity.map((item, index) => <li key={`${item.createdAt}-${index}`}><span>{item.action}</span><strong>{item.detail}</strong><small>{new Date(item.createdAt).toLocaleString("es-CU")}</small></li>)}</ol> : <Empty title="Sin actividad reciente" icon={Activity}>Las acciones registradas aparecerán aquí.</Empty>}</Panel>
       </div>
       <aside className="blocked-rail" aria-label="Ofertas bloqueadas pendientes">
-        <div className="blocked-rail-head"><div><h2>Ofertas bloqueadas</h2></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
+        <div className="blocked-rail-head"><div><h2>Ofertas bloqueadas</h2><p>Decisiones que requieren tu revisión.</p></div><span className="count-badge">{events?.pending ?? blocked.length}</span></div>
         <Button variant="outline" size="sm" disabled={dismissAllBusy || eventsLoading || !events?.pending} onClick={() => void prepareDismissAll()}>
+          <Trash2 aria-hidden="true" />
           {dismissAllBusy ? "Preparando…" : "Descartar todas"}
         </Button>
         {dismissAllMessage ? <p className="recovery-message" role="status">{dismissAllMessage}</p> : null}

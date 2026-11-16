@@ -87,9 +87,10 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
     <div className="capital-stack">
       <ViewHead
         title="Capital"
+        description="Saldos por mercado, ofertas propias y reajuste de la posición."
       />
       <Panel title="Capital disponible" wide>
-        <Freshness state={resources.balance} cachedAt={data.freshness?.balance} />
+        <Freshness label="Balance" state={resources.balance} cachedAt={data.freshness?.balance} />
         {resources.balance?.loading && !data.freshness?.balance ? <Skeleton label="Consultando saldo QUSD" /> : null}
         <div className="market-grid capital-grid">
           {data.markets.map((market) => {
@@ -108,7 +109,7 @@ export function CapitalWorkspace({ data, label, unit, onChanged, resources }) {
 
       <Panel title="Mis ofertas" wide>
         <div className="capital-toolbar">
-          <Freshness state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
+          <Freshness label="Ofertas" state={resources.ownOffers} cachedAt={data.freshness?.ownOffers} />
           <Button variant={hasDeficit ? "destructive" : "secondary"} onClick={openRebalance} disabled={!hasDeficit || loadingRebalance}>
             <Scale aria-hidden="true" /> {loadingRebalance ? "Calculando…" : "Reajustar capital"}
           </Button>
@@ -423,8 +424,12 @@ function OfferEditor({ initial, data, label, unit, onClose, onSubmit }) {
       <header>
         <div className="dialog-icon">{initial.mode === "create" ? <Plus aria-hidden="true" /> : <Pencil aria-hidden="true" />}</div>
         <div>
-          <p className="eyebrow">{initial.mode === "create" ? "Nueva posición" : "Ajustar posición"}</p>
           <h3 id="offer-editor-title">{initial.mode === "create" ? "Crear oferta" : `Editar ${label(initial.coin)}`}</h3>
+          <p className="offer-editor-description">
+            {initial.mode === "create"
+              ? "Define mercado, movimiento, importe y tasa."
+              : "Ajusta la posición sin salir de la mesa."}
+          </p>
         </div>
               <IconButton variant="ghost" type="button" onClick={onClose} aria-label="Cerrar editor"><X aria-hidden="true" /></IconButton>
       </header>

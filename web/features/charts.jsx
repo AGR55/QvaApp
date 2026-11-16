@@ -75,6 +75,7 @@ export function Charts({ markets, initialHistory = [], initialBalanceHistory = [
     <div className="page-stack">
       <ViewHead
         title="Gráficas"
+        description="Precios de compra y venta, actividad y capital de tu cuenta."
       />
       <TradingAnalytics markets={markets} initialBalanceHistory={initialBalanceHistory} />
       <Panel title="Fluctuación de precios" wide>
