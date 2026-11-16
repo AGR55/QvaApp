@@ -107,7 +107,7 @@ func run(logger *slog.Logger) error {
 			readyCheck = pool.Ping
 			shadowStats = postgres.NewShadowRepository(pool).Stats
 			if envOrDefault("HUNTER_EVENTS_CONSUMER", "true") != "false" {
-				consumer = newHunterConsumer(pool, logger, cfg.ShadowMode)
+				consumer = newHunterConsumer(pool, logger)
 				go consumer.run(ctx)
 				logger.Info("consumidor hunter_events iniciado", "worker", consumer.worker)
 			}

@@ -116,6 +116,51 @@ func (reader *fakeOfferReader) User(context.Context) (qvapay.User, error) {
 	return reader.user, reader.err
 }
 
+func TestAutoTraderSoloNotificaAplicacionesNuevas(t *testing.T) {
+	cases := []struct {
+		name         string
+		dryRun       bool
+		err          error
+		preConfirmed bool
+		want         int
+	}{
+		{"aplicada", false, nil, false, 1},
+		{"rechazada", false, &qvapay.MutationError{Status: 409}, false, 0},
+		{"incierta", false, errors.New("timeout"), false, 0},
+		{"dry-run", true, nil, false, 0},
+		{"ya confirmada", false, nil, true, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			operation := reservedOperation(t)
+			if tc.preConfirmed {
+				operation, _ = operation.Transition(core.StateSubmitted, 3000)
+				operation, _ = operation.Transition(core.StateConfirmed, 4000)
+			}
+			repo := &fakeOperationRepo{operation: operation}
+			calls := 0
+			order := ""
+			trader := &autoTrader{
+				dryRun: tc.dryRun, executor: &fakeExecutor{err: tc.err, order: "order-1"},
+				onApplied: func(_ context.Context, _, _, orderUUID string) {
+					calls++
+					order = orderUUID
+				},
+			}
+			if _, err := trader.Execute(context.Background(), repo, "op-1", "offer-1",
+				decimal.MustParse("10"), true); err != nil {
+				t.Fatalf("err = %v", err)
+			}
+			if calls != tc.want {
+				t.Fatalf("onApplied calls = %d, quiero %d", calls, tc.want)
+			}
+			if tc.want > 0 && order != "order-1" {
+				t.Fatalf("order = %q", order)
+			}
+		})
+	}
+}
+
 func TestAutoTraderConfirmedIsIdempotent(t *testing.T) {
 	operation := reservedOperation(t)
 	operation, _ = operation.Transition(core.StateSubmitted, 3000)

@@ -75,6 +75,9 @@ type autoTrader struct {
 	dryRun   bool
 	logger   *slog.Logger
 	now      func() time.Time
+	// onApplied se invoca solo cuando esta ejecución acaba de aplicar y
+	// confirmar la operación. No se llama en reintentos idempotentes.
+	onApplied func(ctx context.Context, operationID, offerUUID, orderUUID string)
 }
 
 func (trader *autoTrader) Execute(
@@ -162,6 +165,9 @@ func (trader *autoTrader) Execute(
 	if trader.logger != nil {
 		trader.logger.Info("aplicación QvaPay confirmada",
 			"operation_id", operationID, "offer_uuid", offerUUID, "order_uuid", orderUUID)
+	}
+	if trader.onApplied != nil {
+		trader.onApplied(ctx, operationID, offerUUID, orderUUID)
 	}
 	return confirmed.State, nil
 }

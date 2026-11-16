@@ -50,6 +50,7 @@ type hunterConsumer struct {
 	reconciler     *operationReconciler
 	notifier       *operationNotifier
 	applyQueue     chan executionTask
+	chat           operationChat
 	identityMu     sync.Mutex
 	ownerUUID      string
 
@@ -89,7 +90,7 @@ type hunterPayload struct {
 	ObservedAt       int64  `json:"observedAt"`
 }
 
-func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger, shadowMode bool) *hunterConsumer {
+func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
 	worker := strings.TrimSpace(os.Getenv("HUNTER_CONSUMER_WORKER"))
 	if worker == "" {
 		worker = "trading-core"
@@ -106,8 +107,11 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger, shadowMode bool)
 		localOps:      postgres.NewLocalOperationRepository(pool),
 	}
 	consumer.applyQueue = make(chan executionTask, 1024)
-	consumer.trader = buildAutoTrader(logger, shadowMode)
+	consumer.trader = buildAutoTrader(logger)
 	consumer.notifier = newOperationNotifier()
+	if consumer.trader != nil {
+		consumer.trader.onApplied = consumer.sendApplyMessage
+	}
 	if token, ok := decryptQvaToken(logger); ok {
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
 			consumer.reconciler = &operationReconciler{
@@ -121,8 +125,66 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger, shadowMode bool)
 		} else {
 			logger.Warn("conciliador QvaPay deshabilitado", "error", err)
 		}
+		if chatClient, err := qvapay.NewChatClient(
+			envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token,
+		); err == nil {
+			consumer.chat = chatClient
+		} else {
+			logger.Warn("chat P2P deshabilitado: no se enviará el mensaje automático", "error", err)
+		}
 	}
 	return consumer
+}
+
+// operationChat aísla el envío del mensaje automático para poder probarlo.
+type operationChat interface {
+	SendChat(ctx context.Context, offerUUID, order, message string) (qvapay.ChatMessage, error)
+}
+
+// sendApplyMessage publica en el chat P2P el mensaje configurado desde la web
+// justo después de una aplicación real confirmada.
+func (consumer *hunterConsumer) sendApplyMessage(
+	ctx context.Context,
+	operationID, offerUUID, orderUUID string,
+) {
+	if consumer == nil || consumer.chat == nil {
+		return
+	}
+	config, _, err := consumer.runtime.Load(ctx)
+	if err != nil {
+		if consumer.logger != nil {
+			consumer.logger.Warn("no se pudo leer el mensaje automático configurado",
+				"operation_id", operationID, "offer_uuid", offerUUID, "error", err)
+		}
+		return
+	}
+	message := strings.TrimSpace(config.Automation.WelcomeMessage)
+	if message == "" {
+		return
+	}
+	if runes := []rune(message); len(runes) > 599 {
+		message = string(runes[:599])
+	}
+	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	sent, sendErr := consumer.chat.SendChat(sendCtx, offerUUID, orderUUID, message)
+	if sendErr != nil {
+		if consumer.logger != nil {
+			consumer.logger.Warn("no se pudo enviar el mensaje automático al chat P2P",
+				"operation_id", operationID, "offer_uuid", offerUUID, "error", sendErr)
+		}
+		if consumer.notifier != nil {
+			_ = consumer.notifier.Send(ctx, fmt.Sprintf(
+				"⚠️ La operación %s se aplicó, pero no se pudo enviar el mensaje automático al chat P2P.",
+				offerUUID), "apply-chat:"+offerUUID)
+		}
+		return
+	}
+	if consumer.logger != nil {
+		consumer.logger.Info("mensaje automático enviado al chat P2P",
+			"operation_id", operationID, "offer_uuid", offerUUID,
+			"order_uuid", orderUUID, "message_id", sent.ID)
+	}
 }
 
 func decryptQvaToken(logger *slog.Logger) (string, bool) {
@@ -144,14 +206,10 @@ func decryptQvaToken(logger *slog.Logger) (string, bool) {
 	return token, true
 }
 
-func buildAutoTrader(logger *slog.Logger, shadowMode bool) *autoTrader {
+func buildAutoTrader(logger *slog.Logger) *autoTrader {
 	enabled, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("CORE_AUTOTRADE")))
 	if !enabled {
 		return nil
-	}
-	if shadowMode {
-		logger.Warn("autotrade bloqueado: SHADOW_MODE está activo")
-		return &autoTrader{dryRun: true, logger: logger}
 	}
 	dryRun := true
 	if raw := strings.TrimSpace(os.Getenv("CORE_AUTOTRADE_DRY_RUN")); raw != "" {
