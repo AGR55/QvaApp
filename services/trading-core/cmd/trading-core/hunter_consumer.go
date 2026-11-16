@@ -30,7 +30,7 @@ type hunterConsumer struct {
 	configMu       sync.RWMutex
 	config         core.Config
 	configErr      error
-	runtime        *runtimeconfig.Repository
+	runtime        runtimeConfigLoader
 	runtimeAt      atomic.Int64
 	runtimeVersion atomic.Int64
 	logger         *slog.Logger
@@ -139,6 +139,10 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 // operationChat aísla el envío del mensaje automático para poder probarlo.
 type operationChat interface {
 	SendChat(ctx context.Context, offerUUID, order, message string) (qvapay.ChatMessage, error)
+}
+
+type runtimeConfigLoader interface {
+	Load(ctx context.Context) (runtimeconfig.Config, int64, error)
 }
 
 // sendApplyMessage publica en el chat P2P el mensaje configurado desde la web
