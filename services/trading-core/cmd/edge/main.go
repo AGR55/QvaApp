@@ -55,6 +55,11 @@ type config struct {
 	MutationBaseURL  string
 	HunterFeedURL    string
 	HunterFeedToken  string
+	SyncEnabled      bool
+	SyncBaseURL      string
+	SyncNATSUrl      string
+	SyncEmail        string
+	SyncPassword     string
 	WebhookEnabled   bool
 	WebhookSecret    string
 }
@@ -77,6 +82,11 @@ func run(logger *slog.Logger) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	cooperativeSync := edge.NewCooperativeSync(
+		cfg.SyncBaseURL, cfg.SyncNATSUrl, cfg.SyncEmail, cfg.SyncPassword,
+		cfg.SyncEnabled, logger,
+	)
+	go cooperativeSync.Run(ctx)
 
 	var stats edge.StatsFunc
 	var pool *pgxpool.Pool
@@ -320,8 +330,25 @@ func run(logger *slog.Logger) error {
 			}
 		}
 	}
+	if dashboard != nil {
+		dashboard.Cooperative = cooperativeSync
+	}
+	if mutations != nil {
+		mutations.Cooperative = cooperativeSync
+		if writePool != nil {
+			mutations.Runtime = &runtimeconfig.Repository{Pool: writePool}
+			mutations.Settings = &edge.PostgresReaderStore{Pool: writePool}
+		}
+	}
 	if liveReader != nil && dashboard != nil {
-		dashboard.Live = &edge.LiveDashboard{Reader: liveReader, Pool: writePool}
+		live := &edge.LiveDashboard{Reader: liveReader, Pool: writePool, Logger: logger}
+		if writePool != nil {
+			live.Observations = &edge.PostgresMarketObservationStore{Pool: writePool}
+		}
+		dashboard.Live = live
+	}
+	if dashboardRead != nil && writePool != nil {
+		dashboardRead.Pool = writePool
 	}
 	if liveReader != nil && mutations != nil {
 		mutations.Reconcile = &edge.Reconciler{Reader: liveReader, Store: mutations.Store}
@@ -557,6 +584,10 @@ func loadConfig() (config, error) {
 		MutationBaseURL: envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"),
 		HunterFeedURL:   envOrDefault("HUNTER_FEED_URL", "http://hunter:8091/feed"),
 		HunterFeedToken: strings.TrimSpace(os.Getenv("HUNTER_FEED_TOKEN")),
+		SyncBaseURL:     strings.TrimSpace(os.Getenv("SYNC_BASE_URL")),
+		SyncNATSUrl:     strings.TrimSpace(os.Getenv("SYNC_NATS_URL")),
+		SyncEmail:       strings.TrimSpace(os.Getenv("SYNC_EMAIL")),
+		SyncPassword:    strings.TrimSpace(os.Getenv("SYNC_PASSWORD")),
 		EncryptionKey:   strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY")),
 		OperatorsFile:   strings.TrimSpace(os.Getenv("EDGE_OPERATORS_FILE")),
 		PublicPushKey:   strings.TrimSpace(os.Getenv("EDGE_PUSH_PUBLIC_KEY")),

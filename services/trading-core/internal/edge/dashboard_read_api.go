@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -178,6 +180,7 @@ type dashboardReadMarketAnalytics struct {
 type DashboardReadAPI struct {
 	Sessions *SessionManager
 	File     string
+	Pool     *pgxpool.Pool
 	Now      func() time.Time
 }
 
@@ -365,11 +368,28 @@ func (api *DashboardReadAPI) marketAnalytics(
 	now := api.now()
 	cutoff := now.Add(-dashboardReadMarketWindow).UnixMilli()
 	limit := now.UnixMilli()
-	points := make([]dashboardReadMarketPoint, 0, len(snapshot.MarketObservations))
+	merged := make(map[int64]dashboardReadMarketPoint, len(snapshot.MarketObservations))
 	for _, point := range snapshot.MarketObservations {
 		if point.Coin != coin || point.CreatedAt < cutoff || point.CreatedAt > limit {
 			continue
 		}
+		merged[point.CreatedAt] = point
+	}
+	// El histórico nuevo de Go trae compra y venta; sustituye al snapshot en
+	// los mismos instantes y añade los puntos posteriores al corte.
+	if api.Pool != nil {
+		store := &PostgresMarketObservationStore{Pool: api.Pool}
+		if observations, err := store.History(r.Context(), coin, cutoff, dashboardReadMaxMarketPoints); err == nil {
+			for _, observation := range observations {
+				if observation.CreatedAt > limit {
+					continue
+				}
+				merged[observation.CreatedAt] = marketPointFromObservation(observation)
+			}
+		}
+	}
+	points := make([]dashboardReadMarketPoint, 0, len(merged))
+	for _, point := range merged {
 		points = append(points, point)
 	}
 	sort.SliceStable(points, func(i, j int) bool {
@@ -496,5 +516,15 @@ func emptyDashboardReadSnapshot() dashboardReadSnapshot {
 		RebalanceJobs:      []dashboardReadRebalanceJob{},
 		MarketObservations: []dashboardReadMarketPoint{},
 		AnalyticsFees:      []dashboardReadAnalyticsFee{},
+	}
+}
+
+func marketPointFromObservation(observation MarketObservation) dashboardReadMarketPoint {
+	return dashboardReadMarketPoint{
+		CreatedAt: observation.CreatedAt, Coin: observation.Coin,
+		AverageBuy: observation.AverageBuy, AverageSell: observation.AverageSell,
+		MedianBuy: observation.MedianBuy, MedianSell: observation.MedianSell,
+		BestBuy: observation.BestBuy, BestSell: observation.BestSell,
+		OpenOffers: int64(observation.OpenOffers), Eligible: int64(observation.Eligible),
 	}
 }

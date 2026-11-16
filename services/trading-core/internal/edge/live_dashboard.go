@@ -3,6 +3,7 @@ package edge
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/url"
 	"strconv"
 	"strings"
@@ -26,15 +27,20 @@ type LiveReader interface {
 // LiveDashboard cachea lecturas QvaPay para que el panel no golpee la API en
 // cada petición. Si una sección falla, conserva el resto y no tumba el panel.
 type LiveDashboard struct {
-	Reader LiveReader
-	Pool   *pgxpool.Pool
-	TTL    time.Duration
-	Now    func() time.Time
+	Reader       LiveReader
+	Pool         *pgxpool.Pool
+	Observations MarketObservationStore
+	Logger       *slog.Logger
+	TTL          time.Duration
+	Now          func() time.Time
 
 	mu     sync.Mutex
 	cached liveDashboardSnapshot
 	at     time.Time
 	loaded bool
+
+	recordMu sync.Mutex
+	recordAt time.Time
 }
 
 type liveDashboardSnapshot struct {
@@ -127,8 +133,10 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 	for _, operation := range operations {
 		snapshot.Operations = append(snapshot.Operations, operation)
 	}
-	if averages, err := live.Reader.Averages(ctx); err == nil {
-		for coin, average := range averages {
+	var averages map[string]qvapay.Average
+	if loaded, err := live.Reader.Averages(ctx); err == nil {
+		averages = loaded
+		for coin, average := range loaded {
 			snapshot.Averages[coin] = map[string]any{
 				"medianBuy":   decimalFloat(average.MedianBuy),
 				"medianSell":  decimalFloat(average.MedianSell),
@@ -138,6 +146,9 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 				"updatedAt":   average.UpdatedAt,
 			}
 		}
+	}
+	if len(averages) > 0 {
+		live.recordMarketObservations(ctx, now, averages, snapshot.Market)
 	}
 	if live.Pool != nil {
 		rows, err := live.Pool.Query(ctx, `

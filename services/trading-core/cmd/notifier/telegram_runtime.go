@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/notifier"
@@ -20,6 +21,13 @@ type telegramRuntime struct {
 	edge        *edgeClient
 	adminChatID int64
 	logger      *slog.Logger
+
+	// pendingMu protege el flujo de publicación cooperativa: tras pulsar
+	// Publicar se guarda el mercado y el siguiente mensaje de texto se toma
+	// como cantidad mínima. Caduca a los cinco minutos.
+	pendingMu   sync.Mutex
+	pendingCoin string
+	pendingAt   time.Time
 }
 
 func (runtime *telegramRuntime) Run(ctx context.Context) {
@@ -78,6 +86,18 @@ func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Upda
 			reply = truncate(reply, 3900)
 			if err := runtime.client.SendMenu(ctx, chat, reply, keyboard); err != nil {
 				runtime.logger.Warn("telegram callback falló", "error", err)
+				return reply, false
+			}
+			return reply, true
+		}
+	}
+	if strings.HasPrefix(strings.TrimSpace(text), "/") {
+		runtime.clearPendingMinimal()
+	} else if text != "" {
+		if reply, keyboard, handled := runtime.consumePendingMinimal(ctx, text); handled {
+			reply = truncate(reply, 3900)
+			if err := runtime.client.SendMenu(ctx, chat, reply, keyboard); err != nil {
+				runtime.logger.Warn("telegram respuesta de cantidad falló", "error", err)
 				return reply, false
 			}
 			return reply, true
@@ -178,8 +198,16 @@ func (runtime *telegramRuntime) dispatch(ctx context.Context, command notifier.C
 		return runtime.createOffer(ctx, "sell", args)
 	case "revisions":
 		return runtime.revisionsText(ctx)
-	case "network", "coop":
+	case "network":
 		return runtime.networkText(ctx)
+	case "coop", "conjuntas", "cacerias-conjuntas":
+		if len(args) >= 2 {
+			return runtime.publishCooperative(ctx, strings.ToUpper(args[0]), args[1])
+		}
+		if len(args) == 1 {
+			return runtime.cooperativePanelWith(ctx, "")
+		}
+		return runtime.cooperativePanel(ctx)
 	case "historial":
 		return runtime.historyText(ctx)
 	default:
@@ -190,8 +218,9 @@ func (runtime *telegramRuntime) dispatch(ctx context.Context, command notifier.C
 func mainMenu() notifier.InlineKeyboard {
 	return notifier.InlineKeyboard{
 		{{Text: "📊 Estado", CallbackData: "cmd:status"}, {Text: "💰 Balance", CallbackData: "cmd:balance"}},
-		{{Text: "🎯 Cacerías", CallbackData: "nav:hunting"}, {Text: "🔎 Mercados", CallbackData: "nav:markets"}},
-		{{Text: "💼 Ofertas", CallbackData: "nav:offers"}, {Text: "📦 Operaciones", CallbackData: "nav:operations"}},
+		{{Text: "🎯 Cacerías", CallbackData: "nav:hunting"}, {Text: "🤝 Conjuntas", CallbackData: "nav:coop"}},
+		{{Text: "🔎 Mercados", CallbackData: "nav:markets"}, {Text: "💼 Ofertas", CallbackData: "nav:offers"}},
+		{{Text: "📦 Operaciones", CallbackData: "nav:operations"}},
 		{{Text: "⚙️ Estrategia", CallbackData: "cmd:strategy"}, {Text: "🤖 Automatización", CallbackData: "cmd:automation"}},
 		{{Text: "❓ Ayuda", CallbackData: "cmd:help"}},
 	}
@@ -203,6 +232,7 @@ func helpText() string {
 Panel y lectura:
 /status · /balance · /markets · /offers
 /operations · /strategy · /automation · /hunting
+/coop · /coop MERCADO MÍNIMO
 /salud · /logs · /revisions · /network · /historial
 
 Cacerías:
@@ -451,10 +481,10 @@ func (runtime *telegramRuntime) huntingPanelWith(ctx context.Context, notice str
 		if asBool(market["active"]) {
 			icon = "🟢"
 		}
-		fmt.Fprintf(&builder, "%s %s\n• Compra: %s · mediana %s · %s ofertas\n• Venta: %s · mediana %s · %s ofertas\n\n",
+		fmt.Fprintf(&builder, "%s %s\n• Compra: %s · media %s · %s ofertas\n• Venta: %s · media %s · %s ofertas\n\n",
 			icon, asString(market["label"]),
-			effectiveStatus(market, "huntBuyEnabled", buyRunning), medianText(average["medianBuy"]), countText(average["count"]),
-			effectiveStatus(market, "huntSellEnabled", sellRunning), medianText(average["medianSell"]), countText(average["count"]))
+			effectiveStatus(market, "huntBuyEnabled", buyRunning), averageText(average["averageBuy"]), countText(average["count"]),
+			effectiveStatus(market, "huntSellEnabled", sellRunning), averageText(average["averageSell"]), countText(average["count"]))
 	}
 	if notice != "" {
 		builder.WriteString(notice)
@@ -507,10 +537,10 @@ func (runtime *telegramRuntime) marketPanelWith(ctx context.Context, code, notic
 	var builder strings.Builder
 	fmt.Fprintf(&builder, "🪙 %s (%s)\n\n", asString(market["label"]), asString(market["code"]))
 	fmt.Fprintf(&builder, "Global: compra %s · venta %s\n", statusWord(buyRunning), statusWord(sellRunning))
-	fmt.Fprintf(&builder, "• Compra: %s · mediana %s · %s ofertas\n",
-		effectiveStatus(market, "huntBuyEnabled", buyRunning), medianText(average["medianBuy"]), countText(average["count"]))
-	fmt.Fprintf(&builder, "• Venta: %s · mediana %s · %s ofertas\n\n",
-		effectiveStatus(market, "huntSellEnabled", sellRunning), medianText(average["medianSell"]), countText(average["count"]))
+	fmt.Fprintf(&builder, "• Compra: %s · media %s · %s ofertas\n",
+		effectiveStatus(market, "huntBuyEnabled", buyRunning), averageText(average["averageBuy"]), countText(average["count"]))
+	fmt.Fprintf(&builder, "• Venta: %s · media %s · %s ofertas\n\n",
+		effectiveStatus(market, "huntSellEnabled", sellRunning), averageText(average["averageSell"]), countText(average["count"]))
 	fmt.Fprintf(&builder, "Compra ≤ %s · Venta ≥ %s\n", rateText(asFloat(market["buyMaxRate"])), rateText(asFloat(market["sellMinRate"])))
 	fmt.Fprintf(&builder, "Máx %s QUSD · fee %s%% · fiat %s %s\n\n",
 		money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])),
@@ -547,6 +577,24 @@ func (runtime *telegramRuntime) handleCallback(ctx context.Context, data string)
 		return runtime.offersText(ctx)
 	case "nav:operations":
 		return runtime.operationsText(ctx)
+	case "nav:coop":
+		return runtime.cooperativePanel(ctx)
+	}
+	if strings.HasPrefix(data, "coop:") {
+		parts := strings.Split(data, ":")
+		if len(parts) == 2 && parts[1] == "refresh" {
+			return runtime.cooperativePanelWith(ctx, "Red actualizada.")
+		}
+		if len(parts) == 3 {
+			coin := strings.ToUpper(strings.TrimSpace(parts[2]))
+			switch parts[1] {
+			case "publish":
+				return runtime.requestMinimal(ctx, coin)
+			case "withdraw":
+				return runtime.withdrawCooperative(ctx, coin)
+			}
+		}
+		return "❌ Acción cooperativa inválida.", mainMenu()
 	}
 	if strings.HasPrefix(data, "hunt:") {
 		parts := strings.Split(data, ":")
@@ -607,6 +655,191 @@ func (runtime *telegramRuntime) setMarketHuntingValue(ctx context.Context, code,
 	return runtime.marketPanelWith(ctx, code, fmt.Sprintf("✅ %s %s.", label, statusWord(enabled)))
 }
 
+// cooperativePanel muestra el estado del sincronizador y los mercados con su
+// precio de compra y fiat disponible. Publicar solo pedirá la cantidad mínima.
+func (runtime *telegramRuntime) cooperativePanel(ctx context.Context) (string, notifier.InlineKeyboard) {
+	return runtime.cooperativePanelWith(ctx, "")
+}
+
+func (runtime *telegramRuntime) cooperativePanelWith(ctx context.Context, notice string) (string, notifier.InlineKeyboard) {
+	dashboard, err := runtime.edge.dashboard(ctx)
+	if err != nil {
+		return "❌ " + err.Error(), mainMenu()
+	}
+	config, err := runtime.edge.config(ctx)
+	if err != nil {
+		return "❌ " + err.Error(), mainMenu()
+	}
+	network := asMap(dashboard["cooperativeNetwork"])
+	enabled := asBool(network["enabled"])
+	connected := asBool(network["httpConnected"])
+	contributions := asMap(network["contributions"])
+	lastError := asString(network["lastError"])
+
+	var builder strings.Builder
+	builder.WriteString("🤝 Cacerías conjuntas\n\n")
+	switch {
+	case !enabled:
+		builder.WriteString("⚠️ Sincronizador sin configurar (SYNC_*).\n")
+	case connected:
+		builder.WriteString("🟢 Conectado al sincronizador.\n")
+	default:
+		builder.WriteString("🟠 Sin conexión con el sincronizador.\n")
+		if lastError != "" {
+			fmt.Fprintf(&builder, "%s\n", truncate(lastError, 180))
+		}
+	}
+	if connected {
+		builder.WriteString("El precio es tu compra configurada; el fiat es el saldo del mercado.\n")
+	}
+	builder.WriteString("\n")
+
+	markets := asList(config["markets"])
+	keyboard := notifier.InlineKeyboard{}
+	for index, item := range markets {
+		if index >= 5 {
+			break
+		}
+		market := asMap(item)
+		code := asString(market["code"])
+		if code == "" || !asBool(market["active"]) {
+			continue
+		}
+		current := asMap(contributions[code])
+		published := asString(current["coin"]) != ""
+		price := asFloat(market["buyMaxRate"])
+		fiat := asFloat(market["fiatBalance"])
+		currency := asString(market["currency"])
+		icon := "⚪"
+		if published {
+			icon = "🟢"
+		}
+		fmt.Fprintf(&builder, "%s %s (%s)\n", icon, asString(market["label"]), code)
+		fmt.Fprintf(&builder, "• Precio de compra: %s %s/QUSD\n", rateText(price), currency)
+		fmt.Fprintf(&builder, "• Fiat disponible: %s %s\n", money(fiat), currency)
+		if published {
+			fmt.Fprintf(&builder, "• Publicado desde %s QUSD · precio %s\n",
+				money(asFloat(current["minimal"])), rateText(asFloat(current["price"])))
+		} else {
+			builder.WriteString("• Sin publicar\n")
+		}
+		builder.WriteString("\n")
+		label := asString(market["label"])
+		if published {
+			keyboard = append(keyboard, []notifier.InlineButton{{
+				Text: "🔴 Retirar " + label, CallbackData: "coop:withdraw:" + code,
+			}})
+		} else {
+			keyboard = append(keyboard, []notifier.InlineButton{{
+				Text: "🟢 Publicar " + label, CallbackData: "coop:publish:" + code,
+			}})
+		}
+	}
+	if len(keyboard) == 0 {
+		builder.WriteString("No hay mercados activos configurados.\n")
+	}
+	if notice != "" {
+		builder.WriteString(notice)
+		builder.WriteString("\n")
+	}
+	keyboard = append(keyboard, []notifier.InlineButton{
+		{Text: "🔄 Actualizar red", CallbackData: "coop:refresh"},
+		{Text: "‹ Volver al panel", CallbackData: "nav:main"},
+	})
+	return builder.String(), keyboard
+}
+
+// requestMinimal pide solo la cantidad mínima y guarda el mercado pendiente.
+func (runtime *telegramRuntime) requestMinimal(ctx context.Context, coin string) (string, notifier.InlineKeyboard) {
+	config, err := runtime.edge.config(ctx)
+	if err != nil {
+		return "❌ " + err.Error(), mainMenu()
+	}
+	market := findMarket(config, coin)
+	if market == nil {
+		return "❌ Mercado no configurado: " + coin, mainMenu()
+	}
+	price := asFloat(market["buyMaxRate"])
+	fiat := asFloat(market["fiatBalance"])
+	if price <= 0 || fiat < 5*price {
+		return runtime.cooperativePanelWith(ctx, fmt.Sprintf(
+			"❌ %s necesita más de %s %s para aportar 5 QUSD al precio de compra.",
+			coin, money(5*price), asString(market["currency"])))
+	}
+	runtime.pendingMu.Lock()
+	runtime.pendingCoin = coin
+	runtime.pendingAt = time.Now()
+	runtime.pendingMu.Unlock()
+	text := fmt.Sprintf("🤝 Publicar en %s\n\nPrecio de compra: %s %s/QUSD\nFiat disponible: %s %s\n\nEscribe solo la cantidad mínima en QUSD que aceptas. Ejemplo: 5",
+		asString(market["label"]), rateText(price), asString(market["currency"]),
+		money(fiat), asString(market["currency"]))
+	return text, notifier.InlineKeyboard{
+		{{Text: "‹ Cancelar", CallbackData: "nav:coop"}},
+	}
+}
+
+// consumePendingMinimal interpreta el siguiente mensaje de texto como la
+// cantidad mínima de la publicación pendiente.
+func (runtime *telegramRuntime) consumePendingMinimal(ctx context.Context, text string) (string, notifier.InlineKeyboard, bool) {
+	runtime.pendingMu.Lock()
+	coin := runtime.pendingCoin
+	at := runtime.pendingAt
+	runtime.pendingMu.Unlock()
+	if coin == "" {
+		return "", nil, false
+	}
+	if time.Since(at) > 5*time.Minute {
+		runtime.clearPendingMinimal()
+		return "⌛ La publicación caducó. Pulsa Publicar de nuevo.", mainMenu(), true
+	}
+	value := strings.TrimSpace(strings.ReplaceAll(text, ",", "."))
+	minimal, err := strconv.ParseFloat(value, 64)
+	if err != nil || minimal <= 0 || mathIsNotFinite(minimal) {
+		return "❌ Cantidad mínima inválida. Escribe un número mayor que 0 o pulsa Cancelar.", notifier.InlineKeyboard{
+			{{Text: "‹ Cancelar", CallbackData: "nav:coop"}},
+		}, true
+	}
+	runtime.clearPendingMinimal()
+	reply, keyboard := runtime.publishCooperative(ctx, coin, value)
+	return reply, keyboard, true
+}
+
+func (runtime *telegramRuntime) publishCooperative(ctx context.Context, coin, rawMinimal string) (string, notifier.InlineKeyboard) {
+	value := strings.TrimSpace(strings.ReplaceAll(rawMinimal, ",", "."))
+	minimal, err := strconv.ParseFloat(value, 64)
+	if err != nil || minimal <= 0 || mathIsNotFinite(minimal) {
+		return "❌ Cantidad mínima inválida.", mainMenu()
+	}
+	if err := runtime.edge.send(ctx, http.MethodPut,
+		"/api/cooperative-network/contributions",
+		map[string]any{"coin": strings.ToUpper(coin), "minimal": minimal},
+	); err != nil {
+		return runtime.cooperativePanelWith(ctx, "❌ "+err.Error())
+	}
+	return runtime.cooperativePanelWith(ctx, fmt.Sprintf(
+		"✅ Publicado en %s con mínimo %s QUSD.", strings.ToUpper(coin), money(minimal)))
+}
+
+func (runtime *telegramRuntime) withdrawCooperative(ctx context.Context, coin string) (string, notifier.InlineKeyboard) {
+	if err := runtime.edge.send(ctx, http.MethodDelete,
+		"/api/cooperative-network/contributions/"+strings.ToUpper(coin), nil,
+	); err != nil {
+		return runtime.cooperativePanelWith(ctx, "❌ "+err.Error())
+	}
+	return runtime.cooperativePanelWith(ctx, "✅ Retirado de "+strings.ToUpper(coin)+".")
+}
+
+func (runtime *telegramRuntime) clearPendingMinimal() {
+	runtime.pendingMu.Lock()
+	runtime.pendingCoin = ""
+	runtime.pendingAt = time.Time{}
+	runtime.pendingMu.Unlock()
+}
+
+func mathIsNotFinite(value float64) bool {
+	return value != value || value > 1e12 || value < -1e12
+}
+
 func normalizeSide(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "buy", "compra":
@@ -660,7 +893,7 @@ func toggleValue(enabled bool) string {
 	return "on"
 }
 
-func medianText(value any) string {
+func averageText(value any) string {
 	number := asFloat(value)
 	if number <= 0 {
 		return "sin observación"

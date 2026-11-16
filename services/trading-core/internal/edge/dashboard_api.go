@@ -101,6 +101,7 @@ type DashboardAPI struct {
 	Runtime         *runtimeconfig.Repository
 	Settings        SettingStore
 	CooperativeFile string
+	Cooperative     *CooperativeSync
 	Live            *LiveDashboard
 	Now             func() time.Time
 }
@@ -355,6 +356,17 @@ func (api *DashboardAPI) webSnapshot(ctx context.Context, summary DashboardSumma
 					"qusdOwed": cooperative.QusdOwed,
 				}
 			}
+		}
+	}
+	if api.Cooperative != nil {
+		snapshot.CooperativeNetwork = api.Cooperative.State()
+		if snapshot.CooperativeHunting == nil {
+			snapshot.CooperativeHunting = map[string]any{
+				"enabled": false, "executions": []any{}, "qusdOwed": 0,
+			}
+		}
+		if api.Settings != nil {
+			snapshot.CooperativeHunting["enabled"] = api.boolSetting(ctx, "cooperative_hunting_enabled")
 		}
 	}
 	if api.Live != nil {

@@ -179,3 +179,25 @@ CREATE INDEX IF NOT EXISTS idx_shadow_hunter_candidates_observed
 
 CREATE INDEX IF NOT EXISTS idx_shadow_hunter_polls_polled
   ON shadow.hunter_polls (polled_at);
+
+-- Histórico de mercado con compra y venta. El TS solo guardaba median_sell;
+-- Go registra ambas medias y medianas para que la gráfica tenga dos series.
+CREATE TABLE IF NOT EXISTS shadow.market_observations (
+  id bigserial PRIMARY KEY,
+  created_at bigint NOT NULL,
+  coin text NOT NULL,
+  average_buy double precision,
+  average_sell double precision,
+  median_buy double precision,
+  median_sell double precision,
+  best_buy double precision,
+  best_sell double precision,
+  open_offers integer NOT NULL DEFAULT 0,
+  eligible integer NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_market_observations_coin_created
+  ON shadow.market_observations (coin, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_shadow_market_observations_created
+  ON shadow.market_observations (created_at);

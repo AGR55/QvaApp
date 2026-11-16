@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
 const mutationsTestNowMS int64 = 1_700_000_000_000
@@ -120,6 +122,8 @@ func newMutationsTestAPI(
 		Sessions:      manager,
 		MobileAuth:    &MobileAuthAPI{File: file, Now: func() time.Time { return now }},
 		Store:         store,
+		Cooperative:   mutationsTestCooperative{},
+		Runtime:       mutationsTestConfig{},
 		TrustedOrigin: "https://panel.example",
 		Now:           func() time.Time { return now },
 	}
@@ -926,4 +930,26 @@ func TestMutationsStoreErrors(t *testing.T) {
 	if len(store.records) != 0 {
 		t.Fatalf("los eventos fallidos no deben acumularse, hubo %d", len(store.records))
 	}
+}
+
+// mutationsTestCooperative simula un sincronizador conectado sin red.
+type mutationsTestCooperative struct{}
+
+func (mutationsTestCooperative) Enabled() bool { return true }
+
+func (mutationsTestCooperative) Publish(context.Context, string, float64, float64, float64) error {
+	return nil
+}
+
+func (mutationsTestCooperative) Withdraw(context.Context, string) error { return nil }
+
+func (mutationsTestCooperative) Refresh(context.Context) error { return nil }
+
+// mutationsTestConfig devuelve un mercado con saldo suficiente para publicar.
+type mutationsTestConfig struct{}
+
+func (mutationsTestConfig) Load(context.Context) (runtimeconfig.Config, int64, error) {
+	return runtimeconfig.Config{Markets: []runtimeconfig.Market{{
+		Code: "BANK_CUP", Active: true, BuyMaxRate: 2, FiatBalance: 100, Currency: "CUP",
+	}}}, 1, nil
 }

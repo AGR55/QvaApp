@@ -183,6 +183,7 @@ services:
       - "127.0.0.1:8093:8093"
     networks:
       - shadow
+      - caceria-net
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777
@@ -352,6 +353,8 @@ services:
 networks:
   shadow:
     name: qvaapply-f3-shadow
+  caceria-net:
+    external: true
 
 volumes:
   qvaapply-f3-shadow-pgdata:

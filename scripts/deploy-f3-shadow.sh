@@ -330,6 +330,21 @@ PY
         printf 'EDGE_QVAPAY_WEBHOOK_SECRET=%s\n' "$(tr -d '\r\n' < "$webhook_secret_file")"
         printf 'HUNTER_FEED_URL=http://hunter:8091/feed\n'
         printf 'HUNTER_FEED_TOKEN=%s\n' "$hunter_feed_secret"
+        sync_enabled=$(sed -n 's/^SYNC_ENABLED=//p' "$prod_env" | tail -1 | tr -d '\r')
+        sync_base=$(sed -n 's/^SYNC_BASE_URL=//p' "$prod_env" | tail -1 | tr -d '\r')
+        sync_nats=$(sed -n 's/^SYNC_NATS_URL=//p' "$prod_env" | tail -1 | tr -d '\r')
+        sync_email=$(sed -n 's/^SYNC_EMAIL=//p' "$prod_env" | tail -1 | tr -d '\r')
+        sync_password=$(sed -n 's/^SYNC_PASSWORD=//p' "$prod_env" | tail -1 | tr -d '\r')
+        sync_password=${sync_password#\"}
+        sync_password=${sync_password%\"}
+        sync_email=${sync_email#\"}
+        sync_email=${sync_email%\"}
+        printf 'SYNC_ENABLED=%s\n' "${sync_enabled:-false}"
+        printf 'SYNC_BASE_URL=%s\n' "${sync_base:-http://caceria-sync-server:8080}"
+        printf 'SYNC_NATS_URL=%s\n' "${sync_nats:-nats://caceria-sync-server:4222}"
+        printf 'SYNC_EMAIL=%s\n' "${sync_email:-}"
+        printf 'SYNC_PASSWORD=%s\n' "${sync_password:-}"
+        unset sync_enabled sync_base sync_nats sync_email sync_password
         push_public=$(sed -n 's/^WEB_PUSH_PUBLIC_KEY=//p' "$push_env" | tail -n 1 | tr -d '\r')
         if [[ -n $push_public ]]; then
           printf 'EDGE_PUSH_PUBLIC_KEY=%s\n' "$push_public"

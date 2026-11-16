@@ -19,6 +19,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
 const (
@@ -38,6 +40,21 @@ const (
 )
 
 // MutationStore persiste la evidencia de las mutaciones y el chat shadow.
+// CooperativeClient es el subconjunto del sincronizador que usan las
+// mutaciones. La interfaz permite probar publicación y retirada sin red.
+type CooperativeClient interface {
+	Enabled() bool
+	Publish(ctx context.Context, coin string, fiat, minimal, price float64) error
+	Withdraw(ctx context.Context, coin string) error
+	Refresh(ctx context.Context) error
+}
+
+// MarketConfigLoader carga la configuración vigente para tomar el precio de
+// compra y el fiat del mercado.
+type MarketConfigLoader interface {
+	Load(ctx context.Context) (runtimeconfig.Config, int64, error)
+}
+
 type MutationStore interface {
 	Record(ctx context.Context, action, target string, payload []byte, actor string, now int64) error
 	SaveMessage(ctx context.Context, message ChatMessage) error
@@ -116,6 +133,9 @@ type MutationsAPI struct {
 	Reconcile     *Reconciler
 	Operations    OperationStore
 	Fiat          FiatMover
+	Cooperative   CooperativeClient
+	Runtime       MarketConfigLoader
+	Settings      SettingStore
 	TrustedOrigin string
 	Now           func() time.Time
 }
@@ -736,18 +756,53 @@ func (api *MutationsAPI) setContribution(
 	var body struct {
 		Coin    string  `json:"coin"`
 		Minimal float64 `json:"minimal"`
-		Price   float64 `json:"price"`
 	}
 	if !mutationDecodeBody(w, raw, &body, false) {
 		return
 	}
-	coin := strings.TrimSpace(body.Coin)
+	coin := strings.ToUpper(strings.TrimSpace(body.Coin))
 	if !mutationCoinPattern.MatchString(coin) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Mercado inválido."})
 		return
 	}
-	if mutationValueInvalid(body.Minimal, true) || mutationValueInvalid(body.Price, true) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Aportación inválida."})
+	if mutationValueInvalid(body.Minimal, true) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Cantidad mínima inválida."})
+		return
+	}
+	if api.Cooperative == nil || !api.Cooperative.Enabled() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Sincronizador no conectado."})
+		return
+	}
+	if api.Runtime == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Configuración no disponible."})
+		return
+	}
+	config, _, err := api.Runtime.Load(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Configuración no disponible."})
+		return
+	}
+	var market *runtimeconfig.Market
+	for index := range config.Markets {
+		if strings.EqualFold(config.Markets[index].Code, coin) {
+			market = &config.Markets[index]
+			break
+		}
+	}
+	if market == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Mercado no configurado."})
+		return
+	}
+	price := market.BuyMaxRate
+	fiat := math.Floor(market.FiatBalance*100) / 100
+	if price <= 0 || fiat < 5*price {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "El saldo del mercado equivale a menos de 5 QUSD al precio de compra.",
+		})
+		return
+	}
+	if err := api.Cooperative.Publish(ctx, coin, fiat, body.Minimal, price); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
 	}
 	if !api.record(ctx, w, "cooperative_contribution_set", coin, raw, actor) {
@@ -768,6 +823,14 @@ func (api *MutationsAPI) deleteContribution(
 		return
 	}
 	payload, _ := json.Marshal(map[string]string{"coin": coin})
+	if api.Cooperative == nil || !api.Cooperative.Enabled() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Sincronizador no conectado."})
+		return
+	}
+	if err := api.Cooperative.Withdraw(ctx, coin); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
+		return
+	}
 	if !api.record(ctx, w, "cooperative_contribution_withdraw", coin, payload, actor) {
 		return
 	}
@@ -794,6 +857,13 @@ func (api *MutationsAPI) setHunting(
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "Estado inválido."})
 		return
 	}
+	if api.Settings != nil {
+		encoded, _ := json.Marshal(*body.Enabled)
+		if err := api.Settings.PutSetting(ctx, "cooperative_hunting_enabled", encoded, api.now().UnixMilli()); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "No se pudo guardar el estado."})
+			return
+		}
+	}
 	if !api.record(ctx, w, "cooperative_hunting_set", "", raw, actor) {
 		return
 	}
@@ -808,6 +878,14 @@ func (api *MutationsAPI) cooperativeReconcile(
 ) {
 	raw, ok := mutationReadBody(w, r)
 	if !ok || !mutationOptionalJSON(w, raw) {
+		return
+	}
+	if api.Cooperative == nil || !api.Cooperative.Enabled() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "Sincronizador no conectado."})
+		return
+	}
+	if err := api.Cooperative.Refresh(ctx); err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
 	}
 	if !api.record(ctx, w, "cooperative_network_reconcile", "", raw, actor) {
