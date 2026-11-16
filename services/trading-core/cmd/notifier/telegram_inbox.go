@@ -20,7 +20,7 @@ func (inbox *telegramInbox) Store(ctx context.Context, updates []json.RawMessage
 	if _, err := inbox.pool.Exec(ctx, `
 		DELETE FROM shadow.telegram_update_inbox
 		WHERE state = 'processed' AND updated_at <
-			(extract(epoch from now()) * 1000)::bigint - 90 * 24 * 60 * 60 * 1000`); err != nil {
+			(extract(epoch from now() - interval '90 days') * 1000)::bigint`); err != nil {
 		return 0, false, err
 	}
 	var maxID int64

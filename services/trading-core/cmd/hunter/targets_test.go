@@ -8,9 +8,9 @@ import (
 
 func TestOfferTargetsPriorizaCompraYExcluyeMercadosInactivos(t *testing.T) {
 	service := &service{config: hunter.Config{Markets: map[string]hunter.Market{
-		"CLASICA": {Active: true, HuntBuy: true, HuntSell: true},
+		"CLASICA":  {Active: true, HuntBuy: true, HuntSell: true},
 		"BANK_CUP": {Active: true, HuntBuy: true, HuntSell: false},
-		"ZELLE":   {Active: false, HuntBuy: true, HuntSell: true},
+		"ZELLE":    {Active: false, HuntBuy: true, HuntSell: true},
 	}}}
 	targets := service.offerTargets()
 	want := []offerTarget{

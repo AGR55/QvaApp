@@ -13,7 +13,7 @@ func (service *service) claimNotification(ctx context.Context, key string) (bool
 	nowSQL := `(extract(epoch from now()) * 1000)::bigint`
 	if _, err := service.pool.Exec(ctx, `
 		DELETE FROM shadow.notifier_dedupe_keys
-		WHERE created_at < (extract(epoch from now()) * 1000)::bigint - 30 * 24 * 60 * 60 * 1000`); err != nil {
+		WHERE created_at < (extract(epoch from now() - interval '30 days') * 1000)::bigint`); err != nil {
 		return false, err
 	}
 	command, err := service.pool.Exec(ctx, `
