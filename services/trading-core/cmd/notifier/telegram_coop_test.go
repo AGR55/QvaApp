@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/notifier"
 )
 
 func TestTelegramCooperativePublishFlow(t *testing.T) {
@@ -67,6 +69,15 @@ func TestTelegramCooperativePublishFlow(t *testing.T) {
 	}
 	ctx := context.Background()
 
+	panel, panelKeyboard := runtime.cooperativePanel(ctx)
+	if !strings.Contains(panel, "Cacerías conjuntas") || !strings.Contains(panel, "Precio de compra") ||
+		!strings.Contains(panel, "Fiat disponible") {
+		t.Fatalf("panel cooperativo incompleto: %q", panel)
+	}
+	if !hasCallback(panelKeyboard, "coop:publish:CLASICA") {
+		t.Fatalf("panel sin botón de publicar: %#v", panelKeyboard)
+	}
+
 	reply, keyboard := runtime.handleCallback(ctx, "coop:publish:CLASICA")
 	if !strings.Contains(reply, "Escribe solo la cantidad mínima") {
 		t.Fatalf("respuesta de publicar = %q", reply)
@@ -90,6 +101,13 @@ func TestTelegramCooperativePublishFlow(t *testing.T) {
 	}
 	if _, ok := body["price"]; ok {
 		t.Fatalf("la web no debe enviar precio: %#v", body)
+	}
+	panel, panelKeyboard = runtime.cooperativePanel(ctx)
+	if !hasCallback(panelKeyboard, "coop:withdraw:CLASICA") {
+		t.Fatalf("panel sin botón de retirar: %#v", panelKeyboard)
+	}
+	if !strings.Contains(panel, "Publicado desde") {
+		t.Fatalf("el panel no refleja la publicación: %q", panel)
 	}
 
 	reply, _ = runtime.handleCallback(ctx, "coop:withdraw:CLASICA")
@@ -120,4 +138,15 @@ func TestTelegramCooperativeRejectsInvalidMinimum(t *testing.T) {
 func writeTestJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func hasCallback(keyboard notifier.InlineKeyboard, data string) bool {
+	for _, row := range keyboard {
+		for _, button := range row {
+			if button.CallbackData == data {
+				return true
+			}
+		}
+	}
+	return false
 }

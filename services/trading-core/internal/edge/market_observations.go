@@ -121,6 +121,9 @@ func (live *LiveDashboard) recordMarketObservations(
 	}
 
 	for coin, average := range averages {
+		if average.Count <= 0 {
+			continue
+		}
 		observation := MarketObservation{
 			CreatedAt: now.UnixMilli(), Coin: coin,
 			OpenOffers: int(average.Count), Eligible: 0,

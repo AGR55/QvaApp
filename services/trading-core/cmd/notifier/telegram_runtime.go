@@ -810,6 +810,12 @@ func (runtime *telegramRuntime) publishCooperative(ctx context.Context, coin, ra
 	if err != nil || minimal <= 0 || mathIsNotFinite(minimal) {
 		return "❌ Cantidad mínima inválida.", mainMenu()
 	}
+	market := map[string]any{}
+	if config, configErr := runtime.edge.config(ctx); configErr == nil {
+		if found := findMarket(config, strings.ToUpper(coin)); found != nil {
+			market = found
+		}
+	}
 	if err := runtime.edge.send(ctx, http.MethodPut,
 		"/api/cooperative-network/contributions",
 		map[string]any{"coin": strings.ToUpper(coin), "minimal": minimal},
@@ -817,7 +823,10 @@ func (runtime *telegramRuntime) publishCooperative(ctx context.Context, coin, ra
 		return runtime.cooperativePanelWith(ctx, "❌ "+err.Error())
 	}
 	return runtime.cooperativePanelWith(ctx, fmt.Sprintf(
-		"✅ Publicado en %s con mínimo %s QUSD.", strings.ToUpper(coin), money(minimal)))
+		"✅ Publicado en %s · mínimo %s QUSD · precio %s %s · fiat %s %s",
+		strings.ToUpper(coin), money(minimal),
+		rateText(asFloat(market["buyMaxRate"])), asString(market["currency"]),
+		money(asFloat(market["fiatBalance"])), asString(market["currency"])))
 }
 
 func (runtime *telegramRuntime) withdrawCooperative(ctx context.Context, coin string) (string, notifier.InlineKeyboard) {
