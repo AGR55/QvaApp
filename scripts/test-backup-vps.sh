@@ -15,9 +15,13 @@ mkdir -p "$backup_dir"
 sqlite3 "$database" "CREATE TABLE events(id INTEGER PRIMARY KEY, detail TEXT); INSERT INTO events(detail) VALUES ('uno'),('dos'),('tres');"
 # Copia antigua que debe borrarse por retención.
 touch -d '20 days ago' "$backup_dir/qvaapply-20000101T000000Z.sqlite"
+# Copias recientes que también deben acotarse por número.
+for index in 1 2 3 4 5; do
+  touch "$backup_dir/qvaapply-2026010${index}T000000Z.sqlite"
+done
 
 QVAAPPLY_DB="$database" QVAAPPLY_BACKUP_DIR="$backup_dir" \
-QVAAPPLY_BACKUP_RETENTION_DAYS=14 "$backup_script"
+QVAAPPLY_BACKUP_RETENTION_DAYS=14 QVAAPPLY_BACKUP_RETENTION_COUNT=3 "$backup_script"
 
 backup=$(find "$backup_dir" -maxdepth 1 -name 'qvaapply-*.sqlite' -newer "$database" | head -n 1)
 [[ -n $backup ]] || { echo "no se creó el backup" >&2; exit 1; }
@@ -28,7 +32,10 @@ backup=$(find "$backup_dir" -maxdepth 1 -name 'qvaapply-*.sqlite' -newer "$datab
   echo "conteo incorrecto" >&2; exit 1;
 }
 [[ ! -e "$backup_dir/qvaapply-20000101T000000Z.sqlite" ]] || {
-  echo "no se aplicó la retención" >&2; exit 1;
+  echo "no se aplicó la retención por días" >&2; exit 1;
+}
+[[ $(find "$backup_dir" -maxdepth 1 -name 'qvaapply-*.sqlite' | wc -l) -eq 3 ]] || {
+  echo "no se aplicó la retención por número" >&2; exit 1;
 }
 
 # Segunda ejecución y base ausente.

@@ -122,8 +122,9 @@ curl http://127.0.0.1:8782/api/session
 ```
 
 El timer `qvaapply-backup.timer` corre diariamente a las 04:15 UTC con
-`CPUQuota=20%`, `Nice=19` y retención de 14 días en
-`/opt/qvaapply/data/backups`. Usa `VACUUM INTO` (una sola pasada consistente)
+`CPUQuota=20%`, `Nice=19` y retención de 14 días **y como máximo 5 copias** en
+`/opt/qvaapply/data/backups`. El límite por número evita que varias copias del
+mismo día llenen el disco cuando el SQLite crece. Usa `VACUUM INTO` (una sola pasada consistente)
 en lugar de `.backup`, que se reiniciaba con las escrituras del bot. No se
 dispara al arrancar (`Persistent=false`). También deben existir backups
 externos cifrados de `/opt/qvaapply/data` y `/opt/qvaapply/config`, con

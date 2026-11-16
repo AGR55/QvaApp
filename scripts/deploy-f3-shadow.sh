@@ -563,6 +563,37 @@ if [[ $healthy != true ]]; then
   exit 1
 fi
 
+# Retención del despliegue: conserva la release activa y las dos anteriores
+# para permitir rollback, sin acumular decenas de copias. También limpia las
+# imágenes/tags antiguos y la caché de compilación para no llenar el disco.
+mapfile -t releases < <(
+  find "$app_root/releases" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
+    sort -rn | cut -d' ' -f2-
+)
+keep_releases=("$revision")
+for item in "${releases[@]}"; do
+  [[ $item == "$revision" ]] && continue
+  (( ${#keep_releases[@]} < 3 )) || break
+  keep_releases+=("$item")
+done
+for item in "${releases[@]}"; do
+  skip=false
+  for kept in "${keep_releases[@]}"; do
+    [[ $item == "$kept" ]] && skip=true
+  done
+  [[ $skip == true ]] || rm -rf "$app_root/releases/$item"
+done
+while read -r tag; do
+  [[ -z $tag || $tag == "<none>" || $tag == "local" ]] && continue
+  skip=false
+  for kept in "${keep_releases[@]}"; do
+    [[ $tag == "$kept" ]] && skip=true
+  done
+  [[ $skip == true ]] || docker image rm "qvaapply-f3-shadow-trading-core:$tag" >/dev/null 2>&1 || true
+done < <(docker image ls --format '{{.Tag}}' qvaapply-f3-shadow-trading-core 2>/dev/null)
+docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f --keep-storage 2GB >/dev/null 2>&1 || true
+
 echo "trading-core shadow desplegado en $release_dir"
 echo "  healthz: http://127.0.0.1:${shadow_port}/healthz"
 echo "  readyz:  http://127.0.0.1:${shadow_port}/readyz"
