@@ -184,7 +184,7 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 		evaluation.Reason = "Restricción VIP o indicador no disponible"
 		return evaluation
 	}
-	if offer.Pause != nil || offer.RequirementsMet != nil && !*offer.RequirementsMet {
+	if offer.Paused() || offer.RequirementsMet != nil && !*offer.RequirementsMet {
 		evaluation.Reason = "Oferta pausada o no cumple los requisitos del anunciante"
 		return evaluation
 	}

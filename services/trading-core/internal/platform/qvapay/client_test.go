@@ -641,3 +641,28 @@ func TestOffersAcceptsObjectCoinAndGroupedList(t *testing.T) {
 		t.Fatalf("oferta inesperada: %+v", offers[0])
 	}
 }
+
+func TestOfferPausedToleraValoresFalsos(t *testing.T) {
+	cases := []struct {
+		payload string
+		want    bool
+	}{
+		{`null`, false},
+		{`false`, false},
+		{`"false"`, false},
+		{`0`, false},
+		{`{}`, false},
+		{`true`, true},
+		{`{"reason":"owner"}`, true},
+		{`[{"reason":"owner"}]`, true},
+	}
+	for _, tc := range cases {
+		var offer Offer
+		if err := json.Unmarshal([]byte(`{"pause":`+tc.payload+`}`), &offer); err != nil {
+			t.Fatalf("pause=%s: %v", tc.payload, err)
+		}
+		if got := offer.Paused(); got != tc.want {
+			t.Fatalf("pause=%s Paused()=%v, quiero %v", tc.payload, got, tc.want)
+		}
+	}
+}

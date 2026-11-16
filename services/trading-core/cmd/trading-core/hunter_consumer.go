@@ -304,9 +304,20 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-consumer.applyQueue:
-			if !consumer.canApplyNow(ctx, task.payload) ||
-				consumer.trader != nil && !consumer.trader.dryRun && !consumer.offerStillEligible(ctx, task) {
-				consumer.logger.Warn("apply omitido: cacería pausada o control runtime no disponible", "event_id", task.eventID)
+			reason := ""
+			if !consumer.canApplyNow(ctx, task.payload) {
+				reason = "cacería pausada, control runtime no disponible o cotización vencida"
+			}
+			if reason == "" && consumer.trader != nil && !consumer.trader.dryRun {
+				var eligible bool
+				eligible, reason = consumer.offerStillEligible(ctx, task)
+				if eligible {
+					reason = ""
+				}
+			}
+			if reason != "" {
+				consumer.logger.Warn("apply omitido", "event_id", task.eventID,
+					"offer_uuid", task.payload.OfferUUID, "reason", reason)
 				if _, err := consumer.operationRepo.Transition(ctx, task.eventID, core.StateRejected, postgres.NowMS()); err != nil {
 					consumer.logger.Warn("no se pudo cerrar operación bloqueada por pausa", "event_id", task.eventID, "error", err)
 				}
@@ -329,25 +340,40 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 
 // offerStillEligible vuelve a leer la oferta remota para no aplicar una
 // cotización que cambió o se cerró mientras el evento esperaba en la cola.
-func (consumer *hunterConsumer) offerStillEligible(ctx context.Context, task executionTask) bool {
+// Devuelve un motivo concreto para que los applies omitidos sean auditables.
+func (consumer *hunterConsumer) offerStillEligible(ctx context.Context, task executionTask) (bool, string) {
 	if consumer == nil || consumer.reconciler == nil || consumer.reconciler.reader == nil {
-		return false
+		return false, "conciliador QvaPay no configurado"
 	}
 	offer, err := consumer.reconciler.reader.Offer(ctx, task.payload.OfferUUID)
-	if err != nil || offer.Status != "open" || offer.OnlyVIP == nil || *offer.OnlyVIP ||
-		offer.Pause != nil || offer.RequirementsMet != nil && !*offer.RequirementsMet {
-		return false
+	if err != nil {
+		return false, "lectura remota falló: " + err.Error()
+	}
+	if offer.Status != "open" {
+		return false, "estado remoto " + offer.Status
+	}
+	if offer.OnlyVIP == nil {
+		return false, "only_vip ausente en la lectura remota"
+	}
+	if *offer.OnlyVIP {
+		return false, "la oferta remota es solo VIP"
+	}
+	if offer.Paused() {
+		return false, "la oferta remota está pausada"
+	}
+	if offer.RequirementsMet != nil && !*offer.RequirementsMet {
+		return false, "no cumple los requisitos del anunciante"
 	}
 	expectedType := "sell"
 	if task.payload.Side == "sell" {
 		expectedType = "buy"
 	}
 	if offer.Type != expectedType {
-		return false
+		return false, fmt.Sprintf("tipo remoto %q, esperado %q", offer.Type, expectedType)
 	}
 	ownerUUIDSelf := consumer.ownAccountUUID(ctx)
 	if ownerUUIDSelf == "" {
-		return false
+		return false, "no se pudo leer el perfil propio"
 	}
 	ownerUUID := strings.TrimSpace(offer.OwnerUUID)
 	for _, party := range []json.RawMessage{offer.User, offer.Peer} {
@@ -357,36 +383,39 @@ func (consumer *hunterConsumer) offerStillEligible(ctx context.Context, task exe
 		if len(party) > 0 && json.Unmarshal(party, &owner) == nil {
 			partyUUID := strings.TrimSpace(owner.UUID)
 			if partyUUID == ownerUUIDSelf {
-				return false
+				return false, "la oferta remota es propia"
 			}
 			if ownerUUID == "" {
 				ownerUUID = partyUUID
 			}
 		}
 	}
-	if ownerUUID == "" || ownerUUID == ownerUUIDSelf {
-		return false
+	if ownerUUID == "" {
+		return false, "la oferta remota no identifica contraparte"
 	}
 	expectedRate, err := decimal.Parse(task.payload.Rate)
-	if err != nil || offer.Rate.Cmp(expectedRate) != 0 {
-		return false
+	if err != nil {
+		return false, "tasa del evento inválida"
+	}
+	if offer.Rate.Cmp(expectedRate) != 0 {
+		return false, fmt.Sprintf("la tasa cambió (%s != %s)", offer.Rate.Format(8), expectedRate.Format(8))
 	}
 	available := offer.AvailableAmount
 	if available.Sign() <= 0 {
 		available = offer.Amount
 	}
 	if available.Cmp(task.amount) < 0 {
-		return false
+		return false, fmt.Sprintf("disponible remoto %s < %s", available.Format(8), task.amount.Format(8))
 	}
 	if offer.OfferKind == "flexible" {
 		if offer.OrderMin.Sign() > 0 && task.amount.Cmp(offer.OrderMin) < 0 {
-			return false
+			return false, "importe por debajo del mínimo de la oferta flexible"
 		}
 		if offer.OrderMax.Sign() > 0 && task.amount.Cmp(offer.OrderMax) > 0 {
-			return false
+			return false, "importe por encima del máximo de la oferta flexible"
 		}
 	}
-	return true
+	return true, ""
 }
 
 func (consumer *hunterConsumer) ownAccountUUID(ctx context.Context) string {

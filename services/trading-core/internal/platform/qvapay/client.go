@@ -316,6 +316,28 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// Paused indica si la oferta está pausada. QvaPay usa null/objeto, pero se
+// toleran booleanos y cadenas para no bloquear ofertas con pause=false.
+func (o Offer) Paused() bool {
+	switch typed := o.Pause.(type) {
+	case nil:
+		return false
+	case bool:
+		return typed
+	case string:
+		value := strings.ToLower(strings.TrimSpace(typed))
+		return value != "" && value != "false" && value != "0"
+	case json.Number:
+		return typed.String() != "0"
+	case map[string]any:
+		return len(typed) > 0
+	case []any:
+		return len(typed) > 0
+	default:
+		return true
+	}
+}
+
 func profileFields(data []byte) map[string]any {
 	var fields map[string]any
 	if err := decodeJSON(data, &fields); err != nil || fields == nil {
