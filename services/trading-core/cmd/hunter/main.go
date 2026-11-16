@@ -555,6 +555,7 @@ type service struct {
 	streamConnected    atomic.Bool
 	streamRaw          atomic.Uint64
 	streamEvents       atomic.Uint64
+	streamIgnored      atomic.Uint64
 	streamErrors       atomic.Uint64
 	streamConsecutive  atomic.Uint64
 	streamLastAt       atomic.Int64
@@ -616,6 +617,15 @@ func (service *service) handleStreamState(state qvapay.StreamState) {
 
 func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	service.streamRaw.Add(1)
+	switch event.Event {
+	case "init":
+		// Handshake del stream: no es una oferta ni un error.
+		return
+	case "subscription_expired":
+		service.streamErrors.Add(1)
+		service.logger.Error("suscripción del feed P2P vencida", "detail", string(event.Data))
+		return
+	}
 	var payload struct {
 		Data   json.RawMessage `json:"data"`
 		SentAt string          `json:"sent_at"`
@@ -644,6 +654,9 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	switch eventName {
 	case "p2p.created", "p2p.reopened", "p2p.resumed", "p2p.range_created", "p2p.range_updated":
 	default:
+		// Salidas y cambios de operaciones ya en curso: no crean una
+		// oportunidad. El apply vuelve a leer la oferta antes de mutar.
+		service.streamIgnored.Add(1)
 		return
 	}
 	service.streamEvents.Add(1)
@@ -1151,6 +1164,7 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_connected Feed SSE conectado (1/0).\n# TYPE hunter_stream_connected gauge\nhunter_stream_connected %d\n", boolInt(service.streamConnected.Load()))
 	fmt.Fprintf(w, "# HELP hunter_stream_raw_events_total Eventos SSE recibidos (incluye init).\n# TYPE hunter_stream_raw_events_total counter\nhunter_stream_raw_events_total %d\n", service.streamRaw.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_events_total Eventos SSE oportunidad recibidos.\n# TYPE hunter_stream_events_total counter\nhunter_stream_events_total %d\n", service.streamEvents.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_ignored_events_total Eventos SSE de salida o seguimiento descartados.\n# TYPE hunter_stream_ignored_events_total counter\nhunter_stream_ignored_events_total %d\n", service.streamIgnored.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_queue_depth Eventos SSE pendientes de persistir.\n# TYPE hunter_stream_queue_depth gauge\nhunter_stream_queue_depth %d\n", len(service.streamQueue))
 	fmt.Fprintf(w, "# HELP hunter_batches_total Lotes de persistencia confirmados.\n# TYPE hunter_batches_total counter\nhunter_batches_total %d\n", service.persistBatches.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE acumulados.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())

@@ -80,9 +80,24 @@ func (stream *Stream) Run(
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		err := stream.runOnce(ctx, credentials, onEvent, onState)
+		// QvaPay cierra el stream cada pocos minutos y nos pide reconectar en
+		// 1 s. Hay que reiniciar el backoff tras una conexión válida; de lo
+		// contrario cada corte normal acumularía esperas hasta 60 s.
+		connected := false
+		state := func(state StreamState) {
+			if state.Connected {
+				connected = true
+			}
+			if onState != nil {
+				onState(state)
+			}
+		}
+		err := stream.runOnce(ctx, credentials, onEvent, state)
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if connected {
+			backoff = streamBackoff
 		}
 		message := "conexión SSE interrumpida"
 		if err != nil {
