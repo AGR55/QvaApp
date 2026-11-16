@@ -608,6 +608,7 @@ func loadConfig() (config, error) {
 		"EDGE_MUTATIONS_LIVE":         &cfg.MutationsLive,
 		"EDGE_LIVE_DASHBOARD":         &cfg.LiveDashboard,
 		"EDGE_QVAPAY_WEBHOOK_ENABLED": &cfg.WebhookEnabled,
+		"SYNC_ENABLED":                &cfg.SyncEnabled,
 	} {
 		if raw := strings.TrimSpace(os.Getenv(name)); raw != "" {
 			value, err := strconv.ParseBool(raw)
