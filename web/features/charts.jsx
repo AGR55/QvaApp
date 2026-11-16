@@ -70,7 +70,10 @@ export function Charts({ markets, initialHistory = [], initialBalanceHistory = [
       .filter(Number.isFinite),
     domain = chartDomain(values),
     digits = markets.find((market) => market.code === coin)?.currency === "USD" ? 4 : 2,
-    latest = rows.at(-1);
+    latest = rows.at(-1),
+    missingBuyHistory = rows.some(
+      (item) => !Number.isFinite(item.medianaCompra) && Number.isFinite(item.medianaVenta),
+    );
   return (
     <div className="page-stack">
       <ViewHead
@@ -91,6 +94,11 @@ export function Charts({ markets, initialHistory = [], initialBalanceHistory = [
             <MarketChart rows={rows} domain={domain} digits={digits} />
             {loading ? <div className="chart-updating" role="status">Actualizando medianas…</div> : null}
           </div>
+          {missingBuyHistory ? (
+            <p className="chart-history-note">
+              La compra se empezó a registrar con el nuevo motor; los puntos anteriores solo tienen venta.
+            </p>
+          ) : null}
           </>
         ) : data ? (
           <div className="chart-stage chart-empty">
