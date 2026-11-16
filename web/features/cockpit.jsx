@@ -104,8 +104,8 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
                 <b>{money(rate ? availability.available / rate : 0)} QUSD</b>
               </p>
               <small>
-                {money(availability.committed)} comprometidos · límite{" "}
-                {money(rate, unit(market.code) === "USD" ? 4 : 2)}
+                <span>{money(availability.committed)} comprometidos</span>
+                <span>límite {money(rate, unit(market.code) === "USD" ? 4 : 2)}</span>
               </small>
             </article>
           );

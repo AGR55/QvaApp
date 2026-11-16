@@ -4887,3 +4887,10 @@ td {
 .login-brand-lockup {
   margin-bottom: 0;
 }
+
+.market-card > small {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 10px;
+}
