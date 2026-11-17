@@ -177,20 +177,28 @@ type Offer struct {
 
 // OfferOrder es una orden hija de una oferta flexible.
 type OfferOrder struct {
-	UUID    string
-	Status  string
-	Amount  decimal.Value
-	Receive decimal.Value
-	Taker   json.RawMessage
+	UUID       string
+	Status     string
+	Amount     decimal.Value
+	Receive    decimal.Value
+	Taker      json.RawMessage
+	CreatedAt  int64
+	UpdatedAt  int64
+	PaidAt     int64
+	ReleasedAt int64
 }
 
 func (o *OfferOrder) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		UUID    any             `json:"uuid"`
-		Status  any             `json:"status"`
-		Amount  any             `json:"amount"`
-		Receive any             `json:"receive"`
-		Taker   json.RawMessage `json:"Taker"`
+		UUID       any             `json:"uuid"`
+		Status     any             `json:"status"`
+		Amount     any             `json:"amount"`
+		Receive    any             `json:"receive"`
+		Taker      json.RawMessage `json:"Taker"`
+		CreatedAt  any             `json:"created_at"`
+		UpdatedAt  any             `json:"updated_at"`
+		PaidAt     any             `json:"paid_at"`
+		ReleasedAt any             `json:"released_at"`
 	}
 	if err := decodeJSON(data, &raw); err != nil {
 		return err
@@ -206,6 +214,8 @@ func (o *OfferOrder) UnmarshalJSON(data []byte) error {
 	*o = OfferOrder{
 		UUID: scalarString(raw.UUID), Status: scalarString(raw.Status),
 		Amount: amount, Receive: receive, Taker: raw.Taker,
+		CreatedAt: chatTimestamp(raw.CreatedAt), UpdatedAt: chatTimestamp(raw.UpdatedAt),
+		PaidAt: chatTimestamp(raw.PaidAt), ReleasedAt: chatTimestamp(raw.ReleasedAt),
 	}
 	return nil
 }

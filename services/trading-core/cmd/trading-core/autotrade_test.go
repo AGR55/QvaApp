@@ -334,14 +334,18 @@ func (fake *fakeLocalOps) SetState(_ context.Context, _ string, state string, _ 
 }
 
 type fakeOperationFiat struct {
-	debits    int
-	credits   int
-	reversals int
+	debits     int
+	credits    int
+	reversals  int
+	lastKey    string
+	lastType   string
+	lastAmount float64
 }
 
 func (fake *fakeOperationFiat) RecordOperationFiat(
-	_ context.Context, _, _, offerType string, _ float64, _, _ string, _ int64,
+	_ context.Context, _, key, offerType string, receive float64, _, _ string, _ int64,
 ) (bool, error) {
+	fake.lastKey, fake.lastType, fake.lastAmount = key, offerType, receive
 	if offerType == "sell" {
 		fake.debits++
 	} else {
@@ -351,8 +355,9 @@ func (fake *fakeOperationFiat) RecordOperationFiat(
 }
 
 func (fake *fakeOperationFiat) ReverseOperationFiat(
-	_ context.Context, _, _, _ string, _ float64, _ string, _ int64,
+	_ context.Context, _, key, offerType string, receive float64, _ string, _ int64,
 ) (bool, error) {
+	fake.lastKey, fake.lastType, fake.lastAmount = key, offerType, receive
 	fake.reversals++
 	return true, nil
 }
@@ -381,5 +386,39 @@ func TestReconcilerRefreshesConfirmedLocalState(t *testing.T) {
 	}
 	if repo.operation.State != core.StateConfirmed {
 		t.Fatalf("no debía transicionar el core: %s", repo.operation.State)
+	}
+}
+
+func TestReconcilerUsaImporteDeLaOrdenPorRango(t *testing.T) {
+	operation := reservedOperation(t)
+	operation, _ = operation.Transition(core.StateSubmitted, 3000)
+	operation, _ = operation.Transition(core.StateConfirmed, 4000)
+	repo := &fakeOperationRepo{operation: operation}
+	local := &fakeLocalOps{
+		found: true,
+		record: postgres.LocalOperation{
+			UUID: "offer-1", OfferType: "sell", Coin: "CLASICA",
+			State: "applied", Receive: 99.99, OrderUUID: "order-1",
+		},
+	}
+	fiat := &fakeOperationFiat{}
+	offer := qvapay.Offer{
+		UUID: "offer-1", Status: "open", Type: "sell", OfferKind: "flexible",
+		Orders: []qvapay.OfferOrder{{
+			UUID: "order-1", Status: "completed",
+			Receive: decimal.MustParse("3.25"),
+		}},
+	}
+	reconciler := &operationReconciler{
+		reader: &fakeOfferReader{offer: offer},
+		repo:   repo, localOps: local, fiat: fiat,
+		now: func() time.Time { return time.Unix(1_700_000_000, 0) },
+	}
+	reconciler.reconcileOne(context.Background(), "op-1", "offer-1", "order-1", string(core.StateConfirmed))
+	if fiat.debits != 1 || fiat.lastKey != "order-1" || fiat.lastAmount != 3.25 {
+		t.Fatalf("fiat = %+v", fiat)
+	}
+	if local.state != "completed" {
+		t.Fatalf("local.state = %q", local.state)
 	}
 }

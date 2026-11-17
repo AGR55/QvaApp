@@ -246,7 +246,12 @@ func run(logger *slog.Logger) error {
 								localOps := postgres.NewLocalOperationRepository(writePool)
 								go runOfferRefresh(ctx, logger, readClient, client, configs)
 								go runAutoCancel(ctx, logger, readClient, client, configs, localOps)
-								logger.Info("bucles de refresco y autocancelación habilitados")
+								fiatSync := &edge.FiatSyncer{
+									Reader: readClient, Recorder: configs, Logger: logger,
+									StartedAt: fiatLedgerStartedAt(writePool),
+								}
+								go fiatSync.Run(ctx)
+								logger.Info("bucles de refresco, autocancelación y conciliación fiat habilitados")
 							} else {
 								logger.Warn("bucles de mantenimiento deshabilitados", "error", err)
 							}
@@ -725,4 +730,31 @@ func envOrDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// fiatLedgerStartedAt fija la base desde la que se importan órdenes históricas.
+// Evita volver a contar operaciones que ya estaban reflejadas en el saldo fiat
+// heredado de TypeScript.
+func fiatLedgerStartedAt(pool *pgxpool.Pool) func(context.Context) int64 {
+	return func(ctx context.Context) int64 {
+		if pool == nil {
+			return 0
+		}
+		var started int64
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(MIN(created_at), 0) FROM shadow.fiat_ledger`).Scan(&started); err != nil {
+			return 0
+		}
+		if started > 0 {
+			return started
+		}
+		if err := pool.QueryRow(ctx,
+			`SELECT COALESCE(MIN(created_at), 0) FROM shadow.runtime_config_revisions`).Scan(&started); err != nil {
+			return 0
+		}
+		if started > 0 {
+			return started
+		}
+		return time.Now().UnixMilli()
+	}
 }

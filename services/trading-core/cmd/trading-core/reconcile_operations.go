@@ -106,11 +106,15 @@ func (reconciler *operationReconciler) reconcileOne(
 		return
 	}
 	status := offer.Status
+	// En ofertas por rango el importe fiat pertenece a la orden hija, no a la
+	// oferta padre: varias órdenes comparten el mismo UUID de oferta.
+	orderReceive := offer.Receive
 	if orderUUID != "" {
 		found := false
 		for _, order := range offer.Orders {
 			if order.UUID == orderUUID {
 				status = order.Status
+				orderReceive = order.Receive
 				found = true
 				break
 			}
@@ -157,21 +161,25 @@ func (reconciler *operationReconciler) reconcileOne(
 			if key == "" {
 				key = offerUUID
 			}
+			fiatReceive := local.Receive
+			if orderUUID != "" {
+				fiatReceive = decimalFloat(orderReceive)
+			}
 			normalized := strings.ToLower(status)
 			var fiatErr error
 			switch {
 			case local.OfferType == "sell" && (normalized == "paid" || normalized == "completed"):
 				_, fiatErr = reconciler.fiat.RecordOperationFiat(
-					ctx, local.Coin, key, "sell", local.Receive, normalized,
+					ctx, local.Coin, key, "sell", fiatReceive, normalized,
 					"Conciliación QvaPay", now)
 			case local.OfferType == "buy" && normalized == "completed":
 				_, fiatErr = reconciler.fiat.RecordOperationFiat(
-					ctx, local.Coin, key, "buy", local.Receive, normalized,
+					ctx, local.Coin, key, "buy", fiatReceive, normalized,
 					"Conciliación QvaPay", now)
 			case local.OfferType == "sell" && local.State == "paid" &&
 				(normalized == "open" || normalized == "cancelled" || normalized == "canceled" || normalized == "rejected"):
 				_, fiatErr = reconciler.fiat.ReverseOperationFiat(
-					ctx, local.Coin, key, "sell", local.Receive,
+					ctx, local.Coin, key, "sell", fiatReceive,
 					"Reversión por cancelación QvaPay", now)
 			}
 			if fiatErr != nil {
