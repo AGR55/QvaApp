@@ -333,6 +333,7 @@ Panel y lectura:
 
 Cacerías:
 /hunting · /market MERCADO
+🎯 Cacerías → mercado → ✏️ precio (compra/venta)
 /huntbuy on|off · /huntsell on|off
 
 Control:
@@ -363,20 +364,21 @@ func (runtime *telegramRuntime) dashboardText(ctx context.Context) (string, noti
 		return "❌ No se pudo leer el panel: " + err.Error(), mainMenu()
 	}
 	config, _ := runtime.edge.config(ctx)
-	text := fmt.Sprintf(`📊 Panel QvaApply
+	text := fmt.Sprintf(`📊 QvaApply
 
 💰 QUSD disponible: %s
 💼 Ofertas propias: %d
 📦 Operaciones: %d
 🔄 Transacciones: %d
-🟢 Cacería compra: %v
-🧾 Cacería venta: %v`,
+
+🎯 Cacería compra: %s
+🎯 Cacería venta: %s`,
 		money(asFloat(dashboard["balance"])),
 		len(asList(dashboard["ownOffers"])),
 		len(asList(dashboard["operations"])),
 		len(asList(dashboard["transactions"])),
-		boolValue(config, "buyRunning"),
-		boolValue(config, "sellRunning"),
+		statusWord(boolValue(config, "buyRunning")),
+		statusWord(boolValue(config, "sellRunning")),
 	)
 	return text, mainMenu()
 }

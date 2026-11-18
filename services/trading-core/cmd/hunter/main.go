@@ -1035,7 +1035,7 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 				evaluation.OfferUUID, evaluation.Decision, evaluation.Rate.Format(8),
 				evaluation.Amount.Format(8), evaluation.Receive.Format(8),
 				evaluation.Available.Format(8), evaluation.OrderMin.Format(8), evaluation.OrderMax.Format(8),
-				strconv.FormatInt(result.PolledAt/300, 10), // permite reevaluar controles cada 5 min sin duplicar cada poll.
+				strconv.FormatInt(result.PolledAt/60, 10), // reevalúa cada minuto sin duplicar cada poll.
 			}, "|")
 			sum := sha256.Sum256([]byte(fingerprint))
 			eventID := "hunter-" + hex.EncodeToString(sum[:16])
