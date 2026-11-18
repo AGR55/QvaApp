@@ -401,7 +401,9 @@ func (consumer *hunterConsumer) offerStillEligible(ctx context.Context, task exe
 	if err != nil {
 		return false, "tasa del evento inválida"
 	}
-	if offer.Rate.Cmp(expectedRate) != 0 {
+	// La tasa viaja serializada a 8 decimales; comparar el valor exacto de
+	// QvaPay contra ese texto produce falsos cambios por el último dígito.
+	if offer.Rate.Format(8) != expectedRate.Format(8) {
 		return false, fmt.Sprintf("la tasa cambió (%s != %s)", offer.Rate.Format(8), expectedRate.Format(8))
 	}
 	available := offer.AvailableAmount

@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"encoding/json"
+	"testing"
+
+	"github.com/AGR55/QvaApp/services/shared/decimal"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
+)
 
 func TestValidateHunterPayload(t *testing.T) {
 	valid := `{"offerUuid":"offer-1","coin":"BANK_CUP","side":"buy","decision":"auto_buy","amount":"10.00000000","receive":"18000.00000000","rate":"1800.00000000"}`
@@ -17,5 +24,28 @@ func TestValidateHunterPayload(t *testing.T) {
 		if err := validateHunterPayload(payload); err == nil {
 			t.Fatalf("payload inválido aceptado: %s", payload)
 		}
+	}
+}
+
+func TestOfferStillEligibleToleraRedondeoDeTasa(t *testing.T) {
+	onlyVIP := false
+	other, _ := json.Marshal(map[string]string{"uuid": "otro"})
+	reader := &fakeOfferReader{
+		offer: qvapay.Offer{
+			UUID: "offer-1", Status: "open", Type: "sell", OfferKind: "fixed",
+			OnlyVIP: &onlyVIP, Rate: decimal.MustParse("1.017964071234"),
+			Amount: decimal.MustParse("10"), Receive: decimal.MustParse("10.17964071234"),
+			AvailableAmount: decimal.MustParse("10"), OwnerUUID: "otro", User: other,
+		},
+		user: qvapay.User{UUID: "yo"},
+	}
+	consumer := &hunterConsumer{reconciler: &operationReconciler{reader: reader}}
+	task := executionTask{
+		payload: hunterPayload{OfferUUID: "offer-1", Side: "buy", Rate: "1.01796407"},
+		amount:  decimal.MustParse("10"),
+	}
+	ok, reason := consumer.offerStillEligible(context.Background(), task)
+	if !ok {
+		t.Fatalf("la diferencia de redondeo no debe bloquear: %s", reason)
 	}
 }
