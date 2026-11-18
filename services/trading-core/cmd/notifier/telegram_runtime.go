@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/telegrammenu"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/notifier"
 )
 
@@ -29,6 +30,12 @@ type telegramRuntime struct {
 	pendingMu   sync.Mutex
 	pendingCoin string
 	pendingAt   time.Time
+
+	// Las ediciones de tasa viven en memoria y se aplican sobre el mismo
+	// mensaje que abrió el panel del mercado.
+	rateMu         sync.Mutex
+	rates          *telegrammenu.Sessions
+	rateMessageIDs map[string]int64
 }
 
 func (runtime *telegramRuntime) Run(ctx context.Context) {
@@ -154,28 +161,35 @@ func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Upda
 		_ = runtime.client.AnswerCallbackQuery(ctx, update.CallbackID)
 	}
 	text := update.Text
+	viaCallback := false
 	if data := update.CallbackData; data != "" {
 		if strings.HasPrefix(data, "cmd:") {
 			text = "/" + strings.TrimPrefix(data, "cmd:")
+			viaCallback = true
 		} else {
-			reply, keyboard := runtime.handleCallback(ctx, data)
+			reply, keyboard := runtime.handleCallback(ctx, chat, data, update.MessageID)
 			if strings.TrimSpace(reply) == "" {
 				return "", false
 			}
-			reply = truncate(reply, 3900)
-			if err := runtime.client.SendMenu(ctx, chat, reply, keyboard); err != nil {
+			if err := runtime.deliverMenu(ctx, chat, update.MessageID, reply, keyboard); err != nil {
 				runtime.logger.Warn("telegram callback falló", "error", err)
 				return reply, false
 			}
 			return reply, true
 		}
 	}
-	if strings.HasPrefix(strings.TrimSpace(text), "/") {
+	trimmed := strings.TrimSpace(text)
+	if trimmed != "" {
+		if handled, reply := runtime.handleRateText(ctx, chat, trimmed); handled {
+			return reply, true
+		}
+	}
+	if strings.HasPrefix(trimmed, "/") {
 		runtime.clearPendingMinimal()
+		runtime.cancelRateSession(chat)
 	} else if text != "" {
 		if reply, keyboard, handled := runtime.consumePendingMinimal(ctx, text); handled {
-			reply = truncate(reply, 3900)
-			if err := runtime.client.SendMenu(ctx, chat, reply, keyboard); err != nil {
+			if err := runtime.deliverMenu(ctx, chat, 0, reply, keyboard); err != nil {
 				runtime.logger.Warn("telegram respuesta de cantidad falló", "error", err)
 				return reply, false
 			}
@@ -190,8 +204,11 @@ func (runtime *telegramRuntime) handle(ctx context.Context, update notifier.Upda
 	if strings.TrimSpace(reply) == "" {
 		return "", false
 	}
-	reply = truncate(reply, 3900)
-	if err := runtime.client.SendMenu(ctx, chat, reply, keyboard); err != nil {
+	messageID := int64(0)
+	if viaCallback {
+		messageID = update.MessageID
+	}
+	if err := runtime.deliverMenu(ctx, chat, messageID, reply, keyboard); err != nil {
 		runtime.logger.Warn("telegram respuesta falló", "error", err)
 		return reply, false
 	}
@@ -296,10 +313,10 @@ func (runtime *telegramRuntime) dispatch(ctx context.Context, command notifier.C
 
 func mainMenu() notifier.InlineKeyboard {
 	return notifier.InlineKeyboard{
-		{{Text: "📊 Estado", CallbackData: "cmd:status"}, {Text: "💰 Balance", CallbackData: "cmd:balance"}},
-		{{Text: "🎯 Cacerías", CallbackData: "nav:hunting"}, {Text: "🤝 Conjuntas", CallbackData: "nav:coop"}},
-		{{Text: "🔎 Mercados", CallbackData: "nav:markets"}, {Text: "💼 Ofertas", CallbackData: "nav:offers"}},
-		{{Text: "📦 Operaciones", CallbackData: "nav:operations"}},
+		{{Text: "🎯 Cacerías", CallbackData: "nav:hunting"}},
+		{{Text: "📦 Operaciones", CallbackData: "nav:operations"}, {Text: "💼 Ofertas", CallbackData: "nav:offers"}},
+		{{Text: "💰 Balance", CallbackData: "cmd:balance"}, {Text: "📊 Estado", CallbackData: "cmd:status"}},
+		{{Text: "🔎 Mercados", CallbackData: "nav:markets"}, {Text: "🤝 Conjuntas", CallbackData: "nav:coop"}},
 		{{Text: "⚙️ Estrategia", CallbackData: "cmd:strategy"}, {Text: "🤖 Automatización", CallbackData: "cmd:automation"}},
 		{{Text: "❓ Ayuda", CallbackData: "cmd:help"}},
 	}
@@ -560,14 +577,18 @@ func (runtime *telegramRuntime) huntingPanelWith(ctx context.Context, notice str
 		if asBool(market["active"]) {
 			icon = "🟢"
 		}
-		fmt.Fprintf(&builder, "%s %s\n• Compra: %s · media %s · %s ofertas\n• Venta: %s · media %s · %s ofertas\n\n",
-			icon, asString(market["label"]),
-			effectiveStatus(market, "huntBuyEnabled", buyRunning), averageText(average["averageBuy"]), countText(average["count"]),
-			effectiveStatus(market, "huntSellEnabled", sellRunning), averageText(average["averageSell"]), countText(average["count"]))
+		fmt.Fprintf(&builder, "%s %s\n", icon, asString(market["label"]))
+		fmt.Fprintf(&builder, "   🔵 %s · ≤ %s · media %s\n",
+			effectiveStatus(market, "huntBuyEnabled", buyRunning),
+			rateText(asFloat(market["buyMaxRate"])), averageText(average["averageBuy"]))
+		fmt.Fprintf(&builder, "   🟢 %s · ≥ %s · media %s\n\n",
+			effectiveStatus(market, "huntSellEnabled", sellRunning),
+			rateText(asFloat(market["sellMinRate"])), averageText(average["averageSell"]))
 	}
+	builder.WriteString("Toca un mercado para ajustar precios o pausar sus cacerías.")
 	if notice != "" {
+		builder.WriteString("\n\n")
 		builder.WriteString(notice)
-		builder.WriteString("\n")
 	}
 	keyboard := notifier.InlineKeyboard{
 		{
@@ -613,29 +634,39 @@ func (runtime *telegramRuntime) marketPanelWith(ctx context.Context, code, notic
 	sellRunning := asBool(hunting["sellRunning"])
 	buyEnabled := asBool(market["huntBuyEnabled"])
 	sellEnabled := asBool(market["huntSellEnabled"])
+	currency := asString(market["currency"])
+	marketCode := asString(market["code"])
 	var builder strings.Builder
-	fmt.Fprintf(&builder, "🪙 %s (%s)\n\n", asString(market["label"]), asString(market["code"]))
-	fmt.Fprintf(&builder, "Global: compra %s · venta %s\n", statusWord(buyRunning), statusWord(sellRunning))
-	fmt.Fprintf(&builder, "• Compra: %s · media %s · %s ofertas\n",
-		effectiveStatus(market, "huntBuyEnabled", buyRunning), averageText(average["averageBuy"]), countText(average["count"]))
-	fmt.Fprintf(&builder, "• Venta: %s · media %s · %s ofertas\n\n",
-		effectiveStatus(market, "huntSellEnabled", sellRunning), averageText(average["averageSell"]), countText(average["count"]))
-	fmt.Fprintf(&builder, "Compra ≤ %s · Venta ≥ %s\n", rateText(asFloat(market["buyMaxRate"])), rateText(asFloat(market["sellMinRate"])))
-	fmt.Fprintf(&builder, "Máx %s QUSD · fee %s%% · fiat %s %s\n\n",
-		money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])),
-		money(asFloat(market["fiatBalance"])), asString(market["currency"]))
-	fmt.Fprintf(&builder, "Cambiar precios:\n/setrate %s buy %s\n/setrate %s sell %s\n",
-		asString(market["code"]), rateText(asFloat(market["buyMaxRate"])),
-		asString(market["code"]), rateText(asFloat(market["sellMinRate"])))
+	marketState := "inactivo"
+	if asBool(market["active"]) {
+		marketState = "activo"
+	}
+	fmt.Fprintf(&builder, "🎯 Cacería · %s\n", asString(market["label"]))
+	fmt.Fprintf(&builder, "Mercado: %s · %s\n\n", marketState, currency)
+	fmt.Fprintf(&builder, "🔵 Compra: %s\n   Máximo %s %s/QUSD · media %s\n",
+		effectiveStatus(market, "huntBuyEnabled", buyRunning),
+		rateText(asFloat(market["buyMaxRate"])), currency, averageText(average["averageBuy"]))
+	fmt.Fprintf(&builder, "🟢 Venta: %s\n   Mínimo %s %s/QUSD · media %s\n\n",
+		effectiveStatus(market, "huntSellEnabled", sellRunning),
+		rateText(asFloat(market["sellMinRate"])), currency, averageText(average["averageSell"]))
+	fmt.Fprintf(&builder, "Fiat: %s %s · Máx %s QUSD · Fee %s%%\n",
+		money(asFloat(market["fiatBalance"])), currency,
+		money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])))
+	builder.WriteString("Global: compra ")
+	builder.WriteString(statusWord(buyRunning))
+	builder.WriteString(" · venta ")
+	builder.WriteString(statusWord(sellRunning))
 	if notice != "" {
-		builder.WriteString("\n")
+		builder.WriteString("\n\n")
 		builder.WriteString(notice)
 	}
 	keyboard := notifier.InlineKeyboard{
 		{
-			{Text: toggleLabel("compra", buyEnabled), CallbackData: "hunt:" + asString(market["code"]) + ":buy:" + toggleValue(buyEnabled)},
-			{Text: toggleLabel("venta", sellEnabled), CallbackData: "hunt:" + asString(market["code"]) + ":sell:" + toggleValue(sellEnabled)},
+			{Text: toggleLabel("compra", buyEnabled), CallbackData: "hunt:" + marketCode + ":buy:" + toggleValue(buyEnabled)},
+			{Text: toggleLabel("venta", sellEnabled), CallbackData: "hunt:" + marketCode + ":sell:" + toggleValue(sellEnabled)},
 		},
+		{{Text: "✏️ Máximo de compra", CallbackData: "hunt:e:buy:" + marketCode}},
+		{{Text: "✏️ Mínimo de venta", CallbackData: "hunt:e:sell:" + marketCode}},
 		{
 			{Text: "‹ Volver a cacerías", CallbackData: "nav:hunting"},
 			{Text: "‹ Volver al panel", CallbackData: "nav:main"},
@@ -644,7 +675,16 @@ func (runtime *telegramRuntime) marketPanelWith(ctx context.Context, code, notic
 	return builder.String(), keyboard
 }
 
-func (runtime *telegramRuntime) handleCallback(ctx context.Context, data string) (string, notifier.InlineKeyboard) {
+func (runtime *telegramRuntime) handleCallback(
+	ctx context.Context,
+	chat, data string,
+	messageID int64,
+) (string, notifier.InlineKeyboard) {
+	if !strings.HasPrefix(data, "hunt:y:") &&
+		!strings.HasPrefix(data, "hunt:n:") &&
+		!strings.HasPrefix(data, "hunt:e:") {
+		runtime.cancelRateSession(chat)
+	}
 	switch data {
 	case "nav:main":
 		return runtime.dashboardText(ctx)
@@ -679,6 +719,15 @@ func (runtime *telegramRuntime) handleCallback(ctx context.Context, data string)
 		parts := strings.Split(data, ":")
 		if len(parts) == 2 {
 			return runtime.marketPanel(ctx, parts[1])
+		}
+		if len(parts) == 3 && parts[1] == "y" {
+			return runtime.confirmRate(ctx, chat, parts[2])
+		}
+		if len(parts) == 3 && parts[1] == "n" {
+			return runtime.cancelRate(ctx, chat, parts[2])
+		}
+		if len(parts) == 4 && parts[1] == "e" {
+			return runtime.beginRateEdit(ctx, chat, messageID, parts[3], parts[2])
 		}
 		if len(parts) == 4 {
 			enabled, ok := parseOnOff(parts[3])
@@ -1115,13 +1164,13 @@ func (runtime *telegramRuntime) refresh(ctx context.Context, args []string) (str
 
 func (runtime *telegramRuntime) setRate(ctx context.Context, args []string) (string, notifier.InlineKeyboard) {
 	if len(args) != 3 {
-		return "Uso: /setrate MERCADO buy|sell TASA", mainMenu()
+		return "Uso: /setrate MERCADO buy|sell TASA", nil
 	}
 	code := strings.ToUpper(strings.TrimSpace(args[0]))
 	side := strings.ToLower(strings.TrimSpace(args[1]))
 	rate, err := strconv.ParseFloat(strings.ReplaceAll(args[2], ",", "."), 64)
 	if err != nil || rate <= 0 {
-		return "❌ Tasa inválida.", mainMenu()
+		return "❌ Tasa inválida.", nil
 	}
 	market := map[string]any{"code": code}
 	switch side {
@@ -1130,12 +1179,12 @@ func (runtime *telegramRuntime) setRate(ctx context.Context, args []string) (str
 	case "sell", "venta":
 		market["sellMinRate"] = rate
 	default:
-		return "Uso: /setrate MERCADO buy|sell TASA", mainMenu()
+		return "Uso: /setrate MERCADO buy|sell TASA", nil
 	}
 	if err := runtime.edge.send(ctx, http.MethodPut, "/api/hunting", map[string]any{"market": market}); err != nil {
-		return "❌ " + err.Error(), mainMenu()
+		return "❌ " + err.Error(), nil
 	}
-	return fmt.Sprintf("✅ %s: %s actualizado a %s.", code, side, rateText(rate)), mainMenu()
+	return fmt.Sprintf("✅ %s: %s actualizado a %s.", code, side, rateText(rate)), nil
 }
 
 func (runtime *telegramRuntime) setMarketNumber(ctx context.Context, args []string, field, label string) (string, notifier.InlineKeyboard) {
@@ -1161,7 +1210,7 @@ func (runtime *telegramRuntime) setMarketNumber(ctx context.Context, args []stri
 	}); err != nil {
 		return "❌ " + err.Error(), mainMenu()
 	}
-	return fmt.Sprintf("✅ %s: %s = %s.", code, label, money(value)), mainMenu()
+	return fmt.Sprintf("✅ %s: %s = %s.", code, label, money(value)), nil
 }
 
 func (runtime *telegramRuntime) operationAction(ctx context.Context, action string, args []string) (string, notifier.InlineKeyboard) {

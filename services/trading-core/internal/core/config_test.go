@@ -53,6 +53,21 @@ func TestDecideTooLarge(t *testing.T) {
 	}
 }
 
+func TestDecideNegativeFiatSeTrataComoCero(t *testing.T) {
+	config := configForTest(t)
+	config.Fiat["BANK_CUP"] = decimal.MustParse("-250")
+	result, err := Decide(Event{
+		OfferUUID: "offer-neg", Coin: "BANK_CUP", Side: "buy", Decision: "auto_buy",
+		Amount: decimal.MustParse("20"), Receive: decimal.MustParse("24000"), Rate: decimal.MustParse("1200"),
+	}, config, decimal.MustParse("100"), 1000)
+	if err != nil {
+		t.Fatalf("un saldo negativo no debe romper la decisión: %v", err)
+	}
+	if result.Allowed || result.Kind != "blocked" {
+		t.Fatalf("resultado inesperado: %+v", result)
+	}
+}
+
 func TestDecideInactiveMarket(t *testing.T) {
 	config := configForTest(t)
 	item := config.Markets["BANK_CUP"]

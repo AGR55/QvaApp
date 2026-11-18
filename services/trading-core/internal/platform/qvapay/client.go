@@ -265,6 +265,13 @@ func (o *Offer) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+	// El detalle de una oferta puede omitir `rate`; la tasa real siempre es
+	// receive/amount y no se debe comparar contra cero al revalidar.
+	if rate.Sign() == 0 && amount.Sign() > 0 && receive.Sign() > 0 {
+		if computed, calcErr := receive.Div(amount); calcErr == nil {
+			rate = computed
+		}
+	}
 	available, err := optionalDecimal("available_amount", raw.AvailableAmount)
 	if err != nil {
 		return err

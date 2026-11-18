@@ -111,11 +111,10 @@ func run(logger *slog.Logger) error {
 				go consumer.run(ctx)
 				logger.Info("consumidor hunter_events iniciado", "worker", consumer.worker)
 			}
-			if envOrDefault("CORE_OPERATION_WORKER", "true") != "false" {
-				worker := newOperationWorker(pool, logger)
-				go worker.run(ctx)
-				logger.Info("worker shadow de operaciones iniciado")
-			}
+			// El antiguo worker shadow confirmaba operaciones con un remoto
+			// no-op y competía con la aplicación real, impidiendo que el
+			// autotrade llegara a QvaPay. La única vía de aplicación es el
+			// consumidor anterior.
 		}
 	}
 

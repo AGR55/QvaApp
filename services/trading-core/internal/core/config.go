@@ -215,6 +215,12 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 	if event.ObservedAt <= 0 {
 		observedAt = decimal.Zero()
 	}
+	// Un saldo declarado puede quedar negativo tras regularizar pagos
+	// históricos. Para el riesgo eso significa cero disponible, no un error.
+	fiatAvailable := config.Fiat[event.Coin]
+	if fiatAvailable.Sign() < 0 {
+		fiatAvailable = decimal.Zero()
+	}
 	context := riskpolicy.Context{
 		Now: now,
 		Opportunity: riskpolicy.Opportunity{
@@ -226,7 +232,7 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 		Limits: config.Limits, PriceDecision: priceDecision,
 		PriceReason:           "Decisión del hunter: " + event.Decision,
 		ExpectedMarginPercent: expectedMargin,
-		QusdBalance:           qusdBalance, FiatAvailable: config.Fiat[event.Coin],
+		QusdBalance:           qusdBalance, FiatAvailable: fiatAvailable,
 		ConcurrentQusdExposure: event.Usage.ConcurrentQusdExposure,
 		DailyAppliedQusd:       event.Usage.DailyAppliedQusd,
 		ActiveOperations:       event.Usage.ActiveOperations,

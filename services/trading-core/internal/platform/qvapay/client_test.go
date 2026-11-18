@@ -666,3 +666,20 @@ func TestOfferPausedToleraValoresFalsos(t *testing.T) {
 		}
 	}
 }
+
+func TestOfferCalculaTasaSiFaltaEnElDetalle(t *testing.T) {
+	var offer Offer
+	if err := json.Unmarshal([]byte(`{"uuid":"offer-1","amount":"10","receive":"11","status":"open"}`), &offer); err != nil {
+		t.Fatal(err)
+	}
+	if got := offer.Rate.Format(8); got != "1.10000000" {
+		t.Fatalf("rate = %s", got)
+	}
+	var explicit Offer
+	if err := json.Unmarshal([]byte(`{"rate":"2.5","amount":"10","receive":"11"}`), &explicit); err != nil {
+		t.Fatal(err)
+	}
+	if got := explicit.Rate.Format(8); got != "2.50000000" {
+		t.Fatalf("rate explícita = %s", got)
+	}
+}

@@ -78,7 +78,7 @@ func TestTelegramCooperativePublishFlow(t *testing.T) {
 		t.Fatalf("panel sin botón de publicar: %#v", panelKeyboard)
 	}
 
-	reply, keyboard := runtime.handleCallback(ctx, "coop:publish:CLASICA")
+	reply, keyboard := runtime.handleCallback(ctx, "123", "coop:publish:CLASICA", 10)
 	if !strings.Contains(reply, "Escribe solo la cantidad mínima") {
 		t.Fatalf("respuesta de publicar = %q", reply)
 	}
@@ -110,7 +110,7 @@ func TestTelegramCooperativePublishFlow(t *testing.T) {
 		t.Fatalf("el panel no refleja la publicación: %q", panel)
 	}
 
-	reply, _ = runtime.handleCallback(ctx, "coop:withdraw:CLASICA")
+	reply, _ = runtime.handleCallback(ctx, "123", "coop:withdraw:CLASICA", 10)
 	if !strings.Contains(reply, "✅ Retirado") {
 		t.Fatalf("respuesta de retirar = %q", reply)
 	}

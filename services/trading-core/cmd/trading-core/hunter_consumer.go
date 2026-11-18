@@ -809,11 +809,15 @@ func sizePayloadAmount(
 	orderMin, _ := decimal.Parse(strings.TrimSpace(payload.OrderMin))
 	orderMax, _ := decimal.Parse(strings.TrimSpace(payload.OrderMax))
 	market := config.Markets[payload.Coin]
+	fiatAvailable := config.Fiat[payload.Coin]
+	if fiatAvailable.Sign() < 0 {
+		fiatAvailable = decimal.Zero()
+	}
 	size, err := core.SizeTake(core.TakeInput{
 		AvailableQusd:     available,
 		OrderMin:          orderMin,
 		OrderMax:          orderMax,
-		FiatAvailable:     config.Fiat[payload.Coin],
+		FiatAvailable:     fiatAvailable,
 		OutgoingFee:       market.OutgoingFee,
 		Rate:              rate,
 		PerOperationMax:   config.Limits.MaxQusdPerOperation,
