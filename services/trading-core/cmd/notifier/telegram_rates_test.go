@@ -135,3 +135,26 @@ func mustJSON(t *testing.T, value any) []byte {
 	}
 	return payload
 }
+
+func TestRateCancelRestauraElPanelSinCambiarConfiguracion(t *testing.T) {
+	runtime, huntingBodies, _ := newRateTestRuntime(t)
+	ctx := context.Background()
+	if _, handled := runtime.handle(ctx, notifier.Update{
+		ChatID: 123, MessageID: 77, CallbackData: "hunt:e:sell:CLASICA",
+	}); !handled {
+		t.Fatal("no se abrió la edición")
+	}
+	if handled, _ := runtime.handleRateText(ctx, "123", "1,15"); !handled {
+		t.Fatal("no se propuso la tasa")
+	}
+	runtime.rateMu.Lock()
+	session, _ := runtime.rates.Current("123")
+	runtime.rateMu.Unlock()
+	panel, _ := runtime.cancelRate(ctx, "123", session.Token)
+	if !strings.Contains(panel, "Edición de tasa cancelada") {
+		t.Fatalf("panel = %q", panel)
+	}
+	if len(*huntingBodies) != 0 {
+		t.Fatalf("cancelar no debe escribir configuración: %+v", *huntingBodies)
+	}
+}
