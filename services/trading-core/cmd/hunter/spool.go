@@ -28,10 +28,22 @@ const (
 type durableSpool struct {
 	mu       sync.Mutex
 	path     string
+	file     *os.File
+	encoder  *json.Encoder
 	seq      uint64
 	records  []*pollResult
 	unsynced int
 	lastSync time.Time
+}
+
+func (spool *durableSpool) openAppend() error {
+	file, err := os.OpenFile(spool.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("abrir journal SSE: %w", err)
+	}
+	spool.file = file
+	spool.encoder = json.NewEncoder(file)
+	return nil
 }
 
 func openDurableSpool(directory string) (*durableSpool, error) {
@@ -94,6 +106,9 @@ func openDurableSpool(directory string) (*durableSpool, error) {
 	if err := syncDirectory(directory); err != nil {
 		return nil, fmt.Errorf("sincronizar directorio spool: %w", err)
 	}
+	if err := spool.openAppend(); err != nil {
+		return nil, err
+	}
 	return spool, nil
 }
 
@@ -118,12 +133,12 @@ func (spool *durableSpool) Append(result *pollResult) error {
 	}
 	spool.seq++
 	id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), spool.seq)
-	file, err := os.OpenFile(spool.path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return fmt.Errorf("abrir journal SSE: %w", err)
+	if spool.file == nil || spool.encoder == nil {
+		if err := spool.openAppend(); err != nil {
+			return err
+		}
 	}
-	if err := json.NewEncoder(file).Encode(spoolRecord{ID: id, Result: *result}); err != nil {
-		_ = file.Close()
+	if err := spool.encoder.Encode(spoolRecord{ID: id, Result: *result}); err != nil {
 		return fmt.Errorf("escribir journal SSE: %w", err)
 	}
 	// El write ya está en la caché del sistema. Un fsync por evento cuesta
@@ -132,15 +147,11 @@ func (spool *durableSpool) Append(result *pollResult) error {
 	// intervalo).
 	spool.unsynced++
 	if spool.unsynced >= spoolSyncEvery || time.Since(spool.lastSync) >= spoolSyncInterval {
-		if err := file.Sync(); err != nil {
-			_ = file.Close()
+		if err := spool.file.Sync(); err != nil {
 			return fmt.Errorf("sincronizar journal SSE: %w", err)
 		}
 		spool.unsynced = 0
 		spool.lastSync = time.Now()
-	}
-	if err := file.Close(); err != nil {
-		return err
 	}
 	result.SpoolID = id
 	spool.records = append(spool.records, result)
@@ -172,6 +183,13 @@ func (spool *durableSpool) Acknowledge(results []*pollResult) error {
 
 	spool.mu.Lock()
 	defer spool.mu.Unlock()
+	if spool.file != nil {
+		if err := spool.file.Close(); err != nil {
+			return err
+		}
+		spool.file = nil
+		spool.encoder = nil
+	}
 	temporary := spool.path + ".tmp"
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -209,5 +227,5 @@ func (spool *durableSpool) Acknowledge(results []*pollResult) error {
 	spool.records = remaining
 	spool.unsynced = 0
 	spool.lastSync = time.Now()
-	return nil
+	return spool.openAppend()
 }

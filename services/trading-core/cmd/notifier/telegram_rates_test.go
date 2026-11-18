@@ -24,7 +24,18 @@ func newRateTestRuntime(t *testing.T) (*telegramRuntime, *[]map[string]any, *[]m
 		case "/api/session":
 			writeTestJSON(w, map[string]any{"data": map[string]any{"csrfToken": "csrf"}})
 		case "/api/dashboard":
-			writeTestJSON(w, map[string]any{"data": map[string]any{"averages": map[string]any{}}})
+			writeTestJSON(w, map[string]any{"data": map[string]any{
+				"averages": map[string]any{},
+				"market": map[string]any{"CLASICA": map[string]any{
+					"offers": []any{
+						map[string]any{"type": "buy", "rate": 1.05, "status": "open"},
+						map[string]any{"type": "buy", "rate": 1.07, "status": "open"},
+						map[string]any{"type": "sell", "rate": 1.10, "status": "open"},
+						map[string]any{"type": "sell", "rate": 1.12, "status": "open"},
+						map[string]any{"type": "sell", "rate": 1.14, "status": "open"},
+					},
+				}},
+			}})
 		case "/api/config":
 			writeTestJSON(w, map[string]any{"data": map[string]any{
 				"hunting": map[string]any{"buyRunning": true, "sellRunning": true},
@@ -156,5 +167,15 @@ func TestRateCancelRestauraElPanelSinCambiarConfiguracion(t *testing.T) {
 	}
 	if len(*huntingBodies) != 0 {
 		t.Fatalf("cancelar no debe escribir configuración: %+v", *huntingBodies)
+	}
+}
+
+func TestHuntingPanelMuestraMedianaYConteoPorLado(t *testing.T) {
+	runtime, _, _ := newRateTestRuntime(t)
+	text, _ := runtime.huntingPanel(context.Background())
+	for _, fragment := range []string{"mediana 1.06", "2 ofertas", "mediana 1.12", "3 ofertas"} {
+		if !strings.Contains(text, fragment) {
+			t.Fatalf("panel sin %q:\n%s", fragment, text)
+		}
 	}
 }
