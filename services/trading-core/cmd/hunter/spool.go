@@ -20,10 +20,7 @@ type spoolRecord struct {
 
 // durableSpool journaliza los eventos antes de ponerlos en la cola de memoria.
 // La ruta debe estar en un volumen persistente del contenedor.
-const (
-	spoolSyncEvery    = 32
-	spoolSyncInterval = 50 * time.Millisecond
-)
+const spoolSyncEvery = 32
 
 type durableSpool struct {
 	mu       sync.Mutex
@@ -33,7 +30,6 @@ type durableSpool struct {
 	seq      uint64
 	records  []*pollResult
 	unsynced int
-	lastSync time.Time
 }
 
 func (spool *durableSpool) openAppend() error {
@@ -55,7 +51,7 @@ func openDurableSpool(directory string) (*durableSpool, error) {
 		return nil, fmt.Errorf("crear directorio spool: %w", err)
 	}
 	spool := &durableSpool{
-		path: filepath.Join(directory, "events.jsonl"), lastSync: time.Now(),
+		path: filepath.Join(directory, "events.jsonl"),
 	}
 	file, err := os.OpenFile(spool.path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -146,12 +142,11 @@ func (spool *durableSpool) Append(result *pollResult) error {
 	// una caída del proceso (solo una caída física podría perder el último
 	// intervalo).
 	spool.unsynced++
-	if spool.unsynced >= spoolSyncEvery || time.Since(spool.lastSync) >= spoolSyncInterval {
+	if spool.unsynced >= spoolSyncEvery {
 		if err := spool.file.Sync(); err != nil {
 			return fmt.Errorf("sincronizar journal SSE: %w", err)
 		}
 		spool.unsynced = 0
-		spool.lastSync = time.Now()
 	}
 	result.SpoolID = id
 	spool.records = append(spool.records, result)
@@ -190,23 +185,33 @@ func (spool *durableSpool) Acknowledge(results []*pollResult) error {
 		spool.file = nil
 		spool.encoder = nil
 	}
+	remaining := make([]*pollResult, 0, len(spool.records))
+	for _, result := range spool.records {
+		if _, ok := acked[result.SpoolID]; ok {
+			continue
+		}
+		remaining = append(remaining, result)
+	}
+	if len(remaining) == 0 {
+		if err := os.Truncate(spool.path, 0); err != nil {
+			return fmt.Errorf("vaciar journal SSE: %w", err)
+		}
+		spool.records = remaining
+		spool.unsynced = 0
+		return spool.openAppend()
+	}
 	temporary := spool.path + ".tmp"
 	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 	if err != nil {
 		return fmt.Errorf("crear journal temporal: %w", err)
 	}
-	remaining := make([]*pollResult, 0, len(spool.records))
 	encoder := json.NewEncoder(file)
-	for _, result := range spool.records {
-		if _, ok := acked[result.SpoolID]; ok {
-			continue
-		}
+	for _, result := range remaining {
 		if err := encoder.Encode(spoolRecord{ID: result.SpoolID, Result: *result}); err != nil {
 			_ = file.Close()
 			_ = os.Remove(temporary)
 			return fmt.Errorf("reescribir journal SSE: %w", err)
 		}
-		remaining = append(remaining, result)
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
@@ -226,6 +231,5 @@ func (spool *durableSpool) Acknowledge(results []*pollResult) error {
 	}
 	spool.records = remaining
 	spool.unsynced = 0
-	spool.lastSync = time.Now()
 	return spool.openAppend()
 }
