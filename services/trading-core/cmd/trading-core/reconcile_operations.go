@@ -30,15 +30,20 @@ type operationFiat interface {
 	ReverseOperationFiat(ctx context.Context, coin, key, offerType string, receive float64, source string, now int64) (bool, error)
 }
 
+type operationExclusionStore interface {
+	ExcludeOffer(ctx context.Context, offerUUID, source string, now int64) error
+}
+
 type operationReconciler struct {
-	pool     *pgxpool.Pool
-	reader   offerReader
-	repo     operationTransitioner
-	localOps localOperationStore
-	fiat     operationFiat
-	notifier *operationNotifier
-	logger   *slog.Logger
-	now      func() time.Time
+	pool       *pgxpool.Pool
+	reader     offerReader
+	repo       operationTransitioner
+	localOps   localOperationStore
+	fiat       operationFiat
+	exclusions operationExclusionStore
+	notifier   *operationNotifier
+	logger     *slog.Logger
+	now        func() time.Time
 }
 
 type uncertainOperation struct {
@@ -166,6 +171,17 @@ func (reconciler *operationReconciler) reconcileOne(
 				fiatReceive = decimalFloat(orderReceive)
 			}
 			normalized := strings.ToLower(status)
+			// Una cancelación observada mientras la operación seguía activa
+			// se trata como manual: no se vuelve a cazar esa oferta.
+			if reconciler.exclusions != nil &&
+				(local.State == "applied" || local.State == "paid") &&
+				(normalized == "open" || normalized == "cancelled" || normalized == "canceled" || normalized == "rejected") {
+				if err := reconciler.exclusions.ExcludeOffer(ctx, offerUUID, "remote_cancel", now); err != nil &&
+					reconciler.logger != nil {
+					reconciler.logger.Warn("no se pudo excluir la oferta cancelada",
+						"operation_id", operationID, "error", err)
+				}
+			}
 			var fiatErr error
 			switch {
 			case local.OfferType == "sell" && (normalized == "paid" || normalized == "completed"):

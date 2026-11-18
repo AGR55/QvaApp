@@ -224,6 +224,7 @@ func run(logger *slog.Logger) error {
 				mutations.Fiat = &runtimeFiatMover{
 					repo: &runtimeconfig.Repository{Pool: writePool},
 				}
+				mutations.Exclusions = postgres.NewOfferExclusionRepository(writePool)
 				feedStore := &edge.PostgresFeedEventStore{Pool: writePool}
 				qvapayWebhook.Store = feedStore
 				qvapayWebhook.ForwardStore = feedStore

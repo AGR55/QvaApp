@@ -100,6 +100,11 @@ type FiatMover interface {
 	ReverseOperation(ctx context.Context, operation OperationRecord, key, source string, now int64) error
 }
 
+// OfferExclusionStore persiste las ofertas canceladas manualmente.
+type OfferExclusionStore interface {
+	ExcludeOffer(ctx context.Context, offerUUID, source string, now int64) error
+}
+
 // LiveChat ejecuta el chat real de QvaPay. Si es nil, el chat es local.
 type LiveChat interface {
 	ListChat(ctx context.Context, operationUUID, order string) ([]ChatMessage, error)
@@ -133,6 +138,7 @@ type MutationsAPI struct {
 	Reconcile     *Reconciler
 	Operations    OperationStore
 	Fiat          FiatMover
+	Exclusions    OfferExclusionStore
 	Cooperative   CooperativeClient
 	Runtime       MarketConfigLoader
 	Settings      SettingStore
@@ -1202,6 +1208,18 @@ func (api *MutationsAPI) operationAction(
 		}
 	}
 	if api.Live != nil && route.action != "ack" {
+		// Una cancelación manual excluye la oferta de futuras cacerías antes
+		// de tocar QvaPay: si el remoto falla, tampoco se reintenta sola.
+		if route.action == "cancel" && api.Exclusions != nil {
+			if err := api.Exclusions.ExcludeOffer(
+				ctx, route.id, "manual_cancel", api.now().UnixMilli(),
+			); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+					"error": "No se pudo registrar la exclusión de la oferta; no se canceló.",
+				})
+				return
+			}
+		}
 		order := r.URL.Query().Get("order")
 		var operation OperationRecord
 		var found bool

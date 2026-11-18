@@ -276,3 +276,56 @@ func TestMutationsAPIPaidRejectsBuyOperation(t *testing.T) {
 		t.Fatalf("no debía llamar a QvaPay: %+v", live.paids)
 	}
 }
+
+type fakeExclusionStore struct {
+	excluded []string
+	err      error
+}
+
+func (store *fakeExclusionStore) ExcludeOffer(_ context.Context, offerUUID, _ string, _ int64) error {
+	if store.err != nil {
+		return store.err
+	}
+	store.excluded = append(store.excluded, offerUUID)
+	return nil
+}
+
+func TestMutationsAPIManualCancelExcluyeLaOferta(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	live := &fakeLiveMutations{}
+	exclusions := &fakeExclusionStore{}
+	api.Live = live
+	api.Exclusions = exclusions
+
+	recorder := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/cancel",
+		body: `{}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d %s", recorder.Code, recorder.Body.String())
+	}
+	if len(exclusions.excluded) != 1 || exclusions.excluded[0] != "op-1" {
+		t.Fatalf("exclusiones = %+v", exclusions.excluded)
+	}
+	if len(live.cancels) != 1 {
+		t.Fatalf("cancelaciones = %+v", live.cancels)
+	}
+}
+
+func TestMutationsAPINoCancelaSiNoPuedeExcluir(t *testing.T) {
+	api, _, cookie, csrf, _ := newMutationsTestAPI(t)
+	live := &fakeLiveMutations{}
+	api.Live = live
+	api.Exclusions = &fakeExclusionStore{err: errors.New("sin base")}
+
+	recorder := mutationsTestDo(api, mutationsTestCall{
+		method: http.MethodPost, target: "/api/operations/op-1/cancel",
+		body: `{}`, cookie: cookie, csrf: csrf, origin: "https://panel.example",
+	})
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	if len(live.cancels) != 0 {
+		t.Fatalf("no debía cancelar sin exclusión: %+v", live.cancels)
+	}
+}

@@ -48,6 +48,7 @@ type hunterConsumer struct {
 	applied        atomic.Uint64
 	trader         *autoTrader
 	reconciler     *operationReconciler
+	exclusions     *postgres.OfferExclusionRepository
 	notifier       *operationNotifier
 	applyQueue     chan executionTask
 	chat           operationChat
@@ -109,6 +110,7 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	consumer.applyQueue = make(chan executionTask, 1024)
 	consumer.trader = buildAutoTrader(logger)
 	consumer.notifier = newOperationNotifier()
+	consumer.exclusions = postgres.NewOfferExclusionRepository(pool)
 	if consumer.trader != nil {
 		consumer.trader.onApplied = consumer.sendApplyMessage
 	}
@@ -116,10 +118,11 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
 			consumer.reconciler = &operationReconciler{
 				pool: pool, reader: reader, repo: consumer.operationRepo,
-				localOps: consumer.localOps,
-				fiat:     &runtimeconfig.Repository{Pool: pool},
-				notifier: consumer.notifier,
-				logger:   logger,
+				localOps:   consumer.localOps,
+				fiat:       &runtimeconfig.Repository{Pool: pool},
+				exclusions: consumer.exclusions,
+				notifier:   consumer.notifier,
+				logger:     logger,
 			}
 			logger.Info("conciliador QvaPay habilitado")
 		} else {
@@ -309,7 +312,12 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 			return
 		case task := <-consumer.applyQueue:
 			reason := ""
-			if !consumer.canApplyNow(ctx, task.payload) {
+			if consumer.exclusions != nil {
+				if excluded, err := consumer.exclusions.IsOfferExcluded(ctx, task.payload.OfferUUID); err == nil && excluded {
+					reason = "Oferta excluida por cancelación manual"
+				}
+			}
+			if reason == "" && !consumer.canApplyNow(ctx, task.payload) {
 				reason = "cacería pausada, control runtime no disponible o cotización vencida"
 			}
 			if reason == "" && consumer.trader != nil && !consumer.trader.dryRun {
@@ -535,6 +543,13 @@ func (consumer *hunterConsumer) consume(
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), "configuración core no disponible")
 		return
+	}
+	if consumer.exclusions != nil {
+		if excluded, err := consumer.exclusions.IsOfferExcluded(ctx, payload.OfferUUID); err == nil && excluded {
+			consumer.persistBlockedEvent(ctx, repository, event, payload,
+				"Oferta excluida por cancelación manual", postgres.NowMS())
+			return
+		}
 	}
 	if !consumer.canApplyNow(ctx, payload) {
 		consumer.persistBlockedEvent(ctx, repository, event, payload,

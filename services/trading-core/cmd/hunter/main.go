@@ -29,6 +29,7 @@ import (
 	"github.com/AGR55/QvaApp/services/shared/decimal"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/domain/hunting"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/hunter"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/postgres"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
 	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
@@ -434,6 +435,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	service.exclusions = postgres.NewOfferExclusionRepository(pool)
+	service.refreshExclusions(ctx)
+	go service.exclusionLoop(ctx)
 	// Sin configuración runtime el planificador conserva el intervalo de la
 	// variable de entorno.
 	service.pollInterval.Store(int64(cfg.PollMS))
@@ -523,6 +527,11 @@ type service struct {
 	ready     chan struct{}
 	readyOnce sync.Once
 	spool     *durableSpool
+
+	exclusions   *postgres.OfferExclusionRepository
+	excludedMu   sync.RWMutex
+	excluded     map[string]struct{}
+	excludedSeen int64
 
 	// pollInterval y paused los refresca runtimeLoop cada 5 s. El intervalo
 	// está en milisegundos; 0 significa sin poll (solo SSE).
@@ -615,6 +624,56 @@ func (service *service) handleStreamState(state qvapay.StreamState) {
 	}
 }
 
+func (service *service) refreshExclusions(ctx context.Context) {
+	if service == nil || service.exclusions == nil {
+		return
+	}
+	offers, err := service.exclusions.ExcludedOffers(ctx)
+	if err != nil {
+		if service.logger != nil {
+			service.logger.Warn("no se pudieron refrescar las ofertas excluidas", "error", err)
+		}
+		return
+	}
+	excluded := make(map[string]struct{}, len(offers))
+	for _, uuid := range offers {
+		excluded[uuid] = struct{}{}
+	}
+	service.excludedMu.Lock()
+	service.excluded = excluded
+	service.excludedSeen = int64(len(excluded))
+	service.excludedMu.Unlock()
+}
+
+func (service *service) exclusionLoop(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			service.refreshExclusions(ctx)
+		}
+	}
+}
+
+func (service *service) isOfferExcluded(uuid string) bool {
+	if service == nil || strings.TrimSpace(uuid) == "" {
+		return false
+	}
+	service.excludedMu.RLock()
+	defer service.excludedMu.RUnlock()
+	_, ok := service.excluded[strings.TrimSpace(uuid)]
+	return ok
+}
+
+func (service *service) excludedCount() int64 {
+	service.excludedMu.RLock()
+	defer service.excludedMu.RUnlock()
+	return service.excludedSeen
+}
+
 func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 	service.streamRaw.Add(1)
 	switch event.Event {
@@ -648,6 +707,10 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 // sin bloquear el lector con la base de datos.
 func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt, source string) {
 	if service.paused.Load() {
+		return
+	}
+	if service.isOfferExcluded(offer.UUID) {
+		service.streamIgnored.Add(1)
 		return
 	}
 	service.offers.Add(1)
@@ -823,6 +886,9 @@ func (service *service) poll(ctx context.Context) {
 	service.offers.Add(uint64(len(offers)))
 	config := service.currentConfig()
 	for _, offer := range offers {
+		if service.isOfferExcluded(offer.UUID) {
+			continue
+		}
 		market, ok := config.Markets[offer.Coin]
 		if !ok {
 			continue
@@ -1165,6 +1231,7 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_raw_events_total Eventos SSE recibidos (incluye init).\n# TYPE hunter_stream_raw_events_total counter\nhunter_stream_raw_events_total %d\n", service.streamRaw.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_events_total Eventos SSE oportunidad recibidos.\n# TYPE hunter_stream_events_total counter\nhunter_stream_events_total %d\n", service.streamEvents.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_ignored_events_total Eventos SSE de salida o seguimiento descartados.\n# TYPE hunter_stream_ignored_events_total counter\nhunter_stream_ignored_events_total %d\n", service.streamIgnored.Load())
+	fmt.Fprintf(w, "# HELP hunter_excluded_offers Ofertas excluidas por cancelación manual.\n# TYPE hunter_excluded_offers gauge\nhunter_excluded_offers %d\n", service.excludedCount())
 	fmt.Fprintf(w, "# HELP hunter_stream_queue_depth Eventos SSE pendientes de persistir.\n# TYPE hunter_stream_queue_depth gauge\nhunter_stream_queue_depth %d\n", len(service.streamQueue))
 	fmt.Fprintf(w, "# HELP hunter_batches_total Lotes de persistencia confirmados.\n# TYPE hunter_batches_total counter\nhunter_batches_total %d\n", service.persistBatches.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_errors_total Errores SSE acumulados.\n# TYPE hunter_stream_errors_total counter\nhunter_stream_errors_total %d\n", service.streamErrors.Load())
