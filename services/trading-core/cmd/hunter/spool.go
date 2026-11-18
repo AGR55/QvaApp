@@ -20,11 +20,18 @@ type spoolRecord struct {
 
 // durableSpool journaliza los eventos antes de ponerlos en la cola de memoria.
 // La ruta debe estar en un volumen persistente del contenedor.
+const (
+	spoolSyncEvery    = 32
+	spoolSyncInterval = 50 * time.Millisecond
+)
+
 type durableSpool struct {
-	mu      sync.Mutex
-	path    string
-	seq     uint64
-	records []*pollResult
+	mu       sync.Mutex
+	path     string
+	seq      uint64
+	records  []*pollResult
+	unsynced int
+	lastSync time.Time
 }
 
 func openDurableSpool(directory string) (*durableSpool, error) {
@@ -35,7 +42,9 @@ func openDurableSpool(directory string) (*durableSpool, error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("crear directorio spool: %w", err)
 	}
-	spool := &durableSpool{path: filepath.Join(directory, "events.jsonl")}
+	spool := &durableSpool{
+		path: filepath.Join(directory, "events.jsonl"), lastSync: time.Now(),
+	}
 	file, err := os.OpenFile(spool.path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("abrir spool: %w", err)
@@ -117,9 +126,18 @@ func (spool *durableSpool) Append(result *pollResult) error {
 		_ = file.Close()
 		return fmt.Errorf("escribir journal SSE: %w", err)
 	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("sincronizar journal SSE: %w", err)
+	// El write ya está en la caché del sistema. Un fsync por evento cuesta
+	// varios milisegundos en el camino SSE; se agrupa sin perder eventos ante
+	// una caída del proceso (solo una caída física podría perder el último
+	// intervalo).
+	spool.unsynced++
+	if spool.unsynced >= spoolSyncEvery || time.Since(spool.lastSync) >= spoolSyncInterval {
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("sincronizar journal SSE: %w", err)
+		}
+		spool.unsynced = 0
+		spool.lastSync = time.Now()
 	}
 	if err := file.Close(); err != nil {
 		return err
@@ -189,5 +207,7 @@ func (spool *durableSpool) Acknowledge(results []*pollResult) error {
 		return fmt.Errorf("sincronizar directorio spool: %w", err)
 	}
 	spool.records = remaining
+	spool.unsynced = 0
+	spool.lastSync = time.Now()
 	return nil
 }

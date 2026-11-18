@@ -395,24 +395,34 @@ func explicitBool(value any) *bool {
 
 // Average es el resumen de un mercado P2P. Tolera campos adicionales.
 type Average struct {
+	Name        string        `json:"name,omitempty"`
 	Average     decimal.Value `json:"average"`
 	AverageBuy  decimal.Value `json:"average_buy"`
 	AverageSell decimal.Value `json:"average_sell"`
+	Median      decimal.Value `json:"median"`
 	MedianBuy   decimal.Value `json:"median_buy"`
 	MedianSell  decimal.Value `json:"median_sell"`
 	Count       int64         `json:"count"`
+	CountBuy    int64         `json:"count_buy"`
+	CountSell   int64         `json:"count_sell"`
+	WindowHours int64         `json:"window_hours"`
 	UpdatedAt   string        `json:"updated_at"`
 }
 
 // UnmarshalJSON decodifica los promedios como decimales exactos.
 func (a *Average) UnmarshalJSON(data []byte) error {
 	var raw struct {
+		Name        string `json:"name"`
 		Average     any    `json:"average"`
 		AverageBuy  any    `json:"average_buy"`
 		AverageSell any    `json:"average_sell"`
+		Median      any    `json:"median"`
 		MedianBuy   any    `json:"median_buy"`
 		MedianSell  any    `json:"median_sell"`
 		Count       any    `json:"count"`
+		CountBuy    any    `json:"count_buy"`
+		CountSell   any    `json:"count_sell"`
+		WindowHours any    `json:"window_hours"`
 		UpdatedAt   string `json:"updated_at"`
 	}
 	if err := decodeJSON(data, &raw); err != nil {
@@ -431,6 +441,10 @@ func (a *Average) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
+	median, err := optionalNonNegativeDecimal("median", raw.Median)
+	if err != nil {
+		return err
+	}
 	medianBuy, err := optionalNonNegativeDecimal("median_buy", raw.MedianBuy)
 	if err != nil {
 		return err
@@ -439,25 +453,33 @@ func (a *Average) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-
-	var count int64
-	if !isMissingNumber(raw.Count) {
-		count, err = int64From(raw.Count)
+	counts := make([]int64, 4)
+	for index, value := range []any{raw.Count, raw.CountBuy, raw.CountSell, raw.WindowHours} {
+		if isMissingNumber(value) {
+			continue
+		}
+		parsed, err := int64From(value)
 		if err != nil {
-			return fmt.Errorf("campo count: %w", err)
+			return fmt.Errorf("campo de conteo: %w", err)
 		}
-		if count < 0 {
-			return fmt.Errorf("campo count: no puede ser negativo")
+		if parsed < 0 {
+			return fmt.Errorf("campo de conteo: no puede ser negativo")
 		}
+		counts[index] = parsed
 	}
 
 	*a = Average{
+		Name:        raw.Name,
 		Average:     average,
 		AverageBuy:  averageBuy,
 		AverageSell: averageSell,
+		Median:      median,
 		MedianBuy:   medianBuy,
 		MedianSell:  medianSell,
-		Count:       count,
+		Count:       counts[0],
+		CountBuy:    counts[1],
+		CountSell:   counts[2],
+		WindowHours: counts[3],
 		UpdatedAt:   raw.UpdatedAt,
 	}
 	return nil

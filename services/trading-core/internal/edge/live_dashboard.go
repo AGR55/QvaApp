@@ -137,13 +137,32 @@ func (live *LiveDashboard) fetch(ctx context.Context, now time.Time) liveDashboa
 	if loaded, err := live.Reader.Averages(ctx); err == nil {
 		averages = loaded
 		for coin, average := range loaded {
+			medianBuy := decimalFloat(average.MedianBuy)
+			medianSell := decimalFloat(average.MedianSell)
+			averageBuy := decimalFloat(average.AverageBuy)
+			averageSell := decimalFloat(average.AverageSell)
+			// Se conservan ambas convenciones: la web histórica usa snake_case
+			// y el bot/edge usan camelCase.
 			snapshot.Averages[coin] = map[string]any{
-				"medianBuy":   decimalFloat(average.MedianBuy),
-				"medianSell":  decimalFloat(average.MedianSell),
-				"averageBuy":  decimalFloat(average.AverageBuy),
-				"averageSell": decimalFloat(average.AverageSell),
-				"count":       average.Count,
-				"updatedAt":   average.UpdatedAt,
+				"name":         average.Name,
+				"median":       decimalFloat(average.Median),
+				"medianBuy":    medianBuy,
+				"medianSell":   medianSell,
+				"averageBuy":   averageBuy,
+				"averageSell":  averageSell,
+				"count":        average.Count,
+				"countBuy":     average.CountBuy,
+				"countSell":    average.CountSell,
+				"windowHours":  average.WindowHours,
+				"updatedAt":    average.UpdatedAt,
+				"median_buy":   medianBuy,
+				"median_sell":  medianSell,
+				"average_buy":  averageBuy,
+				"average_sell": averageSell,
+				"count_buy":    average.CountBuy,
+				"count_sell":   average.CountSell,
+				"window_hours": average.WindowHours,
+				"updated_at":   average.UpdatedAt,
 			}
 		}
 	}

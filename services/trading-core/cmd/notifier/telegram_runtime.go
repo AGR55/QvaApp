@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -575,19 +576,20 @@ func (runtime *telegramRuntime) huntingPanelWith(ctx context.Context, notice str
 		market := asMap(item)
 		code := asString(market["code"])
 		average := asMap(averages[code])
+		buyCount, sellCount, liveBuy, liveSell := offerStats(dashboard, code)
+		buyMedian, buyCountLabel := offerSideStats(average, "buy", buyCount, liveBuy)
+		sellMedian, sellCountLabel := offerSideStats(average, "sell", sellCount, liveSell)
 		icon := "⚪"
 		if asBool(market["active"]) {
 			icon = "🟢"
 		}
 		fmt.Fprintf(&builder, "%s %s\n", icon, asString(market["label"]))
-		fmt.Fprintf(&builder, "   🔵 %s · ≤ %s · media %s\n",
-			effectiveStatus(market, "huntBuyEnabled", buyRunning),
-			rateText(asFloat(market["buyMaxRate"])), averageText(average["averageBuy"]))
-		fmt.Fprintf(&builder, "   🟢 %s · ≥ %s · media %s\n\n",
-			effectiveStatus(market, "huntSellEnabled", sellRunning),
-			rateText(asFloat(market["sellMinRate"])), averageText(average["averageSell"]))
+		fmt.Fprintf(&builder, "   🔵 %s · ≤ %s\n", effectiveStatus(market, "huntBuyEnabled", buyRunning), rateText(asFloat(market["buyMaxRate"])))
+		fmt.Fprintf(&builder, "      mediana %s · %s\n", medianLabel(buyMedian), buyCountLabel)
+		fmt.Fprintf(&builder, "   🟢 %s · ≥ %s\n", effectiveStatus(market, "huntSellEnabled", sellRunning), rateText(asFloat(market["sellMinRate"])))
+		fmt.Fprintf(&builder, "      mediana %s · %s\n\n", medianLabel(sellMedian), sellCountLabel)
 	}
-	builder.WriteString("Toca un mercado para ajustar precios o pausar sus cacerías.")
+	builder.WriteString("Mediana y número de ofertas abiertas por lado. Toca un mercado para ajustar precios o pausar sus cacerías.")
 	if notice != "" {
 		builder.WriteString("\n\n")
 		builder.WriteString(notice)
@@ -645,12 +647,15 @@ func (runtime *telegramRuntime) marketPanelWith(ctx context.Context, code, notic
 	}
 	fmt.Fprintf(&builder, "🎯 Cacería · %s\n", asString(market["label"]))
 	fmt.Fprintf(&builder, "Mercado: %s · %s\n\n", marketState, currency)
-	fmt.Fprintf(&builder, "🔵 Compra: %s\n   Máximo %s %s/QUSD · media %s\n",
+	buyCount, sellCount, liveBuy, liveSell := offerStats(dashboard, marketCode)
+	buyMedian, buyCountLabel := offerSideStats(average, "buy", buyCount, liveBuy)
+	sellMedian, sellCountLabel := offerSideStats(average, "sell", sellCount, liveSell)
+	fmt.Fprintf(&builder, "🔵 Compra: %s\n   Máximo %s %s/QUSD · mediana %s · %s\n",
 		effectiveStatus(market, "huntBuyEnabled", buyRunning),
-		rateText(asFloat(market["buyMaxRate"])), currency, averageText(average["averageBuy"]))
-	fmt.Fprintf(&builder, "🟢 Venta: %s\n   Mínimo %s %s/QUSD · media %s\n\n",
+		rateText(asFloat(market["buyMaxRate"])), currency, medianLabel(buyMedian), buyCountLabel)
+	fmt.Fprintf(&builder, "🟢 Venta: %s\n   Mínimo %s %s/QUSD · mediana %s · %s\n\n",
 		effectiveStatus(market, "huntSellEnabled", sellRunning),
-		rateText(asFloat(market["sellMinRate"])), currency, averageText(average["averageSell"]))
+		rateText(asFloat(market["sellMinRate"])), currency, medianLabel(sellMedian), sellCountLabel)
 	fmt.Fprintf(&builder, "Fiat: %s %s · Máx %s QUSD · Fee %s%%\n",
 		money(asFloat(market["fiatBalance"])), currency,
 		money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])))
@@ -1038,6 +1043,87 @@ func averageText(value any) string {
 		return "sin observación"
 	}
 	return rateText(number)
+}
+
+// offerStats calcula la mediana y el número de ofertas abiertas por lado. Es
+// la foto actual del mercado; los promedios de QvaPay son de operaciones ya
+// completadas y no describen la presión de compra/venta de ahora.
+func offerStats(dashboard map[string]any, coin string) (int, int, float64, float64) {
+	market := asMap(asMap(dashboard["market"])[coin])
+	offers := asList(market["offers"])
+	buyRates := make([]float64, 0, len(offers))
+	sellRates := make([]float64, 0, len(offers))
+	for _, entry := range offers {
+		offer := asMap(entry)
+		if status := asString(offer["status"]); status != "" && status != "open" {
+			continue
+		}
+		rate := asFloat(offer["rate"])
+		if rate <= 0 {
+			amount := asFloat(offer["amount"])
+			receive := asFloat(offer["receive"])
+			if amount > 0 {
+				rate = receive / amount
+			}
+		}
+		if rate <= 0 {
+			continue
+		}
+		switch asString(offer["type"]) {
+		case "buy":
+			buyRates = append(buyRates, rate)
+		case "sell":
+			sellRates = append(sellRates, rate)
+		}
+	}
+	return len(buyRates), len(sellRates), medianFloat(buyRates), medianFloat(sellRates)
+}
+
+func offerSideStats(
+	average map[string]any,
+	side string,
+	liveCount int,
+	liveMedian float64,
+) (float64, string) {
+	median := liveMedian
+	countKey, medianKey, averageKey := "countBuy", "medianBuy", "averageBuy"
+	if side == "sell" {
+		countKey, medianKey, averageKey = "countSell", "medianSell", "averageSell"
+	}
+	if median <= 0 {
+		median = asFloat(average[medianKey])
+	}
+	if median <= 0 {
+		median = asFloat(average[averageKey])
+	}
+	label := fmt.Sprintf("%d ofertas", liveCount)
+	if liveCount == 0 {
+		if completed := asFloat(average[countKey]); completed > 0 {
+			label = fmt.Sprintf("%.0f ops", completed)
+		} else {
+			label = "sin ofertas"
+		}
+	}
+	return median, label
+}
+
+func medianLabel(value float64) string {
+	if value <= 0 {
+		return "sin muestra"
+	}
+	return rateText(value)
+}
+
+func medianFloat(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Float64s(values)
+	middle := len(values) / 2
+	if len(values)%2 == 1 {
+		return values[middle]
+	}
+	return (values[middle-1] + values[middle]) / 2
 }
 
 func countText(value any) string {

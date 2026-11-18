@@ -570,6 +570,7 @@ type service struct {
 	streamLastAt       atomic.Int64
 	streamLastLagMS    atomic.Int64
 	streamLastDecision atomic.Int64
+	streamLastEnqueue  atomic.Int64
 	streamQueue        chan *pollResult
 	persistBatches     atomic.Uint64
 }
@@ -743,9 +744,10 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	if !ok {
 		return
 	}
-	started := time.Now()
+	decisionStarted := time.Now()
 	decision := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
 	service.applyHuntingRequirements(&decision, offer, time.Now())
+	decisionElapsed := time.Since(decisionStarted)
 	lag := int64(0)
 	if parsed, err := time.Parse(time.RFC3339Nano, sentAt); err == nil {
 		lag = maxInt64(0, time.Since(parsed).Milliseconds())
@@ -758,10 +760,12 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	if decision.Decision == "auto_buy" || decision.Decision == "manual_sell" {
 		result.Candidates = 1
 	}
+	enqueueStarted := time.Now()
 	service.enqueue(result)
 	service.streamLastAt.Store(result.PolledAt)
 	service.streamLastLagMS.Store(lag)
-	service.streamLastDecision.Store(time.Since(started).Microseconds())
+	service.streamLastDecision.Store(decisionElapsed.Microseconds())
+	service.streamLastEnqueue.Store(time.Since(enqueueStarted).Microseconds())
 	service.candidates.Add(uint64(result.Candidates))
 	service.record(result)
 }
@@ -1239,6 +1243,7 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP hunter_stream_last_event_timestamp_seconds Último evento SSE (Unix).\n# TYPE hunter_stream_last_event_timestamp_seconds gauge\nhunter_stream_last_event_timestamp_seconds %d\n", service.streamLastAt.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_lag_ms Delivery lag del último evento SSE.\n# TYPE hunter_stream_last_lag_ms gauge\nhunter_stream_last_lag_ms %d\n", service.streamLastLagMS.Load())
 	fmt.Fprintf(w, "# HELP hunter_stream_last_decision_us Decisión local del último evento SSE (µs).\n# TYPE hunter_stream_last_decision_us gauge\nhunter_stream_last_decision_us %d\n", service.streamLastDecision.Load())
+	fmt.Fprintf(w, "# HELP hunter_stream_last_enqueue_us Journalización del último evento SSE (µs).\n# TYPE hunter_stream_last_enqueue_us gauge\nhunter_stream_last_enqueue_us %d\n", service.streamLastEnqueue.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_latency_ms Latencia del último fetch o delivery lag SSE.\n# TYPE hunter_last_latency_ms gauge\nhunter_last_latency_ms %d\n", service.lastLatency.Load())
 	fmt.Fprintf(w, "# HELP hunter_last_poll_timestamp_seconds Último poll (Unix).\n# TYPE hunter_last_poll_timestamp_seconds gauge\nhunter_last_poll_timestamp_seconds %d\n", service.lastPollAt.Load())
 	fmt.Fprintf(w, "# HELP hunter_runtime_config_version Versión de configuración aplicada.\n# TYPE hunter_runtime_config_version gauge\nhunter_runtime_config_version %d\n", service.configVersion.Load())

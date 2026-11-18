@@ -683,3 +683,19 @@ func TestOfferCalculaTasaSiFaltaEnElDetalle(t *testing.T) {
 		t.Fatalf("rate explícita = %s", got)
 	}
 }
+
+func TestAverageConservaConteosYMedianasPorLado(t *testing.T) {
+	var average Average
+	payload := `{"name":"CUP","average":1118.1,"average_buy":1110.8,"average_sell":1119.6,` +
+		`"median":1118.8,"median_buy":1113,"median_sell":1120,"count":442,` +
+		`"count_buy":79,"count_sell":363,"window_hours":24,"updated_at":"2026-11-18T18:55:31Z"}`
+	if err := json.Unmarshal([]byte(payload), &average); err != nil {
+		t.Fatal(err)
+	}
+	if average.CountBuy != 79 || average.CountSell != 363 || average.WindowHours != 24 {
+		t.Fatalf("conteos = %+v", average)
+	}
+	if average.MedianBuy.Format(8) != "1113.00000000" || average.MedianSell.Format(8) != "1120.00000000" {
+		t.Fatalf("medianas = %s %s", average.MedianBuy.Format(8), average.MedianSell.Format(8))
+	}
+}
