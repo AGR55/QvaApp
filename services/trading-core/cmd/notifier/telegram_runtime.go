@@ -1236,6 +1236,9 @@ func (runtime *telegramRuntime) operationAction(ctx context.Context, action stri
 	if err := runtime.edge.send(ctx, http.MethodPost, path, body); err != nil {
 		return "❌ " + err.Error(), mainMenu()
 	}
+	if action == "cancel" {
+		return "✅ Operación cancelada. La oferta quedó excluida de futuras cacerías.", nil
+	}
 	return "✅ Acción " + action + " aplicada.", mainMenu()
 }
 
