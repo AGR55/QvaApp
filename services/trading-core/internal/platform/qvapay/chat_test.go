@@ -63,3 +63,22 @@ func TestChatRejectsInvalidUUIDAndMessage(t *testing.T) {
 		t.Fatal("mensaje vacío aceptado")
 	}
 }
+
+func TestSendChatAceptaRespuestaSinIdentificador(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"ok":true}`)
+	}))
+	defer server.Close()
+	client, err := NewChatClient(server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, err := client.SendChat(context.Background(), chatOfferUUID, "", "hola")
+	if err != nil {
+		t.Fatalf("un 2xx sin id no es un fallo: %v", err)
+	}
+	if sent.Message != "hola" {
+		t.Fatalf("sent = %+v", sent)
+	}
+}

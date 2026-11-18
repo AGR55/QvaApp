@@ -142,7 +142,14 @@ func (c *ChatClient) SendChat(ctx context.Context, offerUUID, order, message str
 	}
 	id := stringField(candidate, "id", "uuid")
 	if id == "" {
-		return ChatMessage{}, fmt.Errorf("QvaPay no devolvió el identificador del mensaje")
+		// Algunas respuestas 2xx sólo confirman el envío con {"ok":true}. El
+		// mensaje ya fue aceptado; no convertir esa respuesta en un fallo.
+		id = stringField(payload, "id", "uuid")
+	}
+	if id == "" {
+		if text, ok := payload["message"].(string); ok {
+			id = strings.TrimSpace(text)
+		}
 	}
 	return ChatMessage{
 		ID: id, PeerID: stringField(candidate, "peer_id", "peerId"),
