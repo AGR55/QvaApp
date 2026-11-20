@@ -1,0 +1,257 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/reconciliation-scheduler.ts",
+  "sourceTests": [
+    "test/reconciliation-scheduler.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Backoff exponencial persistido por intención, acotado a 15 min. La secuencia de operaciones se inyecta por `steps`; epoch ms como number. · goldenHash=6a6ac6ceb73faf4ae170db03c9e89f35fd8f1f1d5f6c676bec91d04c72a1c8af",
+  "cases": [
+    {
+      "caseId": "pure/reconciliation-scheduler/first-failure/0001",
+      "op": "reconciliation.sequence",
+      "source": "test/reconciliation-scheduler.test.ts:17",
+      "input": {
+        "steps": [
+          {
+            "op": "canAttempt",
+            "intentId": "intent-a",
+            "at": 1800000000000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000000000
+          },
+          {
+            "op": "canAttempt",
+            "intentId": "intent-a",
+            "at": 1800000059999
+          },
+          {
+            "op": "canAttempt",
+            "intentId": "intent-a",
+            "at": 1800000060000
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "can": true
+          },
+          {
+            "attempts": 1,
+            "nextAttemptAt": 1800000060000
+          },
+          {
+            "can": false
+          },
+          {
+            "can": true
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/reconciliation-scheduler/exponential/0001",
+      "op": "reconciliation.sequence",
+      "source": "test/reconciliation-scheduler.test.ts:25",
+      "input": {
+        "steps": [
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000000000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000060000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000180000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000420000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000900000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800001800000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800002700000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800003600000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800004500000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800005400000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800006300000
+          },
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800007200000
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "attempts": 1,
+            "nextAttemptAt": 1800000060000
+          },
+          {
+            "attempts": 2,
+            "nextAttemptAt": 1800000180000
+          },
+          {
+            "attempts": 3,
+            "nextAttemptAt": 1800000420000
+          },
+          {
+            "attempts": 4,
+            "nextAttemptAt": 1800000900000
+          },
+          {
+            "attempts": 5,
+            "nextAttemptAt": 1800001800000
+          },
+          {
+            "attempts": 6,
+            "nextAttemptAt": 1800002700000
+          },
+          {
+            "attempts": 7,
+            "nextAttemptAt": 1800003600000
+          },
+          {
+            "attempts": 8,
+            "nextAttemptAt": 1800004500000
+          },
+          {
+            "attempts": 9,
+            "nextAttemptAt": 1800005400000
+          },
+          {
+            "attempts": 10,
+            "nextAttemptAt": 1800006300000
+          },
+          {
+            "attempts": 11,
+            "nextAttemptAt": 1800007200000
+          },
+          {
+            "attempts": 12,
+            "nextAttemptAt": 1800008100000
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/reconciliation-scheduler/isolation/0001",
+      "op": "reconciliation.sequence",
+      "source": "test/reconciliation-scheduler.test.ts:32",
+      "input": {
+        "steps": [
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000000000
+          },
+          {
+            "op": "canAttempt",
+            "intentId": "intent-b",
+            "at": 1800000000000
+          },
+          {
+            "op": "canAttempt",
+            "intentId": "intent-a",
+            "at": 1800000059999
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "attempts": 1,
+            "nextAttemptAt": 1800000060000
+          },
+          {
+            "can": true
+          },
+          {
+            "can": false
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/reconciliation-scheduler/clear/0001",
+      "op": "reconciliation.sequence",
+      "source": "test/reconciliation-scheduler.test.ts:36",
+      "input": {
+        "steps": [
+          {
+            "op": "recordFailure",
+            "intentId": "intent-a",
+            "at": 1800000000000
+          },
+          {
+            "op": "clear",
+            "intentId": "intent-a"
+          },
+          {
+            "op": "canAttempt",
+            "intentId": "intent-a",
+            "at": 1800000000001
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "attempts": 1,
+            "nextAttemptAt": 1800000060000
+          },
+          null,
+          {
+            "can": true
+          }
+        ]
+      }
+    }
+  ]
+}

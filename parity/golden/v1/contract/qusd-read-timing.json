@@ -1,0 +1,135 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qusd-read-timing.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (2 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=7e1c0e875daf31f3c0262ff8fd9ba1c6392f99775bf6bfe0f99860585891188c",
+  "cases": [
+    {
+      "caseId": "contract/qusd-read-timing/02-callback-failure-stages",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qusd-read-timing.test.ts:25",
+      "input": {
+        "scenario": "qusd-read-timing/02-callback-failure-stages"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "qusd:ok",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          },
+          {
+            "label": "qusd:invalid",
+            "outcome": {
+              "error": {
+                "message": "La respuesta de balance de QvaPay no contiene un saldo QUSD reconocible; se bloqueó la venta por seguridad.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "qusd:no-session",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "No hay sesión de QvaPay. Ejecuta pnpm login en la terminal.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 401
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "qusd.timings",
+            "value": [
+              {
+                "outcome": "success",
+                "priority": "normal",
+                "queueMs": 0,
+                "responseMs": 10,
+                "totalMs": 10
+              },
+              {
+                "outcome": "failed",
+                "priority": "normal",
+                "queueMs": 1667,
+                "responseMs": 10,
+                "totalMs": 1677
+              },
+              {
+                "outcome": "failed",
+                "priority": "normal",
+                "queueMs": null,
+                "responseMs": null,
+                "totalMs": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qusd-read-timing/01-priority-retries",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qusd-read-timing.test.ts:7",
+      "input": {
+        "scenario": "qusd-read-timing/01-priority-retries"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "qusd#1",
+            "outcome": {
+              "ok": true,
+              "value": 42
+            }
+          },
+          {
+            "label": "qusd#2",
+            "outcome": {
+              "ok": true,
+              "value": 42
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "qusd.timings",
+            "value": [
+              {
+                "outcome": "success",
+                "priority": "urgent",
+                "queueMs": 0,
+                "responseMs": 5,
+                "totalMs": 5
+              },
+              {
+                "outcome": "success",
+                "priority": "urgent",
+                "queueMs": 1667,
+                "responseMs": 810,
+                "totalMs": 2477
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

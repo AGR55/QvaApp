@@ -1,0 +1,273 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/hunting-requirements.ts",
+  "sourceTests": [
+    "test/hunting-requirements.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Requisitos de cacería: hechos de elegibilidad frescos (60 s) sin inventar ceros. La secuencia de lecturas se inyecta por `actions`; solo viaja string|null como resultado. · goldenHash=cdd3b9dff0cf7357b7ec28cc6267d475bcaf1c3aa508e35140b4470c3ef2bf5e",
+  "cases": [
+    {
+      "caseId": "pure/hunting-requirements/no-facts/0001",
+      "op": "hunt.requirements",
+      "source": "test/hunting-requirements.test.ts:8",
+      "input": {
+        "offer": {
+          "uuid": "offer",
+          "type": "sell",
+          "coin": "CUP",
+          "amount": 10,
+          "receive": 100,
+          "status": "open",
+          "requirements": {
+            "min_completed": 25,
+            "min_rating": 4
+          }
+        },
+        "now": 1000,
+        "actions": []
+      },
+      "expect": {
+        "reason": null
+      }
+    },
+    {
+      "caseId": "pure/hunting-requirements/min-rating/0001",
+      "op": "hunt.requirements",
+      "source": "test/hunting-requirements.test.ts:9",
+      "input": {
+        "offer": {
+          "uuid": "offer",
+          "type": "sell",
+          "coin": "CUP",
+          "amount": 10,
+          "receive": 100,
+          "status": "open",
+          "requirements": {
+            "min_completed": 25,
+            "min_rating": 4
+          }
+        },
+        "now": 1000,
+        "actions": [
+          {
+            "kind": "eligibility",
+            "value": {
+              "_count": {
+                "P2P": 10,
+                "P2P_Peer": 20
+              },
+              "rating_avg": 3.8
+            },
+            "at": 1000
+          }
+        ]
+      },
+      "expect": {
+        "reason": "Requisito min_rating: 3.8 disponible; exige 4"
+      }
+    },
+    {
+      "caseId": "pure/hunting-requirements/stale-facts/0001",
+      "op": "hunt.requirements",
+      "source": "test/hunting-requirements.test.ts:11",
+      "input": {
+        "offer": {
+          "uuid": "offer",
+          "type": "sell",
+          "coin": "CUP",
+          "amount": 10,
+          "receive": 100,
+          "status": "open",
+          "requirements": {
+            "min_completed": 25,
+            "min_rating": 4
+          }
+        },
+        "now": 62000,
+        "actions": [
+          {
+            "kind": "eligibility",
+            "value": {
+              "_count": {
+                "P2P": 10,
+                "P2P_Peer": 20
+              },
+              "rating_avg": 3.8
+            },
+            "at": 1000
+          }
+        ]
+      },
+      "expect": {
+        "reason": null
+      }
+    },
+    {
+      "caseId": "pure/hunting-requirements/refreshed-rating/0001",
+      "op": "hunt.requirements",
+      "source": "test/hunting-requirements.test.ts:12",
+      "input": {
+        "offer": {
+          "uuid": "offer",
+          "type": "sell",
+          "coin": "CUP",
+          "amount": 10,
+          "receive": 100,
+          "status": "open",
+          "requirements": {
+            "min_completed": 25,
+            "min_rating": 4
+          }
+        },
+        "now": 62000,
+        "actions": [
+          {
+            "kind": "eligibility",
+            "value": {
+              "_count": {
+                "P2P": 10,
+                "P2P_Peer": 20
+              },
+              "rating_avg": 3.8
+            },
+            "at": 1000
+          },
+          {
+            "kind": "eligibility",
+            "value": {
+              "rating_avg": 4.5
+            },
+            "at": 62000
+          }
+        ]
+      },
+      "expect": {
+        "reason": null
+      }
+    },
+    {
+      "caseId": "pure/hunting-requirements/missing-min-completed/0001",
+      "op": "hunt.requirements",
+      "source": "test/hunting-requirements.test.ts:14",
+      "input": {
+        "offer": {
+          "uuid": "offer",
+          "type": "sell",
+          "coin": "CUP",
+          "amount": 10,
+          "receive": 100,
+          "status": "open",
+          "requirements": {
+            "min_completed": 25,
+            "min_rating": 4
+          }
+        },
+        "now": 62000,
+        "actions": [
+          {
+            "kind": "eligibility",
+            "value": {
+              "_count": {
+                "P2P": 10,
+                "P2P_Peer": 20
+              },
+              "rating_avg": 3.8
+            },
+            "at": 1000
+          },
+          {
+            "kind": "eligibility",
+            "value": {
+              "rating_avg": 4.5
+            },
+            "at": 62000
+          },
+          {
+            "kind": "missing",
+            "value": [
+              {
+                "key": "min_completed",
+                "actual": 12,
+                "required": 25
+              }
+            ],
+            "at": 62000
+          }
+        ]
+      },
+      "expect": {
+        "reason": "Requisito min_completed: 12 disponible; exige 25"
+      }
+    },
+    {
+      "caseId": "pure/hunting-requirements/incomplete-count/0001",
+      "op": "hunt.requirements",
+      "source": "test/hunting-requirements.test.ts:16",
+      "input": {
+        "offer": {
+          "uuid": "offer",
+          "type": "sell",
+          "coin": "CUP",
+          "amount": 10,
+          "receive": 100,
+          "status": "open",
+          "requirements": {
+            "min_completed": 25,
+            "min_rating": 4
+          }
+        },
+        "now": 62000,
+        "actions": [
+          {
+            "kind": "eligibility",
+            "value": {
+              "_count": {
+                "P2P": 10,
+                "P2P_Peer": 20
+              },
+              "rating_avg": 3.8
+            },
+            "at": 1000
+          },
+          {
+            "kind": "eligibility",
+            "value": {
+              "rating_avg": 4.5
+            },
+            "at": 62000
+          },
+          {
+            "kind": "missing",
+            "value": [
+              {
+                "key": "min_completed",
+                "actual": 12,
+                "required": 25
+              }
+            ],
+            "at": 62000
+          },
+          {
+            "kind": "eligibility",
+            "value": {
+              "_count": {
+                "P2P": 20
+              }
+            },
+            "at": 62000
+          }
+        ]
+      },
+      "expect": {
+        "reason": "Requisito min_completed: 12 disponible; exige 25"
+      }
+    }
+  ]
+}

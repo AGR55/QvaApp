@@ -1,0 +1,100 @@
+{
+  "cassetteVersion": 1,
+  "name": "k1-login",
+  "description": "K1: login TOTP/PIN. 202 has_otp:true, 200 con accessToken, 401 TOTP rechazado (no se reintenta), 423 cuenta bloqueada, 429 rate limit y timeout de transporte reintentado 3 veces por el cliente.",
+  "contract": "K1",
+  "clockMs": 1767225600000,
+  "world": { "user": { "uuid": "user-owner-0001" }, "offers": [] },
+  "exchanges": [
+    {
+      "id": "login-has-otp",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": { "email": "owner@fake.qvapay", "password": "correct-horse-1", "remember": true }
+      },
+      "response": { "status": 202, "body": { "has_otp": true, "notified": true } }
+    },
+    {
+      "id": "login-totp-ok",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "email": "owner@fake.qvapay",
+          "password": "correct-horse-1",
+          "remember": true,
+          "two_factor_code": "123456"
+        }
+      },
+      "response": { "status": 200, "body": { "accessToken": "fake-access-token-0001" } }
+    },
+    {
+      "id": "login-totp-rejected",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "email": "owner@fake.qvapay",
+          "password": "correct-horse-1",
+          "remember": true,
+          "two_factor_code": "000000"
+        }
+      },
+      "response": { "status": 401, "body": { "error": "Código de doble factor inválido", "code": "HTTP_401" } }
+    },
+    {
+      "id": "login-account-locked",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": {
+          "email": "owner@fake.qvapay",
+          "password": "correct-horse-1",
+          "remember": true,
+          "two_factor_code": "999999"
+        }
+      },
+      "response": { "status": 423, "body": { "error": "Cuenta bloqueada temporalmente" } }
+    },
+    {
+      "id": "request-pin-notified",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/request-pin",
+        "body": { "email": "owner@fake.qvapay", "password": "correct-horse-1" }
+      },
+      "response": { "status": 200, "body": { "ok": true, "notified": true } }
+    },
+    {
+      "id": "login-429",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": { "email": "ratelimited@fake.qvapay", "password": "correct-horse-2", "remember": true }
+      },
+      "response": {
+        "status": 429,
+        "headers": { "retry-after": "60" },
+        "body": { "error": "Demasiados intentos de login", "code": "HTTP_429" }
+      }
+    },
+    {
+      "id": "login-transport-timeout-retried-3x",
+      "contract": "K1",
+      "match": {
+        "method": "POST",
+        "path": "/auth/login",
+        "body": { "email": "flaky@fake.qvapay", "password": "correct-horse-3", "remember": true }
+      },
+      "abort": "destroy",
+      "atMost": 3
+    }
+  ]
+}

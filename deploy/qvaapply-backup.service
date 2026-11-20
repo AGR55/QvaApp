@@ -4,7 +4,10 @@ Description=Consistent QvaApply SQLite backup
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/qvaapply-backup
-Nice=10
+Nice=19
+CPUQuota=20%
+MemoryMax=1G
+TimeoutStartSec=6h
 IOSchedulingClass=idle
 PrivateTmp=true
 ProtectSystem=strict

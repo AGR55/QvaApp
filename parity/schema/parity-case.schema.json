@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qvaapply.local/parity/v1/case-file.schema.json",
+  "title": "QvaApply parity case file v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "cases"],
+  "properties": {
+    "schema": { "const": "qvaapply.parity/v1" },
+    "suite": { "enum": ["pure", "contract", "replay", "http"] },
+    "targetService": {
+      "type": "string",
+      "description": "Destino lógico del arnés (money-core, qvapay-adapter, edge, notifier, analytics...)."
+    },
+    "module": { "type": "string" },
+    "sourceTests": { "type": "array", "items": { "type": "string" } },
+    "generatedFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "impl": { "const": "typescript" },
+        "commit": { "type": "string" },
+        "approvedBy": { "type": "string" }
+      }
+    },
+    "notes": { "type": "string" },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/case" }
+    }
+  },
+  "$defs": {
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["caseId"],
+      "properties": {
+        "caseId": { "type": "string", "pattern": "^[a-z0-9]+/[a-z0-9-]+(/[a-zA-Z0-9-]+)*/[0-9]{4}$" },
+        "kind": { "enum": ["pure", "stateful"], "default": "pure" },
+        "op": {
+          "type": "string",
+          "description": "Operación del protocolo CLI v1, p. ej. market.roundQusd."
+        },
+        "source": {
+          "type": "string",
+          "description": "Test TypeScript de origen (archivo:línea)."
+        },
+        "input": { "type": "object" },
+        "expect": {},
+        "expectError": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "class": { "enum": ["validation", "protocol", "error"] },
+            "messageIncludes": { "type": "string" }
+          }
+        },
+        "session": { "type": "object" },
+        "sessionExpect": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "stateDigest": { "type": "string" } }
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "stateful" } }, "required": ["kind"] },
+          "then": {
+            "required": ["session", "steps"],
+            "not": { "required": ["op"] }
+          },
+          "else": {
+            "required": ["op"],
+            "oneOf": [{ "required": ["expect"] }, { "required": ["expectError"] }]
+          }
+        }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["op"],
+      "properties": {
+        "op": { "type": "string" },
+        "input": { "type": "object" },
+        "expect": {},
+        "expectError": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "class": { "enum": ["validation", "protocol", "error"] },
+            "messageIncludes": { "type": "string" }
+          }
+        },
+        "expectUpstream": {},
+        "expectStateDigest": { "type": "string" }
+      },
+      "oneOf": [
+        { "required": ["expect"] },
+        { "required": ["expectError"] }
+      ]
+    }
+  }
+}

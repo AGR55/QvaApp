@@ -1,0 +1,99 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/scheduler.ts",
+  "sourceTests": [
+    "test/scheduler.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Planificador inyectable: exclusión de ejecuciones solapadas y rechazo tras stop. La secuencia se declara por `steps`; no hay temporizadores reales en el escenario. · goldenHash=751124a4400094699561a829399ccb1df3d11ac39f01e2ed583243c94ef2aa69",
+  "cases": [
+    {
+      "caseId": "pure/scheduler/overlap/0001",
+      "op": "scheduler.sequence",
+      "source": "test/scheduler.test.ts:5",
+      "input": {
+        "steps": [
+          {
+            "op": "register",
+            "name": "scan",
+            "interval": 1000,
+            "task": "hold"
+          },
+          {
+            "op": "begin",
+            "name": "scan"
+          },
+          {
+            "op": "settle"
+          },
+          {
+            "op": "run",
+            "name": "scan"
+          },
+          {
+            "op": "calls",
+            "name": "scan"
+          },
+          {
+            "op": "release",
+            "name": "scan"
+          },
+          {
+            "op": "join",
+            "name": "scan"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          false,
+          1,
+          null,
+          true
+        ]
+      }
+    },
+    {
+      "caseId": "pure/scheduler/closed/0001",
+      "op": "scheduler.sequence",
+      "source": "test/scheduler.test.ts:20",
+      "input": {
+        "steps": [
+          {
+            "op": "register",
+            "name": "job",
+            "interval": 1000,
+            "task": "noop"
+          },
+          {
+            "op": "start"
+          },
+          {
+            "op": "stop"
+          },
+          {
+            "op": "run",
+            "name": "job"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          false
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,205 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/bulk-dismiss-http.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (1 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=1851d7b66219637b12da26ce59781ed8f20ae999259a3bb6f28b60000e0db971",
+  "cases": [
+    {
+      "caseId": "http/bulk-dismiss/01-session-csrf-cursor",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/bulk-dismiss-http.test.ts:5",
+      "input": {
+        "scenario": "bulk-dismiss/01-session-csrf-cursor"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/dismiss-all",
+              "headers": {},
+              "payload": {
+                "throughId": 45
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000"
+              },
+              "payload": {
+                "password": "test-password-strong-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/dismiss-all",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": {
+                "throughId": 45
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/dismiss-all",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body must have required property 'throughId'"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/dismiss-all",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "throughId": 0
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/throughId must be >= 1"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/dismiss-all",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "throughId": 1.5
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/throughId must be integer"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/dismiss-all",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "throughId": 45
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "dismissed": 45
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "dismissAllDecisionEvents.calls",
+            "value": [
+              45
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

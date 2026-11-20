@@ -70,6 +70,10 @@ export function Login({ onAuthenticated }) {
             </p>
             </FieldGroup>
           </form>
+          <p className="login-footnote">
+            <span className="login-footnote-dot" aria-hidden="true" />
+            Acceso restringido · sesión auditada
+          </p>
         </div>
       </section>
     </main>

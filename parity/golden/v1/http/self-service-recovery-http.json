@@ -1,0 +1,477 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/self-service-recovery-http.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (2 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=4ef980ccaaa70233cb0339fe9f9afb753a560ecb6ae3c41b1632256218ddd669",
+  "cases": [
+    {
+      "caseId": "http/self-service-recovery/01-session-csrf-contracts",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/self-service-recovery-http.test.ts:11",
+      "input": {
+        "scenario": "self-service-recovery/01-session-csrf-contracts"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/recovery",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "recovery-http-password-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/recovery",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "blocked": true,
+                "items": []
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/check",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {}
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/check",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "checkedAt": 1,
+                "intentId": "i-1",
+                "outcome": "pending",
+                "state": "uncertain",
+                "updatedAt": 1
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/resolve",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "confirmed": true,
+                "evidence": "x",
+                "expectedUpdatedAt": 1,
+                "outcome": "paid",
+                "reason": "x"
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/outcome must be equal to one of the allowed values"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/resolve",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "confirmed": true,
+                "evidence": "No aparece aplicación ni operación para ese UUID.",
+                "expectedUpdatedAt": 1,
+                "outcome": "not_applied",
+                "reason": "Revisé la actividad en QvaPay."
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "actor": "admin_web",
+                "intentId": "i-1",
+                "outcome": "not_applied",
+                "state": "reconciled",
+                "updatedAt": 2,
+                "verifiedAt": 2
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/evidence",
+              "headers": {},
+              "payload": {
+                "evidence": "Estado comprobado en QvaPay"
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/evidence",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": {
+                "evidence": "Estado comprobado en QvaPay"
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/acknowledge",
+              "headers": {},
+              "payload": {
+                "evidence": "Estado comprobado en QvaPay"
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/acknowledge",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": {
+                "evidence": "Estado comprobado en QvaPay"
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/evidence",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "evidence": "short"
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/evidence must NOT have fewer than 12 characters"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/evidence",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "evidence": "Estado comprobado en QvaPay"
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "saved": true
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/acknowledge",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "acknowledged": true
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "recovery.calls",
+            "value": [
+              {
+                "check": "i-1"
+              },
+              {
+                "confirmed": true,
+                "evidence": "No aparece aplicación ni operación para ese UUID.",
+                "expectedUpdatedAt": 1,
+                "intentId": "i-1",
+                "outcome": "not_applied",
+                "reason": "Revisé la actividad en QvaPay."
+              },
+              {
+                "evidence": "Estado comprobado en QvaPay",
+                "id": "i-1"
+              },
+              {
+                "acknowledged": "i-1"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/self-service-recovery/02-cas-conflict",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/self-service-recovery-http.test.ts:88",
+      "input": {
+        "scenario": "self-service-recovery/02-cas-conflict"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "recovery-http-password-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/recovery/i-1/resolve",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "confirmed": true,
+                "evidence": "No aparece una operación activa.",
+                "expectedUpdatedAt": 1,
+                "outcome": "cancelled",
+                "reason": "Revisé la actividad en QvaPay."
+              }
+            },
+            "status": 409,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "La intención cambió."
+            }
+          }
+        ],
+        "effects": []
+      }
+    }
+  ]
+}

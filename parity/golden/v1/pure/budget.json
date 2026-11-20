@@ -1,0 +1,288 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/budget.ts",
+  "sourceTests": [
+    "test/budget.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Plan presupuestario proporcional puro: recorte/cancelación determinista de compras propias. Importes fiat a escala de la moneda (CUP sin decimales, resto escala 8) y QUSD a escala 8. · goldenHash=c21305eb740098774ff0c609009af5c733c333a03da474656924c75c4b09121a",
+  "cases": [
+    {
+      "caseId": "pure/budget/proportional/0001",
+      "op": "budget.proportionalPlan",
+      "source": "test/budget.test.ts:23",
+      "input": {
+        "offers": [
+          {
+            "uuid": "a",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 10,
+            "rate": 1000
+          },
+          {
+            "uuid": "b",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 20,
+            "rate": 1000
+          }
+        ],
+        "coin": "BANK_CUP",
+        "available": 15000,
+        "maximumRate": 1010
+      },
+      "expect": {
+        "coin": "BANK_CUP",
+        "available": "15000.00000000",
+        "committed": "30000.00000000",
+        "deficit": "15000.00000000",
+        "invalid": [],
+        "adjustments": [
+          {
+            "uuid": "a",
+            "coin": "BANK_CUP",
+            "rate": "1000.00000000",
+            "currentQusd": "10.00000000",
+            "proposedQusd": "5.00000000",
+            "currentFiat": "10000.00000000",
+            "proposedFiat": "5000.00000000",
+            "releasedFiat": "5000.00000000",
+            "action": "edit"
+          },
+          {
+            "uuid": "b",
+            "coin": "BANK_CUP",
+            "rate": "1000.00000000",
+            "currentQusd": "20.00000000",
+            "proposedQusd": "10.00000000",
+            "currentFiat": "20000.00000000",
+            "proposedFiat": "10000.00000000",
+            "releasedFiat": "10000.00000000",
+            "action": "edit"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/budget/invalid-rate/0001",
+      "op": "budget.proportionalPlan",
+      "source": "test/budget.test.ts:38",
+      "input": {
+        "offers": [
+          {
+            "uuid": "a",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 10,
+            "rate": 1000
+          },
+          {
+            "uuid": "b",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 20,
+            "rate": 1000
+          },
+          {
+            "uuid": "bad",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 10,
+            "rate": 1000000000000000000
+          }
+        ],
+        "coin": "BANK_CUP",
+        "available": 30000,
+        "maximumRate": 1010
+      },
+      "expect": {
+        "coin": "BANK_CUP",
+        "available": "30000.00000000",
+        "committed": "30000.00000000",
+        "deficit": "0.00000000",
+        "invalid": [
+          "bad"
+        ],
+        "adjustments": []
+      }
+    },
+    {
+      "caseId": "pure/budget/fixed-fee/0001",
+      "op": "budget.proportionalPlan",
+      "source": "test/budget.test.ts:59",
+      "input": {
+        "offers": [
+          {
+            "uuid": "a",
+            "coin": "CLASICA",
+            "type": "buy",
+            "status": "open",
+            "amount": 10,
+            "rate": 1.04
+          },
+          {
+            "uuid": "b",
+            "coin": "CLASICA",
+            "type": "buy",
+            "status": "open",
+            "amount": 5,
+            "rate": 1.03
+          }
+        ],
+        "coin": "CLASICA",
+        "available": 20,
+        "maximumRate": 1.1,
+        "outgoingTransferFee": 0.08
+      },
+      "expect": {
+        "coin": "CLASICA",
+        "available": "20.00000000",
+        "committed": "15.71000000",
+        "deficit": "0.00000000",
+        "invalid": [],
+        "adjustments": []
+      }
+    },
+    {
+      "caseId": "pure/budget/remote-total/0001",
+      "op": "budget.proportionalPlan",
+      "source": "test/budget.test.ts:74",
+      "input": {
+        "offers": [
+          {
+            "uuid": "cup-rounded",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 10,
+            "rate": 973.7,
+            "receive": 9730
+          }
+        ],
+        "coin": "BANK_CUP",
+        "available": 9000,
+        "maximumRate": 980,
+        "outgoingTransferFee": 0,
+        "currency": "CUP"
+      },
+      "expect": {
+        "coin": "BANK_CUP",
+        "available": "9000",
+        "committed": "9730",
+        "deficit": "730",
+        "invalid": [],
+        "adjustments": [
+          {
+            "uuid": "cup-rounded",
+            "coin": "BANK_CUP",
+            "rate": "973.70000000",
+            "currentQusd": "10.00000000",
+            "proposedQusd": "9.24000000",
+            "currentFiat": "9730",
+            "proposedFiat": "8990",
+            "releasedFiat": "740",
+            "action": "edit"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/budget/cup-underflow-cancel/0001",
+      "op": "budget.proportionalPlan",
+      "source": "test/budget.test.ts:97",
+      "input": {
+        "offers": [
+          {
+            "uuid": "cup-underflow",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 10,
+            "rate": 973.7,
+            "receive": 9730
+          }
+        ],
+        "coin": "BANK_CUP",
+        "available": 10,
+        "maximumRate": 980,
+        "outgoingTransferFee": 0,
+        "currency": "CUP"
+      },
+      "expect": {
+        "coin": "BANK_CUP",
+        "available": "10",
+        "committed": "9730",
+        "deficit": "9720",
+        "invalid": [],
+        "adjustments": [
+          {
+            "uuid": "cup-underflow",
+            "coin": "BANK_CUP",
+            "rate": "973.70000000",
+            "currentQusd": "10.00000000",
+            "proposedQusd": "0.00000000",
+            "currentFiat": "9730",
+            "proposedFiat": "0",
+            "releasedFiat": "9730",
+            "action": "cancel"
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/budget/below-qvapay-minimum/0001",
+      "op": "budget.proportionalPlan",
+      "source": "test/budget.test.ts:128",
+      "input": {
+        "offers": [
+          {
+            "uuid": "cup-below-qvapay-minimum",
+            "coin": "BANK_CUP",
+            "type": "buy",
+            "status": "open",
+            "amount": 1,
+            "rate": 1000,
+            "receive": 1000
+          }
+        ],
+        "coin": "BANK_CUP",
+        "available": 90,
+        "maximumRate": 1010,
+        "outgoingTransferFee": 0,
+        "currency": "CUP"
+      },
+      "expect": {
+        "coin": "BANK_CUP",
+        "available": "90",
+        "committed": "1000",
+        "deficit": "910",
+        "invalid": [],
+        "adjustments": [
+          {
+            "uuid": "cup-below-qvapay-minimum",
+            "coin": "BANK_CUP",
+            "rate": "1000.00000000",
+            "currentQusd": "1.00000000",
+            "proposedQusd": "0.00000000",
+            "currentFiat": "1000",
+            "proposedFiat": "0",
+            "releasedFiat": "1000",
+            "action": "cancel"
+          }
+        ]
+      }
+    }
+  ]
+}

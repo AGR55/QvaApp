@@ -1,0 +1,146 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/application/monetary-intents.ts",
+  "sourceTests": [
+    "test/monetary-intents.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Intención durable antes de despachar: el repositorio en memoria registra `created`, el resultado remoto y la auditoría; el observador de tiempos no puede alterar el resultado y la clasificación de fallos es conservadora. · goldenHash=7255721ad0b6d466672774a23bf2a99d2aca8a1ee84f4fad89f2937c342bf9b3",
+  "cases": [
+    {
+      "caseId": "pure/monetary-intents/timing/0001",
+      "op": "monetary.timing",
+      "source": "test/monetary-intents.test.ts:53",
+      "expect": {
+        "phases": [
+          "intentPersistMs",
+          "mutationMs",
+          "resultPersistMs"
+        ],
+        "durationsFinite": true,
+        "state": "confirmed"
+      }
+    },
+    {
+      "caseId": "pure/monetary-intents/persist-before-dispatch/0001",
+      "op": "monetary.persist-before-dispatch",
+      "source": "test/monetary-intents.test.ts:71",
+      "expect": {
+        "result": {
+          "ok": true
+        },
+        "state": "confirmed",
+        "events": [
+          "created:intent-1",
+          "remote:apply",
+          "confirmed:intent-1"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/monetary-intents/persist-failure/0001",
+      "op": "monetary.persist-failure",
+      "source": "test/monetary-intents.test.ts:95",
+      "expect": {
+        "dispatched": false,
+        "message": "sqlite unavailable"
+      }
+    },
+    {
+      "caseId": "pure/monetary-intents/failure-classification/0001",
+      "op": "monetary.failure-classification-all",
+      "source": "test/monetary-intents.test.ts:116",
+      "input": {
+        "kinds": [
+          "4xx",
+          "5xx",
+          "timeout",
+          "unknown"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "kind": "4xx",
+            "sameError": true,
+            "state": "rejected",
+            "events": [
+              "created:intent-classified-3",
+              "rejected:intent-classified-3",
+              "audit:mutation_rejected"
+            ]
+          },
+          {
+            "kind": "5xx",
+            "sameError": true,
+            "state": "uncertain",
+            "events": [
+              "created:intent-classified-4",
+              "uncertain:intent-classified-4",
+              "audit:mutation_uncertain"
+            ]
+          },
+          {
+            "kind": "timeout",
+            "sameError": true,
+            "state": "uncertain",
+            "events": [
+              "created:intent-classified-5",
+              "uncertain:intent-classified-5",
+              "audit:mutation_uncertain"
+            ]
+          },
+          {
+            "kind": "unknown",
+            "sameError": true,
+            "state": "uncertain",
+            "events": [
+              "created:intent-classified-6",
+              "uncertain:intent-classified-6",
+              "audit:mutation_uncertain"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/monetary-intents/outcome/0001",
+      "op": "monetary.outcome-all",
+      "source": "test/monetary-intents.test.ts:168",
+      "input": {
+        "kinds": [
+          "4xx",
+          "5xx",
+          "timeout",
+          "unknown"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "kind": "4xx",
+            "outcome": "rejected"
+          },
+          {
+            "kind": "5xx",
+            "outcome": "uncertain"
+          },
+          {
+            "kind": "timeout",
+            "outcome": "uncertain"
+          },
+          {
+            "kind": "unknown",
+            "outcome": "uncertain"
+          }
+        ]
+      }
+    }
+  ]
+}

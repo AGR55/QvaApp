@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeftRight, Bell, CheckCircle2, MessageSquareText, R
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
+import { stateLabel } from "../lib/labels.js";
 import { operationActionBody } from "../lib/operation-actions.js";
 import { MobileSmsPanel } from "./mobile-sms.jsx";
 import { OperationChatSheet } from "./operation-chat.jsx";
@@ -80,6 +81,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
     <div className="operations-stack">
       <ViewHead
         title="Operaciones"
+        description="Órdenes, avisos y conversaciones con cada contraparte."
       />
       <Panel title="Avisos de operación" wide>
         {notifications.length ? (
@@ -95,11 +97,11 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
       </Panel>
       <Panel title="Conversaciones y órdenes" wide>
         <Field label="Buscar conversación"><Input value={chatSearch} onChange={event=>setChatSearch(event.target.value)} placeholder="Mercado, contraparte, oferta u orden…" /></Field>
-        {conversations.length ? <ol className="operation-notifications">
+        {conversations.length ? <ol className="operation-conversations">
           {conversations.filter(item=>`${item.uuid} ${item.orderUuid||""} ${item.coin} ${label(item.coin)} ${item.counterpartyLabel||""}`.toLowerCase().includes(chatSearch.toLowerCase())).map(item=>(
             <li key={item.id}>
               <div><strong>{item.counterpartyLabel || "Contraparte"} · {label(item.coin)}</strong>
-                <p>{money(item.amount)} QUSD · {item.role === "creator" ? "Tu oferta" : "Oferta tomada"} · {item.state}</p>
+                <p>{money(item.amount)} QUSD · {item.role === "creator" ? "Tu oferta" : "Oferta tomada"} · {stateLabel(item.state)}</p>
                 <small>Oferta {item.uuid.slice(0,8)}{item.orderUuid ? ` · Orden ${item.orderUuid.slice(0,8)}` : " · Operación normal"}</small>
               </div>
               <Button type="button" variant="outline" onClick={()=>setChatOperation(item)}><MessageSquareText aria-hidden="true" /> Abrir chat{item.unreadCount ? ` · ${item.unreadCount} sin leer` : ""}</Button>
@@ -186,7 +188,7 @@ export function Operations({ data, label, unit, onChanged, notifications = [], o
 }
 
 function State({ value }) {
-  return <Badge className={`state state-${value}`}>{value.replaceAll("_", " ")}</Badge>;
+  return <Badge className={`state state-${value}`}>{stateLabel(value)}</Badge>;
 }
 
 function actionTitle(action) {

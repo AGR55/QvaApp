@@ -1,0 +1,1291 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "canonicalVersion": 1,
+  "oracle": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "srcHash": "sha256:abfc79b1bf8e7f00819f873f86e6b9b0fd45ea8e0eb85ba2ac1f19fc0986207a",
+    "source": "src/"
+  },
+  "baseline": {
+    "command": "node --import tsx --test test/*.test.ts",
+    "measuredAt": "2026-11-12",
+    "cases": 718,
+    "files": 95,
+    "pass": 718,
+    "fail": 0,
+    "skipped": 0,
+    "todo": 0,
+    "staticTestCalls": 643,
+    "locTests": 15769
+  },
+  "totals": {
+    "files": 95,
+    "cases": 718,
+    "byCategory": {
+      "P": 107,
+      "C": 74,
+      "H": 39,
+      "I": 470,
+      "U": 22,
+      "O": 6
+    },
+    "byCategoryFiles": {
+      "P": 21,
+      "C": 11,
+      "H": 9,
+      "I": 42,
+      "U": 9,
+      "O": 3
+    },
+    "byStatus": {
+      "portable": 107,
+      "golden": 444,
+      "contract": 113,
+      "property": 6,
+      "ui": 22,
+      "descartado": 26
+    },
+    "byLote": {
+      "L1": {
+        "files": 21,
+        "cases": 107
+      },
+      "L2": {
+        "files": 20,
+        "cases": 113
+      },
+      "L3": {
+        "files": 21,
+        "cases": 298
+      },
+      "L4": {
+        "files": 21,
+        "cases": 172
+      },
+      "L5": {
+        "files": 12,
+        "cases": 28
+      }
+    },
+    "byTargetService": {
+      "money-core": {
+        "files": 33,
+        "cases": 365
+      },
+      "qvapay-adapter": {
+        "files": 10,
+        "cases": 83
+      },
+      "config-registry": {
+        "files": 1,
+        "cases": 2
+      },
+      "decisions": {
+        "files": 1,
+        "cases": 8
+      },
+      "market-ingest": {
+        "files": 9,
+        "cases": 68
+      },
+      "audit": {
+        "files": 0,
+        "cases": 0
+      },
+      "gateway": {
+        "files": 12,
+        "cases": 56
+      },
+      "dashboard-bff": {
+        "files": 2,
+        "cases": 4
+      },
+      "notifier": {
+        "files": 8,
+        "cases": 36
+      },
+      "chat": {
+        "files": 3,
+        "cases": 20
+      },
+      "analytics": {
+        "files": 2,
+        "cases": 25
+      },
+      "sync-coop-adapter": {
+        "files": 2,
+        "cases": 23
+      },
+      "no-aplica": {
+        "files": 12,
+        "cases": 28
+      }
+    },
+    "byE1Service": {
+      "trading-core": {
+        "files": 56,
+        "cases": 549
+      },
+      "edge": {
+        "files": 14,
+        "cases": 60
+      },
+      "notifier": {
+        "files": 11,
+        "cases": 56
+      },
+      "analytics": {
+        "files": 2,
+        "cases": 25
+      },
+      "no-aplica": {
+        "files": 12,
+        "cases": 28
+      }
+    },
+    "parityCases": 670,
+    "nonApplicableBackendCases": 28,
+    "repositoryCases": 20,
+    "nonApplicableCases": 48,
+    "unclassifiedCases": 0
+  },
+  "generator": {
+    "name": "parity/tools/build-manifest.ts",
+    "version": 1,
+    "regenerate": "node --import tsx parity/tools/build-manifest.ts",
+    "check": "node --import tsx parity/tools/build-manifest.ts --check",
+    "profile": "docs/migration/parity-matrix.md",
+    "sourceOfTruth": [
+      "docs/migration/analysis/04-tests.md §2 y §5.2",
+      "docs/migration/verification.md §2 (estado L0)",
+      "docs/migration/target-architecture.md §3.1 (estado E1)"
+    ]
+  },
+  "files": [
+    {
+      "file": "test/budget.test.ts",
+      "category": "P",
+      "cases": 6,
+      "module": "src/budget.ts (plan proporcional, mínimo CUP)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/chat-stream.test.ts",
+      "category": "P",
+      "cases": 2,
+      "module": "src/chat-stream.ts (parser SSE)",
+      "targetService": "chat",
+      "e1Service": "notifier",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/cooperative-menu.test.ts",
+      "category": "P",
+      "cases": 3,
+      "module": "src/cooperative-menu.ts (teclado/acciones)",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/dashboard-auth.test.ts",
+      "category": "P",
+      "cases": 4,
+      "module": "src/dashboard-auth.ts (Origin, sesión, CSRF)",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/dashboard-controls.test.ts",
+      "category": "P",
+      "cases": 3,
+      "module": "src/dashboard.ts (DashboardReadModel con fakes)",
+      "targetService": "dashboard-bff",
+      "e1Service": "edge",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/dashboard.test.ts",
+      "category": "P",
+      "cases": 3,
+      "module": "src/dashboard.ts (marginCalculation, allocateBudget)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/hunting-balance-loops.test.ts",
+      "category": "P",
+      "cases": 1,
+      "module": "src/application/hunting-balance-loops.ts + Scheduler",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/hunting-requirements.test.ts",
+      "category": "P",
+      "cases": 1,
+      "module": "src/hunting-requirements.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/liquidity-plan.test.ts",
+      "category": "P",
+      "cases": 9,
+      "module": "src/core/liquidity-plan.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/market-history-compact.test.ts",
+      "category": "P",
+      "cases": 1,
+      "module": "src/dashboard.ts (compactMarketHistory)",
+      "targetService": "dashboard-bff",
+      "e1Service": "edge",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/market-hunting-loops.test.ts",
+      "category": "P",
+      "cases": 13,
+      "module": "src/application/market-hunting-loops.ts + Scheduler",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/market-list-budget.test.ts",
+      "category": "P",
+      "cases": 9,
+      "module": "src/market-list-budget.ts (cuota de listados)",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/market-math.test.ts",
+      "category": "P",
+      "cases": 7,
+      "module": "src/market-math.ts (median, outgoingFiatCost, ownOfferFiatTotal)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/mobile-operator.test.ts",
+      "category": "P",
+      "cases": 5,
+      "module": "src/mobile-operator.ts (repo + reloj inyectados)",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/monetary-intents.test.ts",
+      "category": "P",
+      "cases": 5,
+      "module": "src/application/monetary-intents.ts (MemoryIntentRepository)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/qusd-balance-cache.test.ts",
+      "category": "P",
+      "cases": 13,
+      "module": "src/qusd-balance-cache.ts",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/rate-rounding.test.ts",
+      "category": "P",
+      "cases": 2,
+      "module": "src/market-math.ts (roundRateForIndex)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/risk-policy.test.ts",
+      "category": "P",
+      "cases": 8,
+      "module": "src/core/risk-policy.ts (evaluateRisk)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/scheduler.test.ts",
+      "category": "P",
+      "cases": 2,
+      "module": "src/scheduler.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/telegram-menu.test.ts",
+      "category": "P",
+      "cases": 5,
+      "module": "src/telegram-menu.ts",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/telegram-runtime.test.ts",
+      "category": "P",
+      "cases": 5,
+      "module": "src/telegram-runtime.ts",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "A",
+      "lote": "L1",
+      "status": "portable"
+    },
+    {
+      "file": "test/chat-images.test.ts",
+      "category": "C",
+      "cases": 7,
+      "module": "src/chat-images.ts + QvaPayClient.downloadChatImage",
+      "targetService": "chat",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K7"
+    },
+    {
+      "file": "test/login.test.ts",
+      "category": "C",
+      "cases": 11,
+      "module": "src/application/qvapay-login.ts + QvaPayClient.login",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K1"
+    },
+    {
+      "file": "test/qusd-read-timing.test.ts",
+      "category": "C",
+      "cases": 2,
+      "module": "QvaPayClient.qusdBalance + telemetría de lectura",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K2/K12"
+    },
+    {
+      "file": "test/qvapay-feed-stream.test.ts",
+      "category": "C",
+      "cases": 5,
+      "module": "src/qvapay-feed-stream.ts (SSE)",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K6"
+    },
+    {
+      "file": "test/qvapay-gateway.test.ts",
+      "category": "C",
+      "cases": 27,
+      "module": "src/qvapay.ts (colas, cuotas, errores)",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K2/K3/K4/K7"
+    },
+    {
+      "file": "test/qvapay-list-budget.test.ts",
+      "category": "C",
+      "cases": 6,
+      "module": "QvaPayClient.profile/listOffersPage + ListingReadBudget",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K2"
+    },
+    {
+      "file": "test/qvapay-list-isolation.test.ts",
+      "category": "C",
+      "cases": 2,
+      "module": "QvaPayClient (identidad de listado)",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K2"
+    },
+    {
+      "file": "test/qvapay-list-timing.test.ts",
+      "category": "C",
+      "cases": 3,
+      "module": "QvaPayClient (timing de lista)",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K2"
+    },
+    {
+      "file": "test/qvapay-operation-timing.test.ts",
+      "category": "C",
+      "cases": 5,
+      "module": "src/operation-trace.ts + QvaPayClient",
+      "targetService": "qvapay-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K3/K4"
+    },
+    {
+      "file": "test/telegram-recovery.test.ts",
+      "category": "C",
+      "cases": 1,
+      "module": "src/telegram-recovery.ts (grammy fake API)",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K14"
+    },
+    {
+      "file": "test/web-push.test.ts",
+      "category": "C",
+      "cases": 5,
+      "module": "src/web-push.ts (VAPID runtime inyectado)",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K14"
+    },
+    {
+      "file": "test/bulk-dismiss-http.test.ts",
+      "category": "H",
+      "cases": 1,
+      "module": "POST /api/audit/dismiss-all",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "secondaryServices": [
+        "audit"
+      ],
+      "contract": "K10"
+    },
+    {
+      "file": "test/cooperative-hunter-http.test.ts",
+      "category": "H",
+      "cases": 1,
+      "module": "/api/cooperative-network/executions/check",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "secondaryServices": [
+        "sync-coop-adapter"
+      ],
+      "contract": "K10"
+    },
+    {
+      "file": "test/http-dashboard.test.ts",
+      "category": "H",
+      "cases": 26,
+      "module": "sesión, CSRF, control, push, recovery, estáticos, webhook",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "secondaryServices": [
+        "dashboard-bff",
+        "notifier"
+      ],
+      "contract": "K10"
+    },
+    {
+      "file": "test/mobile-action-http-budget.test.ts",
+      "category": "H",
+      "cases": 1,
+      "module": "acciones móviles (rate limit)",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K10"
+    },
+    {
+      "file": "test/mobile-tools.test.ts",
+      "category": "H",
+      "cases": 3,
+      "module": "/api/mobile/* (overview, tools)",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K10"
+    },
+    {
+      "file": "test/operation-chat-http.test.ts",
+      "category": "H",
+      "cases": 3,
+      "module": "/api/operations/:uuid/chat",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "secondaryServices": [
+        "chat"
+      ],
+      "contract": "K10"
+    },
+    {
+      "file": "test/self-service-recovery-http.test.ts",
+      "category": "H",
+      "cases": 2,
+      "module": "/api/recovery*",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "secondaryServices": [
+        "money-core"
+      ],
+      "contract": "K10"
+    },
+    {
+      "file": "test/static-assets.test.ts",
+      "category": "H",
+      "cases": 1,
+      "module": "servido comprimido/ETag/HEAD",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "contract": "K10"
+    },
+    {
+      "file": "test/trading-analytics-http.test.ts",
+      "category": "H",
+      "cases": 1,
+      "module": "/api/analytics",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L2",
+      "status": "contract",
+      "secondaryServices": [
+        "analytics"
+      ],
+      "contract": "K10"
+    },
+    {
+      "file": "test/application-reservations.test.ts",
+      "category": "I",
+      "cases": 2,
+      "module": "reservas de aplicación (store.ts)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/architecture-regression.test.ts",
+      "category": "I",
+      "cases": 4,
+      "module": "trading.ts, dashboard.ts, market-config.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden",
+      "secondaryServices": [
+        "dashboard-bff"
+      ]
+    },
+    {
+      "file": "test/assisted-payment.test.ts",
+      "category": "I",
+      "cases": 13,
+      "module": "assisted-payment.ts + HTTP",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden",
+      "secondaryServices": [
+        "gateway"
+      ]
+    },
+    {
+      "file": "test/chat-orders-push.test.ts",
+      "category": "I",
+      "cases": 6,
+      "module": "chat-push.ts, operation-chat.ts",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/config-integrity-performance.test.ts",
+      "category": "I",
+      "cases": 2,
+      "module": "market-config.ts, store.ts",
+      "targetService": "config-registry",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/cooperative-capital.test.ts",
+      "category": "I",
+      "cases": 16,
+      "module": "trading.ts, store.ts, market-config.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/cooperative-hunter.test.ts",
+      "category": "I",
+      "cases": 6,
+      "module": "cooperative-hunter.ts",
+      "targetService": "sync-coop-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/core.test.ts",
+      "category": "I",
+      "cases": 26,
+      "module": "trading.ts, store.ts, vault.ts, qvapay.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/dashboard-market-observation.test.ts",
+      "category": "I",
+      "cases": 3,
+      "module": "dashboard.ts, market-config.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/dashboard-rebalance.test.ts",
+      "category": "I",
+      "cases": 5,
+      "module": "dashboard.ts, market-config.ts, qvapay.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden",
+      "secondaryServices": [
+        "money-core"
+      ]
+    },
+    {
+      "file": "test/flexible-fiat.test.ts",
+      "category": "I",
+      "cases": 7,
+      "module": "trading.ts, store.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/flexible-order.test.ts",
+      "category": "I",
+      "cases": 5,
+      "module": "flexible-order.ts, qvapay.ts, store.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/hunting-pause.test.ts",
+      "category": "I",
+      "cases": 7,
+      "module": "market-config.ts, store.ts, trading.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden",
+      "secondaryServices": [
+        "market-ingest"
+      ]
+    },
+    {
+      "file": "test/hunting-query-performance.test.ts",
+      "category": "I",
+      "cases": 3,
+      "module": "store.ts (índices y consultas)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "C",
+      "lote": "L4",
+      "status": "property",
+      "secondaryServices": [
+        "audit"
+      ]
+    },
+    {
+      "file": "test/hunting-sync.test.ts",
+      "category": "I",
+      "cases": 17,
+      "module": "hunting-sync.ts, store.ts, vault.ts",
+      "targetService": "sync-coop-adapter",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/manual-cancel-exclusion.test.ts",
+      "category": "I",
+      "cases": 9,
+      "module": "trading.ts, market-config.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/manual-cancel-race.test.ts",
+      "category": "I",
+      "cases": 31,
+      "module": "trading.ts, qvapay.ts, store.ts (carreras de cancelación)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/market-accounts.test.ts",
+      "category": "I",
+      "cases": 3,
+      "module": "market-accounts.ts, vault.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/market-feed-shutdown.test.ts",
+      "category": "I",
+      "cases": 1,
+      "module": "market-feed.ts, market-source.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/market-feed.test.ts",
+      "category": "I",
+      "cases": 20,
+      "module": "market-feed.ts, market-source.ts, HTTP",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/market-ingest-serialization.test.ts",
+      "category": "I",
+      "cases": 9,
+      "module": "market-source.ts, trading.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/market-poll-timing.test.ts",
+      "category": "I",
+      "cases": 2,
+      "module": "market-source.ts, market-accounts.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "C",
+      "lote": "L4",
+      "status": "property"
+    },
+    {
+      "file": "test/market-reader-identity.test.ts",
+      "category": "I",
+      "cases": 7,
+      "module": "market-accounts.ts, qvapay.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/market-source.test.ts",
+      "category": "I",
+      "cases": 18,
+      "module": "market-source.ts, market-accounts.ts",
+      "targetService": "market-ingest",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/mobile-operation-status.test.ts",
+      "category": "I",
+      "cases": 8,
+      "module": "mobile-operator.ts, chat-catalog.ts",
+      "targetService": "gateway",
+      "e1Service": "edge",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden",
+      "secondaryServices": [
+        "chat"
+      ]
+    },
+    {
+      "file": "test/notification-dispatcher.test.ts",
+      "category": "I",
+      "cases": 7,
+      "module": "notification-dispatcher.ts",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/offer-latency.test.ts",
+      "category": "I",
+      "cases": 1,
+      "module": "trading.ts, qvapay.ts (latencia recepción→POST)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "C",
+      "lote": "L3",
+      "status": "property"
+    },
+    {
+      "file": "test/operation-actions.test.ts",
+      "category": "I",
+      "cases": 9,
+      "module": "trading.ts, qvapay.ts, store.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/operation-chat.test.ts",
+      "category": "I",
+      "cases": 11,
+      "module": "operation-chat.ts, qvapay.ts",
+      "targetService": "chat",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/operational-insights.test.ts",
+      "category": "I",
+      "cases": 8,
+      "module": "operational-insights.ts, notification-dispatcher.ts, HTTP",
+      "targetService": "decisions",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden",
+      "secondaryServices": [
+        "dashboard-bff"
+      ]
+    },
+    {
+      "file": "test/opportunity-orchestrator.test.ts",
+      "category": "I",
+      "cases": 19,
+      "module": "application/opportunity-orchestrator.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/payment-sms.test.ts",
+      "category": "I",
+      "cases": 24,
+      "module": "payment-sms.ts, qvapay.ts, store.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/practical-tools.test.ts",
+      "category": "I",
+      "cases": 7,
+      "module": "trading-analytics.ts, price-simulation.ts, HTTP",
+      "targetService": "analytics",
+      "e1Service": "analytics",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/qusd-readiness-integration.test.ts",
+      "category": "I",
+      "cases": 12,
+      "module": "trading.ts, market-config.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/reconciliation-feed.test.ts",
+      "category": "I",
+      "cases": 13,
+      "module": "self-service-recovery.ts, qvapay.ts, trading.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/reconciliation-scheduler.test.ts",
+      "category": "I",
+      "cases": 5,
+      "module": "reconciliation-scheduler.ts, store.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/repository.test.ts",
+      "category": "I",
+      "cases": 20,
+      "module": "store.ts (esquema v31, migraciones, índices)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "D",
+      "lote": "L3",
+      "status": "descartado",
+      "secondaryServices": [
+        "audit"
+      ],
+      "motivo": "No se porta como código: su garantía se redefine como verificación de migración de datos (02-persistence.md §6.5) + tests de esquema Postgres. Es la excepción D de 04-tests.md §2.4 y §6.4; queda fuera del score de paridad ejecutable."
+    },
+    {
+      "file": "test/self-service-recovery.test.ts",
+      "category": "I",
+      "cases": 13,
+      "module": "self-service-recovery.ts, store.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/self-service-store.test.ts",
+      "category": "I",
+      "cases": 10,
+      "module": "store.ts (dismiss masivo/versionado)",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden",
+      "secondaryServices": [
+        "decisions"
+      ]
+    },
+    {
+      "file": "test/telegram-operation.test.ts",
+      "category": "I",
+      "cases": 4,
+      "module": "telegram-operation.ts, store.ts",
+      "targetService": "notifier",
+      "e1Service": "notifier",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/trading-analytics.test.ts",
+      "category": "I",
+      "cases": 18,
+      "module": "trading-analytics.ts, dashboard.ts",
+      "targetService": "analytics",
+      "e1Service": "analytics",
+      "reuse": "B",
+      "lote": "L4",
+      "status": "golden"
+    },
+    {
+      "file": "test/trading-automation.test.ts",
+      "category": "I",
+      "cases": 59,
+      "module": "trading.ts, qvapay.ts, market-config.ts",
+      "targetService": "money-core",
+      "e1Service": "trading-core",
+      "reuse": "B",
+      "lote": "L3",
+      "status": "golden"
+    },
+    {
+      "file": "test/chart-domain.test.ts",
+      "category": "U",
+      "cases": 2,
+      "module": "web/lib (lógica de presentación de gráfica)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Lógica de presentación del navegador; no es comportamiento de un servicio de backend."
+    },
+    {
+      "file": "test/dashboard-bootstrap-regression.test.ts",
+      "category": "U",
+      "cases": 3,
+      "module": "web/main.jsx y hooks (lectura de fuente)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Assert.match sobre la estructura de fuentes del frontend; nula señal de paridad del backend."
+    },
+    {
+      "file": "test/dashboard-bootstrap.test.ts",
+      "category": "U",
+      "cases": 2,
+      "module": "web/lib (consumo del bootstrap del navegador)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Consumo del bootstrap del navegador; no se ejecuta en el backend Go."
+    },
+    {
+      "file": "test/dashboard-local-snapshot-regression.test.ts",
+      "category": "U",
+      "cases": 1,
+      "module": "src/dashboard.ts (estructura interna, lectura de fuente)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Verifica estructura interna del código, no comportamiento financiero observable."
+    },
+    {
+      "file": "test/server-dashboard-cache-regression.test.ts",
+      "category": "U",
+      "cases": 3,
+      "module": "web/hooks y src/index.ts (lectura de fuente)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Regresión estructural sobre fuentes del panel; sustituible por smoke visual/E2E."
+    },
+    {
+      "file": "test/telegram-menu-regression.test.ts",
+      "category": "U",
+      "cases": 2,
+      "module": "src/telegram-menu.ts (regex sobre fuente)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Regex sobre el texto de la fuente; el contrato real se cubre con K14/notifier."
+    },
+    {
+      "file": "test/ui-recovery-regression.test.ts",
+      "category": "U",
+      "cases": 4,
+      "module": ".jsx/.css del panel (lectura de fuente)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Regex sobre JSX/CSS; no es evidencia de paridad del backend."
+    },
+    {
+      "file": "test/web-layout-regression.test.ts",
+      "category": "U",
+      "cases": 4,
+      "module": ".jsx/.css del panel (lectura de fuente)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Regex sobre JSX/CSS de layout; se sustituye por visual-smoke."
+    },
+    {
+      "file": "test/web-operation-actions.test.ts",
+      "category": "U",
+      "cases": 1,
+      "module": "web/lib (mapeo de body de acciones del navegador)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "ui",
+      "motivo": "Mapeo de payload del navegador; no pertenece al backend."
+    },
+    {
+      "file": "test/deployment-cleanup.test.ts",
+      "category": "O",
+      "cases": 3,
+      "module": "scripts/cleanup-vps.sh con Docker simulado",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "descartado",
+      "motivo": "Prueba un shell script de operaciones; no es un servicio del backend. Se sustituye por verificación operativa/CI."
+    },
+    {
+      "file": "test/deployment-domain.test.ts",
+      "category": "O",
+      "cases": 1,
+      "module": "nginx/TLS/provision (regex sobre configuración)",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "descartado",
+      "motivo": "Configuración de despliegue (nginx/TLS); no es lógica de negocio. Se sustituye por tests de contrato de infraestructura."
+    },
+    {
+      "file": "test/hunting-latency-report.test.ts",
+      "category": "O",
+      "cases": 2,
+      "module": "scripts/report-hunting-latency.mjs",
+      "targetService": "no-aplica",
+      "e1Service": "no-aplica",
+      "reuse": "D",
+      "lote": "L5",
+      "status": "descartado",
+      "motivo": "Reporte operativo sobre SQLite; se sustituye por métricas y proyecciones de analytics."
+    }
+  ]
+}

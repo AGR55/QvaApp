@@ -67,7 +67,7 @@ export function TradingAnalytics({ markets, initialBalanceHistory = [] }) {
   const unknown = report?.totals.unknown ?? 0;
   return <section className="analytics-workspace" aria-label="Análisis de tu actividad">
     <div className="analytics-toolbar">
-      <div><p className="eyebrow">TU ACTIVIDAD</p><p className="analytics-period">{report ? `${dateLabel(report.start)} — ${dateLabel(report.end)}` : "Actividad de tu cuenta y mercados"}</p></div>
+      <div><p className="analytics-toolbar-title">Tu actividad</p><p className="analytics-period">{report ? `${dateLabel(report.start)} — ${dateLabel(report.end)}` : "Actividad de tu cuenta y mercados"}</p></div>
       <div className="analytics-toolbar-actions">
         <Tabs value={days} onChange={setDays} items={[{ value: "7", label: "7 días" }, { value: "30", label: "30 días" }, { value: "90", label: "90 días" }]} />
         <Button variant="outline" size="icon" aria-label="Actualizar análisis" disabled={loading} onClick={() => setRetry((value) => value + 1)}><RefreshCw aria-hidden="true" /></Button>

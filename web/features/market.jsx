@@ -9,6 +9,7 @@ export function Market({ data, market, setMarket, selected, label, unit, resourc
     <div className="page-stack">
       <ViewHead
         title="Mercados"
+        description="Libro P2P en vivo por mercado, con la tasa y el volumen disponibles."
       />
       <Panel title={`Libro · ${selected.total} abiertas`} wide>
         <ToggleGroup

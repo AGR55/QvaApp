@@ -1,0 +1,201 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qvapay-list-timing.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (3 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=c2a8cb25ccd88683363f886d423373cb1c7e6683c8a72b855fdf28aa70545316",
+  "cases": [
+    {
+      "caseId": "contract/qvapay-list-timing/02-retry-http-error",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-timing.test.ts:22",
+      "input": {
+        "scenario": "qvapay-list-timing/02-retry-http-error"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "busy",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 429
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "list.timings",
+            "value": [
+              {
+                "attempts": 2,
+                "outcome": "failed",
+                "queueMs": 0,
+                "responseMs": 810,
+                "status": 429,
+                "totalMs": 810
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-timing/03-network-and-no-session",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-timing.test.ts:35",
+      "input": {
+        "scenario": "qvapay-list-timing/03-network-and-no-session"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list:network",
+            "outcome": {
+              "error": {
+                "cause": {
+                  "message": "offline",
+                  "name": "Error"
+                },
+                "message": "No se pudo conectar con QvaPay. Comprueba tu conexión e inténtalo de nuevo.",
+                "name": "Error",
+                "reason": "network"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "list:no-session",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "No hay sesión de QvaPay. Ejecuta pnpm login en la terminal.",
+                "name": "Error",
+                "retryAfterMs": null,
+                "status": 401
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "list.timings",
+            "value": [
+              {
+                "attempts": 3,
+                "outcome": "failed",
+                "queueMs": 0,
+                "responseMs": 2406,
+                "totalMs": 2406
+              },
+              {
+                "attempts": 0,
+                "outcome": "failed",
+                "queueMs": null,
+                "responseMs": null,
+                "totalMs": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-timing/01-queue-response-cache",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-timing.test.ts:7",
+      "input": {
+        "scenario": "qvapay-list-timing/01-queue-response-cache"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list#1",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "cacheStatus": "HIT",
+                "currentPage": 1,
+                "offers": [],
+                "perPage": 0,
+                "timing": {
+                  "attempts": 1,
+                  "cacheStatus": "HIT",
+                  "outcome": "success",
+                  "queueMs": 0,
+                  "responseMs": 7,
+                  "status": 200,
+                  "totalMs": 7
+                },
+                "total": 0
+              }
+            }
+          },
+          {
+            "label": "list#2",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "cacheStatus": "HIT",
+                "currentPage": 1,
+                "offers": [],
+                "perPage": 0,
+                "timing": {
+                  "attempts": 1,
+                  "cacheStatus": "HIT",
+                  "outcome": "success",
+                  "queueMs": 2401,
+                  "responseMs": 7,
+                  "status": 200,
+                  "totalMs": 2408
+                },
+                "total": 0
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "list.timings",
+            "value": [
+              {
+                "attempts": 1,
+                "cacheStatus": "HIT",
+                "outcome": "success",
+                "queueMs": 0,
+                "responseMs": 7,
+                "status": 200,
+                "totalMs": 7
+              },
+              {
+                "attempts": 1,
+                "cacheStatus": "HIT",
+                "outcome": "success",
+                "queueMs": 2401,
+                "responseMs": 7,
+                "status": 200,
+                "totalMs": 2408
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,347 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "qvapay-adapter",
+  "sourceTests": [
+    "test/qvapay-list-budget.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (6 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=d2c45d3c955c16081f2a1ef72bea958463fba105b4e071b9bcc78363fd289448",
+  "cases": [
+    {
+      "caseId": "contract/qvapay-list-budget/06-rate-limit-note-failure",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-budget.test.ts:104",
+      "input": {
+        "scenario": "qvapay-list-budget/06-rate-limit-note-failure"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list",
+            "outcome": {
+              "error": {
+                "message": "store unavailable",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "getOffer",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "Peer": null,
+                "amount": 1,
+                "coin": "BANK_CUP",
+                "details": null,
+                "receive": 1,
+                "status": "open",
+                "type": "sell",
+                "uuid": "other"
+              }
+            }
+          },
+          {
+            "label": "apply",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "counters",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "notes": 1,
+                "posts": 1,
+                "waits": 1
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-budget/02-shared-interval-rate-limit",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-budget.test.ts:33",
+      "input": {
+        "scenario": "qvapay-list-budget/02-shared-interval-rate-limit"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list:same-owner",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "total": 0
+              }
+            }
+          },
+          {
+            "label": "list:same-owner-upper",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "total": 0
+              }
+            }
+          },
+          {
+            "label": "list:unknown-429",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "Error de QvaPay (429)",
+                "name": "Error",
+                "retryAfterMs": 10000,
+                "status": 429
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "list:independent-owner",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "total": 0
+              }
+            }
+          },
+          {
+            "label": "limitedAt",
+            "outcome": {
+              "ok": true,
+              "value": 14802
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "dispatches",
+            "value": [
+              10000,
+              12401,
+              14802,
+              24802
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-budget/03-captured-token",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-budget.test.ts:51",
+      "input": {
+        "scenario": "qvapay-list-budget/03-captured-token"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "total": 0
+              }
+            }
+          },
+          {
+            "label": "reservedToken",
+            "outcome": {
+              "ok": true,
+              "value": "fixture-original"
+            }
+          },
+          {
+            "label": "authorization",
+            "outcome": {
+              "ok": true,
+              "value": "Bearer fixture-original"
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-budget/04-retry-reserves-again",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-budget.test.ts:67",
+      "input": {
+        "scenario": "qvapay-list-budget/04-retry-reserves-again"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list",
+            "outcome": {
+              "error": {
+                "code": null,
+                "message": "Error de QvaPay (429)",
+                "name": "Error",
+                "retryAfterMs": 4000,
+                "status": 429
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "calls",
+            "value": [
+              "reserve-1",
+              "fetch-1",
+              "reserve-2",
+              "fetch-2",
+              "429-owner-2-4000"
+            ]
+          },
+          {
+            "effect": "timings",
+            "value": [
+              {
+                "attempts": 2,
+                "outcome": "failed",
+                "queueMs": 10,
+                "responseMs": 820,
+                "status": 429,
+                "totalMs": 830
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-budget/01-owner-token-binding",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-budget.test.ts:7",
+      "input": {
+        "scenario": "qvapay-list-budget/01-owner-token-binding"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "profile:old",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "uuid": "owner-a"
+              }
+            }
+          },
+          {
+            "label": "profile:new",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "uuid": "owner-b"
+              }
+            }
+          },
+          {
+            "label": "owners",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "new": "owner-b",
+                "old": "owner-a"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "throttleState",
+            "value": [
+              [
+                "analytics_account_uuid",
+                "owner-b"
+              ],
+              [
+                "qva_listing_identity:e279159a3ffc189df6fba7a4cfa3a3c64f85a00d1a45defdf94b7a2bf73c241e",
+                "owner-a"
+              ],
+              [
+                "hunting_eligibility",
+                "{}"
+              ],
+              [
+                "qva_listing_identity:de40e18aa2823d886b5c866ab904044e5fb41e306ec7e35b67387be711ed240f",
+                "owner-b"
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/qvapay-list-budget/05-reservation-failure",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/qvapay-list-budget.test.ts:92",
+      "input": {
+        "scenario": "qvapay-list-budget/05-reservation-failure"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "list",
+            "outcome": {
+              "error": {
+                "message": "budget unavailable",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          },
+          {
+            "label": "waits",
+            "outcome": {
+              "ok": true,
+              "value": 1
+            }
+          },
+          {
+            "label": "fetches",
+            "outcome": {
+              "ok": true,
+              "value": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "timings",
+            "value": [
+              {
+                "attempts": 0,
+                "outcome": "failed",
+                "queueMs": null,
+                "responseMs": null
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

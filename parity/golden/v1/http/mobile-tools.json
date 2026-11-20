@@ -1,0 +1,584 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/mobile-tools.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (3 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=f48b4612148631861c3192ddf3da18651ba9c2f4c28b73bb339a94cc0397cfea",
+  "cases": [
+    {
+      "caseId": "http/mobile-tools/02-scoped-bearer-bounds",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/mobile-tools.test.ts:27",
+      "input": {
+        "scenario": "mobile-tools/02-scoped-bearer-bounds"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/overview",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o límite alcanzado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/overview",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o límite alcanzado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/overview",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "balance": null
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=health",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o límite alcanzado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=health",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o límite alcanzado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=health",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "checks": []
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=profitability&days=7",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "coverage": {},
+                "currencies": [],
+                "days": 7,
+                "limited": false
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=history&coin=CLASICA&page=2",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "items": []
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=diagnostics&coin=CLASICA",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {}
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=history&coin=UNKNOWN",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Selecciona un mercado configurado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=history",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Selecciona un mercado configurado."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=profitability&days=365",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "querystring/days must be equal to one of the allowed values"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=history&coin=CLASICA&page=1001",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "querystring/page must be <= 1000"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/insights?kind=other",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "querystring/kind must be equal to one of the allowed values"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/config",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/overview/extra",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/simulate",
+              "headers": {},
+              "payload": {
+                "buyMaxRate": 1,
+                "coin": "CLASICA",
+                "hours": 24,
+                "maxQusd": 25,
+                "sellMinRate": 1.1
+              }
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o límite alcanzado."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/simulate",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": {
+                "buyMaxRate": 1,
+                "coin": "CLASICA",
+                "hours": 24,
+                "maxQusd": -1,
+                "sellMinRate": 1.1
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/maxQusd must be > 0"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/simulate",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": {
+                "buyMaxRate": 1,
+                "coin": "CLASICA",
+                "hours": 24,
+                "maxQusd": 25,
+                "sellMinRate": 1.1
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "note": "local"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000"
+              },
+              "payload": {
+                "password": "android-tools-tests-password"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/simulate",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "cookie": "qvaapply_session=<redacted>",
+                "origin": "http://127.0.0.1:3000"
+              },
+              "payload": {
+                "buyMaxRate": 1,
+                "coin": "CLASICA",
+                "hours": 24,
+                "maxQusd": 25,
+                "sellMinRate": 1.1
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "mobile.calls",
+            "value": [
+              "overview",
+              "health",
+              "profit:7",
+              "history:CLASICA:2",
+              "diagnostics",
+              "simulation"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/mobile-tools/01-overview-no-remote",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/mobile-tools.test.ts:7",
+      "input": {
+        "scenario": "mobile-tools/01-overview-no-remote"
+      },
+      "expect": {
+        "steps": [],
+        "effects": [
+          {
+            "effect": "value:remote",
+            "value": 0
+          },
+          {
+            "effect": "value:overview",
+            "value": {
+              "activeOperations": 2,
+              "balance": 4,
+              "balanceUpdatedAt": 123,
+              "generatedAt": "<timestamp>",
+              "hunting": {
+                "buyRunning": true,
+                "sellRunning": true
+              },
+              "markets": [
+                {
+                  "active": true,
+                  "buyMaxRate": 1.05,
+                  "code": "CLASICA",
+                  "currency": "USD",
+                  "fiat": 12,
+                  "huntBuyEnabled": true,
+                  "huntSellEnabled": false,
+                  "label": "Clásica",
+                  "outgoingTransferFee": 0.08,
+                  "sellMinRate": 1.1
+                }
+              ],
+              "paused": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/mobile-tools/03-archived-input-bounds",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/mobile-tools.test.ts:73",
+      "input": {
+        "scenario": "mobile-tools/03-archived-input-bounds"
+      },
+      "expect": {
+        "steps": [],
+        "effects": [
+          {
+            "effect": "value:offers",
+            "value": 1000
+          },
+          {
+            "effect": "value:transactions",
+            "value": 1000
+          },
+          {
+            "effect": "value:limited",
+            "value": true
+          },
+          {
+            "effect": "value:fullArchive",
+            "value": 1002
+          },
+          {
+            "effect": "value:emptyLimited",
+            "value": false
+          }
+        ]
+      }
+    }
+  ]
+}

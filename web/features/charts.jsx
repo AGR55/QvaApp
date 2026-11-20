@@ -70,11 +70,15 @@ export function Charts({ markets, initialHistory = [], initialBalanceHistory = [
       .filter(Number.isFinite),
     domain = chartDomain(values),
     digits = markets.find((market) => market.code === coin)?.currency === "USD" ? 4 : 2,
-    latest = rows.at(-1);
+    latest = rows.at(-1),
+    missingBuyHistory = rows.some(
+      (item) => !Number.isFinite(item.medianaCompra) && Number.isFinite(item.medianaVenta),
+    );
   return (
     <div className="page-stack">
       <ViewHead
         title="Gráficas"
+        description="Precios de compra y venta, actividad y capital de tu cuenta."
       />
       <TradingAnalytics markets={markets} initialBalanceHistory={initialBalanceHistory} />
       <Panel title="Fluctuación de precios" wide>
@@ -90,6 +94,11 @@ export function Charts({ markets, initialHistory = [], initialBalanceHistory = [
             <MarketChart rows={rows} domain={domain} digits={digits} />
             {loading ? <div className="chart-updating" role="status">Actualizando medianas…</div> : null}
           </div>
+          {missingBuyHistory ? (
+            <p className="chart-history-note">
+              La compra se empezó a registrar con el nuevo motor; los puntos anteriores solo tienen venta.
+            </p>
+          ) : null}
           </>
         ) : data ? (
           <div className="chart-stage chart-empty">
@@ -126,7 +135,7 @@ function MarketChart({ rows, domain, digits }) {
             tick={{ fill: "var(--faint)", fontFamily: "var(--font-mono)", fontSize: 12 }}
             width={92}
           />
-          <Tooltip content={<MarketTooltip digits={digits} />} cursor={{ stroke: "var(--line)", strokeWidth: 1 }} />
+          <Tooltip shared content={<MarketTooltip digits={digits} />} cursor={{ stroke: "var(--line)", strokeWidth: 1 }} />
           <Legend
             iconType="plainline"
             wrapperStyle={{ paddingTop: 12, fontSize: 12, fontWeight: 650, color: "var(--muted)" }}
@@ -164,12 +173,19 @@ function MarketChart({ rows, domain, digits }) {
 
 function MarketTooltip({ active, payload, label, digits }) {
   if (!active || !payload?.length) return null;
+  // Recharts solo entrega las series con valor en el punto; leemos la fila
+  // completa para mostrar siempre compra y venta, aunque una sea "—".
+  const row = payload[0]?.payload || {};
+  const series = [
+    { key: "medianaCompra", name: "Compra", color: "var(--accent)" },
+    { key: "medianaVenta", name: "Venta", color: "var(--success)" },
+  ];
   return <div className="rounded-lg border border-border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-md">
     <p className="mb-1 font-mono text-xs text-muted-foreground">{label}</p>
-    {payload.filter((entry) => Number.isFinite(entry.value)).map((entry) => (
-      <p key={entry.dataKey} className="flex items-center justify-between gap-4 font-medium">
+    {series.map((entry) => (
+      <p key={entry.key} className="flex items-center justify-between gap-4 font-medium">
         <span style={{ color: entry.color }}>{entry.name}</span>
-        <span>{money(entry.value, digits)}</span>
+        <span>{Number.isFinite(row[entry.key]) ? money(row[entry.key], digits) : "—"}</span>
       </p>
     ))}
   </div>;

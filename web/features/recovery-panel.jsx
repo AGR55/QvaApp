@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from "../components/ui/dialog.tsx";
 import { requestJson } from "../lib/http.js";
+import { kindLabel, stateLabel } from "../lib/labels.js";
 
 const jsonPost = (body = {}) => ({
   method: "POST",
@@ -124,7 +125,6 @@ export function RecoveryPanel({ onChanged }) {
   return <>
     <Panel
       title="Recuperación de intenciones"
-      kicker="Control remoto"
       description="Inspecciona operaciones inciertas y reconcilia evidencia sin volver a enviar una mutación."
     >
       <div className="recovery-panel">
@@ -204,7 +204,7 @@ export function RecoveryPanel({ onChanged }) {
 function RecoveryCard({ item, busy, currentBusy, onCheck, onResolve, onEvidence, onAcknowledge }) {
   return <li className="recovery-item">
     <header className="recovery-item-head">
-      <div><strong>{labelKind(item.kind)}</strong><Badge variant={item.state === "uncertain" ? "destructive" : "secondary"}>{item.state}</Badge></div>
+      <div><strong>{kindLabel(item.kind)}</strong><Badge variant={item.state === "uncertain" ? "destructive" : "secondary"}>{stateLabel(item.state)}</Badge></div>
       <time>{formatDate(item.updatedAt)}</time>
     </header>
     <dl className="recovery-fields">
@@ -254,10 +254,6 @@ function ObjectFacts({ title, value, fields }) {
 function Fact({ label, value, code = false }) {
   if (value === undefined || value === null || value === "") return null;
   return <div><dt>{label}</dt><dd>{code ? <code>{value}</code> : value}</dd></div>;
-}
-
-function labelKind(kind) {
-  return ({ apply: "Aplicación", paid: "Pago", received: "Recepción", cancel: "Cancelación", edit: "Edición" })[kind] ?? kind;
 }
 
 
