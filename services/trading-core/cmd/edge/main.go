@@ -94,22 +94,16 @@ func run(logger *slog.Logger) error {
 	if cfg.DatabaseURL == "" {
 		logger.Info("DATABASE_URL no configurada; resumen deshabilitado")
 	} else {
-		pool, err = openStatsPool(ctx, cfg.DatabaseURL)
+		pool, writePool, err = openDatabasePools(ctx, logger, cfg.DatabaseURL)
 		if err != nil {
-			// Sin base de datos el borde sigue sirviendo estáticos y salud.
-			logger.Warn("Postgres no disponible; /api/edge/summary responderá 503", "error", err)
-			pool = nil
-		} else {
-			defer pool.Close()
-			stats = postgresStats(pool)
-			writePool, err = openWritePool(ctx, cfg.DatabaseURL)
-			if err != nil {
-				logger.Warn("Postgres de escritura no disponible; configuración deshabilitada", "error", err)
-				writePool = nil
-			} else {
-				defer writePool.Close()
-			}
+			// Salir permite que Docker reinicie el edge cuando Postgres vuelva.
+			// Arrancar con los pools en nil dejaba /api/config en 503 para
+			// siempre y rompía el bot de Telegram.
+			return fmt.Errorf("Postgres no disponible al arrancar el edge: %w", err)
 		}
+		defer pool.Close()
+		defer writePool.Close()
+		stats = postgresStats(pool)
 	}
 	if info, err := os.Stat(cfg.StaticDir); err != nil || !info.IsDir() {
 		logger.Warn("directorio estático no encontrado", "static_dir", cfg.StaticDir)
@@ -662,7 +656,51 @@ func openWritePool(ctx context.Context, databaseURL string) (*pgxpool.Pool, erro
 	poolConfig.MaxConns = 2
 	poolConfig.MinConns = 0
 	poolConfig.MaxConnLifetime = 30 * time.Minute
-	return pgxpool.NewWithConfig(ctx, poolConfig)
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	if err != nil {
+		return nil, err
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
+}
+
+// openDatabasePools espera a Postgres tras un reinicio. Docker puede arrancar
+// el edge antes que el contenedor de base de datos; sin esta espera los pools
+// quedaban nil y las APIs del panel no se registraban.
+func openDatabasePools(
+	ctx context.Context,
+	logger *slog.Logger,
+	databaseURL string,
+) (*pgxpool.Pool, *pgxpool.Pool, error) {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		pool, err := openStatsPool(ctx, databaseURL)
+		if err == nil {
+			writePool, writeErr := openWritePool(ctx, databaseURL)
+			if writeErr == nil {
+				return pool, writePool, nil
+			}
+			pool.Close()
+			err = writeErr
+		}
+		if ctx.Err() != nil {
+			return nil, nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return nil, nil, err
+		}
+		logger.Warn("Postgres aún no disponible para el edge; reintentando", "error", err)
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 // openStatsPool abre un pool con la sesión en sólo lectura para que cualquier

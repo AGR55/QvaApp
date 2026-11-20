@@ -127,6 +127,9 @@ services:
     profiles: ["notifier"]
     container_name: qvaapply-f3-shadow-notifier
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file:
       - ${F3_NOTIFIER_ENV:-/dev/null}
     environment:
@@ -156,6 +159,9 @@ services:
     profiles: ["edge"]
     container_name: qvaapply-f3-shadow-edge
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file:
       - ${F3_EDGE_ENV:-/dev/null}
     environment:

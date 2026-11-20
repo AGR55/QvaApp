@@ -159,21 +159,16 @@ func run(logger *slog.Logger) error {
 	var pushStore notifier.PushSubscriptionStore
 	var pool *pgxpool.Pool
 	if cfg.DatabaseURL != "" {
-		pool, err = pgxpool.New(ctx, cfg.DatabaseURL)
-		if err == nil {
-			pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			err = pool.Ping(pingCtx)
-			cancel()
-		}
-		if err == nil {
+		pool, err = connectPostgresWithRetry(ctx, logger, cfg.DatabaseURL)
+		if err != nil {
+			if !cfg.DryRun {
+				return fmt.Errorf("Postgres no disponible al arrancar el notifier: %w", err)
+			}
+			logger.Warn("Postgres push no disponible; usando store en memoria", "error", err)
+			pool = nil
+		} else {
 			defer pool.Close()
 			pushStore = postgres.NewPushSubscriptionRepository(pool)
-		} else {
-			logger.Warn("Postgres push no disponible; usando store en memoria", "error", err)
-			if pool != nil {
-				pool.Close()
-				pool = nil
-			}
 		}
 	}
 	if pushStore == nil {
@@ -459,6 +454,38 @@ func healthcheck() int {
 		return 1
 	}
 	return 0
+}
+
+func connectPostgresWithRetry(
+	ctx context.Context,
+	logger *slog.Logger,
+	databaseURL string,
+) (*pgxpool.Pool, error) {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		pool, err := pgxpool.New(ctx, databaseURL)
+		if err == nil {
+			pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err = pool.Ping(pingCtx)
+			cancel()
+			if err == nil {
+				return pool, nil
+			}
+			pool.Close()
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return nil, err
+		}
+		logger.Warn("Postgres aún no disponible para el notifier; reintentando", "error", err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func envOrDefault(name, fallback string) string {
