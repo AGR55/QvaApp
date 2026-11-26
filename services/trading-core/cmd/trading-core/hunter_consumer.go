@@ -642,7 +642,12 @@ func (consumer *hunterConsumer) consume(
 	amount, _ := decimal.Parse(payload.Amount)
 	receive, _ := decimal.Parse(payload.Receive)
 	rate, _ := decimal.Parse(payload.Rate)
-	balance := consumer.currentBalance(ctx)
+	// El capital QUSD solo limita las ventas. Evitamos una lectura de saldo en
+	// el camino crítico de compra, donde solo importa el fiat.
+	balance := decimal.Zero()
+	if payload.Side == "sell" {
+		balance = consumer.currentBalance(ctx)
+	}
 	nowMS := postgres.NowMS()
 	if active, activeErr := consumer.operationRepo.ActiveForOffer(ctx, payload.OfferUUID); activeErr == nil && active {
 		consumer.persistBlockedEvent(ctx, repository, event, payload,
@@ -963,26 +968,44 @@ func remaining(limit, used decimal.Value) decimal.Value {
 	return left
 }
 
-// currentBalance cachea el saldo QUSD unos milisegundos para no consultar la
-// base en cada evento. Se invalida después de cada aplicación.
+const balanceCacheTTL = time.Second
+
+// currentBalance lee el saldo QUSD actual de QvaPay y lo cachea un segundo.
+// El snapshot shadow se actualiza cada hora y no sirve para decidir ventas;
+// solo se usa como respaldo si la lectura en vivo falla.
 func (consumer *hunterConsumer) currentBalance(ctx context.Context) decimal.Value {
 	now := time.Now()
 	consumer.balanceMu.Lock()
-	if !consumer.balanceAt.IsZero() && now.Sub(consumer.balanceAt) < 500*time.Millisecond {
+	if !consumer.balanceAt.IsZero() && now.Sub(consumer.balanceAt) < balanceCacheTTL {
 		value := consumer.balanceValue
 		consumer.balanceMu.Unlock()
 		return value
 	}
 	consumer.balanceMu.Unlock()
-	value, err := consumer.shadowRepo.LatestQvapayBalance(ctx)
-	if err != nil {
-		value = decimal.Zero()
+	value, live := consumer.liveBalance(ctx)
+	if !live && consumer.shadowRepo != nil {
+		if snapshot, err := consumer.shadowRepo.LatestQvapayBalance(ctx); err == nil {
+			value = snapshot
+		} else {
+			value = decimal.Zero()
+		}
 	}
 	consumer.balanceMu.Lock()
 	consumer.balanceValue = value
 	consumer.balanceAt = now
 	consumer.balanceMu.Unlock()
 	return value
+}
+
+func (consumer *hunterConsumer) liveBalance(ctx context.Context) (decimal.Value, bool) {
+	if consumer == nil || consumer.reconciler == nil || consumer.reconciler.reader == nil {
+		return decimal.Zero(), false
+	}
+	user, err := consumer.reconciler.reader.User(ctx)
+	if err != nil {
+		return decimal.Zero(), false
+	}
+	return user.Balance, true
 }
 
 func (consumer *hunterConsumer) invalidateBalance() {
