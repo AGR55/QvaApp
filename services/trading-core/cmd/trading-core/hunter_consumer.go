@@ -387,6 +387,9 @@ func (consumer *hunterConsumer) markRequirementsBlocked(uuid string) {
 			clear(consumer.requirementsBlocked)
 		}
 	}
+	if consumer.rejected == nil {
+		consumer.rejected = map[string]time.Time{}
+	}
 	consumer.requirementsBlocked[uuid] = now.Add(requirementsBlockTTL)
 	consumer.rejected[uuid] = now.Add(requirementsBlockTTL)
 }
@@ -709,6 +712,11 @@ func (consumer *hunterConsumer) consume(
 				"Oferta excluida por cancelación manual", postgres.NowMS())
 			return
 		}
+	}
+	if consumer.offerRequirementsBlocked(payload.OfferUUID, time.Now()) {
+		consumer.persistBlockedEvent(ctx, repository, event, payload,
+			"Oferta bloqueada: requisitos de la contraparte no cumplidos", postgres.NowMS())
+		return
 	}
 	if !consumer.canApplyNow(ctx, payload) {
 		consumer.persistBlockedEvent(ctx, repository, event, payload,
@@ -1160,7 +1168,7 @@ func (consumer *hunterConsumer) persistBlockedEvent(
 	}
 	consumer.processed.Add(1)
 	consumer.blocked.Add(1)
-	consumer.logger.Info("oferta no aplicable por dimensionado",
+	consumer.logger.Info("oferta no aplicable",
 		"event_id", event.EventID, "offer_uuid", payload.OfferUUID, "reason", reason)
 }
 
