@@ -945,6 +945,10 @@ func (mutationsTestCooperative) Withdraw(context.Context, string) error { return
 
 func (mutationsTestCooperative) Refresh(context.Context) error { return nil }
 
+func (mutationsTestCooperative) EnsureBaseline(context.Context, string) error { return nil }
+
+func (mutationsTestCooperative) SyncCapacity(context.Context) error { return nil }
+
 // mutationsTestConfig devuelve un mercado con saldo suficiente para publicar.
 type mutationsTestConfig struct{}
 

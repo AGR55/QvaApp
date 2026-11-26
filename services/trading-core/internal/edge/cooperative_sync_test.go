@@ -3,83 +3,165 @@ package edge
 import (
 	"context"
 	"encoding/json"
-	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
 
-func TestCooperativeSyncRefreshPublishWithdraw(t *testing.T) {
-	var mu sync.Mutex
-	var published map[string]any
-	var deleted string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		defer mu.Unlock()
+type fakeCooperativeFiat struct {
+	fiat float64
+}
+
+func (source fakeCooperativeFiat) Load(context.Context) (runtimeconfig.Config, int64, error) {
+	return runtimeconfig.Config{Markets: []runtimeconfig.Market{{
+		Code: "BANK_CUP", Active: true, FiatBalance: source.fiat,
+	}}}, 1, nil
+}
+
+type fakeCooperativeSettings struct {
+	values map[string][]byte
+}
+
+func (settings *fakeCooperativeSettings) GetSetting(_ context.Context, key string) ([]byte, bool, error) {
+	value, ok := settings.values[key]
+	return value, ok, nil
+}
+
+func (settings *fakeCooperativeSettings) PutSetting(_ context.Context, key string, value []byte, _ int64) error {
+	settings.values[key] = append([]byte(nil), value...)
+	return nil
+}
+
+type cooperativeTestServer struct {
+	mu         sync.Mutex
+	putBodies  []map[string]any
+	deletes    []string
+	remoteFiat float64
+}
+
+func (server *cooperativeTestServer) handler(t *testing.T) http.Handler {
+	t.Helper()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/auth/login":
-			writeJSON(w, http.StatusOK, map[string]any{"api_key": "csk_test"})
+			writeCooperativeJSON(w, map[string]any{"api_key": "csk_test"})
 		case r.URL.Path == "/hunts/sync":
-			writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
-				"CLASICA": map[string]any{"coin": "CLASICA", "fiat": 11.42, "price": 1.07, "minimal": 5, "offers_count": 1},
-			}})
+			writeCooperativeJSON(w, map[string]any{"data": map[string]any{}})
 		case r.URL.Path == "/hunts" && r.Method == http.MethodGet:
-			writeJSON(w, http.StatusOK, map[string]any{"data": []any{}})
+			server.mu.Lock()
+			fiat := server.remoteFiat
+			server.mu.Unlock()
+			writeCooperativeJSON(w, map[string]any{"data": []any{map[string]any{
+				"coin": "BANK_CUP", "fiat": fiat, "minimal": 5.0, "price": 1.0,
+				"updated_at": "2026-11-26T12:00:00Z",
+			}}})
 		case r.URL.Path == "/hunts" && r.Method == http.MethodPost:
-			body, _ := io.ReadAll(r.Body)
-			if err := json.Unmarshal(body, &published); err != nil {
-				t.Errorf("body de publicación inválido: %v", err)
-			}
-			w.WriteHeader(http.StatusNoContent)
-		case r.URL.Path == "/hunts/CLASICA" && r.Method == http.MethodDelete:
-			deleted = r.URL.Path
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			server.mu.Lock()
+			server.putBodies = append(server.putBodies, body)
+			server.remoteFiat = numberValue(body["fiat"])
+			server.mu.Unlock()
+			writeCooperativeJSON(w, map[string]any{"data": body})
+		case strings.HasPrefix(r.URL.Path, "/hunts/") && r.Method == http.MethodDelete:
+			server.mu.Lock()
+			server.deletes = append(server.deletes, strings.TrimPrefix(r.URL.Path, "/hunts/"))
+			server.mu.Unlock()
 			w.WriteHeader(http.StatusNoContent)
 		default:
+			t.Logf("ruta inesperada %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer server.Close()
+	})
+}
 
-	client := NewCooperativeSync(server.URL, "", "sync@example.com", "secret", true, nil)
-	if err := client.Refresh(context.Background()); err != nil {
-		t.Fatalf("Refresh: %v", err)
-	}
-	state := client.State()
-	if state["httpConnected"] != true {
-		t.Fatalf("httpConnected = %v", state["httpConnected"])
-	}
-	snapshot, _ := state["snapshot"].(map[string]any)
-	if snapshot["CLASICA"] == nil {
-		t.Fatalf("snapshot sin CLASICA: %#v", snapshot)
-	}
+func writeCooperativeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(value)
+}
 
-	if err := client.Publish(context.Background(), "CLASICA", 11.426, 5, 1.07); err != nil {
-		t.Fatalf("Publish: %v", err)
+func newCooperativeSyncTest(t *testing.T, fiat float64, baseline *float64) (*CooperativeSync, *cooperativeTestServer, *fakeCooperativeSettings) {
+	t.Helper()
+	server := &cooperativeTestServer{remoteFiat: 100}
+	httpServer := httptest.NewServer(server.handler(t))
+	t.Cleanup(httpServer.Close)
+	settings := &fakeCooperativeSettings{values: map[string][]byte{}}
+	if baseline != nil {
+		encoded, _ := json.Marshal(*baseline)
+		settings.values[cooperativeBaselinePrefix+"BANK_CUP"] = encoded
 	}
-	mu.Lock()
-	body := published
-	mu.Unlock()
-	if body["coin"] != "CLASICA" || body["minimal"] != float64(5) || body["price"] != 1.07 {
-		t.Fatalf("publicación = %#v", body)
+	sync := NewCooperativeSync(httpServer.URL, "", "bot@example.com", "secret", true, nil)
+	sync.Fiat = fakeCooperativeFiat{fiat: fiat}
+	sync.Baselines = settings
+	return sync, server, settings
+}
+
+func TestCooperativeSyncCapacityAplicaLasDeltasLocales(t *testing.T) {
+	cases := []struct {
+		name       string
+		local      float64
+		baseline   float64
+		remote     float64
+		wantPut    *float64
+		wantDelete bool
+	}{
+		{"pago reduce capacidad", 80, 100, 100, floatPtr(80), false},
+		{"cobro aumenta capacidad", 120, 100, 100, floatPtr(120), false},
+		{"no restaura lo gastado por la red", 120, 100, 30, floatPtr(50), false},
+		{"bajo el mínimo se retira", 3, 100, 100, nil, true},
+		{"sin cambio no publica", 100, 100, 100, nil, false},
 	}
-	if body["fiat"] != 11.42 {
-		t.Fatalf("fiat = %v, quiero 11.42 (redondeo a la baja)", body["fiat"])
-	}
-	if err := client.Withdraw(context.Background(), "CLASICA"); err != nil {
-		t.Fatalf("Withdraw: %v", err)
-	}
-	mu.Lock()
-	path := deleted
-	mu.Unlock()
-	if path != "/hunts/CLASICA" {
-		t.Fatalf("retirada = %q", path)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sync, server, settings := newCooperativeSyncTest(t, tc.local, &tc.baseline)
+			server.remoteFiat = tc.remote
+			if err := sync.SyncCapacity(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			server.mu.Lock()
+			puts, deletes := append([]map[string]any(nil), server.putBodies...), append([]string(nil), server.deletes...)
+			server.mu.Unlock()
+			if tc.wantPut != nil {
+				if len(puts) != 1 {
+					t.Fatalf("puts = %+v", puts)
+				}
+				got := numberValue(puts[0]["fiat"])
+				if math.Abs(got-*tc.wantPut) > 0.001 {
+					t.Fatalf("fiat publicado = %v, quiero %v", got, *tc.wantPut)
+				}
+			} else if len(puts) != 0 {
+				t.Fatalf("no debía publicar: %+v", puts)
+			}
+			if tc.wantDelete && (len(deletes) != 1 || deletes[0] != "BANK_CUP") {
+				t.Fatalf("deletes = %v", deletes)
+			}
+			var stored float64
+			_ = json.Unmarshal(settings.values[cooperativeBaselinePrefix+"BANK_CUP"], &stored)
+			if math.Abs(stored-tc.local) > 0.001 {
+				t.Fatalf("baseline = %v, quiero %v", stored, tc.local)
+			}
+		})
 	}
 }
 
-func TestCooperativeSyncRejectsSmallCapacity(t *testing.T) {
-	client := NewCooperativeSync("http://127.0.0.1:1", "", "sync@example.com", "secret", true, nil)
-	if err := client.Publish(context.Background(), "CLASICA", 5, 5, 1.1); err == nil {
-		t.Fatal("se esperaba error cuando el fiat equivale a menos de 5 QUSD")
+func TestCooperativeSyncCapacityInicializaBaselineSinPublicar(t *testing.T) {
+	sync, server, settings := newCooperativeSyncTest(t, 80, nil)
+	if err := sync.SyncCapacity(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(server.putBodies) != 0 || len(server.deletes) != 0 {
+		t.Fatalf("primera observación no debe mutar: puts=%v deletes=%v", server.putBodies, server.deletes)
+	}
+	var stored float64
+	_ = json.Unmarshal(settings.values[cooperativeBaselinePrefix+"BANK_CUP"], &stored)
+	if stored != 80 {
+		t.Fatalf("baseline inicial = %v", stored)
 	}
 }
+
+func floatPtr(value float64) *float64 { return &value }

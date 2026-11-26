@@ -107,8 +107,15 @@ func (repository *CoreOperationRepository) ActiveForOffer(
 			SELECT 1
 			FROM shadow.core_operations o
 			JOIN shadow.core_decisions d ON d.event_id = o.operation_id
+			LEFT JOIN shadow.local_operations l ON l.uuid = d.offer_uuid
 			WHERE d.offer_uuid = $1
-			  AND o.state IN ('reserved', 'submitted', 'uncertain')
+			  AND (
+			    o.state IN ('reserved', 'submitted', 'uncertain')
+			    OR (
+			      o.state = 'confirmed'
+			      AND l.state IN ('applied', 'acknowledged', 'paid', 'uncertain')
+			    )
+			  )
 		)`, offerUUID,
 	).Scan(&active)
 	return active, err

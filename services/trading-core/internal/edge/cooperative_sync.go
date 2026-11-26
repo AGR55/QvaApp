@@ -36,7 +36,22 @@ type CooperativeSync struct {
 	contributions map[string]any
 	connected     bool
 	lastError     string
+
+	// Fiat y Baselines permiten ajustar la capacidad publicada cuando cambia
+	// el saldo local por un pago o una liberación.
+	Fiat      MarketConfigLoader
+	Baselines SettingStore
+
+	capacityMu sync.Mutex
+	// refreshOverride solo se usa en pruebas para evitar HTTP.
+	refreshOverride func(context.Context) error
 }
+
+const (
+	cooperativeMinQusd        = 5.0
+	cooperativeCapacityEps    = 0.001
+	cooperativeBaselinePrefix = "cooperative_capacity_baseline:"
+)
 
 func NewCooperativeSync(
 	baseURL, natsURL, email, password string,
@@ -158,7 +173,11 @@ func (sync *CooperativeSync) Publish(
 		sync.setError(err.Error())
 		return err
 	}
-	return sync.Refresh(ctx)
+	if err := sync.refresh(ctx); err != nil {
+		return err
+	}
+	sync.acknowledgeBaseline(ctx, strings.ToUpper(coin))
+	return nil
 }
 
 func (sync *CooperativeSync) Withdraw(ctx context.Context, coin string) error {
@@ -169,7 +188,186 @@ func (sync *CooperativeSync) Withdraw(ctx context.Context, coin string) error {
 		sync.setError(err.Error())
 		return err
 	}
+	return sync.refresh(ctx)
+}
+
+func (sync *CooperativeSync) refresh(ctx context.Context) error {
+	if sync.refreshOverride != nil {
+		return sync.refreshOverride(ctx)
+	}
 	return sync.Refresh(ctx)
+}
+
+// RunCapacity mantiene sincronizada la capacidad cooperativa con el saldo
+// fiat local de cada mercado.
+func (sync *CooperativeSync) RunCapacity(ctx context.Context) {
+	if !sync.Enabled() {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		if err := sync.SyncCapacity(ctx); err != nil && ctx.Err() == nil && sync.logger != nil {
+			sync.logger.Warn("sincronización de capacidad cooperativa falló", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// SyncCapacity aplica solo el cambio local de fiat a la capacidad remota. No
+// reemplaza el total con el saldo local: el sincronizador puede haber gastado
+// parte de la capacidad en una cacería conjunta.
+func (sync *CooperativeSync) SyncCapacity(ctx context.Context) error {
+	if sync == nil || !sync.Enabled() || sync.Fiat == nil || sync.Baselines == nil {
+		return nil
+	}
+	sync.capacityMu.Lock()
+	defer sync.capacityMu.Unlock()
+	if err := sync.refresh(ctx); err != nil {
+		return err
+	}
+	sync.mu.RLock()
+	contributions := make(map[string]map[string]any, len(sync.contributions))
+	for coin, raw := range sync.contributions {
+		if item, ok := raw.(map[string]any); ok {
+			contributions[coin] = item
+		}
+	}
+	sync.mu.RUnlock()
+	for coin, current := range contributions {
+		local, err := sync.localFiat(ctx, coin)
+		if err != nil {
+			if sync.logger != nil {
+				sync.logger.Warn("capacidad cooperativa: fiat local no disponible", "coin", coin, "error", err)
+			}
+			continue
+		}
+		previous, found, err := sync.baseline(ctx, coin)
+		if err != nil {
+			if sync.logger != nil {
+				sync.logger.Warn("capacidad cooperativa: baseline no disponible", "coin", coin, "error", err)
+			}
+			continue
+		}
+		if !found {
+			// Primera observación: fija la base sin alterar la capacidad remota.
+			_ = sync.setBaseline(ctx, coin, local)
+			continue
+		}
+		remote := numberValue(current["fiat"])
+		price := numberValue(current["price"])
+		minimal := numberValue(current["minimal"])
+		if price <= 0 {
+			continue
+		}
+		delta := local - previous
+		available := local
+		if remote+delta < available {
+			available = remote + delta
+		}
+		if available < 0 {
+			available = 0
+		}
+		available = math.Floor(available*100) / 100
+		switch {
+		case available < cooperativeMinQusd*price:
+			if err := sync.Withdraw(ctx, coin); err != nil {
+				if sync.logger != nil {
+					sync.logger.Warn("capacidad cooperativa: retirar falló", "coin", coin, "error", err)
+				}
+				continue
+			}
+			if sync.logger != nil {
+				sync.logger.Info("capacidad cooperativa retirada", "coin", coin, "fiat", available)
+			}
+		case math.Abs(available-remote) > cooperativeCapacityEps:
+			if err := sync.Publish(ctx, coin, available, minimal, price); err != nil {
+				if sync.logger != nil {
+					sync.logger.Warn("capacidad cooperativa: publicar ajuste falló", "coin", coin, "error", err)
+				}
+				continue
+			}
+			if sync.logger != nil {
+				sync.logger.Info("capacidad cooperativa ajustada", "coin", coin, "fiat", available, "anterior", remote)
+			}
+		}
+		if err := sync.setBaseline(ctx, coin, local); err != nil && sync.logger != nil {
+			sync.logger.Warn("capacidad cooperativa: baseline no persistido", "coin", coin, "error", err)
+		}
+	}
+	return nil
+}
+
+// EnsureBaseline fija el saldo local previo a un cambio de fiat. Así el ajuste
+// posterior conoce el delta exacto aunque el bucle de capacidad aún no haya
+// pasado por ese mercado.
+func (sync *CooperativeSync) EnsureBaseline(ctx context.Context, coin string) error {
+	if sync == nil || sync.Fiat == nil || sync.Baselines == nil {
+		return nil
+	}
+	coin = strings.ToUpper(strings.TrimSpace(coin))
+	if coin == "" {
+		return nil
+	}
+	if _, found, err := sync.baseline(ctx, coin); err != nil || found {
+		return err
+	}
+	local, err := sync.localFiat(ctx, coin)
+	if err != nil {
+		return err
+	}
+	return sync.setBaseline(ctx, coin, local)
+}
+
+func (sync *CooperativeSync) localFiat(ctx context.Context, coin string) (float64, error) {
+	config, _, err := sync.Fiat.Load(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, market := range config.Markets {
+		if market.Code == coin {
+			return market.FiatBalance, nil
+		}
+	}
+	return 0, fmt.Errorf("mercado %s no configurado", coin)
+}
+
+func (sync *CooperativeSync) baseline(ctx context.Context, coin string) (float64, bool, error) {
+	raw, found, err := sync.Baselines.GetSetting(ctx, cooperativeBaselinePrefix+coin)
+	if err != nil || !found {
+		return 0, found, err
+	}
+	var value float64
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return 0, false, err
+	}
+	return value, true, nil
+}
+
+func (sync *CooperativeSync) setBaseline(ctx context.Context, coin string, value float64) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return sync.Baselines.PutSetting(ctx, cooperativeBaselinePrefix+coin, encoded, sync.now().UnixMilli())
+}
+
+func (sync *CooperativeSync) acknowledgeBaseline(ctx context.Context, coin string) {
+	if sync.Fiat == nil || sync.Baselines == nil {
+		return
+	}
+	local, err := sync.localFiat(ctx, coin)
+	if err == nil {
+		_ = sync.setBaseline(ctx, coin, local)
+	}
+}
+
+func (sync *CooperativeSync) now() time.Time {
+	return time.Now()
 }
 
 func (sync *CooperativeSync) request(

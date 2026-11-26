@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/url"
 	"time"
@@ -62,6 +63,22 @@ func runOfferRefresh(
 
 // runAutoCancel libera las órdenes que superaron la ventana de pago. Antes de
 // cancelar exige que QvaPay siga mostrando la operación en processing.
+type autoCancelReader interface {
+	Offer(ctx context.Context, uuid string) (qvapay.Offer, error)
+}
+
+type autoCancelMutator interface {
+	Cancel(ctx context.Context, uuid, order string) (qvapay.MutationResult, error)
+}
+
+type autoCancelLocalOps interface {
+	SetState(ctx context.Context, uuid, state string, now int64) error
+}
+
+type autoCancelExclusions interface {
+	ExcludeOffer(ctx context.Context, uuid, source string, now int64) error
+}
+
 func runAutoCancel(
 	ctx context.Context,
 	logger *slog.Logger,
@@ -69,6 +86,7 @@ func runAutoCancel(
 	mutations *qvapay.MutationClient,
 	configs *runtimeconfig.Repository,
 	localOps *postgres.LocalOperationRepository,
+	exclusions *postgres.OfferExclusionRepository,
 ) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -100,40 +118,62 @@ func runAutoCancel(
 			})
 		}
 		for _, operation := range edge.DueForCancel(due, now, window) {
-			offer, err := reader.Offer(ctx, operation.UUID)
-			if err != nil {
-				logger.Warn("autocancelación: no se pudo leer la oferta",
+			if err := cancelExpiredOperation(
+				ctx, logger, reader, mutations, localOps, exclusions, operation, now,
+			); err != nil {
+				logger.Warn("autocancelación no aplicada",
 					"offer_uuid", operation.UUID, "error", err)
-				continue
 			}
-			orderStatus := ""
-			if operation.OrderUUID != "" {
-				found := false
-				for _, order := range offer.Orders {
-					if order.UUID == operation.OrderUUID {
-						orderStatus = order.Status
-						found = true
-						break
-					}
-				}
-				if !found {
-					continue
-				}
-			}
-			if !edge.ShouldAutoCancel(offer.Status, orderStatus) {
-				continue
-			}
-			if _, err := mutations.Cancel(ctx, operation.UUID, operation.OrderUUID); err != nil {
-				logger.Warn("autocancelación rechazada por QvaPay",
-					"offer_uuid", operation.UUID, "error", err)
-				continue
-			}
-			if err := localOps.SetState(ctx, operation.UUID, "cancelled", now.UnixMilli()); err != nil {
-				logger.Warn("autocancelación aplicada pero no persistida",
-					"offer_uuid", operation.UUID, "error", err)
-				continue
-			}
-			logger.Info("operación cancelada por vencimiento", "offer_uuid", operation.UUID)
 		}
 	}
+}
+
+// cancelExpiredOperation excluye la oferta antes de cancelarla: una orden
+// vencida no debe volver a ser tomada automáticamente por el bot.
+func cancelExpiredOperation(
+	ctx context.Context,
+	logger *slog.Logger,
+	reader autoCancelReader,
+	mutations autoCancelMutator,
+	localOps autoCancelLocalOps,
+	exclusions autoCancelExclusions,
+	operation edge.PendingOperation,
+	now time.Time,
+) error {
+	offer, err := reader.Offer(ctx, operation.UUID)
+	if err != nil {
+		return fmt.Errorf("leer oferta: %w", err)
+	}
+	orderStatus := ""
+	if operation.OrderUUID != "" {
+		found := false
+		for _, order := range offer.Orders {
+			if order.UUID == operation.OrderUUID {
+				orderStatus = order.Status
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("orden %s no encontrada", operation.OrderUUID)
+		}
+	}
+	if !edge.ShouldAutoCancel(offer.Status, orderStatus) {
+		return nil
+	}
+	if exclusions != nil {
+		if err := exclusions.ExcludeOffer(ctx, operation.UUID, "auto_cancel", now.UnixMilli()); err != nil {
+			return fmt.Errorf("registrar exclusión: %w", err)
+		}
+	}
+	if _, err := mutations.Cancel(ctx, operation.UUID, operation.OrderUUID); err != nil {
+		return fmt.Errorf("QvaPay rechazó la cancelación: %w", err)
+	}
+	if err := localOps.SetState(ctx, operation.UUID, "cancelled", now.UnixMilli()); err != nil {
+		return fmt.Errorf("persistir estado cancelado: %w", err)
+	}
+	if logger != nil {
+		logger.Info("operación cancelada por vencimiento y oferta excluida", "offer_uuid", operation.UUID)
+	}
+	return nil
 }

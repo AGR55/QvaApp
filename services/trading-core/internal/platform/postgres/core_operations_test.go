@@ -307,3 +307,44 @@ func TestCoreOperationRepositoryCountByState(t *testing.T) {
 		t.Fatalf("counts = %v, quiero %v", counts, want)
 	}
 }
+
+func TestActiveForOfferBloqueaHastaTerminarLaOperacionLocal(t *testing.T) {
+	pool := coreOperationsSetup(t)
+	repository := postgres.NewCoreOperationRepository(pool)
+	ctx := context.Background()
+	offer := "offer-active-test"
+	operation := newCoreOperation(t, "op-active-test", 100)
+	operation.State = core.StateReserved
+	if err := repository.Create(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO shadow.core_decisions
+			(event_id, offer_uuid, coin, side, hunter_decision, core_kind,
+			 allowed, amount, receive, rate, reason, checks_json, created_at)
+		VALUES ($1, $2, 'BANK_CUP', 'buy', 'auto_buy', 'apply', true,
+			'10', '11', '1.1', 'test', 'null', 100)`, operation.ID, offer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO shadow.local_operations
+			(uuid, offer_type, coin, amount, receive, rate, state, auto_applied,
+			 order_uuid, created_at, updated_at)
+		VALUES ($1, 'sell', 'BANK_CUP', 10, 11, 1.1, 'applied', true, '', 100, 100)`,
+		offer); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM shadow.local_operations WHERE uuid = $1`, offer)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM shadow.core_decisions WHERE offer_uuid = $1`, offer)
+	})
+	if active, err := repository.ActiveForOffer(ctx, offer); err != nil || !active {
+		t.Fatalf("con operación applied debe bloquear: active=%v err=%v", active, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE shadow.local_operations SET state='completed' WHERE uuid=$1`, offer); err != nil {
+		t.Fatal(err)
+	}
+	if active, err := repository.ActiveForOffer(ctx, offer); err != nil || active {
+		t.Fatalf("con operación terminada no debe bloquear: active=%v err=%v", active, err)
+	}
+}

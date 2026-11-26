@@ -47,6 +47,8 @@ type CooperativeClient interface {
 	Publish(ctx context.Context, coin string, fiat, minimal, price float64) error
 	Withdraw(ctx context.Context, coin string) error
 	Refresh(ctx context.Context) error
+	EnsureBaseline(ctx context.Context, coin string) error
+	SyncCapacity(ctx context.Context) error
 }
 
 // MarketConfigLoader carga la configuración vigente para tomar el precio de
@@ -1208,18 +1210,6 @@ func (api *MutationsAPI) operationAction(
 		}
 	}
 	if api.Live != nil && route.action != "ack" {
-		// Una cancelación manual excluye la oferta de futuras cacerías antes
-		// de tocar QvaPay: si el remoto falla, tampoco se reintenta sola.
-		if route.action == "cancel" && api.Exclusions != nil {
-			if err := api.Exclusions.ExcludeOffer(
-				ctx, route.id, "manual_cancel", api.now().UnixMilli(),
-			); err != nil {
-				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
-					"error": "No se pudo registrar la exclusión de la oferta; no se canceló.",
-				})
-				return
-			}
-		}
 		order := r.URL.Query().Get("order")
 		var operation OperationRecord
 		var found bool
@@ -1248,6 +1238,19 @@ func (api *MutationsAPI) operationAction(
 			}
 			if order == "" && operation.OrderUUID != "" {
 				order = operation.OrderUUID
+			}
+		}
+		// La exclusión se registra tras validar que la operación realmente se
+		// puede cancelar, y antes de tocar QvaPay: si el remoto falla, la
+		// oferta tampoco se reintenta sola.
+		if route.action == "cancel" && api.Exclusions != nil {
+			if err := api.Exclusions.ExcludeOffer(
+				ctx, route.id, "manual_cancel", api.now().UnixMilli(),
+			); err != nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+					"error": "No se pudo registrar la exclusión de la oferta; no se canceló.",
+				})
+				return
 			}
 		}
 		var err error
@@ -1298,38 +1301,62 @@ func (api *MutationsAPI) afterOperationAction(
 	// El movimiento fiat va primero: si falla, el estado local se queda en el
 	// valor anterior y la acción puede reintentarse. El ledger es idempotente,
 	// así que un reintento no duplica el débito/crédito.
+	fiatChanged := false
+	changesFiat := action == "paid" || action == "received" ||
+		(action == "cancel" && operation.OfferType == "sell" && operation.State == "paid")
+	if changesFiat && api.Cooperative != nil {
+		// Fija la base antes del movimiento para que el ajuste cooperativo
+		// conozca el delta exacto aunque sea el primer cambio tras un reinicio.
+		_ = api.Cooperative.EnsureBaseline(ctx, operation.Coin)
+	}
 	if api.Fiat != nil {
 		switch {
 		case action == "paid" && operation.OfferType == "sell":
 			if err := api.Fiat.DebitOperation(ctx, operation, key, source, now); err != nil {
 				return err
 			}
+			fiatChanged = true
 		case action == "received" && operation.OfferType == "buy":
 			if err := api.Fiat.CreditOperation(ctx, operation, key, source, now); err != nil {
 				return err
 			}
+			fiatChanged = true
 		case action == "cancel" && operation.OfferType == "sell" && operation.State == "paid":
 			if err := api.Fiat.ReverseOperation(ctx, operation, "reversal:"+key, source, now); err != nil {
 				return err
 			}
+			fiatChanged = true
 		}
 	}
-	if api.Operations == nil {
-		return nil
+	if api.Operations != nil {
+		state := operation.State
+		switch action {
+		case "paid":
+			state = "paid"
+		case "received":
+			state = "completed"
+		case "cancel":
+			state = "cancelled"
+		}
+		if state != operation.State {
+			if err := api.Operations.SetState(ctx, operation.UUID, state, now); err != nil {
+				return err
+			}
+		}
 	}
-	state := operation.State
-	switch action {
-	case "paid":
-		state = "paid"
-	case "received":
-		state = "completed"
-	case "cancel":
-		state = "cancelled"
+	// El fiat del mercado cambió: refleja ese delta en la capacidad publicada
+	// a la red cooperativa. Si el sincronizador no responde, el bucle
+	// periódico lo reintenta sin deshacer la acción de la operación.
+	if fiatChanged && api.Cooperative != nil {
+		syncCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		err := api.Cooperative.SyncCapacity(syncCtx)
+		cancel()
+		if err != nil && api.Store != nil {
+			payload, _ := json.Marshal(map[string]string{"coin": operation.Coin, "error": err.Error()})
+			_ = api.Store.Record(ctx, "cooperative_capacity_failed", operation.UUID, payload, actor, api.now().UnixMilli())
+		}
 	}
-	if state == operation.State {
-		return nil
-	}
-	return api.Operations.SetState(ctx, operation.UUID, state, now)
+	return nil
 }
 
 func (api *MutationsAPI) workflowReconcile(

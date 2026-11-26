@@ -48,6 +48,29 @@ func (repository *OfferExclusionRepository) ExcludeOffer(
 	return err
 }
 
+// BackfillCancelled excluye las operaciones que ya terminaron canceladas
+// antes de que existiera la lista. No toca completadas ni rechazadas.
+func (repository *OfferExclusionRepository) BackfillCancelled(
+	ctx context.Context,
+	now int64,
+) (int64, error) {
+	if repository == nil || repository.pool == nil {
+		return 0, errors.New("offer exclusions: repositorio sin pool")
+	}
+	tag, err := repository.pool.Exec(ctx, `
+		INSERT INTO shadow.runtime_settings (key, value, updated_at)
+		SELECT 'excluded_offer:' || uuid,
+		       jsonb_build_object('source', 'backfill_cancel', 'created_at', $1),
+		       $1
+		FROM shadow.local_operations
+		WHERE state = 'cancelled'
+		ON CONFLICT (key) DO NOTHING`, now)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (repository *OfferExclusionRepository) IsOfferExcluded(
 	ctx context.Context,
 	offerUUID string,

@@ -91,6 +91,7 @@ func run(logger *slog.Logger) error {
 	var stats edge.StatsFunc
 	var pool *pgxpool.Pool
 	var writePool *pgxpool.Pool
+	var exclusions *postgres.OfferExclusionRepository
 	if cfg.DatabaseURL == "" {
 		logger.Info("DATABASE_URL no configurada; resumen deshabilitado")
 	} else {
@@ -104,6 +105,17 @@ func run(logger *slog.Logger) error {
 		defer pool.Close()
 		defer writePool.Close()
 		stats = postgresStats(pool)
+	}
+	if writePool != nil {
+		exclusions = postgres.NewOfferExclusionRepository(writePool)
+		if count, err := exclusions.BackfillCancelled(ctx, time.Now().UnixMilli()); err != nil {
+			logger.Warn("no se pudo completar la lista de canceladas", "error", err)
+		} else if count > 0 {
+			logger.Info("ofertas canceladas añadidas a la exclusión automática", "count", count)
+		}
+		cooperativeSync.Fiat = &runtimeconfig.Repository{Pool: writePool}
+		cooperativeSync.Baselines = &edge.PostgresReaderStore{Pool: writePool}
+		go cooperativeSync.RunCapacity(ctx)
 	}
 	if info, err := os.Stat(cfg.StaticDir); err != nil || !info.IsDir() {
 		logger.Warn("directorio estático no encontrado", "static_dir", cfg.StaticDir)
@@ -218,7 +230,7 @@ func run(logger *slog.Logger) error {
 				mutations.Fiat = &runtimeFiatMover{
 					repo: &runtimeconfig.Repository{Pool: writePool},
 				}
-				mutations.Exclusions = postgres.NewOfferExclusionRepository(writePool)
+				mutations.Exclusions = exclusions
 				feedStore := &edge.PostgresFeedEventStore{Pool: writePool}
 				qvapayWebhook.Store = feedStore
 				qvapayWebhook.ForwardStore = feedStore
@@ -240,7 +252,7 @@ func run(logger *slog.Logger) error {
 								configs := &runtimeconfig.Repository{Pool: writePool}
 								localOps := postgres.NewLocalOperationRepository(writePool)
 								go runOfferRefresh(ctx, logger, readClient, client, configs)
-								go runAutoCancel(ctx, logger, readClient, client, configs, localOps)
+								go runAutoCancel(ctx, logger, readClient, client, configs, localOps, exclusions)
 								fiatSync := &edge.FiatSyncer{
 									Reader: readClient, Recorder: configs, Logger: logger,
 									StartedAt: fiatLedgerStartedAt(writePool),
