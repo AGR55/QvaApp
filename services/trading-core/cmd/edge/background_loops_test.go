@@ -100,3 +100,26 @@ func TestCancelExpiredOperationNoCancelaSiNoPuedeExcluir(t *testing.T) {
 		t.Fatalf("no debía persistir estado: %q", local.state)
 	}
 }
+
+func TestCancelExpiredOperationExcluyeOfertaInexistente(t *testing.T) {
+	events := []string{}
+	local := &fakeAutoCancelLocal{}
+	err := cancelExpiredOperation(
+		context.Background(), nil,
+		fakeAutoCancelReader{err: &qvapay.APIError{Status: 404, Body: "No tienes permisos para ver esta oferta"}},
+		fakeAutoCancelMutator{events: &events},
+		local,
+		fakeAutoCancelExclusion{events: &events},
+		edge.PendingOperation{UUID: "offer-gone", State: "applied", CreatedAt: 1},
+		time.Unix(2, 0),
+	)
+	if err != nil {
+		t.Fatalf("cancelExpiredOperation: %v", err)
+	}
+	if len(events) != 1 || events[0] != "exclude:offer_not_found:offer-gone" {
+		t.Fatalf("eventos = %v", events)
+	}
+	if local.state != "cancelled" {
+		t.Fatalf("state = %q", local.state)
+	}
+}

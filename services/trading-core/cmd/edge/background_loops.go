@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -142,6 +144,23 @@ func cancelExpiredOperation(
 ) error {
 	offer, err := reader.Offer(ctx, operation.UUID)
 	if err != nil {
+		var apiErr *qvapay.APIError
+		if errors.As(err, &apiErr) && apiErr.Status == http.StatusNotFound {
+			// QvaPay ya no expone esta oferta: no se puede pagar y no debe
+			// volver a tomarse. Se excluye para no reintentar cada ciclo.
+			if exclusions != nil {
+				if err := exclusions.ExcludeOffer(ctx, operation.UUID, "offer_not_found", now.UnixMilli()); err != nil {
+					return fmt.Errorf("registrar exclusión de oferta inexistente: %w", err)
+				}
+			}
+			if err := localOps.SetState(ctx, operation.UUID, "cancelled", now.UnixMilli()); err != nil {
+				return fmt.Errorf("persistir estado cancelado: %w", err)
+			}
+			if logger != nil {
+				logger.Info("oferta inexistente en QvaPay excluida", "offer_uuid", operation.UUID)
+			}
+			return nil
+		}
 		return fmt.Errorf("leer oferta: %w", err)
 	}
 	orderStatus := ""
