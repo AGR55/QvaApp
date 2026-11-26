@@ -137,10 +137,9 @@ func (trader *autoTrader) Execute(
 		if _, transitionErr := repository.Transition(ctx, operationID, target, trader.timestamp()); transitionErr != nil {
 			return "", errors.Join(applyErr, transitionErr)
 		}
-		if trader.logger != nil {
-			trader.logger.Warn("aplicación QvaPay falló", "operation_id", operationID, "state", target, "error", applyErr)
-		}
-		return target, nil
+		// El llamador necesita el rechazo para cachear la oferta y para
+		// distinguir un 4xx definitivo de un timeout incierto.
+		return target, applyErr
 	}
 	if flexible && orderUUID == "" {
 		if _, transitionErr := repository.Transition(ctx, operationID, core.StateUncertain, trader.timestamp()); transitionErr != nil {

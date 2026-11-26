@@ -79,13 +79,14 @@ func TestAutoTraderDryRunDoesNotCallQvaPay(t *testing.T) {
 
 func TestAutoTraderLiveOutcomes(t *testing.T) {
 	cases := []struct {
-		name  string
-		err   error
-		state core.OperationState
+		name    string
+		err     error
+		state   core.OperationState
+		wantErr bool
 	}{
-		{"success", nil, core.StateConfirmed},
-		{"rejected", &qvapay.MutationError{Status: 409}, core.StateRejected},
-		{"uncertain", errors.New("timeout"), core.StateUncertain},
+		{"success", nil, core.StateConfirmed, false},
+		{"rejected", &qvapay.MutationError{Status: 409}, core.StateRejected, true},
+		{"uncertain", errors.New("timeout"), core.StateUncertain, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -93,7 +94,7 @@ func TestAutoTraderLiveOutcomes(t *testing.T) {
 			executor := &fakeExecutor{err: tc.err, order: "order-1"}
 			trader := &autoTrader{executor: executor}
 			state, err := trader.Execute(context.Background(), repo, "op-1", "offer-1", decimal.MustParse("10"), true)
-			if err != nil || state != tc.state || executor.calls != 1 {
+			if (err != nil) != tc.wantErr || state != tc.state || executor.calls != 1 {
 				t.Fatalf("state=%s err=%v calls=%d", state, err, executor.calls)
 			}
 			if tc.state == core.StateConfirmed && len(repo.orders) != 1 {
@@ -124,12 +125,13 @@ func TestAutoTraderSoloNotificaAplicacionesNuevas(t *testing.T) {
 		err          error
 		preConfirmed bool
 		want         int
+		wantErr      bool
 	}{
-		{"aplicada", false, nil, false, 1},
-		{"rechazada", false, &qvapay.MutationError{Status: 409}, false, 0},
-		{"incierta", false, errors.New("timeout"), false, 0},
-		{"dry-run", true, nil, false, 0},
-		{"ya confirmada", false, nil, true, 0},
+		{"aplicada", false, nil, false, 1, false},
+		{"rechazada", false, &qvapay.MutationError{Status: 409}, false, 0, true},
+		{"incierta", false, errors.New("timeout"), false, 0, true},
+		{"dry-run", true, nil, false, 0, false},
+		{"ya confirmada", false, nil, true, 0, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,8 +151,8 @@ func TestAutoTraderSoloNotificaAplicacionesNuevas(t *testing.T) {
 				},
 			}
 			if _, err := trader.Execute(context.Background(), repo, "op-1", "offer-1",
-				decimal.MustParse("10"), true); err != nil {
-				t.Fatalf("err = %v", err)
+				decimal.MustParse("10"), true); (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr=%v", err, tc.wantErr)
 			}
 			if calls != tc.want {
 				t.Fatalf("onApplied calls = %d, quiero %d", calls, tc.want)
