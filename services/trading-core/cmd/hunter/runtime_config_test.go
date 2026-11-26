@@ -22,6 +22,7 @@ func TestHunterConfigFromRuntime(t *testing.T) {
 				BuyMaxRate:          1.25,
 				SellMinRate:         0.95,
 				PurchaseMaxQusd:     50,
+				PurchaseMinQusd:     1.5,
 				OutgoingTransferFee: 0.5,
 			},
 			{Code: "   ", Active: true},
@@ -62,6 +63,7 @@ func TestHunterConfigFromRuntime(t *testing.T) {
 		"BuyMaxRate":      {market.BuyMaxRate.Compact(), "1.25"},
 		"SellMinRate":     {market.SellMinRate.Compact(), "0.95"},
 		"PurchaseMaxQusd": {market.PurchaseMaxQusd.Compact(), "50"},
+		"PurchaseMinQusd": {market.PurchaseMinQusd.Compact(), "1.5"},
 		"OutgoingFee":     {market.OutgoingFee.Compact(), "0.5"},
 	} {
 		if pair[0] != pair[1] {

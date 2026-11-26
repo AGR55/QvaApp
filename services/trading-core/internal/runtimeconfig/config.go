@@ -104,6 +104,7 @@ type Market struct {
 	BuyMaxRate          float64         `json:"buyMaxRate"`
 	SellMinRate         float64         `json:"sellMinRate"`
 	PurchaseMaxQusd     float64         `json:"purchaseMaxQusd"`
+	PurchaseMinQusd     float64         `json:"purchaseMinQusd"`
 	SellFeePercent      float64         `json:"sellFeePercent"`
 	OutgoingTransferFee float64         `json:"outgoingTransferFee"`
 	PaymentDetails      []PaymentDetail `json:"paymentDetails"`
@@ -218,6 +219,15 @@ func validateMarkets(markets []Market) error {
 		}
 		if market.PurchaseMaxQusd < 0 {
 			return invalidConfig("mercado %s: purchaseMaxQusd no puede ser negativo", market.Code)
+		}
+		if market.PurchaseMinQusd < 0 {
+			return invalidConfig("mercado %s: purchaseMinQusd no puede ser negativo", market.Code)
+		}
+		if market.PurchaseMaxQusd > 0 && market.PurchaseMinQusd > market.PurchaseMaxQusd {
+			return invalidConfig(
+				"mercado %s: purchaseMinQusd no puede superar a purchaseMaxQusd",
+				market.Code,
+			)
 		}
 		if market.SellFeePercent < 0 {
 			return invalidConfig("mercado %s: sellFeePercent no puede ser negativo", market.Code)

@@ -811,9 +811,20 @@ func sizePayloadAmount(
 	usage core.Usage,
 	rate decimal.Value,
 ) (decimal.Value, decimal.Value, bool, string) {
+	market := config.Markets[payload.Coin]
 	if payload.Side != "buy" || payload.OfferKind != "flexible" {
 		// Las ofertas fijas se aplican por su importe exacto y sin cuerpo; solo
-		// las flexibles admiten dimensionado.
+		// las flexibles admiten dimensionado. El mínimo del mercado se valida
+		// aquí, en memoria, antes de llegar al core.
+		if payload.Side == "buy" && market.PurchaseMinQusd.Sign() > 0 {
+			amount, _ := decimal.Parse(strings.TrimSpace(payload.Amount))
+			if amount.Sign() > 0 && amount.Cmp(market.PurchaseMinQusd) < 0 {
+				return decimal.Zero(), decimal.Zero(), true, fmt.Sprintf(
+					"el importe (%s QUSD) queda por debajo del mínimo del mercado (%s QUSD)",
+					amount.Compact(), market.PurchaseMinQusd.Compact(),
+				)
+			}
+		}
 		return decimal.Zero(), decimal.Zero(), false, ""
 	}
 	if rate.Sign() <= 0 {
@@ -825,7 +836,6 @@ func sizePayloadAmount(
 	}
 	orderMin, _ := decimal.Parse(strings.TrimSpace(payload.OrderMin))
 	orderMax, _ := decimal.Parse(strings.TrimSpace(payload.OrderMax))
-	market := config.Markets[payload.Coin]
 	fiatAvailable := config.Fiat[payload.Coin]
 	if fiatAvailable.Sign() < 0 {
 		fiatAvailable = decimal.Zero()
@@ -839,6 +849,7 @@ func sizePayloadAmount(
 		Rate:              rate,
 		PerOperationMax:   config.Limits.MaxQusdPerOperation,
 		MarketMaxQusd:     market.PurchaseMaxQusd,
+		MarketMinQusd:     market.PurchaseMinQusd,
 		ExposureRemaining: remaining(config.Limits.MaxConcurrentQusdExposure, usage.ConcurrentQusdExposure),
 		DailyRemaining:    remaining(config.Limits.MaxDailyAppliedQusd, usage.DailyAppliedQusd),
 	})

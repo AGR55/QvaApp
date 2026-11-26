@@ -97,9 +97,12 @@ importe   = floor(min(disponible, orderMax, capacidad,
                       exposición restante, volumen diario restante), 2)
 ```
 
-- Si el resultado queda por debajo de `orderMin`, no se aplica.
-- `purchaseMaxQusd` es por mercado y se edita en el panel
-  («Máximo QUSD por oferta (0 = sin límite)»).
+- Si el resultado queda por debajo de `orderMin` o del `purchaseMinQusd` del
+  mercado, no se aplica.
+- `purchaseMaxQusd` y `purchaseMinQusd` son por mercado y se editan en el
+  panel («Máximo/Mínimo QUSD por oferta (0 = sin límite)»). El mínimo se
+  valida en memoria con la configuración cacheada del hunter; no añade
+  consultas a la base por cada oferta.
 - La exposición simultánea y el volumen diario se leen de
   `shadow.core_operations`, no se asumen cero.
 

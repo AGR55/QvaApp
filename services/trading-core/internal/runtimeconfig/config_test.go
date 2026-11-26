@@ -56,6 +56,7 @@ func validConfig() runtimeconfig.Config {
 			BuyMaxRate:          70000,
 			SellMinRate:         69000,
 			PurchaseMaxQusd:     50,
+			PurchaseMinQusd:     1,
 			SellFeePercent:      1,
 			OutgoingTransferFee: 0.5,
 			PaymentDetails: []runtimeconfig.PaymentDetail{{
@@ -194,6 +195,13 @@ func TestValidateRejectsInvalidConfig(t *testing.T) {
 		}},
 		{"purchaseMaxQusd negativo", func(config *runtimeconfig.Config) {
 			config.Markets[0].PurchaseMaxQusd = -0.01
+		}},
+		{"purchaseMinQusd negativo", func(config *runtimeconfig.Config) {
+			config.Markets[0].PurchaseMinQusd = -0.01
+		}},
+		{"purchaseMinQusd mayor que el máximo", func(config *runtimeconfig.Config) {
+			config.Markets[0].PurchaseMaxQusd = 1
+			config.Markets[0].PurchaseMinQusd = 2
 		}},
 		{"sellFeePercent negativo", func(config *runtimeconfig.Config) {
 			config.Markets[0].SellFeePercent = -0.01

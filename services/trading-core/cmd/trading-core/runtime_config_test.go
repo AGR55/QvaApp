@@ -34,7 +34,7 @@ func runtimeConfigFixture() runtimeconfig.Config {
 			{
 				Code: "BANK_CUP", Active: true, HuntBuyEnabled: true,
 				HuntSellEnabled: false, FiatBalance: 1000, BuyMaxRate: 1.076,
-				SellMinRate: 1.15, PurchaseMaxQusd: 20, SellFeePercent: 3,
+				SellMinRate: 1.15, PurchaseMaxQusd: 20, PurchaseMinQusd: 1.25, SellFeePercent: 3,
 				OutgoingTransferFee: 0.25,
 			},
 			{
@@ -79,6 +79,7 @@ func TestCoreConfigFromRuntime(t *testing.T) {
 	assertDecimal(t, "BANK_CUP.buy_max_rate", market.BuyMaxRate, "1.076")
 	assertDecimal(t, "BANK_CUP.sell_min_rate", market.SellMinRate, "1.15")
 	assertDecimal(t, "BANK_CUP.purchase_max_qusd", market.PurchaseMaxQusd, "20")
+	assertDecimal(t, "BANK_CUP.purchase_min_qusd", market.PurchaseMinQusd, "1.25")
 	assertDecimal(t, "BANK_CUP.sell_fee_percent", market.SellFeePercent, "3")
 	assertDecimal(t, "BANK_CUP.outgoing_fee", market.OutgoingFee, "0.25")
 	assertDecimal(t, "fiat.BANK_CUP", config.Fiat["BANK_CUP"], "1000")

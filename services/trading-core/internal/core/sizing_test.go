@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
@@ -102,5 +103,32 @@ func TestSizeTakeRejectsInvalidRate(t *testing.T) {
 	input.Rate = decimal.Zero()
 	if _, err := SizeTake(input); err == nil {
 		t.Fatal("se esperaba error con tasa cero")
+	}
+}
+
+func TestSizeTakeRejectsBelowMarketMinimum(t *testing.T) {
+	input := takeInput()
+	input.MarketMaxQusd = decimal.MustParse("0.5")
+	input.MarketMinQusd = decimal.MustParse("1")
+	size, err := SizeTake(input)
+	if err != nil {
+		t.Fatalf("SizeTake: %v", err)
+	}
+	if size.Amount.Sign() != 0 || !strings.Contains(size.Reason, "mínimo del mercado") {
+		t.Fatalf("size = %+v, se esperaba rechazo por mínimo del mercado", size)
+	}
+}
+
+func TestSizeTakeAcceptsAtMarketMinimum(t *testing.T) {
+	input := takeInput()
+	input.MarketMaxQusd = decimal.MustParse("1")
+	input.MarketMinQusd = decimal.MustParse("1")
+	input.OrderMin = decimal.Zero()
+	size, err := SizeTake(input)
+	if err != nil {
+		t.Fatalf("SizeTake: %v", err)
+	}
+	if size.Amount.Cmp(decimal.MustParse("1")) != 0 {
+		t.Fatalf("amount = %s, quiero 1", size.Amount.Compact())
 	}
 }

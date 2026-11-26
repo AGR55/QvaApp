@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -420,5 +421,24 @@ func TestReconcilerUsaImporteDeLaOrdenPorRango(t *testing.T) {
 	}
 	if local.state != "completed" {
 		t.Fatalf("local.state = %q", local.state)
+	}
+}
+
+func TestSizePayloadAmountRejectsFixedBelowMarketMinimum(t *testing.T) {
+	config := core.Config{
+		Markets: map[string]core.Market{
+			"CLASICA": {Code: "CLASICA", Active: true, PurchaseMinQusd: decimal.MustParse("1")},
+		},
+	}
+	payload := hunterPayload{
+		OfferUUID: "offer-min", Coin: "CLASICA", Side: "buy", Decision: "auto_buy",
+		Amount: "0.5", Receive: "1", Rate: "2",
+	}
+	amount, _, sized, reason := sizePayloadAmount(payload, config, core.Usage{}, decimal.MustParse("2"))
+	if !sized || amount.Sign() != 0 {
+		t.Fatalf("amount=%s sized=%v, se esperaba bloqueo por mínimo", amount.Compact(), sized)
+	}
+	if !strings.Contains(reason, "mínimo") {
+		t.Fatalf("reason = %q, se esperaba mención al mínimo", reason)
 	}
 }

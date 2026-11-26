@@ -27,6 +27,9 @@ type TakeInput struct {
 	// significa sin tope.
 	PerOperationMax decimal.Value
 	MarketMaxQusd   decimal.Value
+	// MarketMinQusd es el mínimo de QUSD por compra del mercado. Cero
+	// significa sin mínimo.
+	MarketMinQusd decimal.Value
 	// ExposureRemaining y DailyRemaining acotan la exposición simultánea y el
 	// volumen diario restante. Cero significa sin tope.
 	ExposureRemaining decimal.Value
@@ -80,6 +83,12 @@ func SizeTake(input TakeInput) (TakeSize, error) {
 	amount := floorScale(limit, 2)
 	if amount.Sign() <= 0 {
 		return TakeSize{Reason: "el importe calculado es cero"}, nil
+	}
+	if input.MarketMinQusd.Sign() > 0 && amount.Cmp(input.MarketMinQusd) < 0 {
+		return TakeSize{Reason: fmt.Sprintf(
+			"el importe disponible (%s QUSD) queda por debajo del mínimo del mercado (%s QUSD)",
+			amount.Compact(), input.MarketMinQusd.Compact(),
+		)}, nil
 	}
 	if input.OrderMin.Sign() > 0 && amount.Cmp(input.OrderMin) < 0 {
 		return TakeSize{Reason: fmt.Sprintf(

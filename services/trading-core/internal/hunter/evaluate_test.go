@@ -1,6 +1,7 @@
 package hunter
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/AGR55/QvaApp/services/shared/decimal"
@@ -98,5 +99,55 @@ func BenchmarkEvaluate(b *testing.B) {
 		for _, item := range offers {
 			_ = Evaluate(item, average, configMarket, decimal.FromInt(15))
 		}
+	}
+}
+
+func TestEvaluateBuyBelowMarketMinimumIgnored(t *testing.T) {
+	market := market()
+	market.PurchaseMinQusd = decimal.MustParse("1")
+	result := Evaluate(offer("sell", "0.5", "900"), qvapay.Average{MedianSell: decimal.MustParse("2000")}, market, decimal.FromInt(15))
+	if result.Decision != "ignored" {
+		t.Fatalf("decisión = %s, quiero ignored", result.Decision)
+	}
+	if !strings.Contains(result.Reason, "mínimo") {
+		t.Fatalf("reason = %q, se esperaba mención al mínimo", result.Reason)
+	}
+}
+
+func TestEvaluateBuyAtMarketMinimumEligible(t *testing.T) {
+	market := market()
+	market.PurchaseMinQusd = decimal.MustParse("1")
+	result := Evaluate(offer("sell", "1", "1800"), qvapay.Average{MedianSell: decimal.MustParse("2000")}, market, decimal.FromInt(15))
+	if result.Decision != "auto_buy" {
+		t.Fatalf("decisión = %s, quiero auto_buy (%s)", result.Decision, result.Reason)
+	}
+}
+
+func TestEvaluateFlexibleBuyBelowAvailableMinimumIgnored(t *testing.T) {
+	market := market()
+	market.PurchaseMinQusd = decimal.MustParse("1")
+	item := offer("sell", "10", "18000")
+	item.OfferKind = "flexible"
+	item.AvailableAmount = decimal.MustParse("0.5")
+	result := Evaluate(item, qvapay.Average{MedianSell: decimal.MustParse("2000")}, market, decimal.FromInt(15))
+	if result.Decision != "ignored" {
+		t.Fatalf("decisión = %s, quiero ignored", result.Decision)
+	}
+	if !strings.Contains(result.Reason, "mínimo") {
+		t.Fatalf("reason = %q, se esperaba mención al mínimo", result.Reason)
+	}
+}
+
+func TestLoadConfigParsesPurchaseMinQusd(t *testing.T) {
+	path := t.TempDir() + "/config.json"
+	if err := writeFile(path, `{"markets":[{"code":"BANK_CUP","active":true,"buy_max_rate":2000,"sell_min_rate":500,"purchase_max_qusd":50,"purchase_min_qusd":1.5,"hunt_buy_enabled":true,"hunt_sell_enabled":true}]}`); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := config.Markets["BANK_CUP"].PurchaseMinQusd.Compact(); got != "1.5" {
+		t.Fatalf("PurchaseMinQusd = %q, quiero 1.5", got)
 	}
 }

@@ -20,6 +20,7 @@ type Market struct {
 	BuyMaxRate      decimal.Value
 	SellMinRate     decimal.Value
 	PurchaseMaxQusd decimal.Value
+	PurchaseMinQusd decimal.Value
 	OutgoingFee     decimal.Value
 	HuntBuy         bool
 	HuntSell        bool
@@ -37,6 +38,7 @@ type rawMarket struct {
 	BuyMaxRate      any    `json:"buy_max_rate"`
 	SellMinRate     any    `json:"sell_min_rate"`
 	PurchaseMaxQusd any    `json:"purchase_max_qusd"`
+	PurchaseMinQusd any    `json:"purchase_min_qusd"`
 	OutgoingFee     any    `json:"outgoing_transfer_fee"`
 	HuntBuyEnabled  any    `json:"hunt_buy_enabled"`
 	HuntSellEnabled any    `json:"hunt_sell_enabled"`
@@ -78,10 +80,11 @@ func LoadConfig(path string) (Config, error) {
 		buyMax, _ := number(item.BuyMaxRate)
 		sellMin, _ := number(item.SellMinRate)
 		purchaseMax, _ := number(item.PurchaseMaxQusd)
+		purchaseMin, _ := number(item.PurchaseMinQusd)
 		fee, _ := number(item.OutgoingFee)
 		config.Markets[code] = Market{
 			Active: boolean(item.Active, false), BuyMaxRate: buyMax, SellMinRate: sellMin,
-			PurchaseMaxQusd: purchaseMax, OutgoingFee: fee,
+			PurchaseMaxQusd: purchaseMax, PurchaseMinQusd: purchaseMin, OutgoingFee: fee,
 			HuntBuy: boolean(item.HuntBuyEnabled, true), HuntSell: boolean(item.HuntSellEnabled, true),
 		}
 	}
@@ -209,6 +212,15 @@ func Evaluate(offer qvapay.Offer, average qvapay.Average, market Market, guard d
 		evaluation.Side = "buy"
 		if !market.HuntBuy {
 			evaluation.Reason = "Cacería de compra detenida"
+			return evaluation
+		}
+		// El mínimo se comprueba sobre lo disponible: para fijas es el importe
+		// tomable y para flexibles el saldo que aún admite la oferta.
+		if market.PurchaseMinQusd.Sign() > 0 && available.Cmp(market.PurchaseMinQusd) < 0 {
+			evaluation.Reason = fmt.Sprintf(
+				"Por debajo del mínimo de %s QUSD por compra",
+				market.PurchaseMinQusd.Compact(),
+			)
 			return evaluation
 		}
 		// Una oferta flexible puede publicar más QUSD de los que el mercado

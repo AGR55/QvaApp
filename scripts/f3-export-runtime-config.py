@@ -44,6 +44,16 @@ def boolean(value: Any, default: bool = False) -> bool:
     return bool(int(value))
 
 
+def market_columns(connection: sqlite3.Connection) -> set[str]:
+    try:
+        return {
+            str(row["name"])
+            for row in connection.execute("PRAGMA table_info(market_config)")
+        }
+    except sqlite3.Error:
+        return set()
+
+
 def payment_details(connection: sqlite3.Connection) -> dict[str, list[dict[str, str]]]:
     details: dict[str, list[dict[str, str]]] = {}
     try:
@@ -70,11 +80,17 @@ def main() -> int:
         bot = first(connection, "SELECT * FROM bot_config WHERE id = 1")
         risk = first(connection, "SELECT * FROM risk_config WHERE id = 1")
         details = payment_details(connection)
+        columns = market_columns(connection)
+        min_expression = (
+            "purchase_min_qusd"
+            if "purchase_min_qusd" in columns
+            else "0 AS purchase_min_qusd"
+        )
         markets = []
         for row in connection.execute(
             "SELECT code, label, currency, icon_url, color, active,"
             " hunt_buy_enabled, hunt_sell_enabled, fiat_balance, buy_max_rate,"
-            " sell_min_rate, purchase_max_qusd, sell_fee_percent,"
+            f" sell_min_rate, purchase_max_qusd, {min_expression}, sell_fee_percent,"
             " outgoing_transfer_fee FROM market_config ORDER BY rowid"
         ):
             markets.append(
@@ -91,6 +107,7 @@ def main() -> int:
                     "buyMaxRate": number(row["buy_max_rate"]),
                     "sellMinRate": number(row["sell_min_rate"]),
                     "purchaseMaxQusd": number(row["purchase_max_qusd"]),
+                    "purchaseMinQusd": number(row["purchase_min_qusd"]),
                     "sellFeePercent": number(row["sell_fee_percent"]),
                     "outgoingTransferFee": number(row["outgoing_transfer_fee"]),
                     "paymentDetails": details.get(str(row["code"]), []),

@@ -189,6 +189,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
           buyMaxRate: 1,
           sellMinRate: 1,
           priceGuardPercent: undefined,
+          purchaseMinQusd: 0,
           purchaseMaxQusd: 0,
           sellFeePercent: 0,
           outgoingTransferFee: 0,
@@ -487,6 +488,18 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                       "priceGuardPercent",
                       event.target.value,
                     )
+                  }
+                />
+              </MarketField>
+              <MarketField label="Mínimo QUSD por compra (0 = sin mínimo)" htmlFor={`market-min-amount-${index}`}>
+                <Input
+                  id={`market-min-amount-${index}`}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={market.purchaseMinQusd ?? 0}
+                  onChange={(event) =>
+                    updateMarket(index, "purchaseMinQusd", event.target.value)
                   }
                 />
               </MarketField>
@@ -1316,6 +1329,7 @@ function diffConfig(saved, draft) {
       "buyMaxRate",
       "sellMinRate",
       "priceGuardPercent",
+      "purchaseMinQusd",
       "purchaseMaxQusd",
       "sellFeePercent",
       "outgoingTransferFee",

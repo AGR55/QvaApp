@@ -56,6 +56,7 @@ func hunterConfigFromRuntime(config runtimeconfig.Config) hunter.Config {
 			BuyMaxRate:      runtimeDecimal(market.BuyMaxRate),
 			SellMinRate:     runtimeDecimal(market.SellMinRate),
 			PurchaseMaxQusd: runtimeDecimal(market.PurchaseMaxQusd),
+			PurchaseMinQusd: runtimeDecimal(market.PurchaseMinQusd),
 			OutgoingFee:     runtimeDecimal(market.OutgoingTransferFee),
 			HuntBuy:         config.Hunting.BuyRunning && market.HuntBuyEnabled,
 			HuntSell:        config.Hunting.SellRunning && market.HuntSellEnabled,

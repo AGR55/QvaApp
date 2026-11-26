@@ -20,6 +20,7 @@ type Market struct {
 	BuyMaxRate      decimal.Value
 	SellMinRate     decimal.Value
 	PurchaseMaxQusd decimal.Value
+	PurchaseMinQusd decimal.Value
 	SellFeePercent  decimal.Value
 	OutgoingFee     decimal.Value
 	HuntBuy         bool
@@ -53,6 +54,7 @@ type rawMarket struct {
 	BuyMaxRate      any    `json:"buy_max_rate"`
 	SellMinRate     any    `json:"sell_min_rate"`
 	PurchaseMaxQusd any    `json:"purchase_max_qusd"`
+	PurchaseMinQusd any    `json:"purchase_min_qusd"`
 	SellFeePercent  any    `json:"sell_fee_percent"`
 	OutgoingFee     any    `json:"outgoing_transfer_fee"`
 	HuntBuy         any    `json:"hunt_buy_enabled"`
@@ -103,6 +105,7 @@ func LoadConfig(path string) (Config, error) {
 			Code: code, Active: boolValue(item.Active),
 			BuyMaxRate: number(item.BuyMaxRate), SellMinRate: number(item.SellMinRate),
 			PurchaseMaxQusd: number(item.PurchaseMaxQusd),
+			PurchaseMinQusd: number(item.PurchaseMinQusd),
 			SellFeePercent:  number(item.SellFeePercent), OutgoingFee: number(item.OutgoingFee),
 			HuntBuy: boolValueDefault(item.HuntBuy, true), HuntSell: boolValueDefault(item.HuntSell, true),
 		}

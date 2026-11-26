@@ -275,6 +275,8 @@ func (runtime *telegramRuntime) dispatch(ctx context.Context, command notifier.C
 		return runtime.setRate(ctx, args)
 	case "setlimit":
 		return runtime.setMarketNumber(ctx, args, "purchaseMaxQusd", "límite QUSD")
+	case "setmin":
+		return runtime.setMarketNumber(ctx, args, "purchaseMinQusd", "mínimo QUSD")
 	case "setfee":
 		return runtime.setMarketNumber(ctx, args, "sellFeePercent", "comisión %")
 	case "fiat":
@@ -344,6 +346,7 @@ Control:
 Configuración:
 /setrate MERCADO buy|sell TASA
 /setlimit MERCADO QUSD
+/setmin MERCADO QUSD
 /setfee MERCADO PORCENTAJE
 /fiat MERCADO IMPORTE
 
@@ -420,10 +423,11 @@ func (runtime *telegramRuntime) marketsText(ctx context.Context) (string, notifi
 		if asBool(market["active"]) {
 			icon = "🟢"
 		}
-		fmt.Fprintf(&builder, "%s %s (%s)\n  compra ≤ %s · venta ≥ %s\n  máx %s QUSD · fee %s%% · fiat %s %s\n\n",
+		fmt.Fprintf(&builder, "%s %s (%s)\n  compra ≤ %s · venta ≥ %s\n  mín %s · máx %s QUSD · fee %s%% · fiat %s %s\n\n",
 			icon, asString(market["label"]), asString(market["code"]),
 			rateText(asFloat(market["buyMaxRate"])), rateText(asFloat(market["sellMinRate"])),
-			money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])),
+			money(asFloat(market["purchaseMinQusd"])), money(asFloat(market["purchaseMaxQusd"])),
+			money(asFloat(market["sellFeePercent"])),
 			money(asFloat(market["fiatBalance"])), asString(market["currency"]))
 	}
 	return builder.String(), mainMenu()
@@ -656,9 +660,10 @@ func (runtime *telegramRuntime) marketPanelWith(ctx context.Context, code, notic
 	fmt.Fprintf(&builder, "🟢 Venta: %s\n   Mínimo %s %s/QUSD · mediana %s · %s\n\n",
 		effectiveStatus(market, "huntSellEnabled", sellRunning),
 		rateText(asFloat(market["sellMinRate"])), currency, medianLabel(sellMedian), sellCountLabel)
-	fmt.Fprintf(&builder, "Fiat: %s %s · Máx %s QUSD · Fee %s%%\n",
+	fmt.Fprintf(&builder, "Fiat: %s %s · Mín %s · Máx %s QUSD · Fee %s%%\n",
 		money(asFloat(market["fiatBalance"])), currency,
-		money(asFloat(market["purchaseMaxQusd"])), money(asFloat(market["sellFeePercent"])))
+		money(asFloat(market["purchaseMinQusd"])), money(asFloat(market["purchaseMaxQusd"])),
+		money(asFloat(market["sellFeePercent"])))
 	builder.WriteString("Global: compra ")
 	builder.WriteString(statusWord(buyRunning))
 	builder.WriteString(" · venta ")

@@ -49,6 +49,7 @@ func coreConfigFromRuntime(config runtimeconfig.Config) core.Config {
 			BuyMaxRate:      decimalValueFromFloat(market.BuyMaxRate),
 			SellMinRate:     decimalValueFromFloat(market.SellMinRate),
 			PurchaseMaxQusd: decimalValueFromFloat(market.PurchaseMaxQusd),
+			PurchaseMinQusd: decimalValueFromFloat(market.PurchaseMinQusd),
 			SellFeePercent:  decimalValueFromFloat(market.SellFeePercent),
 			OutgoingFee:     decimalValueFromFloat(market.OutgoingTransferFee),
 			HuntBuy:         config.Hunting.BuyRunning && market.HuntBuyEnabled,

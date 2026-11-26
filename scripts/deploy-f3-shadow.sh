@@ -251,8 +251,15 @@ PY
     } > "$temporary_env"
     chmod 600 "$temporary_env"
     mv -f "$temporary_env" "$hunter_env"
+    min_column="0 AS purchase_min_qusd"
+    min_expression="0"
+    if [[ $(sqlite3 -readonly "file:${prod_db}?mode=ro" \
+      "SELECT COUNT(*) FROM pragma_table_info('market_config') WHERE name='purchase_min_qusd';" 2>/dev/null) == 1 ]]; then
+      min_column="purchase_min_qusd"
+      min_expression="purchase_min_qusd"
+    fi
     markets=$(sqlite3 -readonly -json "file:${prod_db}?mode=ro" \
-      "SELECT code, active, buy_max_rate, sell_min_rate, purchase_max_qusd, outgoing_transfer_fee, hunt_buy_enabled, hunt_sell_enabled FROM market_config ORDER BY code;")
+      "SELECT code, active, buy_max_rate, sell_min_rate, purchase_max_qusd, ${min_column}, outgoing_transfer_fee, hunt_buy_enabled, hunt_sell_enabled FROM market_config ORDER BY code;")
     [[ -n $markets ]] || markets='[]'
     temporary_config=$(mktemp "$hunter_data_dir/hunter-config.XXXXXX")
     printf '{"price_guard_percent":15,"markets":%s}\n' "$markets" > "$temporary_config"
@@ -261,7 +268,7 @@ PY
     risk=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
       "SELECT json_object('max_qusd_per_operation', max_qusd_per_operation, 'max_concurrent_qusd_exposure', max_concurrent_qusd_exposure, 'max_daily_applied_qusd', max_daily_applied_qusd, 'max_concurrent_operations', max_concurrent_operations, 'min_qusd_reserve', min_qusd_reserve, 'max_quote_age_seconds', max_quote_age_seconds, 'min_expected_margin_percent', min_expected_margin_percent, 'max_slippage_percent', max_slippage_percent, 'max_consecutive_errors', max_consecutive_errors, 'market_cooldown_seconds', market_cooldown_seconds, 'counterparty_cooldown_seconds', counterparty_cooldown_seconds) FROM risk_config WHERE id = 1;")
     core_markets=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
-      "SELECT json_group_array(json_object('code', code, 'active', active, 'buy_max_rate', buy_max_rate, 'sell_min_rate', sell_min_rate, 'purchase_max_qusd', purchase_max_qusd, 'sell_fee_percent', sell_fee_percent, 'outgoing_transfer_fee', outgoing_transfer_fee, 'hunt_buy_enabled', hunt_buy_enabled, 'hunt_sell_enabled', hunt_sell_enabled)) FROM market_config ORDER BY code;")
+      "SELECT json_group_array(json_object('code', code, 'active', active, 'buy_max_rate', buy_max_rate, 'sell_min_rate', sell_min_rate, 'purchase_max_qusd', purchase_max_qusd, 'purchase_min_qusd', ${min_expression}, 'sell_fee_percent', sell_fee_percent, 'outgoing_transfer_fee', outgoing_transfer_fee, 'hunt_buy_enabled', hunt_buy_enabled, 'hunt_sell_enabled', hunt_sell_enabled)) FROM market_config ORDER BY code;")
     core_fiat=$(sqlite3 -readonly -noheader "file:${prod_db}?mode=ro" \
       "SELECT json_group_array(json_object('key', key, 'value', value)) FROM (SELECT key, value FROM settings WHERE key LIKE 'fiat_balance:%' ORDER BY key);")
     [[ -n $risk ]] || risk='{}'
