@@ -56,8 +56,9 @@ type hunterConsumer struct {
 	identityMu     sync.Mutex
 	ownerUUID      string
 
-	rejectedMu sync.Mutex
-	rejected   map[string]time.Time
+	rejectedMu          sync.Mutex
+	rejected            map[string]time.Time
+	requirementsBlocked map[string]time.Time
 
 	balanceMu    sync.Mutex
 	balanceValue decimal.Value
@@ -114,6 +115,7 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	}
 	consumer.applyQueue = make(chan executionTask, 1024)
 	consumer.rejected = map[string]time.Time{}
+	consumer.requirementsBlocked = map[string]time.Time{}
 	consumer.trader = buildAutoTrader(logger)
 	consumer.notifier = newOperationNotifier()
 	consumer.notifications = newNotificationDispatcher(consumer.notifier, logger)
@@ -340,7 +342,17 @@ func fastApplyWindow() time.Duration {
 	return time.Duration(value) * time.Millisecond
 }
 
-const rejectedOfferTTL = 5 * time.Minute
+const (
+	rejectedOfferTTL     = 5 * time.Minute
+	requirementsBlockTTL = 30 * time.Minute
+)
+
+func definitiveEligibilityReason(reason string) bool {
+	reason = strings.ToLower(reason)
+	return strings.Contains(reason, "requisitos") ||
+		strings.Contains(reason, "vip") ||
+		strings.Contains(reason, "propia")
+}
 
 func definitiveApplyRejection(err error) bool {
 	var mutationError *qvapay.MutationError
@@ -353,6 +365,47 @@ func definitiveApplyRejection(err error) bool {
 	default:
 		return false
 	}
+}
+
+func (consumer *hunterConsumer) markRequirementsBlocked(uuid string) {
+	if consumer == nil || strings.TrimSpace(uuid) == "" {
+		return
+	}
+	now := time.Now()
+	consumer.rejectedMu.Lock()
+	defer consumer.rejectedMu.Unlock()
+	if consumer.requirementsBlocked == nil {
+		consumer.requirementsBlocked = map[string]time.Time{}
+	}
+	if len(consumer.requirementsBlocked) >= 1024 {
+		for key, expiry := range consumer.requirementsBlocked {
+			if now.After(expiry) {
+				delete(consumer.requirementsBlocked, key)
+			}
+		}
+		if len(consumer.requirementsBlocked) >= 1024 {
+			clear(consumer.requirementsBlocked)
+		}
+	}
+	consumer.requirementsBlocked[uuid] = now.Add(requirementsBlockTTL)
+	consumer.rejected[uuid] = now.Add(requirementsBlockTTL)
+}
+
+func (consumer *hunterConsumer) offerRequirementsBlocked(uuid string, now time.Time) bool {
+	if consumer == nil || strings.TrimSpace(uuid) == "" {
+		return false
+	}
+	consumer.rejectedMu.Lock()
+	defer consumer.rejectedMu.Unlock()
+	expiry, ok := consumer.requirementsBlocked[uuid]
+	if !ok {
+		return false
+	}
+	if now.Before(expiry) {
+		return true
+	}
+	delete(consumer.requirementsBlocked, uuid)
+	return false
 }
 
 func (consumer *hunterConsumer) markOfferRejected(uuid string) {
@@ -399,7 +452,8 @@ func (consumer *hunterConsumer) canSkipRemoteRead(payload hunterPayload, now tim
 	if window <= 0 || payload.ObservedAt <= 0 {
 		return false
 	}
-	if consumer.offerRecentlyRejected(payload.OfferUUID, now) {
+	if consumer.offerRecentlyRejected(payload.OfferUUID, now) ||
+		consumer.offerRequirementsBlocked(payload.OfferUUID, now) {
 		return false
 	}
 	age := now.Sub(time.UnixMilli(payload.ObservedAt))
@@ -422,6 +476,9 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 					reason = "Oferta excluida por cancelación manual"
 				}
 			}
+			if reason == "" && consumer.offerRequirementsBlocked(task.payload.OfferUUID, time.Now()) {
+				reason = "Oferta bloqueada: requisitos de la contraparte no cumplidos"
+			}
 			if reason == "" && !consumer.canApplyNow(ctx, task.payload) {
 				reason = "cacería pausada, control runtime no disponible o cotización vencida"
 			}
@@ -436,7 +493,11 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				if eligible {
 					reason = ""
 				} else if reason != "" {
-					consumer.markOfferRejected(task.payload.OfferUUID)
+					if definitiveEligibilityReason(reason) {
+						consumer.markRequirementsBlocked(task.payload.OfferUUID)
+					} else {
+						consumer.markOfferRejected(task.payload.OfferUUID)
+					}
 				}
 			}
 			if reason != "" {
@@ -457,7 +518,10 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				task.amount, task.flexible)
 			executeMS := time.Since(executeStarted).Milliseconds()
 			if err != nil {
-				if definitiveApplyRejection(err) {
+				var mutationError *qvapay.MutationError
+				if errors.As(err, &mutationError) && mutationError.Status == 403 {
+					consumer.markRequirementsBlocked(task.payload.OfferUUID)
+				} else if definitiveApplyRejection(err) {
 					consumer.markOfferRejected(task.payload.OfferUUID)
 				}
 				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err,
