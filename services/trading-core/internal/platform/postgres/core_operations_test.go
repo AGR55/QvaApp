@@ -157,7 +157,7 @@ func TestCoreOperationRepositoryRejectsDuplicate(t *testing.T) {
 		t.Fatal(err)
 	}
 	duplicate := newCoreOperation(t, "op-duplicate", 200)
-	if err := repository.Create(ctx, duplicate); err == nil {
+	if err := repository.Create(ctx, duplicate); !errors.Is(err, postgres.ErrCoreOperationExists) {
 		t.Fatal("Create aceptó un operation_id duplicado")
 	}
 

@@ -16,6 +16,10 @@ import (
 // la escritura: otra transición ganó la carrera por la misma versión.
 var ErrCoreOperationConflict = errors.New("conflicto concurrente: la operación core cambió de versión")
 
+// ErrCoreOperationExists indica que el INSERT no insertó porque la operación
+// ya estaba persistida. Es distinto de un fallo de base de datos.
+var ErrCoreOperationExists = errors.New("la operación core ya existe")
+
 // CoreOperationRepository persiste operaciones shadow con transiciones
 // optimistas. No mueve dinero: solo guarda el estado y los importes exactos.
 type CoreOperationRepository struct {
@@ -49,7 +53,7 @@ func (repository *CoreOperationRepository) Create(ctx context.Context, operation
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("operación core %q ya existe", operation.ID)
+		return fmt.Errorf("%w: %q", ErrCoreOperationExists, operation.ID)
 	}
 	return nil
 }

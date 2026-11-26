@@ -265,6 +265,9 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 	if consumer.notifications != nil {
 		go consumer.notifications.Run(ctx)
 	}
+	// Recupera reserved/submitted antes de arrancar el conciliador para que
+	// este encuentre ya marcadas como inciertas las enviadas sin confirmar.
+	consumer.recoverStaleOperations(ctx)
 	if consumer.reconciler != nil {
 		go consumer.reconciler.loop(ctx)
 	}
@@ -826,7 +829,12 @@ func (consumer *hunterConsumer) consume(
 			operation.State = core.StateReserved
 			operation.UpdatedAt = now
 			if err := consumer.operationRepo.Create(ctx, operation); err != nil {
-				consumer.logger.Debug("operación shadow ya existía", "event_id", event.EventID)
+				if errors.Is(err, postgres.ErrCoreOperationExists) {
+					consumer.logger.Debug("operación shadow ya existía", "event_id", event.EventID)
+				} else {
+					consumer.failed.Add(1)
+					consumer.logger.Warn("crear operación shadow falló", "event_id", event.EventID, "error", err)
+				}
 			} else {
 				consumer.operations.Add(1)
 				consumer.invalidateUsage()
