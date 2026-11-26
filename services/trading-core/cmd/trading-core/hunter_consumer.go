@@ -50,6 +50,7 @@ type hunterConsumer struct {
 	reconciler     *operationReconciler
 	exclusions     *postgres.OfferExclusionRepository
 	notifier       *operationNotifier
+	notifications  *notificationDispatcher
 	applyQueue     chan executionTask
 	chat           operationChat
 	identityMu     sync.Mutex
@@ -110,9 +111,14 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 	consumer.applyQueue = make(chan executionTask, 1024)
 	consumer.trader = buildAutoTrader(logger)
 	consumer.notifier = newOperationNotifier()
+	consumer.notifications = newNotificationDispatcher(consumer.notifier, logger)
 	consumer.exclusions = postgres.NewOfferExclusionRepository(pool)
 	if consumer.trader != nil {
-		consumer.trader.onApplied = consumer.sendApplyMessage
+		// El mensaje al chat P2P no debe retrasar el aviso al administrador ni
+		// retener al worker de apply mientras QvaPay responde.
+		consumer.trader.onApplied = func(ctx context.Context, operationID, offerUUID, orderUUID string) {
+			go consumer.sendApplyMessage(ctx, operationID, offerUUID, orderUUID)
+		}
 	}
 	if token, ok := decryptQvaToken(logger); ok {
 		if reader, err := qvapay.New(envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), token); err == nil {
@@ -121,7 +127,6 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 				localOps:   consumer.localOps,
 				fiat:       &runtimeconfig.Repository{Pool: pool},
 				exclusions: consumer.exclusions,
-				notifier:   consumer.notifier,
 				logger:     logger,
 			}
 			logger.Info("conciliador QvaPay habilitado")
@@ -180,7 +185,11 @@ func (consumer *hunterConsumer) sendApplyMessage(
 			consumer.logger.Warn("no se pudo enviar el mensaje automático al chat P2P",
 				"operation_id", operationID, "offer_uuid", offerUUID, "error", sendErr)
 		}
-		if consumer.notifier != nil {
+		if consumer.notifications != nil {
+			consumer.notifications.Enqueue(ctx, fmt.Sprintf(
+				"⚠️ La operación %s se aplicó, pero no se pudo enviar el mensaje automático al chat P2P.",
+				offerUUID), "apply-chat:"+offerUUID)
+		} else if consumer.notifier != nil {
 			_ = consumer.notifier.Send(ctx, fmt.Sprintf(
 				"⚠️ La operación %s se aplicó, pero no se pudo enviar el mensaje automático al chat P2P.",
 				offerUUID), "apply-chat:"+offerUUID)
@@ -246,6 +255,9 @@ func buildAutoTrader(logger *slog.Logger) *autoTrader {
 
 func (consumer *hunterConsumer) run(ctx context.Context) {
 	repository := postgres.NewHunterEventRepository(consumer.pool)
+	if consumer.notifications != nil {
+		go consumer.notifications.Run(ctx)
+	}
 	if consumer.reconciler != nil {
 		go consumer.reconciler.loop(ctx)
 	}
@@ -764,7 +776,12 @@ func (consumer *hunterConsumer) notifyApplied(
 		fmt.Fprintf(&builder, "🔗 https://qvapay.com/p2p/%s\n\n", linkUUID)
 		builder.WriteString("📌 Siguiente paso: envía el pago fiat y pulsa «Registrar pago».")
 	}
-	if err := consumer.notifier.Send(ctx, builder.String(), "apply:"+payload.OfferUUID); err != nil && consumer.logger != nil {
+	key := "apply:" + payload.OfferUUID
+	if consumer.notifications != nil {
+		consumer.notifications.Enqueue(ctx, builder.String(), key)
+		return
+	}
+	if err := consumer.notifier.Send(ctx, builder.String(), key); err != nil && consumer.logger != nil {
 		consumer.logger.Warn("no se pudo notificar la aplicación", "offer_uuid", payload.OfferUUID, "error", err)
 	}
 }

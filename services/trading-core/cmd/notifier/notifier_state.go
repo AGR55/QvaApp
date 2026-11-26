@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+func (service *service) releaseNotification(ctx context.Context, key string) error {
+	if service == nil || service.pool == nil || strings.TrimSpace(key) == "" {
+		return errors.New("store de deduplicación no disponible")
+	}
+	_, err := service.pool.Exec(ctx,
+		`DELETE FROM shadow.notifier_dedupe_keys WHERE dedupe_key = $1`, key)
+	return err
+}
+
 func (service *service) claimNotification(ctx context.Context, key string) (bool, error) {
 	if service == nil || service.pool == nil || strings.TrimSpace(key) == "" {
 		return false, errors.New("store de deduplicación no disponible")

@@ -255,6 +255,8 @@ type service struct {
 	sent         atomic.Uint64
 	deduped      atomic.Uint64
 	errors       atomic.Uint64
+	slowSends    atomic.Uint64
+	sendMS       atomic.Uint64
 }
 
 type notifyRequest struct {
@@ -386,15 +388,30 @@ func (service *service) notify(w http.ResponseWriter, r *http.Request) {
 	if chatID == "" {
 		chatID = service.cfg.ChatID
 	}
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
-	defer cancel()
-	if err := service.client.SendMessage(ctx, chatID, request.Text); err != nil {
+	sendErr := service.client.SendMessage(ctx, chatID, request.Text)
+	cancel()
+	elapsed := time.Since(started)
+	service.sendMS.Add(uint64(elapsed.Milliseconds()))
+	if sendErr != nil {
 		service.errors.Add(1)
-		service.logger.Warn("envío Telegram falló", "error", err)
+		service.logger.Warn("envío Telegram falló", "error", sendErr)
+		// Libera la clave para que el emisor pueda reintentar: la notificación
+		// no se entregó y no debe quedar bloqueada por la deduplicación.
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := service.releaseNotification(releaseCtx, dedupeKey); err != nil {
+			service.logger.Warn("no se pudo liberar la clave de notificación", "error", err)
+		}
+		releaseCancel()
 		writeJSON(w, http.StatusBadGateway, map[string]string{"status": "telegram_error"})
 		return
 	}
 	service.sent.Add(1)
+	if elapsed >= 2*time.Second {
+		service.slowSends.Add(1)
+		service.logger.Warn("envío Telegram lento", "dedupe_key", dedupeKey, "elapsed_ms", elapsed.Milliseconds())
+	}
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "sent"})
 }
 
@@ -441,6 +458,8 @@ func (service *service) metrics(w http.ResponseWriter) {
 	fmt.Fprintf(w, "# HELP notifier_sent_total Notificaciones enviadas o simuladas.\n# TYPE notifier_sent_total counter\nnotifier_sent_total %d\n", service.sent.Load())
 	fmt.Fprintf(w, "# HELP notifier_deduped_total Notificaciones deduplicadas.\n# TYPE notifier_deduped_total counter\nnotifier_deduped_total %d\n", service.deduped.Load())
 	fmt.Fprintf(w, "# HELP notifier_errors_total Errores de envío.\n# TYPE notifier_errors_total counter\nnotifier_errors_total %d\n", service.errors.Load())
+	fmt.Fprintf(w, "# HELP notifier_slow_sends_total Envíos que tardaron 2 s o más.\n# TYPE notifier_slow_sends_total counter\nnotifier_slow_sends_total %d\n", service.slowSends.Load())
+	fmt.Fprintf(w, "# HELP notifier_send_ms_total Tiempo acumulado de envío a Telegram (ms).\n# TYPE notifier_send_ms_total counter\nnotifier_send_ms_total %d\n", service.sendMS.Load())
 }
 
 func healthcheck() int {

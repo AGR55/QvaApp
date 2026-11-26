@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -41,7 +39,6 @@ type operationReconciler struct {
 	localOps   localOperationStore
 	fiat       operationFiat
 	exclusions operationExclusionStore
-	notifier   *operationNotifier
 	logger     *slog.Logger
 	now        func() time.Time
 }
@@ -207,7 +204,6 @@ func (reconciler *operationReconciler) reconcileOne(
 			}
 		}
 		if found {
-			previousState := local.State
 			localState := "reconciled"
 			switch normalizedStatus(status) {
 			case "paid":
@@ -222,13 +218,6 @@ func (reconciler *operationReconciler) reconcileOne(
 			if err := reconciler.localOps.SetState(ctx, offerUUID, localState, now); err != nil &&
 				reconciler.logger != nil {
 				reconciler.logger.Warn("no se pudo actualizar el estado local", "operation_id", operationID, "error", err)
-			}
-			if localState == "completed" && previousState != "completed" {
-				notifyKey := orderUUID
-				if notifyKey == "" {
-					notifyKey = offerUUID
-				}
-				reconciler.notifyCompleted(ctx, local, notifyKey)
 			}
 		}
 	}
@@ -247,37 +236,4 @@ func (reconciler *operationReconciler) timestamp() int64 {
 
 func normalizedStatus(status string) string {
 	return strings.ToLower(strings.TrimSpace(status))
-}
-
-func (reconciler *operationReconciler) notifyCompleted(ctx context.Context, local postgres.LocalOperation, key string) {
-	if reconciler.notifier == nil {
-		return
-	}
-	link := local.UUID
-	if local.OrderUUID != "" {
-		link = local.OrderUUID
-	}
-	var builder strings.Builder
-	if local.OfferType == "buy" {
-		builder.WriteString("✅ P2P Completado - Fiat Recibido\n\n")
-		fmt.Fprintf(&builder, "💵 Monto recibido: %s %s\n", formatFloat(local.Receive), marketCurrency(local.Coin))
-		fmt.Fprintf(&builder, "🪙 QUSD entregado: %s\n", formatFloat(local.Amount))
-	} else {
-		builder.WriteString("✅ P2P Completado - Fondos Recibidos\n\n")
-		fmt.Fprintf(&builder, "💰 Monto recibido: %s QUSD\n", formatFloat(local.Amount))
-		fmt.Fprintf(&builder, "💵 Fiat enviado: %s %s\n", formatFloat(local.Receive), marketCurrency(local.Coin))
-	}
-	fmt.Fprintf(&builder, "🪙 Moneda: %s\n", local.Coin)
-	if local.CounterpartyID != "" {
-		fmt.Fprintf(&builder, "👤 Contraparte: %s\n", local.CounterpartyID)
-	}
-	fmt.Fprintf(&builder, "🆔 ID: %s\n", local.UUID)
-	fmt.Fprintf(&builder, "🔗 https://qvapay.com/p2p/%s", link)
-	if err := reconciler.notifier.Send(ctx, builder.String(), "completed:"+key); err != nil && reconciler.logger != nil {
-		reconciler.logger.Warn("no se pudo notificar la operación completada", "offer_uuid", local.UUID, "error", err)
-	}
-}
-
-func formatFloat(value float64) string {
-	return strconv.FormatFloat(value, 'f', 2, 64)
 }
