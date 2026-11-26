@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -54,6 +55,9 @@ type hunterConsumer struct {
 	chat           operationChat
 	identityMu     sync.Mutex
 	ownerUUID      string
+
+	rejectedMu sync.Mutex
+	rejected   map[string]time.Time
 
 	balanceMu    sync.Mutex
 	balanceValue decimal.Value
@@ -109,6 +113,7 @@ func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer 
 		localOps:      postgres.NewLocalOperationRepository(pool),
 	}
 	consumer.applyQueue = make(chan executionTask, 1024)
+	consumer.rejected = map[string]time.Time{}
 	consumer.trader = buildAutoTrader(logger)
 	consumer.notifier = newOperationNotifier()
 	consumer.notifications = newNotificationDispatcher(consumer.notifier, logger)
@@ -335,14 +340,53 @@ func fastApplyWindow() time.Duration {
 	return time.Duration(value) * time.Millisecond
 }
 
-func canSkipRemoteRead(payload hunterPayload, now time.Time, window time.Duration) bool {
-	// Solo el feed en tiempo real justifica saltarse la relectura: es donde se
-	// pierden las carreras. El sondeo mantiene la comprobación remota para no
-	// reenviar ofertas que ya no cumplen requisitos.
-	if payload.Source != "stream" && payload.Source != "webhook" {
+const rejectedOfferTTL = 5 * time.Minute
+
+func (consumer *hunterConsumer) markOfferRejected(uuid string) {
+	if consumer == nil || strings.TrimSpace(uuid) == "" {
+		return
+	}
+	now := time.Now()
+	consumer.rejectedMu.Lock()
+	defer consumer.rejectedMu.Unlock()
+	if consumer.rejected == nil {
+		consumer.rejected = map[string]time.Time{}
+	}
+	if len(consumer.rejected) >= 1024 {
+		for key, expiry := range consumer.rejected {
+			if now.After(expiry) {
+				delete(consumer.rejected, key)
+			}
+		}
+		if len(consumer.rejected) >= 1024 {
+			clear(consumer.rejected)
+		}
+	}
+	consumer.rejected[uuid] = now.Add(rejectedOfferTTL)
+}
+
+func (consumer *hunterConsumer) offerRecentlyRejected(uuid string, now time.Time) bool {
+	if consumer == nil || strings.TrimSpace(uuid) == "" {
 		return false
 	}
+	consumer.rejectedMu.Lock()
+	defer consumer.rejectedMu.Unlock()
+	expiry, ok := consumer.rejected[uuid]
+	if !ok {
+		return false
+	}
+	if now.Before(expiry) {
+		return true
+	}
+	delete(consumer.rejected, uuid)
+	return false
+}
+
+func (consumer *hunterConsumer) canSkipRemoteRead(payload hunterPayload, now time.Time, window time.Duration) bool {
 	if window <= 0 || payload.ObservedAt <= 0 {
+		return false
+	}
+	if consumer.offerRecentlyRejected(payload.OfferUUID, now) {
 		return false
 	}
 	age := now.Sub(time.UnixMilli(payload.ObservedAt))
@@ -369,7 +413,7 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				reason = "cacería pausada, control runtime no disponible o cotización vencida"
 			}
 			canMS := time.Since(started).Milliseconds()
-			fastPath := canSkipRemoteRead(task.payload, time.Now(), fastApplyWindow())
+			fastPath := consumer.canSkipRemoteRead(task.payload, time.Now(), fastApplyWindow())
 			eligibleMS := int64(0)
 			if reason == "" && !fastPath && consumer.trader != nil && !consumer.trader.dryRun {
 				eligibleStarted := time.Now()
@@ -378,6 +422,8 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				eligibleMS = time.Since(eligibleStarted).Milliseconds()
 				if eligible {
 					reason = ""
+				} else if reason != "" {
+					consumer.markOfferRejected(task.payload.OfferUUID)
 				}
 			}
 			if reason != "" {
@@ -398,6 +444,10 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				task.amount, task.flexible)
 			executeMS := time.Since(executeStarted).Milliseconds()
 			if err != nil {
+				var mutationError *qvapay.MutationError
+				if errors.As(err, &mutationError) && (mutationError.Status == 400 || mutationError.Status == 409) {
+					consumer.markOfferRejected(task.payload.OfferUUID)
+				}
 				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err,
 					"fast_path", fastPath, "eligible_ms", eligibleMS, "execute_ms", executeMS)
 			} else if state == core.StateConfirmed {
