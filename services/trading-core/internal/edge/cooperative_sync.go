@@ -43,6 +43,9 @@ type CooperativeSync struct {
 	Baselines SettingStore
 
 	capacityMu sync.Mutex
+	// loginMu serializa los inicios de sesión: el sincronizador rechaza dos
+	// logins simultáneos al arrancar el edge.
+	loginMu sync.Mutex
 	// refreshOverride solo se usa en pruebas para evitar HTTP.
 	refreshOverride func(context.Context) error
 }
@@ -433,6 +436,16 @@ func (sync *CooperativeSync) ensureToken(ctx context.Context) (string, error) {
 	sync.mu.RLock()
 	token := sync.token
 	issued := sync.tokenAt
+	sync.mu.RUnlock()
+	if token != "" && time.Since(issued) < 4*24*time.Hour {
+		return token, nil
+	}
+	sync.loginMu.Lock()
+	defer sync.loginMu.Unlock()
+	// Otro goroutine pudo iniciar sesión mientras se esperaba el turno.
+	sync.mu.RLock()
+	token = sync.token
+	issued = sync.tokenAt
 	sync.mu.RUnlock()
 	if token != "" && time.Since(issued) < 4*24*time.Hour {
 		return token, nil

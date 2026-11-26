@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/AGR55/QvaApp/services/trading-core/internal/runtimeconfig"
 )
@@ -165,3 +167,32 @@ func TestCooperativeSyncCapacityInicializaBaselineSinPublicar(t *testing.T) {
 }
 
 func floatPtr(value float64) *float64 { return &value }
+
+func TestCooperativeSyncSerializaLoginsSimultaneos(t *testing.T) {
+	var logins int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/auth/login" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		atomic.AddInt32(&logins, 1)
+		time.Sleep(100 * time.Millisecond)
+		writeCooperativeJSON(w, map[string]any{"api_key": "csk_test"})
+	}))
+	t.Cleanup(server.Close)
+	syncer := NewCooperativeSync(server.URL, "", "bot@example.com", "secret", true, nil)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := syncer.ensureToken(context.Background()); err != nil {
+				t.Errorf("ensureToken: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&logins); got != 1 {
+		t.Fatalf("logins simultáneos = %d, quiero 1", got)
+	}
+}

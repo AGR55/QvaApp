@@ -60,8 +60,8 @@ func (repository *OfferExclusionRepository) BackfillCancelled(
 	tag, err := repository.pool.Exec(ctx, `
 		INSERT INTO shadow.runtime_settings (key, value, updated_at)
 		SELECT 'excluded_offer:' || uuid,
-		       jsonb_build_object('source', 'backfill_cancel', 'created_at', $1),
-		       $1
+		       jsonb_build_object('source', 'backfill_cancel', 'created_at', $1::bigint),
+		       $1::bigint
 		FROM shadow.local_operations
 		WHERE state = 'cancelled'
 		ON CONFLICT (key) DO NOTHING`, now)
