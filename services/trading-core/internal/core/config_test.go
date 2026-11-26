@@ -104,3 +104,28 @@ func TestDecideHuntFlagsStopSide(t *testing.T) {
 		t.Fatalf("venta detenida: %+v err=%v", sell, err)
 	}
 }
+
+func TestDecideSellRestaExposicionDeVentasActivas(t *testing.T) {
+	config := configForTest(t)
+	event := Event{
+		OfferUUID: "offer-sell", Coin: "BANK_CUP", Side: "sell", Decision: "manual_sell",
+		Amount: decimal.MustParse("20"), Receive: decimal.MustParse("24000"), Rate: decimal.MustParse("1200"),
+		Usage: Usage{SellQusdExposure: decimal.MustParse("80")},
+	}
+	result, err := Decide(event, config, decimal.MustParse("100"), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed || result.Kind != "blocked" {
+		t.Fatalf("resultado inesperado: %+v", result)
+	}
+
+	event.Usage.SellQusdExposure = decimal.MustParse("50")
+	result, err = Decide(event, config, decimal.MustParse("100"), 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Allowed || result.Kind != "apply" {
+		t.Fatalf("resultado inesperado: %+v", result)
+	}
+}

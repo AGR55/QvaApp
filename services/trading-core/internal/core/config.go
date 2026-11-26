@@ -140,6 +140,9 @@ type Usage struct {
 	ConcurrentQusdExposure decimal.Value
 	DailyAppliedQusd       decimal.Value
 	ActiveOperations       decimal.Value
+	// SellQusdExposure es el QUSD comprometido en ventas activas. Se descuenta
+	// del saldo disponible para no sobrevender el mismo capital.
+	SellQusdExposure decimal.Value
 }
 
 // Result es la decisión del core shadow.
@@ -236,6 +239,7 @@ func Decide(event Event, config Config, qusdBalance decimal.Value, nowMS int64) 
 		PriceReason:           "Decisión del hunter: " + event.Decision,
 		ExpectedMarginPercent: expectedMargin,
 		QusdBalance:           qusdBalance, FiatAvailable: fiatAvailable,
+		SellQusdExposure:       event.Usage.SellQusdExposure,
 		ConcurrentQusdExposure: event.Usage.ConcurrentQusdExposure,
 		DailyAppliedQusd:       event.Usage.DailyAppliedQusd,
 		ActiveOperations:       event.Usage.ActiveOperations,

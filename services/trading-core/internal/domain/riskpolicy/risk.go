@@ -95,6 +95,7 @@ type Context struct {
 	ExpectedMarginPercent       decimal.Value
 	QusdBalance                 decimal.Value
 	FiatAvailable               decimal.Value
+	SellQusdExposure            decimal.Value
 	ConcurrentQusdExposure      decimal.Value
 	DailyAppliedQusd            decimal.Value
 	ActiveOperations            decimal.Value
@@ -247,6 +248,7 @@ func validate(context Context) error {
 		context.Opportunity.ObservedAt,
 		context.QusdBalance,
 		context.FiatAvailable,
+		context.SellQusdExposure,
 		context.ConcurrentQusdExposure,
 		context.DailyAppliedQusd,
 		context.ActiveOperations,
@@ -287,7 +289,9 @@ func capitalCheck(context Context) Check {
 			"El capital fiat disponible no cubre la operación.",
 		)
 	}
-	available := nonNegative(context.QusdBalance.Sub(context.Limits.MinQusdReserve))
+	available := nonNegative(
+		context.QusdBalance.Sub(context.Limits.MinQusdReserve).Sub(context.SellQusdExposure),
+	)
 	return minimumCheck(
 		"qusd_capital",
 		"QUSD disponible después de reserva",

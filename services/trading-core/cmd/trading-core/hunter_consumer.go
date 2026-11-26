@@ -342,6 +342,19 @@ func fastApplyWindow() time.Duration {
 
 const rejectedOfferTTL = 5 * time.Minute
 
+func definitiveApplyRejection(err error) bool {
+	var mutationError *qvapay.MutationError
+	if !errors.As(err, &mutationError) {
+		return false
+	}
+	switch mutationError.Status {
+	case 400, 403, 409, 422:
+		return true
+	default:
+		return false
+	}
+}
+
 func (consumer *hunterConsumer) markOfferRejected(uuid string) {
 	if consumer == nil || strings.TrimSpace(uuid) == "" {
 		return
@@ -444,8 +457,7 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				task.amount, task.flexible)
 			executeMS := time.Since(executeStarted).Milliseconds()
 			if err != nil {
-				var mutationError *qvapay.MutationError
-				if errors.As(err, &mutationError) && (mutationError.Status == 400 || mutationError.Status == 409) {
+				if definitiveApplyRejection(err) {
 					consumer.markOfferRejected(task.payload.OfferUUID)
 				}
 				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err,
@@ -642,19 +654,29 @@ func (consumer *hunterConsumer) consume(
 	amount, _ := decimal.Parse(payload.Amount)
 	receive, _ := decimal.Parse(payload.Receive)
 	rate, _ := decimal.Parse(payload.Rate)
-	// El capital QUSD solo limita las ventas. Evitamos una lectura de saldo en
-	// el camino crítico de compra, donde solo importa el fiat.
-	balance := decimal.Zero()
-	if payload.Side == "sell" {
-		balance = consumer.currentBalance(ctx)
-	}
 	nowMS := postgres.NowMS()
+	usage := consumer.currentUsage(ctx, nowMS)
+	// El capital QUSD solo limita las ventas: la compra se decide con fiat. El
+	// saldo para la simulación/auditoría sí se conserva, usando el snapshot sin
+	// añadir la lectura en vivo al camino crítico de compra.
+	riskBalance := decimal.Zero()
+	executionBalance := decimal.Zero()
+	if payload.Side == "sell" {
+		riskBalance = consumer.currentBalance(ctx)
+		executionBalance = riskBalance.Sub(usage.SellQusdExposure)
+		if executionBalance.Sign() < 0 {
+			executionBalance = decimal.Zero()
+		}
+	} else if consumer.shadowRepo != nil {
+		if snapshot, err := consumer.shadowRepo.LatestQvapayBalance(ctx); err == nil {
+			executionBalance = snapshot
+		}
+	}
 	if active, activeErr := consumer.operationRepo.ActiveForOffer(ctx, payload.OfferUUID); activeErr == nil && active {
 		consumer.persistBlockedEvent(ctx, repository, event, payload,
 			"Ya existe una operación activa para esta oferta", nowMS)
 		return
 	}
-	usage := consumer.currentUsage(ctx, nowMS)
 	sizedAmount, sizedReceive, sized, sizeReason := sizePayloadAmount(payload, config, usage, rate)
 	if sized {
 		if sizedAmount.Sign() <= 0 {
@@ -671,7 +693,7 @@ func (consumer *hunterConsumer) consume(
 		OfferUUID: payload.OfferUUID, Coin: payload.Coin, Side: payload.Side,
 		Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
 		Usage: usage, ObservedAt: payload.ObservedAt,
-	}, config, balance, nowMS)
+	}, config, riskBalance, nowMS)
 	if err != nil {
 		consumer.failed.Add(1)
 		_ = repository.Fail(ctx, event.EventID, event.Attempts, postgres.NowMS(), err.Error())
@@ -688,7 +710,7 @@ func (consumer *hunterConsumer) consume(
 				Decision: payload.Decision, Amount: amount, Receive: receive, Rate: rate,
 				ObservedAt: payload.ObservedAt,
 			},
-			Result: result, AvailableQusd: balance,
+			Result: result, AvailableQusd: executionBalance,
 			ReserveQusd: config.Limits.MinQusdReserve,
 			OperationID: event.EventID,
 		})

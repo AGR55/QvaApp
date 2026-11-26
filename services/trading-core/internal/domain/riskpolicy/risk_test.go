@@ -95,3 +95,27 @@ func TestEvaluateRejectsNegativeContext(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestEvaluateSellRestaExposicionDeVentasActivas(t *testing.T) {
+	context := baseContext()
+	context.SellQusdExposure = decimal.MustParse("80")
+	decision, err := Evaluate(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Kind != Blocked {
+		t.Fatalf("kind = %s, quiero blocked por capital QUSD", decision.Kind)
+	}
+	if !strings.Contains(strings.Join(decision.Reasons, " "), "saldo QUSD disponible") {
+		t.Fatalf("razones = %v", decision.Reasons)
+	}
+
+	context.SellQusdExposure = decimal.MustParse("50")
+	decision, err = Evaluate(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Kind != Apply {
+		t.Fatalf("kind = %s, quiero apply", decision.Kind)
+	}
+}
