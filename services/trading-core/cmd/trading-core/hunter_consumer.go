@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -90,6 +89,7 @@ type hunterPayload struct {
 	CounterpartyID   string `json:"counterpartyId,omitempty"`
 	CounterpartyName string `json:"counterpartyName,omitempty"`
 	ObservedAt       int64  `json:"observedAt"`
+	Source           string `json:"source,omitempty"`
 }
 
 func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
@@ -305,16 +305,51 @@ func (consumer *hunterConsumer) run(ctx context.Context) {
 func applyConcurrency() int {
 	raw := strings.TrimSpace(os.Getenv("CORE_APPLY_CONCURRENCY"))
 	if raw == "" {
-		return 3
+		return 6
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil || value < 1 {
-		return 3
+		return 6
 	}
 	if value > 6 {
 		return 6
 	}
 	return value
+}
+
+// defaultFastApplyMS evita la relectura remota en eventos recién recibidos.
+// La relectura añade una llamada a QvaPay justo antes de la mutación y amplía
+// la ventana en la que otro bot puede tomar la oferta. QvaPay sigue validando
+// la aplicación de forma autoritativa.
+const defaultFastApplyMS = 1500
+
+func fastApplyWindow() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("CORE_FAST_APPLY_MS"))
+	if raw == "" {
+		return time.Duration(defaultFastApplyMS) * time.Millisecond
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 || value > 5000 {
+		return time.Duration(defaultFastApplyMS) * time.Millisecond
+	}
+	return time.Duration(value) * time.Millisecond
+}
+
+func canSkipRemoteRead(payload hunterPayload, now time.Time, window time.Duration) bool {
+	// Solo el feed en tiempo real justifica saltarse la relectura: es donde se
+	// pierden las carreras. El sondeo mantiene la comprobación remota para no
+	// reenviar ofertas que ya no cumplen requisitos.
+	if payload.Source != "stream" && payload.Source != "webhook" {
+		return false
+	}
+	if window <= 0 || payload.ObservedAt <= 0 {
+		return false
+	}
+	age := now.Sub(time.UnixMilli(payload.ObservedAt))
+	if age < 0 {
+		age = 0
+	}
+	return age <= window
 }
 
 func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
@@ -323,6 +358,7 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case task := <-consumer.applyQueue:
+			started := time.Now()
 			reason := ""
 			if consumer.exclusions != nil {
 				if excluded, err := consumer.exclusions.IsOfferExcluded(ctx, task.payload.OfferUUID); err == nil && excluded {
@@ -332,29 +368,45 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 			if reason == "" && !consumer.canApplyNow(ctx, task.payload) {
 				reason = "cacería pausada, control runtime no disponible o cotización vencida"
 			}
-			if reason == "" && consumer.trader != nil && !consumer.trader.dryRun {
+			canMS := time.Since(started).Milliseconds()
+			fastPath := canSkipRemoteRead(task.payload, time.Now(), fastApplyWindow())
+			eligibleMS := int64(0)
+			if reason == "" && !fastPath && consumer.trader != nil && !consumer.trader.dryRun {
+				eligibleStarted := time.Now()
 				var eligible bool
 				eligible, reason = consumer.offerStillEligible(ctx, task)
+				eligibleMS = time.Since(eligibleStarted).Milliseconds()
 				if eligible {
 					reason = ""
 				}
 			}
 			if reason != "" {
 				consumer.logger.Warn("apply omitido", "event_id", task.eventID,
-					"offer_uuid", task.payload.OfferUUID, "reason", reason)
+					"offer_uuid", task.payload.OfferUUID, "reason", reason,
+					"source", task.payload.Source, "fast_path", fastPath,
+					"can_ms", canMS, "eligible_ms", eligibleMS,
+					"total_ms", time.Since(started).Milliseconds())
 				if _, err := consumer.operationRepo.Transition(ctx, task.eventID, core.StateRejected, postgres.NowMS()); err != nil {
 					consumer.logger.Warn("no se pudo cerrar operación bloqueada por pausa", "event_id", task.eventID, "error", err)
 				}
 				consumer.invalidateUsage()
 				continue
 			}
+			executeStarted := time.Now()
 			state, err := consumer.trader.Execute(
 				ctx, consumer.operationRepo, task.eventID, task.payload.OfferUUID,
 				task.amount, task.flexible)
+			executeMS := time.Since(executeStarted).Milliseconds()
 			if err != nil {
-				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err)
+				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err,
+					"fast_path", fastPath, "eligible_ms", eligibleMS, "execute_ms", executeMS)
 			} else if state == core.StateConfirmed {
 				consumer.applied.Add(1)
+				consumer.logger.Info("apply confirmado",
+					"event_id", task.eventID, "offer_uuid", task.payload.OfferUUID,
+					"source", task.payload.Source, "fast_path", fastPath,
+					"can_ms", canMS, "eligible_ms", eligibleMS, "execute_ms", executeMS,
+					"total_ms", time.Since(started).Milliseconds())
 			}
 			consumer.invalidateBalance()
 			consumer.recordLocalOperation(ctx, task.payload, task.eventID, task.amount, task.receive, time.Now().UnixMilli())
@@ -461,9 +513,9 @@ func (consumer *hunterConsumer) ownAccountUUID(ctx context.Context) string {
 	return consumer.ownerUUID
 }
 
-// canApplyNow relee los interruptores persistidos justo antes del apply. La
-// caché del consumidor sirve para decidir candidatos, pero no para autorizar
-// una mutación que pudo quedar en cola mientras se pausaba la cacería.
+// canApplyNow relee la pausa persistida y usa el snapshot de configuración
+// ya cacheado. Evita una lectura de runtime_config en el camino crítico del
+// apply; el snapshot se refresca cada 10 s y antes de cada evento.
 func (consumer *hunterConsumer) canApplyNow(ctx context.Context, payload hunterPayload) bool {
 	if consumer == nil || consumer.runtime == nil {
 		return false
@@ -476,58 +528,27 @@ func (consumer *hunterConsumer) canApplyNow(ctx context.Context, payload hunterP
 	`).Scan(&paused, &emergency); err != nil || paused || emergency {
 		return false
 	}
-	config, _, err := consumer.runtime.Load(ctx)
-	maxQuoteAgeSeconds := 0.0
-	if err != nil {
-		if !errors.Is(err, runtimeconfig.ErrNotFound) {
-			return false
-		}
-		coreConfig, configErr := consumer.configSnapshot()
-		if configErr != nil {
-			return false
-		}
-		market, ok := coreConfig.Markets[payload.Coin]
-		if !ok || !market.Active {
-			return false
-		}
-		maxQuoteAgeSeconds, _ = strconv.ParseFloat(coreConfig.Limits.MaxQuoteAgeSeconds.Format(4), 64)
-		if payload.Side == "buy" {
-			if !market.HuntBuy {
-				return false
-			}
-		} else if payload.Side == "sell" {
-			if !market.HuntSell {
-				return false
-			}
-		} else {
-			return false
-		}
-	} else {
-		if payload.Side == "buy" && !config.Hunting.BuyRunning || payload.Side == "sell" && !config.Hunting.SellRunning {
-			return false
-		}
-		for _, market := range config.Markets {
-			if market.Code != payload.Coin {
-				continue
-			}
-			if !market.Active {
-				return false
-			}
-			if payload.Side == "buy" {
-				if !market.HuntBuyEnabled {
-					return false
-				}
-			} else if payload.Side == "sell" {
-				if !market.HuntSellEnabled {
-					return false
-				}
-			} else {
-				return false
-			}
-			maxQuoteAgeSeconds = config.Risk.MaxQuoteAgeSeconds
-			break
-		}
+	config, configErr := consumer.configSnapshot()
+	if configErr != nil {
+		return false
 	}
+	market, ok := config.Markets[payload.Coin]
+	if !ok || !market.Active {
+		return false
+	}
+	switch payload.Side {
+	case "buy":
+		if !market.HuntBuy {
+			return false
+		}
+	case "sell":
+		if !market.HuntSell {
+			return false
+		}
+	default:
+		return false
+	}
+	maxQuoteAgeSeconds, _ := strconv.ParseFloat(config.Limits.MaxQuoteAgeSeconds.Format(4), 64)
 	if payload.ObservedAt <= 0 || maxQuoteAgeSeconds <= 0 {
 		return false
 	}

@@ -760,6 +760,7 @@ func newHTTPClient() *http.Client {
 	return &http.Client{
 		Timeout:       DefaultTimeout,
 		CheckRedirect: checkSameHostRedirect,
+		Transport:     sharedTransport,
 	}
 }
 

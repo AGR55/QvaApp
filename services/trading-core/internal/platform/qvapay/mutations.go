@@ -97,6 +97,7 @@ func NewMutationClient(baseURL, token string) *MutationClient {
 		HTTP: &http.Client{
 			Timeout:       MutationTimeout,
 			CheckRedirect: checkNoMutationRedirect,
+			Transport:     sharedTransport,
 		},
 		Enabled: false,
 	}

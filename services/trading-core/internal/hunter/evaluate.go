@@ -112,6 +112,8 @@ type Evaluation struct {
 	CounterpartyID   string
 	CounterpartyName string
 	ObservedAt       int64
+	// Source identifica si la oportunidad llegó por stream, webhook o poll.
+	Source string
 }
 
 func offerObservedAt(value string) int64 {
@@ -142,6 +144,7 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		CounterpartyID   string `json:"counterpartyId,omitempty"`
 		CounterpartyName string `json:"counterpartyName,omitempty"`
 		ObservedAt       int64  `json:"observedAt"`
+		Source           string `json:"source,omitempty"`
 	}{
 		OfferUUID: e.OfferUUID, Coin: e.Coin, Side: e.Side,
 		Amount: e.Amount.Format(8), Receive: e.Receive.Format(8),
@@ -152,6 +155,7 @@ func (e Evaluation) MarshalJSON() ([]byte, error) {
 		OfferType: e.OfferType, CounterpartyID: e.CounterpartyID,
 		CounterpartyName: e.CounterpartyName,
 		ObservedAt:       e.ObservedAt,
+		Source:           e.Source,
 	})
 }
 

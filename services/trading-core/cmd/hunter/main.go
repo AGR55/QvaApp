@@ -963,7 +963,7 @@ func (service *service) enqueue(result *pollResult) {
 // batchLoop agrupa eventos SSE y los persiste en una sola transacción. El
 // lector SSE nunca espera por la base: solo evalúa y encola.
 func (service *service) batchLoop(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Millisecond)
+	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	batch := make([]*pollResult, 0, 256)
 	retryAfter := time.Time{}
@@ -1083,6 +1083,7 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 			if evaluation.Decision == "ignored" {
 				continue
 			}
+			evaluation.Source = result.Source
 			batch.Queue(`
 				INSERT INTO shadow.hunter_candidates
 					(poll_id, offer_uuid, coin, side, rate, median, decision, reason, observed_at, source)
@@ -1115,7 +1116,11 @@ func (service *service) persistBatch(ctx context.Context, results []*pollResult)
 					(event_id, offer_uuid, coin, side, decision, rate, payload_json,
 					 state, available_at, created_at)
 				VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9)
-				ON CONFLICT (event_id) DO NOTHING`,
+				ON CONFLICT (event_id) DO UPDATE
+				SET payload_json = EXCLUDED.payload_json
+				WHERE shadow.hunter_events.state = 'pending'
+				  AND shadow.hunter_events.payload_json::jsonb->>'source' = 'poll'
+				  AND EXCLUDED.payload_json::jsonb->>'source' IN ('stream', 'webhook')`,
 				eventID, evaluation.OfferUUID, evaluation.Coin, evaluation.Side,
 				evaluation.Decision, evaluation.Rate.Format(8), string(payload),
 				time.Now().UnixMilli(), result.PolledAt,
