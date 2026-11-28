@@ -707,6 +707,7 @@ func (service *service) handleStreamEvent(event qvapay.StreamEvent) {
 // handleOffer es el camino común de SSE y webhook: evalúa y encola el evento
 // sin bloquear el lector con la base de datos.
 func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt, source string) {
+	receivedAt := time.Now().UnixMilli()
 	if service.paused.Load() {
 		return
 	}
@@ -747,6 +748,7 @@ func (service *service) handleOffer(eventName string, offer qvapay.Offer, sentAt
 	decisionStarted := time.Now()
 	decision := hunter.Evaluate(offer, averages[offer.Coin], market, config.PriceGuardPercent)
 	service.applyHuntingRequirements(&decision, offer, time.Now())
+	decision.ReceivedAt = receivedAt
 	decisionElapsed := time.Since(decisionStarted)
 	lag := int64(0)
 	if parsed, err := time.Parse(time.RFC3339Nano, sentAt); err == nil {
@@ -902,6 +904,7 @@ func (service *service) poll(ctx context.Context) {
 		// En polling la cotización se acaba de leer: la antigüedad relevante es
 		// desde esta observación, no el updated_at histórico de la oferta.
 		evaluation.ObservedAt = time.Now().UnixMilli()
+		evaluation.ReceivedAt = evaluation.ObservedAt
 		result.Evaluations = append(result.Evaluations, evaluation)
 		if evaluation.Decision == "auto_buy" || evaluation.Decision == "manual_sell" {
 			result.Candidates++
@@ -1012,7 +1015,9 @@ func (service *service) batchLoop(ctx context.Context) {
 			return
 		case result := <-queue:
 			batch = append(batch, result)
-			if len(batch) >= 256 {
+			// Un candidato no espera al siguiente tick: es la ruta que compite
+			// con otros bots. Los eventos ignorados siguen agrupándose.
+			if len(batch) >= 256 || result.Candidates > 0 {
 				flush()
 			}
 		case <-ticker.C:

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"testing"
 	"time"
 )
@@ -68,5 +69,13 @@ func TestFastApplyWindowValidatesEnvironment(t *testing.T) {
 	t.Setenv("CORE_FAST_APPLY_MS", "invalido")
 	if got := fastApplyWindow(); got != defaultFastApplyMS*time.Millisecond {
 		t.Fatalf("ventana por defecto = %s", got)
+	}
+}
+
+func TestControlFlagsCacheYLecturaFresca(t *testing.T) {
+	consumer := &hunterConsumer{controlPaused: true, controlAt: time.Now()}
+	paused, emergency, err := consumer.controlFlags(context.Background(), false)
+	if err != nil || !paused || emergency {
+		t.Fatalf("la copia cacheada debe usarse sin tocar la base: paused=%v emergency=%v err=%v", paused, emergency, err)
 	}
 }

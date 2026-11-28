@@ -174,24 +174,28 @@ func (repository *CoreOperationRepository) Usage(
 	ctx context.Context,
 	dailySinceMS int64,
 ) (core.Usage, error) {
+	// Solo se leen operaciones activas y las confirmadas del día: ambas usan el
+	// índice (state, updated_at). Antes el agregado recorría todo el histórico
+	// y cada invalidación de caché pagaba ese coste en el camino caliente.
 	var exposureText, dailyText, sellExposureText string
 	var active int64
 	err := repository.pool.QueryRow(ctx, `
+		WITH active AS (
+			SELECT o.qusd_amount, d.side
+			FROM shadow.core_operations o
+			LEFT JOIN shadow.core_decisions d ON d.event_id = o.operation_id
+			WHERE o.state IN ('reserved', 'submitted', 'uncertain')
+		),
+		daily AS (
+			SELECT COALESCE(SUM(qusd_amount::numeric), 0) AS total
+			FROM shadow.core_operations
+			WHERE state IN ('confirmed', 'reconciled') AND updated_at >= $1
+		)
 		SELECT
-			COALESCE(SUM(o.qusd_amount::numeric) FILTER (
-				WHERE o.state IN ('reserved', 'submitted', 'uncertain')
-			), 0)::text,
-			COALESCE(SUM(o.qusd_amount::numeric) FILTER (
-				WHERE o.state IN ('confirmed', 'reconciled') AND o.updated_at >= $1
-			), 0)::text,
-			COUNT(*) FILTER (
-				WHERE o.state IN ('reserved', 'submitted', 'uncertain')
-			),
-			COALESCE(SUM(o.qusd_amount::numeric) FILTER (
-				WHERE o.state IN ('reserved', 'submitted', 'uncertain') AND d.side = 'sell'
-			), 0)::text
-		FROM shadow.core_operations o
-		LEFT JOIN shadow.core_decisions d ON d.event_id = o.operation_id`,
+			COALESCE((SELECT SUM(qusd_amount::numeric) FROM active), 0)::text,
+			(SELECT total FROM daily)::text,
+			(SELECT COUNT(*) FROM active),
+			COALESCE((SELECT SUM(qusd_amount::numeric) FROM active WHERE side = 'sell'), 0)::text`,
 		dailySinceMS,
 	).Scan(&exposureText, &dailyText, &active, &sellExposureText)
 	if err != nil {

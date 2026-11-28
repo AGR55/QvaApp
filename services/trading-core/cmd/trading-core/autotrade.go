@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http/httptrace"
 	"strings"
 	"time"
 
@@ -27,6 +28,10 @@ type qvapayTradeExecutor struct {
 // UUID de orden, importe exacto y recepción positiva. Las fijas se envían sin
 // cuerpo y QvaPay puede responder sin orden; en ese caso se confirma igual.
 func (executor *qvapayTradeExecutor) Apply(ctx context.Context, offerUUID string, amount *decimal.Value) (string, error) {
+	if trace := applyTraceFrom(ctx); trace != nil {
+		ctx = httptrace.WithClientTrace(ctx, trace.clientTrace())
+		trace.markDispatch()
+	}
 	result, err := executor.client.Apply(ctx, offerUUID, amount)
 	if err != nil {
 		return "", err

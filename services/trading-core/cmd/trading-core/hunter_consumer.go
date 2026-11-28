@@ -63,9 +63,14 @@ type hunterConsumer struct {
 	balanceMu    sync.Mutex
 	balanceValue decimal.Value
 	balanceAt    time.Time
-	usageMu      sync.Mutex
-	usageValue   core.Usage
-	usageAt      time.Time
+
+	controlMu        sync.Mutex
+	controlAt        time.Time
+	controlPaused    bool
+	controlEmergency bool
+	usageMu          sync.Mutex
+	usageValue       core.Usage
+	usageAt          time.Time
 }
 
 type executionTask struct {
@@ -95,6 +100,8 @@ type hunterPayload struct {
 	CounterpartyName string `json:"counterpartyName,omitempty"`
 	ObservedAt       int64  `json:"observedAt"`
 	Source           string `json:"source,omitempty"`
+	// ReceivedAt es cuándo el hunter recibió la oferta del feed (epoch ms).
+	ReceivedAt int64 `json:"receivedAt,omitempty"`
 }
 
 func newHunterConsumer(pool *pgxpool.Pool, logger *slog.Logger) *hunterConsumer {
@@ -262,6 +269,8 @@ func buildAutoTrader(logger *slog.Logger) *autoTrader {
 
 func (consumer *hunterConsumer) run(ctx context.Context) {
 	repository := postgres.NewHunterEventRepository(consumer.pool)
+	consumer.refreshBalance(ctx)
+	go consumer.runBalanceRefresher(ctx)
 	if consumer.notifications != nil {
 		go consumer.notifications.Run(ctx)
 	}
@@ -485,7 +494,7 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 			if reason == "" && consumer.offerRequirementsBlocked(task.payload.OfferUUID, time.Now()) {
 				reason = "Oferta bloqueada: requisitos de la contraparte no cumplidos"
 			}
-			if reason == "" && !consumer.canApplyNow(ctx, task.payload) {
+			if reason == "" && !consumer.canApplyNow(ctx, task.payload, true) {
 				reason = "cacería pausada, control runtime no disponible o cotización vencida"
 			}
 			canMS := time.Since(started).Milliseconds()
@@ -519,10 +528,12 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 				continue
 			}
 			executeStarted := time.Now()
+			trace := &applyTrace{}
 			state, err := consumer.trader.Execute(
-				ctx, consumer.operationRepo, task.eventID, task.payload.OfferUUID,
+				withApplyTrace(ctx, trace), consumer.operationRepo, task.eventID, task.payload.OfferUUID,
 				task.amount, task.flexible)
 			executeMS := time.Since(executeStarted).Milliseconds()
+			timing := trace.snapshot(task.payload.ReceivedAt)
 			if err != nil {
 				var mutationError *qvapay.MutationError
 				if errors.As(err, &mutationError) && mutationError.Status == 403 {
@@ -531,16 +542,22 @@ func (consumer *hunterConsumer) applyWorker(ctx context.Context) {
 					consumer.markOfferRejected(task.payload.OfferUUID)
 				}
 				consumer.logger.Warn("autotrade falló", "event_id", task.eventID, "error", err,
-					"fast_path", fastPath, "eligible_ms", eligibleMS, "execute_ms", executeMS)
+					"fast_path", fastPath, "eligible_ms", eligibleMS, "execute_ms", executeMS,
+					"receive_to_dispatch_ms", timing.receiveToDispatchMS, "conn_reused", timing.connReused)
 			} else if state == core.StateConfirmed {
 				consumer.applied.Add(1)
 				consumer.logger.Info("apply confirmado",
 					"event_id", task.eventID, "offer_uuid", task.payload.OfferUUID,
 					"source", task.payload.Source, "fast_path", fastPath,
 					"can_ms", canMS, "eligible_ms", eligibleMS, "execute_ms", executeMS,
+					"receive_to_dispatch_ms", timing.receiveToDispatchMS,
+					"conn_reused", timing.connReused, "conn_wait_ms", timing.connWaitMS,
+					"first_byte_ms", timing.firstByteMS,
 					"total_ms", time.Since(started).Milliseconds())
 			}
-			consumer.invalidateBalance()
+			if err == nil && state == core.StateConfirmed && task.payload.Side == "sell" {
+				consumer.debitBalance(task.amount)
+			}
 			consumer.recordLocalOperation(ctx, task.payload, task.eventID, task.amount, task.receive, time.Now().UnixMilli())
 		}
 	}
@@ -648,16 +665,17 @@ func (consumer *hunterConsumer) ownAccountUUID(ctx context.Context) string {
 // canApplyNow relee la pausa persistida y usa el snapshot de configuración
 // ya cacheado. Evita una lectura de runtime_config en el camino crítico del
 // apply; el snapshot se refresca cada 10 s y antes de cada evento.
-func (consumer *hunterConsumer) canApplyNow(ctx context.Context, payload hunterPayload) bool {
+//
+// fresh=true lee la pausa en la base justo antes de la mutación (worker). Con
+// fresh=false usa una copia de hasta controlCacheTTL para decidir si se encola;
+// el worker vuelve a comprobar antes de enviar, así que la barrera de seguridad
+// no depende de la caché.
+func (consumer *hunterConsumer) canApplyNow(ctx context.Context, payload hunterPayload, fresh bool) bool {
 	if consumer == nil || consumer.runtime == nil {
 		return false
 	}
-	var paused, emergency bool
-	if err := consumer.pool.QueryRow(ctx, `
-		SELECT
-			COALESCE((SELECT value::text IN ('true', '"true"', '1', '"1"') FROM shadow.runtime_settings WHERE key = 'control.paused'), false),
-			COALESCE((SELECT value::text IN ('true', '"true"', '1', '"1"') FROM shadow.runtime_settings WHERE key = 'control.emergency_stop'), false)
-	`).Scan(&paused, &emergency); err != nil || paused || emergency {
+	paused, emergency, err := consumer.controlFlags(ctx, fresh)
+	if err != nil || paused || emergency {
 		return false
 	}
 	config, configErr := consumer.configSnapshot()
@@ -721,7 +739,7 @@ func (consumer *hunterConsumer) consume(
 			"Oferta bloqueada: requisitos de la contraparte no cumplidos", postgres.NowMS())
 		return
 	}
-	if !consumer.canApplyNow(ctx, payload) {
+	if !consumer.canApplyNow(ctx, payload, false) {
 		consumer.persistBlockedEvent(ctx, repository, event, payload,
 			"Cacería pausada, mercado desactivado o cotización vencida", postgres.NowMS())
 		return
@@ -1070,33 +1088,96 @@ func remaining(limit, used decimal.Value) decimal.Value {
 	return left
 }
 
-const balanceCacheTTL = time.Second
+const (
+	controlCacheTTL       = time.Second
+	balanceRefreshEvery   = time.Second
+	balanceRefreshTimeout = 3 * time.Second
+)
 
-// currentBalance lee el saldo QUSD actual de QvaPay y lo cachea un segundo.
-// El snapshot shadow se actualiza cada hora y no sirve para decidir ventas;
-// solo se usa como respaldo si la lectura en vivo falla.
-func (consumer *hunterConsumer) currentBalance(ctx context.Context) decimal.Value {
-	now := time.Now()
-	consumer.balanceMu.Lock()
-	if !consumer.balanceAt.IsZero() && now.Sub(consumer.balanceAt) < balanceCacheTTL {
-		value := consumer.balanceValue
-		consumer.balanceMu.Unlock()
-		return value
+// controlFlags devuelve la pausa y la parada de emergencia. Con fresh=false
+// reutiliza la última lectura durante controlCacheTTL.
+func (consumer *hunterConsumer) controlFlags(ctx context.Context, fresh bool) (bool, bool, error) {
+	consumer.controlMu.Lock()
+	if !fresh && !consumer.controlAt.IsZero() && time.Since(consumer.controlAt) < controlCacheTTL {
+		paused, emergency := consumer.controlPaused, consumer.controlEmergency
+		consumer.controlMu.Unlock()
+		return paused, emergency, nil
 	}
-	consumer.balanceMu.Unlock()
-	value, live := consumer.liveBalance(ctx)
-	if !live && consumer.shadowRepo != nil {
-		if snapshot, err := consumer.shadowRepo.LatestQvapayBalance(ctx); err == nil {
-			value = snapshot
-		} else {
-			value = decimal.Zero()
+	consumer.controlMu.Unlock()
+	var paused, emergency bool
+	if err := consumer.pool.QueryRow(ctx, `
+		SELECT
+			COALESCE((SELECT value::text IN ('true', '"true"', '1', '"1"') FROM shadow.runtime_settings WHERE key = 'control.paused'), false),
+			COALESCE((SELECT value::text IN ('true', '"true"', '1', '"1"') FROM shadow.runtime_settings WHERE key = 'control.emergency_stop'), false)
+	`).Scan(&paused, &emergency); err != nil {
+		return false, false, err
+	}
+	consumer.controlMu.Lock()
+	consumer.controlPaused, consumer.controlEmergency = paused, emergency
+	consumer.controlAt = time.Now()
+	consumer.controlMu.Unlock()
+	return paused, emergency, nil
+}
+
+// currentBalance devuelve el último saldo QUSD conocido sin bloquear. Un
+// refrescador en segundo plano lo actualiza cada balanceRefreshEvery, así que
+// una venta nunca espera a QvaPay para decidir su capital.
+func (consumer *hunterConsumer) currentBalance(_ context.Context) decimal.Value {
+	consumer.balanceMu.Lock()
+	defer consumer.balanceMu.Unlock()
+	return consumer.balanceValue
+}
+
+// debitBalance descuenta localmente una venta confirmada hasta el próximo
+// refresco, para no sobrevender el mismo QUSD mientras QvaPay actualiza su saldo.
+func (consumer *hunterConsumer) debitBalance(amount decimal.Value) {
+	consumer.balanceMu.Lock()
+	defer consumer.balanceMu.Unlock()
+	next := consumer.balanceValue.Sub(amount)
+	if next.Sign() < 0 {
+		next = decimal.Zero()
+	}
+	consumer.balanceValue = next
+	consumer.balanceAt = time.Now()
+}
+
+// refreshBalance lee el saldo en vivo de QvaPay. Si la lectura falla conserva
+// el último valor válido; solo cae al snapshot shadow si no existe ninguno.
+func (consumer *hunterConsumer) refreshBalance(ctx context.Context) {
+	if consumer == nil {
+		return
+	}
+	callCtx, cancel := context.WithTimeout(ctx, balanceRefreshTimeout)
+	defer cancel()
+	value, live := consumer.liveBalance(callCtx)
+	consumer.balanceMu.Lock()
+	defer consumer.balanceMu.Unlock()
+	if live {
+		consumer.balanceValue = value
+		consumer.balanceAt = time.Now()
+		return
+	}
+	if !consumer.balanceAt.IsZero() || consumer.shadowRepo == nil {
+		return
+	}
+	if snapshot, err := consumer.shadowRepo.LatestQvapayBalance(callCtx); err == nil {
+		consumer.balanceValue = snapshot
+		consumer.balanceAt = time.Now()
+	}
+}
+
+// runBalanceRefresher mantiene el saldo QUSD fresco fuera del camino de venta.
+func (consumer *hunterConsumer) runBalanceRefresher(ctx context.Context) {
+	ticker := time.NewTicker(balanceRefreshEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			consumer.refreshBalance(ctx)
 		}
 	}
-	consumer.balanceMu.Lock()
-	consumer.balanceValue = value
-	consumer.balanceAt = now
-	consumer.balanceMu.Unlock()
-	return value
 }
 
 func (consumer *hunterConsumer) liveBalance(ctx context.Context) (decimal.Value, bool) {
@@ -1108,12 +1189,6 @@ func (consumer *hunterConsumer) liveBalance(ctx context.Context) (decimal.Value,
 		return decimal.Zero(), false
 	}
 	return user.Balance, true
-}
-
-func (consumer *hunterConsumer) invalidateBalance() {
-	consumer.balanceMu.Lock()
-	consumer.balanceAt = time.Time{}
-	consumer.balanceMu.Unlock()
 }
 
 // currentUsage cachea el consumo de riesgo un cuarto de segundo. Las
