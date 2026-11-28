@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -41,6 +42,58 @@ type operationReconciler struct {
 	exclusions operationExclusionStore
 	logger     *slog.Logger
 	now        func() time.Time
+
+	// stale guarda, por operación confirmada que sigue sin cerrarse en QvaPay,
+	// cuándo toca volver a leerla. Se duplica el intervalo en cada lectura.
+	staleMu sync.Mutex
+	stale   map[string]staleBackoff
+}
+
+type staleBackoff struct {
+	nextAt time.Time
+	delay  time.Duration
+}
+
+const (
+	staleReconcileMin = 30 * time.Second
+	staleReconcileMax = 15 * time.Minute
+)
+
+// staleDue indica si una operación confirmada estancada debe releerse ahora.
+func (reconciler *operationReconciler) staleDue(operationID string, now time.Time) bool {
+	reconciler.staleMu.Lock()
+	defer reconciler.staleMu.Unlock()
+	backoff, ok := reconciler.stale[operationID]
+	return !ok || !now.Before(backoff.nextAt)
+}
+
+// noteStale registra una lectura de una operación estancada y aplaza la
+// siguiente hasta un máximo de staleReconcileMax.
+func (reconciler *operationReconciler) noteStale(operationID string, now time.Time) {
+	reconciler.staleMu.Lock()
+	defer reconciler.staleMu.Unlock()
+	if reconciler.stale == nil {
+		reconciler.stale = map[string]staleBackoff{}
+	}
+	delay := staleReconcileMin
+	if previous, ok := reconciler.stale[operationID]; ok {
+		delay = previous.delay * 2
+		if delay > staleReconcileMax {
+			delay = staleReconcileMax
+		}
+	}
+	reconciler.stale[operationID] = staleBackoff{nextAt: now.Add(delay), delay: delay}
+}
+
+// pruneStale descarta el backoff de operaciones que ya no están estancadas.
+func (reconciler *operationReconciler) pruneStale(active map[string]struct{}) {
+	reconciler.staleMu.Lock()
+	defer reconciler.staleMu.Unlock()
+	for id := range reconciler.stale {
+		if _, ok := active[id]; !ok {
+			delete(reconciler.stale, id)
+		}
+	}
 }
 
 type uncertainOperation struct {
@@ -78,12 +131,12 @@ func (reconciler *operationReconciler) runOnce(ctx context.Context) {
 		         SELECT 1 FROM shadow.local_operations l
 		         WHERE l.uuid = d.offer_uuid AND l.state IN ('applied', 'paid')
 		       ))
-		ORDER BY o.updated_at ASC LIMIT 20`, staleBefore)
+		ORDER BY o.updated_at ASC LIMIT 200`, staleBefore)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
-	pending := make([]uncertainOperation, 0, 20)
+	pending := make([]uncertainOperation, 0, 64)
 	for rows.Next() {
 		var item uncertainOperation
 		if rows.Scan(&item.operationID, &item.offerUUID, &item.orderUUID, &item.state) == nil {
@@ -91,9 +144,21 @@ func (reconciler *operationReconciler) runOnce(ctx context.Context) {
 		}
 	}
 	rows.Close()
+	now := reconciler.timestamp()
+	active := make(map[string]struct{}, len(pending))
 	for _, item := range pending {
+		// Las inciertas se resuelven con prioridad; las confirmadas ya enviadas
+		// solo necesitan refrescar su vista y se espacian si no cambian.
+		if item.state == string(core.StateConfirmed) {
+			active[item.operationID] = struct{}{}
+			if !reconciler.staleDue(item.operationID, time.UnixMilli(now)) {
+				continue
+			}
+			reconciler.noteStale(item.operationID, time.UnixMilli(now))
+		}
 		reconciler.reconcileOne(ctx, item.operationID, item.offerUUID, item.orderUUID, item.state)
 	}
+	reconciler.pruneStale(active)
 }
 
 func (reconciler *operationReconciler) reconcileOne(
