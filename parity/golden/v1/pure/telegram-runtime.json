@@ -1,0 +1,122 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "notifier",
+  "module": "src/telegram-runtime.ts",
+  "sourceTests": [
+    "test/telegram-runtime.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Runtime de Telegram: callbacks expirados no derriban el proceso, split conserva dos puntos, el guard invalida ediciones anteriores y se reconoce el texto sin cambios. · goldenHash=3902b8805058a6174c2410e57e637ef64aae7b0a883fd2c2b341d3284d10bf7e",
+  "cases": [
+    {
+      "caseId": "pure/telegram-runtime/answer-callback/expired/0001",
+      "op": "telegram.answer-callback",
+      "source": "test/telegram-runtime.test.ts:12",
+      "input": {
+        "scenario": "expired"
+      },
+      "expect": {
+        "answered": false,
+        "calls": 1
+      }
+    },
+    {
+      "caseId": "pure/telegram-runtime/answer-callback/valid/0001",
+      "op": "telegram.answer-callback",
+      "source": "test/telegram-runtime.test.ts:21",
+      "input": {
+        "scenario": "valid"
+      },
+      "expect": {
+        "answered": true,
+        "calls": 1
+      }
+    },
+    {
+      "caseId": "pure/telegram-runtime/split-callback/0001",
+      "op": "telegram.split-callback",
+      "source": "test/telegram-runtime.test.ts:29",
+      "input": {
+        "data": "panel:market:BANDECPREPAGO"
+      },
+      "expect": {
+        "parts": [
+          "panel",
+          "market:BANDECPREPAGO"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/telegram-runtime/render-guard/0001",
+      "op": "telegram.render-guard",
+      "source": "test/telegram-runtime.test.ts:36",
+      "input": {
+        "steps": [
+          {
+            "op": "begin",
+            "key": "admin-chat",
+            "label": "first"
+          },
+          {
+            "op": "isCurrent",
+            "key": "admin-chat",
+            "label": "first"
+          },
+          {
+            "op": "begin",
+            "key": "admin-chat",
+            "label": "second"
+          },
+          {
+            "op": "isCurrent",
+            "key": "admin-chat",
+            "label": "first"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "revision": 1
+          },
+          {
+            "current": true
+          },
+          {
+            "revision": 2
+          },
+          {
+            "current": false
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/telegram-runtime/not-modified/0001",
+      "op": "telegram.not-modified",
+      "source": "test/telegram-runtime.test.ts:44",
+      "input": {
+        "message": "Bad Request: message is not modified"
+      },
+      "expect": {
+        "notModified": true
+      }
+    },
+    {
+      "caseId": "pure/telegram-runtime/not-modified/0002",
+      "op": "telegram.not-modified",
+      "source": "test/telegram-runtime.test.ts:45",
+      "input": {
+        "message": "network error"
+      },
+      "expect": {
+        "notModified": false
+      }
+    }
+  ]
+}

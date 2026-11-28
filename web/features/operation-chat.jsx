@@ -95,7 +95,6 @@ export function OperationChatSheet({ operation, label, onUnreadChange, onClose }
     <Sheet open={Boolean(operation)} onOpenChange={(open) => !open && onClose?.()}>
       <SheetContent className="operation-chat-sheet" aria-describedby="operation-chat-description">
         <SheetHeader className="operation-chat-header">
-          <p className="operation-chat-kicker">OPERACIÓN · CONVERSACIÓN</p>
           <SheetTitle>Chat con la contraparte</SheetTitle>
           <p id="operation-chat-description" className="operation-chat-context">
             {operation ? `${money(operation.amount)} QUSD · ${label(operation.coin)}` : ""}

@@ -1,0 +1,1310 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/core/risk-policy.ts",
+  "sourceTests": [
+    "test/risk-policy.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Dominio de riesgo puro: decisión, cheques y razones. Importes QUSD como string decimal de escala 8; evidencia numérica de los checks normalizada a la misma escala. · goldenHash=2999027dd6b6292d4d992a74aad6d08acdd2f0a80f6be3f958165fd8464c5fff",
+  "cases": [
+    {
+      "caseId": "pure/risk-policy/apply/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:42",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "eligible",
+        "priceReason": "Supera el mínimo de venta.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 100,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": 20,
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1010,
+          "referenceRate": 1005,
+          "observedAt": 1788695995000,
+          "counterpartyId": "peer-1"
+        },
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "apply",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "20.00000000",
+        "requiredFiat": "0.00000000",
+        "projectedExposureQusd": "25.00000000",
+        "projectedDailyAppliedQusd": "40.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "pass",
+            "actual": "eligible",
+            "limit": "eligible",
+            "reason": "Supera el mínimo de venta."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Interruptor de emergencia: correcto."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Sin mutaciones inciertas: correcto."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "pass",
+            "actual": "25.00000000",
+            "limit": "50.00000000",
+            "reason": "Exposición simultánea: dentro del límite."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "pass",
+            "actual": "40.00000000",
+            "limit": "100.00000000",
+            "reason": "Volumen diario: dentro del límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "2.00000000",
+            "reason": "Operaciones simultáneas: dentro del límite."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "pass",
+            "actual": "5.00000000",
+            "limit": "45.00000000",
+            "reason": "Antigüedad de la cotización: dentro del límite."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "pass",
+            "actual": "0.49751244",
+            "limit": "1.00000000",
+            "reason": "Deslizamiento frente a referencia: dentro del límite."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "not_applicable",
+            "limit": "30.00000000",
+            "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "not_applicable",
+            "limit": "300.00000000",
+            "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+          },
+          {
+            "code": "qusd_capital",
+            "label": "QUSD disponible después de reserva",
+            "status": "pass",
+            "actual": "90.00000000",
+            "limit": "20.00000000",
+            "reason": "QUSD disponible después de reserva: suficiente."
+          }
+        ],
+        "reasons": [
+          "La oportunidad cumple la política de precio y todos los límites."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/all-reasons/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:52",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "eligible",
+        "priceReason": "Supera el mínimo de venta.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 25,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 45,
+        "dailyAppliedQusd": 95,
+        "activeOperations": 2,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": true,
+        "hasUnresolvedMutation": true,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1010,
+          "referenceRate": 1005,
+          "observedAt": 1788695995000,
+          "counterpartyId": "peer-1"
+        },
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "blocked",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "20.00000000",
+        "requiredFiat": "0.00000000",
+        "projectedExposureQusd": "65.00000000",
+        "projectedDailyAppliedQusd": "115.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "pass",
+            "actual": "eligible",
+            "limit": "eligible",
+            "reason": "Supera el mínimo de venta."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "fail",
+            "actual": true,
+            "limit": false,
+            "reason": "El interruptor de emergencia está activo."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "fail",
+            "actual": true,
+            "limit": false,
+            "reason": "Existe una mutación incierta pendiente de conciliación."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "fail",
+            "actual": "65.00000000",
+            "limit": "50.00000000",
+            "reason": "La exposición proyectada supera el límite simultáneo."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "fail",
+            "actual": "115.00000000",
+            "limit": "100.00000000",
+            "reason": "El volumen diario proyectado supera el límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "fail",
+            "actual": "3.00000000",
+            "limit": "2.00000000",
+            "reason": "Se alcanzó el máximo de operaciones simultáneas."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "pass",
+            "actual": "5.00000000",
+            "limit": "45.00000000",
+            "reason": "Antigüedad de la cotización: dentro del límite."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "pass",
+            "actual": "0.49751244",
+            "limit": "1.00000000",
+            "reason": "Deslizamiento frente a referencia: dentro del límite."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "not_applicable",
+            "limit": "30.00000000",
+            "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "not_applicable",
+            "limit": "300.00000000",
+            "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+          },
+          {
+            "code": "qusd_capital",
+            "label": "QUSD disponible después de reserva",
+            "status": "fail",
+            "actual": "15.00000000",
+            "limit": "20.00000000",
+            "reason": "El saldo QUSD disponible después de la reserva no cubre la operación."
+          }
+        ],
+        "reasons": [
+          "El interruptor de emergencia está activo.",
+          "Existe una mutación incierta pendiente de conciliación.",
+          "La exposición proyectada supera el límite simultáneo.",
+          "El volumen diario proyectado supera el límite.",
+          "Se alcanzó el máximo de operaciones simultáneas.",
+          "El saldo QUSD disponible después de la reserva no cubre la operación."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/ignored/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:78",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "ignored",
+        "priceReason": "No alcanza el precio mínimo configurado.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 100,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": 20,
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1010,
+          "referenceRate": 1005,
+          "observedAt": 1788695995000,
+          "counterpartyId": "peer-1"
+        },
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "ignored",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "20.00000000",
+        "requiredFiat": "0.00000000",
+        "projectedExposureQusd": "25.00000000",
+        "projectedDailyAppliedQusd": "40.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "not_applicable",
+            "actual": "ignored",
+            "limit": "eligible",
+            "reason": "No alcanza el precio mínimo configurado."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Interruptor de emergencia: correcto."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Sin mutaciones inciertas: correcto."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "pass",
+            "actual": "25.00000000",
+            "limit": "50.00000000",
+            "reason": "Exposición simultánea: dentro del límite."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "pass",
+            "actual": "40.00000000",
+            "limit": "100.00000000",
+            "reason": "Volumen diario: dentro del límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "2.00000000",
+            "reason": "Operaciones simultáneas: dentro del límite."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "pass",
+            "actual": "5.00000000",
+            "limit": "45.00000000",
+            "reason": "Antigüedad de la cotización: dentro del límite."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "pass",
+            "actual": "0.49751244",
+            "limit": "1.00000000",
+            "reason": "Deslizamiento frente a referencia: dentro del límite."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "not_applicable",
+            "limit": "30.00000000",
+            "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "not_applicable",
+            "limit": "300.00000000",
+            "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+          },
+          {
+            "code": "qusd_capital",
+            "label": "QUSD disponible después de reserva",
+            "status": "pass",
+            "actual": "90.00000000",
+            "limit": "20.00000000",
+            "reason": "QUSD disponible después de reserva: suficiente."
+          }
+        ],
+        "reasons": [
+          "No alcanza el precio mínimo configurado."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/manual-review/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:92",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "manual_review",
+        "priceReason": "La referencia de mercado tiene pocas muestras.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 100,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": 20,
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1010,
+          "referenceRate": 1005,
+          "observedAt": 1788695995000,
+          "counterpartyId": "peer-1"
+        },
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "manual_review",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "20.00000000",
+        "requiredFiat": "0.00000000",
+        "projectedExposureQusd": "25.00000000",
+        "projectedDailyAppliedQusd": "40.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "fail",
+            "actual": "manual_review",
+            "limit": "eligible",
+            "reason": "La referencia de mercado tiene pocas muestras."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Interruptor de emergencia: correcto."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Sin mutaciones inciertas: correcto."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "pass",
+            "actual": "25.00000000",
+            "limit": "50.00000000",
+            "reason": "Exposición simultánea: dentro del límite."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "pass",
+            "actual": "40.00000000",
+            "limit": "100.00000000",
+            "reason": "Volumen diario: dentro del límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "2.00000000",
+            "reason": "Operaciones simultáneas: dentro del límite."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "pass",
+            "actual": "5.00000000",
+            "limit": "45.00000000",
+            "reason": "Antigüedad de la cotización: dentro del límite."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "pass",
+            "actual": "0.49751244",
+            "limit": "1.00000000",
+            "reason": "Deslizamiento frente a referencia: dentro del límite."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "not_applicable",
+            "limit": "30.00000000",
+            "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "not_applicable",
+            "limit": "300.00000000",
+            "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+          },
+          {
+            "code": "qusd_capital",
+            "label": "QUSD disponible después de reserva",
+            "status": "pass",
+            "actual": "90.00000000",
+            "limit": "20.00000000",
+            "reason": "QUSD disponible después de reserva: suficiente."
+          }
+        ],
+        "reasons": [
+          "La referencia de mercado tiene pocas muestras."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/stale-quote/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:104",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "eligible",
+        "priceReason": "Supera el mínimo de venta.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 100,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": 20,
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1030,
+          "referenceRate": 1005,
+          "observedAt": 1788695940000,
+          "counterpartyId": "peer-1"
+        },
+        "lastMarketOperationAt": 1788695990000,
+        "lastCounterpartyOperationAt": 1788695940000,
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "blocked",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "20.00000000",
+        "requiredFiat": "0.00000000",
+        "projectedExposureQusd": "25.00000000",
+        "projectedDailyAppliedQusd": "40.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "pass",
+            "actual": "eligible",
+            "limit": "eligible",
+            "reason": "Supera el mínimo de venta."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Interruptor de emergencia: correcto."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Sin mutaciones inciertas: correcto."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "pass",
+            "actual": "25.00000000",
+            "limit": "50.00000000",
+            "reason": "Exposición simultánea: dentro del límite."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "pass",
+            "actual": "40.00000000",
+            "limit": "100.00000000",
+            "reason": "Volumen diario: dentro del límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "2.00000000",
+            "reason": "Operaciones simultáneas: dentro del límite."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "fail",
+            "actual": "60.00000000",
+            "limit": "45.00000000",
+            "reason": "La cotización es demasiado antigua para operar."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "warning",
+            "actual": "2.48756219",
+            "limit": "1.00000000",
+            "reason": "El precio se aleja demasiado de la referencia."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "warning",
+            "actual": "10.00000000",
+            "limit": "30.00000000",
+            "reason": "El mercado todavía está en periodo de enfriamiento."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "warning",
+            "actual": "60.00000000",
+            "limit": "300.00000000",
+            "reason": "La contraparte todavía está en periodo de enfriamiento."
+          },
+          {
+            "code": "qusd_capital",
+            "label": "QUSD disponible después de reserva",
+            "status": "pass",
+            "actual": "90.00000000",
+            "limit": "20.00000000",
+            "reason": "QUSD disponible después de reserva: suficiente."
+          }
+        ],
+        "reasons": [
+          "La cotización es demasiado antigua para operar."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/advisory-only/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:123",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "eligible",
+        "priceReason": "Supera el mínimo de venta.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 100,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": 20,
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1030,
+          "referenceRate": 1005,
+          "observedAt": 1788696000000,
+          "counterpartyId": "peer-1"
+        },
+        "lastMarketOperationAt": 1788695990000,
+        "lastCounterpartyOperationAt": 1788695940000,
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "apply",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "20.00000000",
+        "requiredFiat": "0.00000000",
+        "projectedExposureQusd": "25.00000000",
+        "projectedDailyAppliedQusd": "40.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "pass",
+            "actual": "eligible",
+            "limit": "eligible",
+            "reason": "Supera el mínimo de venta."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Interruptor de emergencia: correcto."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Sin mutaciones inciertas: correcto."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "pass",
+            "actual": "25.00000000",
+            "limit": "50.00000000",
+            "reason": "Exposición simultánea: dentro del límite."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "pass",
+            "actual": "40.00000000",
+            "limit": "100.00000000",
+            "reason": "Volumen diario: dentro del límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "2.00000000",
+            "reason": "Operaciones simultáneas: dentro del límite."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "45.00000000",
+            "reason": "Antigüedad de la cotización: dentro del límite."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "warning",
+            "actual": "2.48756219",
+            "limit": "1.00000000",
+            "reason": "El precio se aleja demasiado de la referencia."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "warning",
+            "actual": "10.00000000",
+            "limit": "30.00000000",
+            "reason": "El mercado todavía está en periodo de enfriamiento."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "warning",
+            "actual": "60.00000000",
+            "limit": "300.00000000",
+            "reason": "La contraparte todavía está en periodo de enfriamiento."
+          },
+          {
+            "code": "qusd_capital",
+            "label": "QUSD disponible después de reserva",
+            "status": "pass",
+            "actual": "90.00000000",
+            "limit": "20.00000000",
+            "reason": "QUSD disponible después de reserva: suficiente."
+          }
+        ],
+        "reasons": [
+          "La oportunidad cumple la política de precio y todos los límites."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/buy-qusd-fiat-capital/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:134",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "eligible",
+        "priceReason": "Supera el mínimo de venta.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 0,
+        "fiatAvailable": 19999,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": 20,
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "buy_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1010,
+          "referenceRate": 1005,
+          "observedAt": 1788695995000,
+          "counterpartyId": "peer-1"
+        },
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expect": {
+        "kind": "blocked",
+        "opportunityUuid": "offer-1",
+        "evaluatedAt": 1788696000000,
+        "requiredQusd": "0.00000000",
+        "requiredFiat": "20000.00000000",
+        "projectedExposureQusd": "25.00000000",
+        "projectedDailyAppliedQusd": "40.00000000",
+        "checks": [
+          {
+            "code": "price_policy",
+            "label": "Política de precio",
+            "status": "pass",
+            "actual": "eligible",
+            "limit": "eligible",
+            "reason": "Supera el mínimo de venta."
+          },
+          {
+            "code": "emergency_stop",
+            "label": "Interruptor de emergencia",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Interruptor de emergencia: correcto."
+          },
+          {
+            "code": "automation_paused",
+            "label": "Automatización activa",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Automatización activa: correcto."
+          },
+          {
+            "code": "unresolved_mutation",
+            "label": "Sin mutaciones inciertas",
+            "status": "pass",
+            "actual": false,
+            "limit": false,
+            "reason": "Sin mutaciones inciertas: correcto."
+          },
+          {
+            "code": "operation_amount",
+            "label": "Importe por operación",
+            "status": "pass",
+            "actual": "20.00000000",
+            "limit": "25.00000000",
+            "reason": "Importe por operación: dentro del límite."
+          },
+          {
+            "code": "concurrent_exposure",
+            "label": "Exposición simultánea",
+            "status": "pass",
+            "actual": "25.00000000",
+            "limit": "50.00000000",
+            "reason": "Exposición simultánea: dentro del límite."
+          },
+          {
+            "code": "daily_volume",
+            "label": "Volumen diario",
+            "status": "pass",
+            "actual": "40.00000000",
+            "limit": "100.00000000",
+            "reason": "Volumen diario: dentro del límite."
+          },
+          {
+            "code": "concurrent_operations",
+            "label": "Operaciones simultáneas",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "2.00000000",
+            "reason": "Operaciones simultáneas: dentro del límite."
+          },
+          {
+            "code": "quote_age",
+            "label": "Antigüedad de la cotización",
+            "status": "pass",
+            "actual": "5.00000000",
+            "limit": "45.00000000",
+            "reason": "Antigüedad de la cotización: dentro del límite."
+          },
+          {
+            "code": "expected_margin",
+            "label": "Margen esperado",
+            "status": "pass",
+            "actual": "2.00000000",
+            "limit": "0.50000000",
+            "reason": "Margen esperado: suficiente."
+          },
+          {
+            "code": "slippage",
+            "label": "Deslizamiento frente a referencia",
+            "status": "pass",
+            "actual": "0.49751244",
+            "limit": "1.00000000",
+            "reason": "Deslizamiento frente a referencia: dentro del límite."
+          },
+          {
+            "code": "consecutive_errors",
+            "label": "Errores consecutivos",
+            "status": "pass",
+            "actual": "0.00000000",
+            "limit": "2.00000000",
+            "reason": "Errores consecutivos: dentro del límite."
+          },
+          {
+            "code": "market_cooldown",
+            "label": "Enfriamiento del mercado",
+            "status": "not_applicable",
+            "limit": "30.00000000",
+            "reason": "Enfriamiento del mercado: sin actividad previa aplicable."
+          },
+          {
+            "code": "counterparty_cooldown",
+            "label": "Enfriamiento de contraparte",
+            "status": "not_applicable",
+            "limit": "300.00000000",
+            "reason": "Enfriamiento de contraparte: sin actividad previa aplicable."
+          },
+          {
+            "code": "fiat_capital",
+            "label": "Capital fiat disponible",
+            "status": "fail",
+            "actual": "19999.00000000",
+            "limit": "20000.00000000",
+            "reason": "El capital fiat disponible no cubre la operación."
+          }
+        ],
+        "reasons": [
+          "El capital fiat disponible no cubre la operación."
+        ]
+      }
+    },
+    {
+      "caseId": "pure/risk-policy/non-finite/0001",
+      "op": "risk.evaluate",
+      "source": "test/risk-policy.test.ts:158",
+      "input": {
+        "now": 1788696000000,
+        "priceDecision": "eligible",
+        "priceReason": "Supera el mínimo de venta.",
+        "expectedMarginPercent": 2,
+        "qusdBalance": 100,
+        "fiatAvailable": 100000,
+        "concurrentQusdExposure": 5,
+        "dailyAppliedQusd": "NaN",
+        "activeOperations": 1,
+        "consecutiveErrors": 0,
+        "paused": false,
+        "emergencyStop": false,
+        "hasUnresolvedMutation": false,
+        "opportunity": {
+          "uuid": "offer-1",
+          "market": "BANK_CUP",
+          "side": "sell_qusd",
+          "qusdAmount": 20,
+          "requiredFiat": 20000,
+          "quotedRate": 1010,
+          "referenceRate": 1005,
+          "observedAt": 1788695995000,
+          "counterpartyId": "peer-1"
+        },
+        "limits": {
+          "maxQusdPerOperation": 25,
+          "maxConcurrentQusdExposure": 50,
+          "maxDailyAppliedQusd": 100,
+          "maxConcurrentOperations": 2,
+          "minQusdReserve": 10,
+          "maxQuoteAgeSeconds": 45,
+          "minExpectedMarginPercent": 0.5,
+          "maxSlippagePercent": 1,
+          "maxConsecutiveErrors": 3,
+          "marketCooldownSeconds": 30,
+          "counterpartyCooldownSeconds": 300
+        }
+      },
+      "expectError": {
+        "class": "validation",
+        "messageIncludes": "finitos y no negativos"
+      }
+    }
+  ]
+}

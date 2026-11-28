@@ -11,6 +11,7 @@ import {
 import { Empty, Panel, ViewHead } from "../components/common.jsx";
 import { money } from "../lib/format.js";
 import { requestJson } from "../lib/http.js";
+import { stateLabel } from "../lib/labels.js";
 import { Badge, Button, Input } from "../components/ui.jsx";
 import { Field, FieldContent, FieldLabel, FieldTitle } from "../components/ui/field.tsx";
 import { MarketIdentity } from "../components/market-identity.jsx";
@@ -140,6 +141,7 @@ export function Hunting({ data, label, unit, onChanged }) {
     <div className="hunting-stack">
       <ViewHead
         title="Cacería"
+        description="Control de compra y venta automática, diagnóstico y simulación de precios."
       />
       <section className="hunting-command" aria-label="Controles de cacería">
         <div className="hunt-scan-status">
@@ -561,17 +563,7 @@ function HuntSide({
 }
 
 function OperationState({ value }) {
-  const labels = {
-    applied: "Aplicada",
-    acknowledged: "Pago anunciado",
-    paid: "Pagada",
-    cancelled: "Cancelada",
-    completed: "Completada",
-    failed: "Fallida",
-  };
-  return (
-    <Badge className={`state state-${value}`}>{labels[value] || value}</Badge>
-  );
+  return <Badge className={`state state-${value}`}>{stateLabel(value)}</Badge>;
 }
 
 function rateDraft(markets) {

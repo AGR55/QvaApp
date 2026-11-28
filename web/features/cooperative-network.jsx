@@ -13,6 +13,8 @@ import { requestJson } from "../lib/http.js";
 import { money } from "../lib/format.js";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel } from "../components/ui/alert-dialog.tsx";
 
+const MIN_COOPERATIVE_QUSD = 5;
+
 export function CooperativeNetwork({ data, label, unit, onChanged }) {
   const network = data.cooperativeNetwork || disabledState;
   const [drafts, setDrafts] = useState({});
@@ -34,34 +36,33 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
 
   const draftFor = (market) => {
     const current = network.contributions?.[market.code];
-    return drafts[market.code] || {
+    return drafts[market.code] ?? {
       minimal: current?.minimal ?? "",
-      price: current?.price ?? "",
     };
   };
-  const updateDraft = (coin, field, value) =>
-    setDrafts((current) => {
-      const base = current[coin] || network.contributions?.[coin] || {
-        minimal: "",
-        price: "",
-      };
-      return { ...current, [coin]: { ...base, [field]: value } };
-    });
+  const updateDraft = (coin, value) =>
+    setDrafts((current) => ({ ...current, [coin]: { minimal: value } }));
   const publish = async (market) => {
     const draft = draftFor(market);
+    const minimal = Number(draft.minimal);
+    if (!Number.isFinite(minimal) || minimal <= 0) {
+      setNotice("Escribe la cantidad mínima que quieres comprar en este mercado.");
+      return;
+    }
     setBusy(market.code);
     setNotice("");
     try {
       await requestJson("/api/cooperative-network/contributions", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          coin: market.code,
-          minimal: Number(draft.minimal),
-          price: Number(draft.price),
-        }),
+        body: JSON.stringify({ coin: market.code, minimal }),
       });
-      setNotice(`Aportación de ${label(market.code)} enviada a la red.`);
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[market.code];
+        return next;
+      });
+      setNotice(`Publicado en ${label(market.code)}: ${money(market.buyMaxRate, 4)} ${market.currency}/QUSD · mínimo ${money(minimal)} QUSD.`);
       await onChanged();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo publicar la aportación.");
@@ -81,7 +82,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
           body: "{}",
         },
       );
-      setNotice(`Aportación de ${label(market.code)} retirada.`);
+      setNotice(`Retirado de ${label(market.code)}.`);
       await onChanged();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo retirar la aportación.");
@@ -98,7 +99,7 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
         headers: { "content-type": "application/json" },
         body: "{}",
       });
-      setNotice("Red reconciliada con Sync Core.");
+      setNotice("Red sincronizada.");
       await onChanged();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo reconciliar la red.");
@@ -107,45 +108,177 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
     }
   };
 
+  const markets = data.markets.filter((market) => market.active !== false);
+  const published = Object.keys(network.contributions || {}).length;
+  const connected = Boolean(network.enabled && network.httpConnected);
+
   return (
     <div className="view-stack cooperative-network-view">
       <ViewHead
-        title="Red cooperativa"
+        title="Cacerías conjuntas"
+        description="Comparte liquidez con otros bots y publica tu capacidad por mercado."
         meta={(
           <Button type="button" variant="outline" disabled={!network.enabled || busy === "reconcile"} onClick={() => void reconcile()}>
-            <RefreshCw aria-hidden="true" /> Actualizar red
+            <RefreshCw aria-hidden="true" /> Reconectar
           </Button>
         )}
       />
 
-      <div className="network-status-row" role="status" aria-live="polite">
-        <ConnectionPill connected={network.httpConnected} label="HTTP" />
-        <ConnectionPill connected={network.natsConnected} label="NATS" />
-        <span className="freshness">
-          {network.lastNatsAt || network.lastHttpAt
-            ? `Snapshot · ${new Date(network.lastNatsAt || network.lastHttpAt).toLocaleString("es-CU")}`
-            : "Sin snapshot"}
-        </span>
-      </div>
+      <section className={`network-hero ${connected ? "is-online" : "is-offline"}`} aria-label="Estado del sincronizador">
+        <div className="network-hero-signal">
+          {connected ? <Wifi aria-hidden="true" /> : <WifiOff aria-hidden="true" />}
+          <div>
+            <strong>{connected ? "Conectado al sincronizador" : network.enabled ? "Sin conexión con el sincronizador" : "Sincronizador sin configurar"}</strong>
+            <p>
+              {connected
+                ? `${published} ${published === 1 ? "mercado publicado" : "mercados publicados"} en la red cooperativa.`
+                : network.lastError || "Revisa SYNC_* o pulsa Reconectar para reintentar."}
+            </p>
+          </div>
+        </div>
+        <dl className="network-hero-stats">
+          <div>
+            <dt>HTTP</dt>
+            <dd><ConnectionDot connected={network.httpConnected} /></dd>
+          </div>
+          <div>
+            <dt>NATS</dt>
+            <dd>{network.natsConnected ? <ConnectionDot connected /> : <span className="network-optional">Informativo</span>}</dd>
+          </div>
+          <div>
+            <dt>Última respuesta</dt>
+            <dd>{network.lastHttpAt ? new Date(network.lastHttpAt).toLocaleTimeString("es-CU", { hour: "2-digit", minute: "2-digit" }) : "—"}</dd>
+          </div>
+        </dl>
+      </section>
+
       {notice ? <p className="network-notice" role="status">{notice}</p> : null}
 
       {!network.enabled ? (
-        <Panel title="Sincronización">
+        <Panel title="Conexión">
           <div className="network-callout">
             <WifiOff aria-hidden="true" />
-            <p>Configura <code>SYNC_*</code> para conectar Sync Core.</p>
+            <p>Faltan las variables <code>SYNC_*</code> en el entorno del edge. El sincronizador está desplegado: solo necesita la URL, el correo y la contraseña para entrar.</p>
           </div>
         </Panel>
       ) : null}
 
-      {network.lastError ? (
+      {network.lastError && connected ? (
         <div className="network-error" role="alert">
           <ShieldAlert aria-hidden="true" />
           <span>{network.lastError}</span>
         </div>
       ) : null}
 
-      <Panel title="Cacería cooperativa · segunda prioridad" wide>
+      <Panel title="Publicar por mercado" wide>
+        <p className="network-capacity-hint">
+          El precio es el de tu compra configurada y el fiat sale del saldo del mercado. Solo eliges la cantidad mínima que estás dispuesto a que te asignen.
+        </p>
+        <div className="network-market-grid">
+          {markets.map((market) => {
+            const draft = draftFor(market);
+            const current = network.contributions?.[market.code];
+            const formId = `network-contribution-${market.code}`;
+            const minQusd = market.buyMaxRate > 0 ? MIN_COOPERATIVE_QUSD * market.buyMaxRate : 0;
+            const canPublish = connected && market.fiatBalance > minQusd && market.buyMaxRate > 0;
+            const projected = Number(draft.minimal) > 0 && market.buyMaxRate > 0
+              ? Number(draft.minimal) * market.buyMaxRate
+              : 0;
+            return (
+              <Card className={`network-market-card ${current ? "is-published" : ""}`} key={market.code} size="sm">
+                <CardHeader>
+                  <CardTitle>{label(market.code)}</CardTitle>
+                  <CardAction>
+                    <Badge variant={current ? "success" : "neutral"}>
+                      {current ? "Publicado" : "Sin publicar"}
+                    </Badge>
+                  </CardAction>
+                </CardHeader>
+                <CardContent className="network-market-card-body">
+                  <dl className="network-market-terms">
+                    <div>
+                      <dt>Precio de compra</dt>
+                      <dd>{market.buyMaxRate > 0 ? `${money(market.buyMaxRate, 4)} ${market.currency}` : "Sin configurar"}</dd>
+                    </div>
+                    <div>
+                      <dt>Fiat disponible</dt>
+                      <dd>{money(market.fiatBalance)} {market.currency}</dd>
+                    </div>
+                    <div>
+                      <dt>Mínimo por cacería</dt>
+                      <dd>{money(minQusd)} {market.currency}</dd>
+                    </div>
+                  </dl>
+                  <form id={formId} className="network-market-form" onSubmit={(event) => { event.preventDefault(); void publish(market); }}>
+                    <label htmlFor={`${market.code}-minimal`}>
+                      <span className="network-minimal-title">Cantidad mínima</span>
+                      <span className="network-minimal-hint">QUSD que aceptas como mínimo</span>
+                    </label>
+                    <Input
+                      id={`${market.code}-minimal`}
+                      name="minimal"
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      inputMode="decimal"
+                      autoComplete="off"
+                      required
+                      aria-label={`Cantidad mínima para ${market.label}`}
+                      value={draft.minimal}
+                      onChange={(event) => updateDraft(market.code, event.target.value)}
+                    />
+                    <p className="network-market-projection">
+                      {projected > 0
+                        ? `Reservaría hasta ${money(projected)} ${market.currency} de tu fiat.`
+                        : "Se publica con tu saldo fiat actual."}
+                    </p>
+                  </form>
+                </CardContent>
+                <footer className="network-market-actions">
+                  <Button form={formId} type="submit" variant="primary" disabled={!canPublish || busy === market.code}>
+                    {current ? "Actualizar" : "Publicar"}
+                  </Button>
+                  {current ? (
+                    <Button type="button" variant="outline" disabled={busy === market.code} onClick={() => void withdraw(market)}>
+                      Retirar
+                    </Button>
+                  ) : null}
+                  {!canPublish ? (
+                    <small>{market.buyMaxRate <= 0 ? "Falta el precio de compra." : `Necesitas más de ${money(minQusd)} ${market.currency}.`}</small>
+                  ) : null}
+                </footer>
+              </Card>
+            );
+          })}
+        </div>
+      </Panel>
+
+      <Panel title="Liquidez de la red" wide>
+        <div className="network-aggregate-grid">
+          {aggregates.length ? aggregates.map((item) => (
+            <div className="network-aggregate" key={item.coin}>
+              <div className="network-aggregate-head">
+                <strong>{label(item.coin)}</strong>
+                <Badge variant="neutral">
+                  <UsersRound aria-hidden="true" /> {item.offersCount} bots
+                </Badge>
+              </div>
+              <p className="network-aggregate-amount">{money(item.fiat)} <span>{unit(item.coin)}</span></p>
+              <p className="network-aggregate-price">
+                {item.price > 0 ? `${money(item.price, 4)} ${unit(item.coin)}/QUSD` : "Sin precio"}
+                {item.minimal > 0 ? ` · mínimo ${money(item.minimal)} QUSD` : ""}
+              </p>
+            </div>
+          )) : (
+            <div className="network-callout">
+              <RadioTower aria-hidden="true" />
+              <p>Todavía no hay capacidad global. Publica un mercado para abrir la red.</p>
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Cacería conjunta · segunda prioridad" wide>
         <div className="flex flex-wrap items-center gap-3">
           <Badge variant={hunting.enabled ? "success" : "neutral"}>{hunting.enabled ? "Activa" : "Detenida"}</Badge>
           <Button variant="outline" disabled={!network.enabled || Boolean(busy)} onClick={() => cooperativeAction("/api/cooperative-network/hunting", { enabled: !hunting.enabled }, "PUT")}>
@@ -169,106 +302,15 @@ export function CooperativeNetwork({ data, label, unit, onChanged }) {
           <AlertDialogFooter><AlertDialogCancel>Volver</AlertDialogCancel><Button disabled={Boolean(busy)} onClick={() => cooperativeAction(`/api/cooperative-network/executions/${encodeURIComponent(distribution.offer.uuid)}/distributed`, { confirmed: true })}>Confirmo que repartí todo</Button></AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <Panel
-        title="Liquidez global"
-        wide
-      >
-        <div className="network-aggregate-grid">
-          {aggregates.length ? aggregates.map((item) => (
-            <Card className="network-aggregate" key={item.coin} size="sm">
-              <CardHeader>
-                <CardTitle>{label(item.coin)}</CardTitle>
-                <CardAction>
-                  <Badge variant="neutral">
-                    <UsersRound aria-hidden="true" /> {item.offersCount} bots
-                  </Badge>
-                </CardAction>
-              </CardHeader>
-              <CardContent className="network-aggregate-content">
-                <strong>{money(item.fiat)} {unit(item.coin)}</strong>
-              </CardContent>
-            </Card>
-          )) : (
-            <div className="network-callout">
-              <RadioTower aria-hidden="true" />
-              <p>Todavía no hay capacidad global guardada.</p>
-            </div>
-          )}
-        </div>
-      </Panel>
-
-      <Panel
-        title="Aportaciones"
-        wide
-      >
-        <p className="network-capacity-hint">El aporte usa el saldo fiat del mercado. Se actualiza automáticamente y se retira si queda por debajo de 5 QUSD al precio indicado.</p>
-        <div className="network-contribution-table-wrap">
-          <table className="network-contribution-table">
-            <caption className="sr-only">Aportaciones por mercado a la red cooperativa</caption>
-            <thead>
-              <tr>
-                <th scope="col">Mercado</th>
-                <th scope="col">Estado</th>
-                <th scope="col">Fiat aportado</th>
-                <th scope="col">Mínimo</th>
-                <th scope="col">Precio objetivo</th>
-                <th scope="col">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.markets.map((market) => {
-                const draft = draftFor(market);
-                const current = network.contributions?.[market.code];
-                const formId = `network-contribution-${market.code}`;
-                const state = current?.state === "confirmed" ? "confirmed" : current ? "pending" : "draft";
-                const status = state === "confirmed" ? "Confirmada" : state === "pending" ? "Pendiente" : "Sin publicar";
-                return (
-                  <tr className={`network-contribution-row is-${state}`} key={market.code}>
-                    <td data-label="Mercado" className="network-market-cell">
-                      <form id={formId} onSubmit={(event) => { event.preventDefault(); void publish(market); }} />
-                      <strong>{market.label}</strong>
-                      <small>{market.currency}</small>
-                    </td>
-                    <td data-label="Estado">
-                      <Badge variant="neutral">{status}</Badge>
-                    </td>
-                    <td data-label={`Fiat aportado (${market.currency})`}>
-                      <strong>{money(current?.fiat ?? market.fiatBalance)} {market.currency}</strong>
-                      {current && Math.abs(current.fiat - market.fiatBalance) > 0.01 ? <small className="network-local-balance">Saldo local: {money(market.fiatBalance)} {market.currency}</small> : null}
-                    </td>
-                    <td data-label="Mínimo">
-                      <Input form={formId} id={`${market.code}-minimal`} name="minimal" type="number" min="0.01" step="0.01" inputMode="decimal" autoComplete="off" required aria-label={`Mínimo para ${market.label}`} value={draft.minimal} onChange={(event) => updateDraft(market.code, "minimal", event.target.value)} />
-                    </td>
-                    <td data-label="Precio objetivo">
-                      <Input form={formId} id={`${market.code}-price`} name="price" type="number" min="0.0001" step="any" inputMode="decimal" autoComplete="off" required aria-label={`Precio objetivo para ${market.label}`} value={draft.price} onChange={(event) => updateDraft(market.code, "price", event.target.value)} />
-                    </td>
-                    <td data-label="Acciones" className="network-actions">
-                      <Button form={formId} type="submit" variant="primary" disabled={!network.enabled || busy === market.code}>
-                        {current ? "Actualizar" : "Publicar"}
-                      </Button>
-                      {current ? (
-                        <Button type="button" variant="outline" disabled={busy === market.code} onClick={() => void withdraw(market)}>
-                          Retirar
-                        </Button>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
     </div>
   );
 }
 
-function ConnectionPill({ connected, label }) {
+function ConnectionDot({ connected }) {
   return (
-    <span className={`network-pill ${connected ? "connected" : "offline"}`}>
-      {connected ? <Wifi aria-hidden="true" /> : <WifiOff aria-hidden="true" />}
-      {label} · {connected ? "conectado" : "sin conexión"}
+    <span className={`network-dot ${connected ? "is-on" : "is-off"}`}>
+      <span aria-hidden="true" />
+      {connected ? "Conectado" : "Sin conexión"}
     </span>
   );
 }

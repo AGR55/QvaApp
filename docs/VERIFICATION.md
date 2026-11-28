@@ -1,13 +1,15 @@
 # Evidencia de verificación
 
-Última ejecución completa: 2026-09-09. Entorno local, Node.js 25.9.0 y pnpm 11.26.0.
+Última ejecución completa: 2026-11-12 (suite completa; el resto de puertas
+corresponde a la ejecución de 2026-09-09). Entorno local, Node.js 25.9.0 y
+pnpm 11.26.0.
 
 ## Puertas automáticas
 
 | Puerta | Resultado | Evidencia |
 | --- | --- | --- |
 | TypeScript estricto | Correcto | `pnpm typecheck`; sin errores |
-| Pruebas | Correcto | 118 ejecutadas, 118 aprobadas, 0 omitidas |
+| Pruebas | Correcto | 718 ejecutadas, 718 aprobadas, 0 omitidas (2026-11-12; `node --import tsx --test test/*.test.ts`) |
 | Servidor | Correcto | `tsc -p tsconfig.build.json` |
 | Panel | Correcto | Vite; JS principal 268.92 kB (82.83 kB gzip), gráficas diferidas 3.78 kB (1.65 kB gzip), CSS 59.69 kB (12.08 kB gzip) |
 | Secretos literales | Correcto | `pnpm check:secrets`; ninguno detectado |

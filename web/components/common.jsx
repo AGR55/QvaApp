@@ -34,9 +34,11 @@ export function Panel({ title, children, wide = false, kicker, description }) {
 export function ViewHead({ kicker, title, description, meta }) {
   return (
     <header className="view-head">
-      {kicker ? <p className="view-kicker">{kicker}</p> : null}
-      <h1>{title}</h1>
-      {description ? <p className="view-description">{description}</p> : null}
+      <div className="view-head-copy">
+        {kicker ? <p className="view-kicker">{kicker}</p> : null}
+        <h1>{title}</h1>
+        {description ? <p className="view-description">{description}</p> : null}
+      </div>
       {meta ? <div className="view-meta">{meta}</div> : null}
     </header>
   );
@@ -94,18 +96,22 @@ export function ViewLoading({ label = "Cargando vista" }) {
     </section>
   );
 }
-export function Freshness({ state, cachedAt }) {
+export function Freshness({ state, cachedAt, label }) {
   const updatedAt = state?.updatedAt ?? cachedAt;
+  const prefix = label ? <span className="freshness-label">{label}</span> : null;
   if (state?.loading && !updatedAt)
-    return <span className="freshness loading">Actualizando…</span>;
+    return <span className="freshness loading">{prefix}Actualizando…</span>;
   if (!updatedAt)
-    return <span className="freshness stale">Sin datos guardados</span>;
+    return <span className="freshness stale">{prefix}Sin datos guardados</span>;
+  const date = new Date(updatedAt);
   return (
     <span
       className={`freshness ${state?.stale || state?.error ? "stale" : ""}`}
     >
+      {prefix}
       {state?.stale || state?.error ? "Dato guardado" : "Actualizado"} ·{" "}
-      {new Date(updatedAt).toLocaleString("es-CU")}
+      <span className="freshness-date">{date.toLocaleDateString("es-CU")}, </span>
+      {date.toLocaleTimeString("es-CU")}
     </span>
   );
 }

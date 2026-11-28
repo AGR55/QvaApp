@@ -31,14 +31,14 @@ import { Skeleton as ShadcnSkeleton } from "../components/ui/skeleton.tsx";
 import { requestJson } from "../lib/http.js";
 
 const LEVELS = [
-  { value: "all", label: "Todos los niveles" },
+  { value: "all", label: "Todos" },
   { value: "error", label: "Errores" },
   { value: "warning", label: "Avisos" },
   { value: "success", label: "Correctos" },
   { value: "info", label: "Informativos" },
 ];
 const COMPONENTS = [
-  { value: "all", label: "Todos los componentes" },
+  { value: "all", label: "Todos" },
   { value: "trading", label: "Escáner y estrategia" },
   { value: "qvapay", label: "QvaPay y operaciones" },
   { value: "notifications", label: "Notificaciones" },
@@ -221,6 +221,7 @@ export function Logs() {
     <div className="page-stack logs-view">
       <ViewHead
         title="Logs"
+        description="Flujo de eventos del sistema, filtrable por nivel, componente y período."
       />
 
       <section className="log-metrics" aria-label="Resumen de eventos visibles">
@@ -238,7 +239,7 @@ export function Logs() {
               Flujo de eventos
             </CardTitle>
             <CardDescription>
-              Hasta 500 eventos visibles; el historial completo permanece en SQLite.
+              Hasta 500 eventos visibles; el historial completo permanece en la base de datos.
             </CardDescription>
             <div className="log-view-status" role="status" aria-live="polite">
               <span className={`live-dot ${following && !error ? "is-live" : ""}`} />
@@ -439,12 +440,19 @@ function LogRow({ entry }) {
   );
 }
 
+const ACTION_LABELS = {
+  startup_reconciliation: "Conciliación de arranque",
+  scan_complete: "Escaneo completado",
+  opportunity_applied: "Oportunidad aplicada",
+  fiat_sync_background_error: "Error de sincronización fiat",
+  price_guard_block: "Bloqueo por precio",
+  market_reader_added: "Cuenta lectora añadida",
+};
+
 function humanizeAction(action) {
-  return action
-    .split("_")
-    .filter(Boolean)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(" ");
+  if (ACTION_LABELS[action]) return ACTION_LABELS[action];
+  const sentence = action.split("_").filter(Boolean).join(" ").toLowerCase();
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
 function formatLogLine(entry) {

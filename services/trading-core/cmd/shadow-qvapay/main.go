@@ -1,0 +1,214 @@
+// Comando shadow-qvapay: lee QvaPay en modo estrictamente read-only y guarda
+// solo un resumen no sensible en shadow.qvapay_snapshots.
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/qvapay"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/platform/vault"
+)
+
+type output struct {
+	RunID        string `json:"runId"`
+	UserKnown    bool   `json:"userKnown"`
+	Balance      string `json:"balance"`
+	Offers       int    `json:"offers"`
+	Averages     int    `json:"averages"`
+	Transactions int    `json:"transactions"`
+	CapturedAt   int64  `json:"capturedAt"`
+}
+
+func main() {
+	databaseURL := flag.String("database-url", "", "DSN de PostgreSQL (fallback: DATABASE_URL)")
+	baseURL := flag.String("base-url", envOrDefault("QVAPAY_API_BASE_URL", "https://api.qvapay.com"), "base URL de QvaPay")
+	runID := flag.String("run-id", "", "identificador del run")
+	flag.Parse()
+
+	dsn := strings.TrimSpace(*databaseURL)
+	if dsn == "" {
+		dsn = strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	}
+	if dsn == "" {
+		fmt.Fprintln(os.Stderr, "shadow-qvapay: falta -database-url o DATABASE_URL")
+		os.Exit(2)
+	}
+	encryptedToken := strings.TrimSpace(os.Getenv("QVA_TOKEN_CIPHERTEXT"))
+	if encryptedToken == "" {
+		fmt.Fprintln(os.Stderr, "shadow-qvapay: falta QVA_TOKEN_CIPHERTEXT")
+		os.Exit(2)
+	}
+	key := strings.TrimSpace(os.Getenv("LOCAL_ENCRYPTION_KEY"))
+	if key == "" {
+		fmt.Fprintln(os.Stderr, "shadow-qvapay: falta LOCAL_ENCRYPTION_KEY")
+		os.Exit(2)
+	}
+	vaultClient, err := vault.New(key)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: %v\n", err)
+		os.Exit(1)
+	}
+	token, err := vaultClient.Decrypt(encryptedToken)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: no se pudo descifrar el token QvaPay\n")
+		os.Exit(1)
+	}
+	client, err := qvapay.New(*baseURL, token)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: %v\n", err)
+		os.Exit(1)
+	}
+
+	id := strings.TrimSpace(*runID)
+	if id == "" {
+		id = "qvapay-" + time.Now().UTC().Format("20060102T150405Z")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+
+	user, err := client.User(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: leer /user: %v\n", err)
+		os.Exit(1)
+	}
+	offers, err := client.Offers(ctx, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: leer /p2p: %v\n", err)
+		os.Exit(1)
+	}
+	averages, err := client.Averages(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: leer /p2p/averages: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Decisión: /transaction es un extra sobre el snapshot. Si QvaPay falla o
+	// devuelve una página inválida, se registra el error sin token y se continúa
+	// con cero transacciones: perder balance/offers por un fallo del historial
+	// sería peor que servir el snapshot sin transacciones. El comando sigue
+	// siendo exitoso.
+	transactions := make([]qvapay.Transaction, 0, 20)
+	transactionPage, err := client.Transactions(ctx, 1, 20)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: leer /transaction (se continúa sin transacciones): %v\n", err)
+	} else {
+		transactions = transactionPage.Transactions
+	}
+	capturedAt := time.Now().Unix()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: conectar PostgreSQL: %v\n", err)
+		os.Exit(1)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: PostgreSQL no responde: %v\n", err)
+		os.Exit(1)
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: iniciar transacción: %v\n", err)
+		os.Exit(1)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // el rollback tras commit es inocuo
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO shadow.qvapay_snapshots
+			(run_id, user_uuid, balance, offers, averages, captured_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (run_id) DO UPDATE SET
+			user_uuid = excluded.user_uuid,
+			balance = excluded.balance,
+			offers = excluded.offers,
+			averages = excluded.averages,
+			captured_at = excluded.captured_at`,
+		id, user.UUID, user.Balance.Format(8), len(offers), len(averages), capturedAt,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: persistir snapshot: %v\n", err)
+		os.Exit(1)
+	}
+	for _, offer := range offers {
+		if offer.UUID == "" {
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO shadow.qvapay_offers
+				(run_id, offer_uuid, coin, type, amount, receive, rate, status, captured_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (run_id, offer_uuid) DO UPDATE SET
+				coin = excluded.coin,
+				type = excluded.type,
+				amount = excluded.amount,
+				receive = excluded.receive,
+				rate = excluded.rate,
+				status = excluded.status,
+				captured_at = excluded.captured_at`,
+			id, offer.UUID, offer.Coin, offer.Type, offer.Amount.Format(8),
+			offer.Receive.Format(8), offer.Rate.Format(8), offer.Status, capturedAt,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shadow-qvapay: persistir oferta: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	persistedTransactions := 0
+	for _, transaction := range transactions {
+		if transaction.UUID == "" {
+			continue
+		}
+		_, err = tx.Exec(ctx, `
+			INSERT INTO shadow.qvapay_transactions
+				(run_id, transaction_uuid, amount, status, description, remote_id,
+				 created_at, updated_at, captured_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			ON CONFLICT (run_id, transaction_uuid) DO UPDATE SET
+				amount = excluded.amount,
+				status = excluded.status,
+				description = excluded.description,
+				remote_id = excluded.remote_id,
+				created_at = excluded.created_at,
+				updated_at = excluded.updated_at,
+				captured_at = excluded.captured_at`,
+			id, transaction.UUID, transaction.Amount.Format(8), transaction.Status,
+			transaction.Description, transaction.RemoteID, transaction.CreatedAt,
+			transaction.UpdatedAt, capturedAt,
+		)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "shadow-qvapay: persistir transacción: %v\n", err)
+			os.Exit(1)
+		}
+		persistedTransactions++
+	}
+	if err := tx.Commit(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "shadow-qvapay: confirmar snapshot: %v\n", err)
+		os.Exit(1)
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetEscapeHTML(false)
+	_ = encoder.Encode(output{
+		RunID:        id,
+		UserKnown:    user.UUID != "",
+		Balance:      user.Balance.Format(8),
+		Offers:       len(offers),
+		Averages:     len(averages),
+		Transactions: persistedTransactions,
+		CapturedAt:   capturedAt,
+	})
+}
+
+func envOrDefault(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
+}

@@ -1,0 +1,223 @@
+# Configuración editable y cuentas lectoras — 2026-11-15
+
+## Qué quedó activo
+
+El panel web completo (`public/dashboard`) se sirve desde el edge y ahora puede
+leer y guardar la configuración que antes vivía sólo en el monolito TS:
+
+| Área | Endpoint | Persistencia |
+| --- | --- | --- |
+| Configuración completa | `GET /api/config` | `shadow.runtime_config` |
+| Guardar configuración | `PUT /api/config` | nueva revisión + versión |
+| Historial | `GET /api/config-revisions` | `shadow.runtime_config_revisions` |
+| Cacería | `PUT /api/hunting` | mismas tablas, merge parcial |
+| Estrategia | `PUT /api/strategy` | mercados BANK_CUP/BANDECPREPAGO + reserva |
+| Control | `PUT /api/control` | `shadow.runtime_settings` |
+| Fuente de mercado | `GET/PUT /api/market-source` | modo `polling`/`hybrid` |
+| Secretos del feed | `PUT /api/market-source/webhook-secret` | cifrado AES-GCM |
+| Credenciales del stream | `PUT /api/market-source/stream-credentials` | cifrado AES-GCM |
+| Cuentas lectoras | `POST/PUT/DELETE /api/market-readers` | `shadow.market_readers` |
+| Rotar token | `PUT /api/market-readers/:id/token` | token cifrado + fingerprint |
+
+Todas las mutaciones exigen cookie de sesión, `X-CSRF-Token` y `Origin`
+coincidente (configurado o same-origin). Los secretos nunca se devuelven.
+
+## Consumo en caliente
+
+- `hunter` recarga `shadow.runtime_config` cada 5 s y lee
+  `market_source.mode`, `control.paused` y `control.emergency_stop`.
+- En modo `polling`, el intervalo efectivo es
+  `max(3000 ms, automation.scanIntervalSeconds * 1000)`.
+- En modo `hybrid`, se conserva `HUNTER_POLL_MS` (0 = SSE-only).
+- `hunter` rota los lectores habilitados para `Offers`/`Averages`; el cliente
+  principal queda como fallback.
+- `trading-core` recarga riesgo, mercados y saldos fiat cada 10 s y aplica el
+  snapshot antes de decidir.
+- Métricas de verificación:
+  - `hunter_runtime_config_version`
+  - `hunter_runtime_paused`
+  - `hunter_poll_interval_ms`
+  - `trading_core_runtime_config_version`
+
+## Evidencia en VPS
+
+```text
+login web                     = 200, data.csrfToken presente
+GET /api/config               = 200, 5 mercados, version 3
+PUT /api/config               = 204
+PUT /api/hunting              = 204
+PUT /api/control {"paused":true} = 204
+hunter_runtime_paused         = 1
+hunter_runtime_config_version = 4 → 5
+trading_core_runtime_config_version = 4
+UI “Configuración activa y auditada.”
+UI Cacería: controles, precios y salud renderizados sin errores
+UI Mercados/Operaciones/Capital/Gráficas/Auditoría/Logs/Red renderizadas
+```
+
+Guardar desde el navegador cambió `automation.scanIntervalSeconds` de 3 a 4 y
+luego se restauró a 3; ambas revisiones quedaron auditadas y el hunter aplicó
+las versiones.
+
+## Logs, notificaciones, recuperación e iconos
+
+También quedaron activas estas superficies que no mueven dinero:
+
+| Ruta | Estado |
+| --- | --- |
+| `GET /api/logs` | 5.000 eventos reales con filtros de nivel, componente, texto y período |
+| `GET /api/notifications` | Notificaciones pendientes reales; excluye las reconocidas |
+| `POST /api/notifications/:id/ack` | Persiste el reconocimiento en `shadow.notification_acks` |
+| `GET /api/recovery` | Intenciones `submitted`/`uncertain` con evidencia y avisos |
+| `POST /api/market-icons` | Icono validado, escrito de forma atómica y servido |
+
+Los iconos se guardan en `/opt/qvaapply-f3-shadow/market-icons` (volumen
+escribible, UID 65532) y se sirven en `/market-icons/:name`; si no existe en el
+volumen se usa el asset público del repositorio. SVG con scripts/eventos se
+rechaza.
+
+La consola muestra los logs reales (120 eventos, niveles y componentes) y la
+notificación “Aplicación confirmada” de producción. El panel de recuperación
+lee las 3 intenciones reales; las acciones de conciliación siguen en TS.
+
+## Simulación, descartes y red cooperativa
+
+| Ruta | Estado |
+| --- | --- |
+| `POST /api/hunting/simulate` | Simulación real sobre 5.000 observaciones del feed |
+| `POST /api/mobile/simulate` | Misma simulación con Bearer de operador |
+| `GET /api/decision-events` | 1.158 decisiones reales, filtros y paginación |
+| `POST /api/decision-events/:id/dismiss` | Descarte persistido en `shadow.decision_dismissals` |
+| `POST /api/decision-events/dismiss-all` | Descarte masivo hasta un id |
+| Lectura cooperativa | `cooperativeNetwork`/`cooperativeHunting` en `/api/dashboard` |
+
+Evidencia de la simulación en el navegador: 25 ofertas distintas, 5 excluidas
+por importe/rango, 2 propias y 2 con entrega antigua. La auditoría muestra 137
+ofertas bloqueadas y el descarte de una dejó 136 pendientes. La red cooperativa
+muestra HTTP/NATS conectados y 44.89 QUSD pendientes de repartir.
+
+## Emparejamiento móvil y suscripciones Push
+
+| Ruta | Estado |
+| --- | --- |
+| `GET/POST /api/mobile/devices` | Lista combinada y alta con token mostrado una vez |
+| `DELETE /api/mobile/devices/:id` | Revocación inmediata |
+| `GET/POST /api/mobile/operators` | Lista combinada y alta con scopes |
+| `DELETE /api/mobile/operators/:id` | Revocación inmediata |
+| `POST/DELETE /api/mobile/push-device` | Token FCM por operador (Bearer) |
+| `POST/DELETE/GET /api/push/subscriptions` | Suscripciones Web Push persistidas |
+| `GET /api/push/public-key` | 503 hasta configurar VAPID |
+
+Los tokens se generan con `crypto/rand`, se guardan como SHA-256 y nunca se
+devuelven de nuevo. `MobileAuthAPI` combina el snapshot privado con las
+credenciales creadas en Postgres, por lo que un alta funciona sin redeploy.
+
+Evidencia VPS:
+
+```text
+POST /api/mobile/devices       = 201
+device-check con token nuevo    = 200
+DELETE dispositivo              = 204
+device-check después            = 401
+POST /api/mobile/operators      = 201
+operator-check                  = 200 {"ok":true,"scopes":[...]}
+POST /api/mobile/push-device    = 200
+POST /api/push/subscriptions    = 201
+GET  /api/push/subscriptions    = 1 endpoint
+DELETE push subscription        = 204
+/dashboard/app.js               = 200
+```
+
+## Evidencia, descartes y comisiones
+
+| Ruta | Estado |
+| --- | --- |
+| `POST /api/recovery/:intentId/evidence` | Añade evidencia al aviso y la persiste |
+| `POST /api/recovery/:intentId/acknowledge` | Reconoce el aviso |
+| `POST /api/blocked-offers/:uuid/dismiss` | Descarta las decisiones bloqueadas de una oferta |
+| `GET/POST /api/analytics/fees` | Consulta y registra evidencia de comisión con versión |
+
+La evidencia y el reconocimiento viven en `shadow.runtime_settings`; las
+comisiones en `shadow.analytics_fee_evidence`; los descartes en
+`shadow.decision_dismissals`. Ninguna de estas rutas mueve dinero.
+
+Evidencia VPS:
+
+```text
+GET  /api/recovery                       = 3 intenciones
+POST /api/recovery/<id>/evidence         = 200, evidencia 5 → 8
+POST /api/recovery/<id>/acknowledge      = 200, acknowledged=true
+GET  /api/analytics/fees                 = 20 compras
+POST /api/analytics/fees                 = 200, version 0 → 1 → 2
+POST /api/blocked-offers/<uuid>/dismiss  = 204, bloqueadas 137 → 136
+```
+
+Después limpié los registros de prueba para dejar el shadow como estaba.
+
+## Superficie completa y banderas de seguridad
+
+La auditoría ya cubre **109/109 rutas**. Las operaciones que en TS mueven dinero
+(ofertas, operaciones, rebalanceos, cooperativa, recuperación, workflows,
+ofertas bloqueadas) existen en el edge con estas garantías:
+
+- `EDGE_MUTATIONS_ENABLED=true` sólo en shadow.
+- Validan cookie/CSRF/Origen o Bearer de operador.
+- Registran la intención en `shadow.mutation_events` y mensajes de chat en
+  `shadow.chat_messages`.
+- **No llaman a QvaPay ni ejecutan mutaciones reales.** El adaptador
+  `internal/platform/qvapay/mutations.go` sigue deshabilitado y sólo se activa
+  en el cutover.
+- `payment-preview` responde 503 hasta que exista QvaPay en vivo.
+- El webhook QvaPay está activo con HMAC (`EDGE_QVAPAY_WEBHOOK_SECRET`,
+  generado una vez en `/opt/qvaapply-f3-shadow/webhook.secret`) y guarda en
+  `shadow.qvapay_feed_events`.
+
+Evidencia:
+
+```text
+POST /api/offers                         = 201
+PUT/DELETE /api/offers/:uuid             = 204
+POST /api/offers/rebalance/preview       = 200
+POST /api/offers/rebalance/apply         = 202
+POST /api/operations/:uuid/ack           = 204
+POST /api/workflows/:id/reconcile        = 200
+PUT /api/cooperative-network/hunting     = 204
+POST /api/cooperative-network/reconcile  = 204
+POST /api/blocked-offers/:uuid/preview   = 200 execution=shadow
+POST /api/recovery/:id/check             = 200 shadow_review
+POST /api/mobile/operations/:uuid/paid   = 204
+GET  /api/mobile/.../payment-preview     = 503
+POST /webhooks/qvapay/p2p-feed (HMAC)    = 202
+```
+
+## Lo que falta y requiere tu intervención
+
+1. **Cuentas lectoras**: pulsa “Añadir cuenta lectora” y pega un token QvaPay
+   con permiso `p2p:read`. El token se cifra en la sombra; no se muestra de
+   nuevo. Para rotarlo usa el mismo diálogo.
+2. **Modo híbrido real**: pega el `App ID`, `App Secret` y el secreto del feed.
+   El webhook público del edge todavía no está expuesto en Nginx; hoy la URL
+   visible apunta al monolito TS. Activar el webhook en el edge requiere una
+   ventana para retirar el long-polling/webhook de TS.
+3. **Push real**: configura `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY`,
+   `WEB_PUSH_SUBJECT` y `PUSH_SEND_ENABLED=true` en el notifier, más el
+   `EDGE_PUSH_PUBLIC_KEY` para que `/api/push/public-key` deje de responder 503.
+4. **Mutaciones de dinero**: crear/editar/cancelar ofertas, aplicar operaciones,
+   rebalanceos y acciones cooperativas siguen deshabilitadas. Requieren
+   autorización explícita, revisión de riesgo y ventana de corte.
+5. **Cutover TS→Go**: sigue siendo manual, con backup, congelación, drenaje y
+   rollback de 14 días.
+
+## Variables nuevas
+
+| Variable | Servicio | Uso |
+| --- | --- | --- |
+| `EDGE_TRUSTED_ORIGIN` | edge | origen del panel |
+| `LOCAL_ENCRYPTION_KEY` | edge | cifrar tokens de lectores |
+| `EDGE_DASHBOARD_SNAPSHOT_FILE` | edge | snapshot de lectura |
+| `EDGE_OPERATIONAL_HEALTH_FILE` | edge | salud del bot |
+| `PUSH_SEND_ENABLED` | notifier | habilitar envío push |
+| `WEB_PUSH_*` | notifier | claves VAPID |
+
+Los valores sensibles se generan en `/opt/qvaapply-f3-shadow/edge.env` (600) y
+no se imprimen en logs.

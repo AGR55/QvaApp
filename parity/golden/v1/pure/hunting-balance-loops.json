@@ -1,0 +1,33 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/application/hunting-balance-loops.ts",
+  "sourceTests": [
+    "test/hunting-balance-loops.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Cierre ordenado de los bucles de saldo de cacería: `stop()` espera los trabajos completos (incluidas sus guardas), no inicia trabajo nuevo y cierra la caché al final. · goldenHash=946f19465baa808bf519079c05c154661adfcfc11be9f3a6611c59d61b6d04b9",
+  "cases": [
+    {
+      "caseId": "pure/hunting-balance-loops/stop/0001",
+      "op": "hunting-balance.stop",
+      "source": "test/hunting-balance-loops.test.ts:6",
+      "expect": {
+        "events": [
+          "warm",
+          "prepare",
+          "warm-completed",
+          "prepare-completed",
+          "cache-stopped"
+        ],
+        "cacheStoppedAfterWarm": false,
+        "warmCount": 1
+      }
+    }
+  ]
+}

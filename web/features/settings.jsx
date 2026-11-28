@@ -72,7 +72,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
   const [reason, setReason] = useState(
     "Revisión de límites y mercados desde la mesa de operaciones",
   );
-  const [status, setStatus] = useState("Cargando configuración…");
+  const [status, setStatus] = useState(initialConfig ? "" : "Cargando configuración…");
   const closeReview = useCallback(() => setReviewing(false), []);
 
   const load = async () => {
@@ -189,6 +189,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
           buyMaxRate: 1,
           sellMinRate: 1,
           priceGuardPercent: undefined,
+          purchaseMinQusd: 0,
           purchaseMaxQusd: 0,
           sellFeePercent: 0,
           outgoingTransferFee: 0,
@@ -226,6 +227,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
     <div className="settings-stack">
       <ViewHead
         title="Estrategia"
+        description="Límites de riesgo, comportamiento del bot y configuración de cada mercado."
       />
       <Panel title="Límites de riesgo" wide>
         <form onSubmit={(event) => event.preventDefault()}>
@@ -279,7 +281,7 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                 ? "Revisar y aprobar límites"
                 : `Revisar ${changes.length} cambio(s)`}
             </Button>
-            <span>{status}</span>
+            {status ? <span role="status">{status}</span> : null}
           </div>
           </FieldGroup>
         </form>
@@ -489,7 +491,19 @@ export function Settings({ initialConfig, initialRevisions, onChanged }) {
                   }
                 />
               </MarketField>
-              <MarketField label="Máximo QUSD por compra" htmlFor={`market-max-amount-${index}`}>
+              <MarketField label="Mínimo QUSD por compra (0 = sin mínimo)" htmlFor={`market-min-amount-${index}`}>
+                <Input
+                  id={`market-min-amount-${index}`}
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={market.purchaseMinQusd ?? 0}
+                  onChange={(event) =>
+                    updateMarket(index, "purchaseMinQusd", event.target.value)
+                  }
+                />
+              </MarketField>
+              <MarketField label="Máximo QUSD por oferta (0 = sin límite)" htmlFor={`market-max-amount-${index}`}>
                 <Input
                   id={`market-max-amount-${index}`}
                   type="number"
@@ -1315,6 +1329,7 @@ function diffConfig(saved, draft) {
       "buyMaxRate",
       "sellMinRate",
       "priceGuardPercent",
+      "purchaseMinQusd",
       "purchaseMaxQusd",
       "sellFeePercent",
       "outgoingTransferFee",

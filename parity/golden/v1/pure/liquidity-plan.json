@@ -1,0 +1,777 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/core/liquidity-plan.ts",
+  "sourceTests": [
+    "test/liquidity-plan.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Plan de liquidez puro: selección determinista de ventas propias por rentabilidad y consumo/reposición de QUSD. Importes QUSD y rentabilidades como string decimal de escala 8. · goldenHash=fa71bbfcbd186439787c048ee917cee4ddab906e129889d82b965f5ed94cca74",
+  "cases": [
+    {
+      "caseId": "pure/liquidity-plan/covered/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:33",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 50,
+        "reserveQusd": 10,
+        "ownOffers": [
+          {
+            "uuid": "a",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 20,
+            "receive": 20000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-a"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": true,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "40.00000000",
+        "requiredReleaseQusd": "0.00000000",
+        "plannedReleaseQusd": "0.00000000",
+        "potentialReleaseQusd": "0.00000000",
+        "cancel": [],
+        "reason": "El saldo QUSD disponible cubre la oportunidad sin cancelar ofertas propias."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/range-not-capital/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:45",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 0,
+        "reserveQusd": 0,
+        "ownOffers": [
+          {
+            "uuid": "range-own",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 100,
+            "receive": 100000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-range-own"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "offer_kind": "flexible",
+            "available_amount": 2,
+            "order_min": 5,
+            "order_max": 30
+          },
+          {
+            "uuid": "fixed-own",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 5,
+            "receive": 5000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-fixed-own"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": false,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "0.00000000",
+        "requiredReleaseQusd": "30.00000000",
+        "plannedReleaseQusd": "0.00000000",
+        "potentialReleaseQusd": "5.00000000",
+        "cancel": [],
+        "reason": "Las ventas propias disponibles liberarían 5 QUSD, pero se requieren 30; no se cancelará ninguna."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/worst-first/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:54",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 15,
+        "reserveQusd": 10,
+        "ownOffers": [
+          {
+            "uuid": "better",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 20,
+            "receive": 20300,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-better"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "worst",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 10,
+            "receive": 9900,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-worst"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "only_kyc": 1
+          },
+          {
+            "uuid": "middle",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 20,
+            "receive": 20000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-middle"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": true,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "5.00000000",
+        "requiredReleaseQusd": "25.00000000",
+        "plannedReleaseQusd": "30.00000000",
+        "potentialReleaseQusd": "30.00000000",
+        "cancel": [
+          {
+            "uuid": "worst",
+            "coin": "BANK_CUP",
+            "amount": "10.00000000",
+            "receive": "9900.00000000",
+            "rate": "990.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-worst"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": true,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "990.00000000",
+            "consumeQusd": "10.00000000",
+            "restoreQusd": "0.00000000"
+          },
+          {
+            "uuid": "middle",
+            "coin": "BANK_CUP",
+            "amount": "20.00000000",
+            "receive": "20000.00000000",
+            "rate": "1000.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-middle"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "1000.00000000",
+            "consumeQusd": "15.00000000",
+            "restoreQusd": "5.00000000"
+          }
+        ],
+        "reason": "Se liberarán 30 QUSD de 2 oferta(s) propia(s); 5 QUSD se repondrán después de aplicar."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/equal-or-better/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:78",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 10,
+        "reserveQusd": 10,
+        "ownOffers": [
+          {
+            "uuid": "equal",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 30,
+            "receive": 30600,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-equal"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "better",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 30,
+            "receive": 30900,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-better"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": true,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "0.00000000",
+        "requiredReleaseQusd": "30.00000000",
+        "plannedReleaseQusd": "30.00000000",
+        "potentialReleaseQusd": "30.00000000",
+        "cancel": [
+          {
+            "uuid": "equal",
+            "coin": "BANK_CUP",
+            "amount": "30.00000000",
+            "receive": "30600.00000000",
+            "rate": "1020.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-equal"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "1020.00000000",
+            "consumeQusd": "30.00000000",
+            "restoreQusd": "0.00000000"
+          }
+        ],
+        "reason": "Se liberarán 30 QUSD de 1 oferta(s) propia(s); 0 QUSD se repondrán después de aplicar."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/locked-qusd/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:90",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 58.63,
+          "receive": 59802.600000000006,
+          "status": "open"
+        },
+        "availableQusd": 0,
+        "reserveQusd": 0,
+        "ownOffers": [
+          {
+            "uuid": "locked-qusd",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 100,
+            "receive": 103000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-locked-qusd"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": true,
+        "targetQusd": "58.63000000",
+        "immediatelyAvailableQusd": "0.00000000",
+        "requiredReleaseQusd": "58.63000000",
+        "plannedReleaseQusd": "100.00000000",
+        "potentialReleaseQusd": "100.00000000",
+        "cancel": [
+          {
+            "uuid": "locked-qusd",
+            "coin": "BANK_CUP",
+            "amount": "100.00000000",
+            "receive": "103000.00000000",
+            "rate": "1030.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-locked-qusd"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "1030.00000000",
+            "consumeQusd": "58.63000000",
+            "restoreQusd": "41.37000000"
+          }
+        ],
+        "reason": "Se liberarán 100 QUSD de 1 oferta(s) propia(s); 41.37 QUSD se repondrán después de aplicar."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/partial-impossible/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:105",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 15,
+        "reserveQusd": 10,
+        "ownOffers": [
+          {
+            "uuid": "small",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 20,
+            "receive": 20000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-small"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": false,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "5.00000000",
+        "requiredReleaseQusd": "25.00000000",
+        "plannedReleaseQusd": "0.00000000",
+        "potentialReleaseQusd": "20.00000000",
+        "cancel": [],
+        "reason": "Las ventas propias disponibles liberarían 20 QUSD, pero se requieren 25; no se cancelará ninguna."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/ignore-non-releasing/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:119",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 10,
+        "reserveQusd": 10,
+        "ownOffers": [
+          {
+            "uuid": "other-market",
+            "type": "sell",
+            "coin": "CLASICA",
+            "amount": 40,
+            "receive": 36000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-other-market"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "closed",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 40,
+            "receive": 36000,
+            "status": "processing",
+            "details": {
+              "cuenta": "ACC-closed"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "buy",
+            "type": "buy",
+            "coin": "BANK_CUP",
+            "amount": 40,
+            "receive": 36000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-buy"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": false,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "0.00000000",
+        "requiredReleaseQusd": "30.00000000",
+        "plannedReleaseQusd": "0.00000000",
+        "potentialReleaseQusd": "0.00000000",
+        "cancel": [],
+        "reason": "Las ventas propias disponibles liberarían 0 QUSD, pero se requieren 30; no se cancelará ninguna."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/multi-market/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:135",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 73,
+          "receive": 72400,
+          "status": "open"
+        },
+        "availableQusd": 0,
+        "reserveQusd": 0,
+        "ownOffers": [
+          {
+            "uuid": "cup-one",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 16.51,
+            "receive": 16097.250000000002,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-cup-one"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "cup-two",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 20,
+            "receive": 19700,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-cup-two"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "classic-one",
+            "type": "sell",
+            "coin": "CLASICA",
+            "amount": 20,
+            "receive": 22.599999999999998,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-classic-one"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          },
+          {
+            "uuid": "classic-two",
+            "type": "sell",
+            "coin": "CLASICA",
+            "amount": 50,
+            "receive": 56.49999999999999,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-classic-two"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ],
+        "marketEconomics": {
+          "BANK_CUP": {
+            "buyMaxRate": 930,
+            "sellFeePercent": 0,
+            "outgoingTransferFee": 0
+          },
+          "CLASICA": {
+            "buyMaxRate": 1.06,
+            "sellFeePercent": 0,
+            "outgoingTransferFee": 0.08
+          }
+        }
+      },
+      "expect": {
+        "feasible": true,
+        "targetQusd": "73.00000000",
+        "immediatelyAvailableQusd": "0.00000000",
+        "requiredReleaseQusd": "73.00000000",
+        "plannedReleaseQusd": "106.51000000",
+        "potentialReleaseQusd": "106.51000000",
+        "cancel": [
+          {
+            "uuid": "cup-one",
+            "coin": "BANK_CUP",
+            "amount": "16.51000000",
+            "receive": "16097.25000000",
+            "rate": "975.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-cup-one"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "4.83870968",
+            "consumeQusd": "16.51000000",
+            "restoreQusd": "0.00000000"
+          },
+          {
+            "uuid": "cup-two",
+            "coin": "BANK_CUP",
+            "amount": "20.00000000",
+            "receive": "19700.00000000",
+            "rate": "985.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-cup-two"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "5.91397849",
+            "consumeQusd": "20.00000000",
+            "restoreQusd": "0.00000000"
+          },
+          {
+            "uuid": "classic-one",
+            "coin": "CLASICA",
+            "amount": "20.00000000",
+            "receive": "22.60000000",
+            "rate": "1.13000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-classic-one"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "6.20300752",
+            "consumeQusd": "20.00000000",
+            "restoreQusd": "0.00000000"
+          },
+          {
+            "uuid": "classic-two",
+            "coin": "CLASICA",
+            "amount": "50.00000000",
+            "receive": "56.50000000",
+            "rate": "1.13000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-classic-two"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "6.44310475",
+            "consumeQusd": "16.49000000",
+            "restoreQusd": "33.51000000"
+          }
+        ],
+        "reason": "Se liberarán 106.51 QUSD de 4 oferta(s) propia(s); 33.51 QUSD se repondrán después de aplicar."
+      }
+    },
+    {
+      "caseId": "pure/liquidity-plan/partial-reserve/0001",
+      "op": "liquidity.plan",
+      "source": "test/liquidity-plan.test.ts:167",
+      "input": {
+        "target": {
+          "uuid": "external",
+          "type": "buy",
+          "coin": "BANK_CUP",
+          "amount": 30,
+          "receive": 30600,
+          "status": "open"
+        },
+        "availableQusd": 5,
+        "reserveQusd": 10,
+        "ownOffers": [
+          {
+            "uuid": "enough",
+            "type": "sell",
+            "coin": "BANK_CUP",
+            "amount": 40,
+            "receive": 40000,
+            "status": "open",
+            "details": {
+              "cuenta": "ACC-enough"
+            },
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "feasible": true,
+        "targetQusd": "30.00000000",
+        "immediatelyAvailableQusd": "0.00000000",
+        "requiredReleaseQusd": "35.00000000",
+        "plannedReleaseQusd": "40.00000000",
+        "potentialReleaseQusd": "40.00000000",
+        "cancel": [
+          {
+            "uuid": "enough",
+            "coin": "BANK_CUP",
+            "amount": "40.00000000",
+            "receive": "40000.00000000",
+            "rate": "1000.00000000",
+            "details": [
+              {
+                "name": "cuenta",
+                "value": "ACC-enough"
+              }
+            ],
+            "message": "Pago verificado",
+            "tags": [
+              "transferencia"
+            ],
+            "onlyKyc": false,
+            "onlyVip": false,
+            "private": false,
+            "profitabilityPercent": "1000.00000000",
+            "consumeQusd": "35.00000000",
+            "restoreQusd": "5.00000000"
+          }
+        ],
+        "reason": "Se liberarán 40 QUSD de 1 oferta(s) propia(s); 5 QUSD se repondrán después de aplicar."
+      }
+    }
+  ]
+}

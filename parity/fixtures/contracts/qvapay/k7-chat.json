@@ -1,0 +1,156 @@
+{
+  "cassetteVersion": 1,
+  "name": "k7-chat",
+  "description": "K7: chat por operación. Listado con envelopes array/chat/messages/data.messages, envío de texto con id en message, efecto de chat en el mundo y stream SSE mínimo del hilo.",
+  "contract": "K7",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": { "uuid": "user-owner-0001" },
+    "offers": [
+      {
+        "uuid": "offer-chat-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "5.00000000",
+        "receive": "5.00000000",
+        "status": "open",
+        "User": { "uuid": "peer-chat-0001" },
+        "Peer": {},
+        "details": []
+      }
+    ],
+    "chats": {
+      "offer-chat-1": [
+        {
+          "id": "msg-0001",
+          "peer_id": "peer-chat-0001",
+          "message": "¿Estás disponible?",
+          "created_at": "2026-01-01T00:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "exchanges": [
+    {
+      "id": "chat-list-array",
+      "contract": "K7",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-chat-1/chat", "query": { "format": "array" } },
+      "response": {
+        "status": 200,
+        "body": [
+          {
+            "id": "msg-0001",
+            "peer_id": "peer-chat-0001",
+            "message": "¿Estás disponible?",
+            "created_at": "2026-01-01T00:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "id": "chat-list-chat-envelope",
+      "contract": "K7",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-chat-1/chat", "query": { "format": "chat" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "chat": [
+            { "id": "msg-0001", "peer_id": "peer-chat-0001", "message": "¿Estás disponible?" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "chat-list-messages-envelope",
+      "contract": "K7",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-chat-1/chat", "query": { "format": "messages" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "messages": [
+            { "id": "msg-0001", "peer_id": "peer-chat-0001", "message": "¿Estás disponible?" }
+          ]
+        }
+      }
+    },
+    {
+      "id": "chat-list-data-envelope",
+      "contract": "K7",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-chat-1/chat", "query": { "format": "data" } },
+      "response": {
+        "status": 200,
+        "body": {
+          "data": {
+            "messages": [
+              { "id": "msg-0001", "peer_id": "peer-chat-0001", "message": "¿Estás disponible?" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "chat-send-text",
+      "contract": "K7",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-chat-1/chat",
+        "body": { "message": "Hola, sigo interesado" }
+      },
+      "effects": [
+        {
+          "op": "chat",
+          "uuid": "offer-chat-1",
+          "message": {
+            "id": "msg-0002",
+            "peer_id": "peer-chat-0001",
+            "message": "Hola, sigo interesado",
+            "created_at": "2026-01-01T00:00:01.000Z"
+          }
+        }
+      ],
+      "response": {
+        "status": 200,
+        "body": {
+          "message": {
+            "id": "msg-0002",
+            "message": "Hola, sigo interesado",
+            "created_at": "2026-01-01T00:00:01.000Z"
+          }
+        }
+      }
+    },
+    {
+      "id": "chat-send-ambiguous",
+      "contract": "K7",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-chat-1/chat", "bodyContains": "mensaje incierto" },
+      "abort": "after-headers",
+      "response": {
+        "status": 200,
+        "partialBody": "{\"message\":{\"id\":\"msg-0003\",\"mess"
+      }
+    },
+    {
+      "id": "chat-stream",
+      "contract": "K7",
+      "match": { "method": "GET", "path": "/v2/p2p/offer-chat-1/chat/stream", "query": { "order": "order-chat-0001" } },
+      "response": {
+        "status": 200,
+        "sse": {
+          "retryMs": 1500,
+          "events": [
+            { "comment": "keepalive" },
+            {
+              "event": "message",
+              "data": {
+                "id": "msg-0002",
+                "peer_id": "peer-chat-0001",
+                "message": "Hola, sigo interesado",
+                "created_at": "2026-01-01T00:00:01.000Z"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

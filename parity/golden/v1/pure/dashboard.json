@@ -1,0 +1,1721 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "money-core",
+  "module": "src/dashboard.ts",
+  "sourceTests": [
+    "test/dashboard.test.ts",
+    "test/market-history-compact.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Funciones puras del panel: margen neto con comisión fija, reparto de presupuesto por mejores tasas y compactación determinista del histórico. Importes y tasas a 8 dp. · goldenHash=e474b2dc1065b8ec186e938c8f8e3e474f6cf72523a80dc28547c60763a2897e",
+  "cases": [
+    {
+      "caseId": "pure/dashboard/margin/0001",
+      "op": "dashboard.margin",
+      "source": "test/dashboard.test.ts:5",
+      "input": {
+        "buyRate": 970,
+        "sellRate": 1010,
+        "amount": 35,
+        "sellFeePercent": 0.25
+      },
+      "expect": {
+        "cost": "33950.00000000",
+        "grossRevenue": "35350.00000000",
+        "netRevenue": "35261.62500000",
+        "netProfit": "1311.62500000",
+        "marginPercent": "3.86340206",
+        "breakEvenRate": "972.43107769"
+      }
+    },
+    {
+      "caseId": "pure/dashboard/margin/fixed-fee/0001",
+      "op": "dashboard.margin",
+      "source": "test/dashboard.test.ts:13",
+      "input": {
+        "buyRate": 1.04,
+        "sellRate": 1.12,
+        "amount": 10,
+        "sellFeePercent": 0,
+        "outgoingTransferFee": 0.08
+      },
+      "expect": {
+        "cost": "10.48000000",
+        "grossRevenue": "11.20000000",
+        "netRevenue": "11.20000000",
+        "netProfit": "0.72000000",
+        "marginPercent": "6.87022901",
+        "breakEvenRate": "1.04800000"
+      }
+    },
+    {
+      "caseId": "pure/dashboard/allocate/0001",
+      "op": "dashboard.allocate",
+      "source": "test/dashboard.test.ts:19",
+      "input": {
+        "budget": 35000,
+        "reserve": 1000,
+        "maximumPerOffer": 35,
+        "opportunities": [
+          {
+            "rate": 980,
+            "amount": 20
+          },
+          {
+            "rate": 970,
+            "amount": 20
+          }
+        ]
+      },
+      "expect": [
+        {
+          "rate": "970.00000000",
+          "fiat": "19400.00000000",
+          "qusd": "20.00000000"
+        },
+        {
+          "rate": "980.00000000",
+          "fiat": "14600.00000000",
+          "qusd": "14.89795918"
+        }
+      ]
+    },
+    {
+      "caseId": "pure/dashboard/compact-history/0001",
+      "op": "dashboard.compact-history",
+      "source": "test/market-history-compact.test.ts:5",
+      "input": {
+        "history": [
+          {
+            "coin": "CLASICA",
+            "createdAt": 0,
+            "medianBuy": 0
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 1,
+            "medianBuy": 1
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 2,
+            "medianBuy": 2
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 3,
+            "medianBuy": 3
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 4,
+            "medianBuy": 4
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 5,
+            "medianBuy": 5
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 6,
+            "medianBuy": 6
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 7,
+            "medianBuy": 7
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 8,
+            "medianBuy": 8
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 9,
+            "medianBuy": 9
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 10,
+            "medianBuy": 10
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 11,
+            "medianBuy": 11
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 12,
+            "medianBuy": 12
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 13,
+            "medianBuy": 13
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 14,
+            "medianBuy": 14
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 15,
+            "medianBuy": 15
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 16,
+            "medianBuy": 16
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 17,
+            "medianBuy": 17
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 18,
+            "medianBuy": 18
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 19,
+            "medianBuy": 19
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 20,
+            "medianBuy": 20
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 21,
+            "medianBuy": 21
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 22,
+            "medianBuy": 22
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 23,
+            "medianBuy": 23
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 24,
+            "medianBuy": 24
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 25,
+            "medianBuy": 25
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 26,
+            "medianBuy": 26
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 27,
+            "medianBuy": 27
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 28,
+            "medianBuy": 28
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 29,
+            "medianBuy": 29
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 30,
+            "medianBuy": 30
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 31,
+            "medianBuy": 31
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 32,
+            "medianBuy": 32
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 33,
+            "medianBuy": 33
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 34,
+            "medianBuy": 34
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 35,
+            "medianBuy": 35
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 36,
+            "medianBuy": 36
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 37,
+            "medianBuy": 37
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 38,
+            "medianBuy": 38
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 39,
+            "medianBuy": 39
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 40,
+            "medianBuy": 40
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 41,
+            "medianBuy": 41
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 42,
+            "medianBuy": 42
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 43,
+            "medianBuy": 43
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 44,
+            "medianBuy": 44
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 45,
+            "medianBuy": 45
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 46,
+            "medianBuy": 46
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 47,
+            "medianBuy": 47
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 48,
+            "medianBuy": 48
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 49,
+            "medianBuy": 49
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 50,
+            "medianBuy": 50
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 51,
+            "medianBuy": 51
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 52,
+            "medianBuy": 52
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 53,
+            "medianBuy": 53
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 54,
+            "medianBuy": 54
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 55,
+            "medianBuy": 55
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 56,
+            "medianBuy": 56
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 57,
+            "medianBuy": 57
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 58,
+            "medianBuy": 58
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 59,
+            "medianBuy": 59
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 60,
+            "medianBuy": 60
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 61,
+            "medianBuy": 61
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 62,
+            "medianBuy": 62
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 63,
+            "medianBuy": 63
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 64,
+            "medianBuy": 64
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 65,
+            "medianBuy": 65
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 66,
+            "medianBuy": 66
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 67,
+            "medianBuy": 67
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 68,
+            "medianBuy": 68
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 69,
+            "medianBuy": 69
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 70,
+            "medianBuy": 70
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 71,
+            "medianBuy": 71
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 72,
+            "medianBuy": 72
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 73,
+            "medianBuy": 73
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 74,
+            "medianBuy": 74
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 75,
+            "medianBuy": 75
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 76,
+            "medianBuy": 76
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 77,
+            "medianBuy": 77
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 78,
+            "medianBuy": 78
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 79,
+            "medianBuy": 79
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 80,
+            "medianBuy": 80
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 81,
+            "medianBuy": 81
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 82,
+            "medianBuy": 82
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 83,
+            "medianBuy": 83
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 84,
+            "medianBuy": 84
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 85,
+            "medianBuy": 85
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 86,
+            "medianBuy": 86
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 87,
+            "medianBuy": 87
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 88,
+            "medianBuy": 88
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 89,
+            "medianBuy": 89
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 90,
+            "medianBuy": 90
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 91,
+            "medianBuy": 91
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 92,
+            "medianBuy": 92
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 93,
+            "medianBuy": 93
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 94,
+            "medianBuy": 94
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 95,
+            "medianBuy": 95
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 96,
+            "medianBuy": 96
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 97,
+            "medianBuy": 97
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 98,
+            "medianBuy": 98
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 99,
+            "medianBuy": 99
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 100,
+            "medianBuy": 100
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 101,
+            "medianBuy": 101
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 102,
+            "medianBuy": 102
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 103,
+            "medianBuy": 103
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 104,
+            "medianBuy": 104
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 105,
+            "medianBuy": 105
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 106,
+            "medianBuy": 106
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 107,
+            "medianBuy": 107
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 108,
+            "medianBuy": 108
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 109,
+            "medianBuy": 109
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 110,
+            "medianBuy": 110
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 111,
+            "medianBuy": 111
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 112,
+            "medianBuy": 112
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 113,
+            "medianBuy": 113
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 114,
+            "medianBuy": 114
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 115,
+            "medianBuy": 115
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 116,
+            "medianBuy": 116
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 117,
+            "medianBuy": 117
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 118,
+            "medianBuy": 118
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 119,
+            "medianBuy": 119
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 120,
+            "medianBuy": 120
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 121,
+            "medianBuy": 121
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 122,
+            "medianBuy": 122
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 123,
+            "medianBuy": 123
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 124,
+            "medianBuy": 124
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 125,
+            "medianBuy": 125
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 126,
+            "medianBuy": 126
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 127,
+            "medianBuy": 127
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 128,
+            "medianBuy": 128
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 129,
+            "medianBuy": 129
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 130,
+            "medianBuy": 130
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 131,
+            "medianBuy": 131
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 132,
+            "medianBuy": 132
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 133,
+            "medianBuy": 133
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 134,
+            "medianBuy": 134
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 135,
+            "medianBuy": 135
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 136,
+            "medianBuy": 136
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 137,
+            "medianBuy": 137
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 138,
+            "medianBuy": 138
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 139,
+            "medianBuy": 139
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 140,
+            "medianBuy": 140
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 141,
+            "medianBuy": 141
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 142,
+            "medianBuy": 142
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 143,
+            "medianBuy": 143
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 144,
+            "medianBuy": 144
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 145,
+            "medianBuy": 145
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 146,
+            "medianBuy": 146
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 147,
+            "medianBuy": 147
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 148,
+            "medianBuy": 148
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 149,
+            "medianBuy": 149
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 150,
+            "medianBuy": 150
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 151,
+            "medianBuy": 151
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 152,
+            "medianBuy": 152
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 153,
+            "medianBuy": 153
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 154,
+            "medianBuy": 154
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 155,
+            "medianBuy": 155
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 156,
+            "medianBuy": 156
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 157,
+            "medianBuy": 157
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 158,
+            "medianBuy": 158
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 159,
+            "medianBuy": 159
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 160,
+            "medianBuy": 160
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 161,
+            "medianBuy": 161
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 162,
+            "medianBuy": 162
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 163,
+            "medianBuy": 163
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 164,
+            "medianBuy": 164
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 165,
+            "medianBuy": 165
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 166,
+            "medianBuy": 166
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 167,
+            "medianBuy": 167
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 168,
+            "medianBuy": 168
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 169,
+            "medianBuy": 169
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 170,
+            "medianBuy": 170
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 171,
+            "medianBuy": 171
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 172,
+            "medianBuy": 172
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 173,
+            "medianBuy": 173
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 174,
+            "medianBuy": 174
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 175,
+            "medianBuy": 175
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 176,
+            "medianBuy": 176
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 177,
+            "medianBuy": 177
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 178,
+            "medianBuy": 178
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 179,
+            "medianBuy": 179
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 180,
+            "medianBuy": 180
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 181,
+            "medianBuy": 181
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 182,
+            "medianBuy": 182
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 183,
+            "medianBuy": 183
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 184,
+            "medianBuy": 184
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 185,
+            "medianBuy": 185
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 186,
+            "medianBuy": 186
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 187,
+            "medianBuy": 187
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 188,
+            "medianBuy": 188
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 189,
+            "medianBuy": 189
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 190,
+            "medianBuy": 190
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 191,
+            "medianBuy": 191
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 192,
+            "medianBuy": 192
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 193,
+            "medianBuy": 193
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 194,
+            "medianBuy": 194
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 195,
+            "medianBuy": 195
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 196,
+            "medianBuy": 196
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 197,
+            "medianBuy": 197
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 198,
+            "medianBuy": 198
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 199,
+            "medianBuy": 199
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 200,
+            "medianBuy": 200
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 201,
+            "medianBuy": 201
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 202,
+            "medianBuy": 202
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 203,
+            "medianBuy": 203
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 204,
+            "medianBuy": 204
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 205,
+            "medianBuy": 205
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 206,
+            "medianBuy": 206
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 207,
+            "medianBuy": 207
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 208,
+            "medianBuy": 208
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 209,
+            "medianBuy": 209
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 210,
+            "medianBuy": 210
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 211,
+            "medianBuy": 211
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 212,
+            "medianBuy": 212
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 213,
+            "medianBuy": 213
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 214,
+            "medianBuy": 214
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 215,
+            "medianBuy": 215
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 216,
+            "medianBuy": 216
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 217,
+            "medianBuy": 217
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 218,
+            "medianBuy": 218
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 219,
+            "medianBuy": 219
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 220,
+            "medianBuy": 220
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 221,
+            "medianBuy": 221
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 222,
+            "medianBuy": 222
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 223,
+            "medianBuy": 223
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 224,
+            "medianBuy": 224
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 225,
+            "medianBuy": 225
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 226,
+            "medianBuy": 226
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 227,
+            "medianBuy": 227
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 228,
+            "medianBuy": 228
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 229,
+            "medianBuy": 229
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 230,
+            "medianBuy": 230
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 231,
+            "medianBuy": 231
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 232,
+            "medianBuy": 232
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 233,
+            "medianBuy": 233
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 234,
+            "medianBuy": 234
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 235,
+            "medianBuy": 235
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 236,
+            "medianBuy": 236
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 237,
+            "medianBuy": 237
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 238,
+            "medianBuy": 238
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 239,
+            "medianBuy": 239
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 240,
+            "medianBuy": 240
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 241,
+            "medianBuy": 241
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 242,
+            "medianBuy": 242
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 243,
+            "medianBuy": 243
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 244,
+            "medianBuy": 244
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 245,
+            "medianBuy": 245
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 246,
+            "medianBuy": 246
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 247,
+            "medianBuy": 247
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 248,
+            "medianBuy": 248
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 249,
+            "medianBuy": 249
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 250,
+            "medianBuy": 250
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 251,
+            "medianBuy": 251
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 252,
+            "medianBuy": 252
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 253,
+            "medianBuy": 253
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 254,
+            "medianBuy": 254
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 255,
+            "medianBuy": 255
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 256,
+            "medianBuy": 256
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 257,
+            "medianBuy": 257
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 258,
+            "medianBuy": 258
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 259,
+            "medianBuy": 259
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 260,
+            "medianBuy": 260
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 261,
+            "medianBuy": 261
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 262,
+            "medianBuy": 262
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 263,
+            "medianBuy": 263
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 264,
+            "medianBuy": 264
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 265,
+            "medianBuy": 265
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 266,
+            "medianBuy": 266
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 267,
+            "medianBuy": 267
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 268,
+            "medianBuy": 268
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 269,
+            "medianBuy": 269
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 270,
+            "medianBuy": 270
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 271,
+            "medianBuy": 271
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 272,
+            "medianBuy": 272
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 273,
+            "medianBuy": 273
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 274,
+            "medianBuy": 274
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 275,
+            "medianBuy": 275
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 276,
+            "medianBuy": 276
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 277,
+            "medianBuy": 277
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 278,
+            "medianBuy": 278
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 279,
+            "medianBuy": 279
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 280,
+            "medianBuy": 280
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 281,
+            "medianBuy": 281
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 282,
+            "medianBuy": 282
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 283,
+            "medianBuy": 283
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 284,
+            "medianBuy": 284
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 285,
+            "medianBuy": 285
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 286,
+            "medianBuy": 286
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 287,
+            "medianBuy": 287
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 288,
+            "medianBuy": 288
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 289,
+            "medianBuy": 289
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 290,
+            "medianBuy": 290
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 291,
+            "medianBuy": 291
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 292,
+            "medianBuy": 292
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 293,
+            "medianBuy": 293
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 294,
+            "medianBuy": 294
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 295,
+            "medianBuy": 295
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 296,
+            "medianBuy": 296
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 297,
+            "medianBuy": 297
+          },
+          {
+            "coin": "CLASICA",
+            "createdAt": 298,
+            "medianBuy": 298
+          },
+          {
+            "coin": "BANK_CUP",
+            "createdAt": 299,
+            "medianBuy": 299
+          }
+        ],
+        "maxPerMarket": 12
+      },
+      "expect": [
+        {
+          "coin": "CLASICA",
+          "createdAt": 0,
+          "medianBuy": 0
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 1,
+          "medianBuy": 1
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 28,
+          "medianBuy": 28
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 29,
+          "medianBuy": 29
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 54,
+          "medianBuy": 54
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 55,
+          "medianBuy": 55
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 82,
+          "medianBuy": 82
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 83,
+          "medianBuy": 83
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 108,
+          "medianBuy": 108
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 109,
+          "medianBuy": 109
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 136,
+          "medianBuy": 136
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 137,
+          "medianBuy": 137
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 162,
+          "medianBuy": 162
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 163,
+          "medianBuy": 163
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 190,
+          "medianBuy": 190
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 191,
+          "medianBuy": 191
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 216,
+          "medianBuy": 216
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 217,
+          "medianBuy": 217
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 244,
+          "medianBuy": 244
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 245,
+          "medianBuy": 245
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 270,
+          "medianBuy": 270
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 271,
+          "medianBuy": 271
+        },
+        {
+          "coin": "CLASICA",
+          "createdAt": 298,
+          "medianBuy": 298
+        },
+        {
+          "coin": "BANK_CUP",
+          "createdAt": 299,
+          "medianBuy": 299
+        }
+      ]
+    }
+  ]
+}

@@ -1,15 +1,135 @@
-:root{font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}
-*{box-sizing:border-box}body{margin:0;color:#27231e;background:#f6f3ed}
-.login-shell{min-height:100dvh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0%,#e6e4e0,#f6f3ed 60%)}
-.login-panel{width:min(100%,440px);padding:clamp(28px,5vw,48px);border:1px solid #e7e1d8;border-radius:22px;background:#fffdfa;box-shadow:0 20px 64px #00000014}
-.login-logo{--brand-width:224px;display:block}
-h1{margin:26px 0 8px;font-size:clamp(26px,5vw,32px);line-height:1.18;letter-spacing:-.035em}
-.login-panel>p{margin:0 0 28px;color:#6b645c;font-size:14px;line-height:1.5}
-form{display:grid;gap:12px}label{font-size:13px;font-weight:650;color:#625b52}
-input{width:100%;min-height:42px;padding:9px 12px;border:1px solid #bbb3a9;border-radius:10px;background:#fffdfa;color:#27231e;font:inherit;font-size:14px}
-input:focus-visible,button:focus-visible{outline:3px solid #8bafce;outline-offset:2px}
-button{min-height:42px;margin-top:8px;border:0;border-radius:10px;background:#1d4e86;color:white;font:inherit;font-size:14px;font-weight:650;cursor:pointer}
-button:hover{background:#153c69}button:disabled{opacity:.65;cursor:wait}
-#login-status{min-height:1.4em;margin:0;color:#9b302d;font-size:13px;line-height:1.4}
-[data-theme="dark"] body{color:#f5f1ea;background:#211e1b}[data-theme="dark"] .login-shell{background:radial-gradient(circle at 50% 0%,#303033,#211e1b 65%)}[data-theme="dark"] .login-panel{background:#292521;border-color:#464039}[data-theme="dark"] .login-panel>p,[data-theme="dark"] label{color:#c4bdb4}[data-theme="dark"] input{background:#34302b;color:#f5f1ea;border-color:#655c52}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) body{color:#f5f1ea;background:#211e1b}:root:not([data-theme="light"]) .login-shell{background:radial-gradient(circle at 50% 0%,#303033,#211e1b 65%)}:root:not([data-theme="light"]) .login-panel{background:#292521;border-color:#464039}:root:not([data-theme="light"]) .login-panel>p,:root:not([data-theme="light"]) label{color:#c4bdb4}:root:not([data-theme="light"]) input{background:#34302b;color:#f5f1ea;border-color:#655c52}}
+:root {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  color: #27231e;
+  background: #f6f3ed;
+}
+.login-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 0%, #e6e4e0, #f6f3ed 60%);
+}
+.login-panel {
+  width: min(100%, 440px);
+  padding: clamp(28px, 5vw, 48px);
+  border: 1px solid #e7e1d8;
+  border-radius: 20px;
+  background: #fffdfa;
+  box-shadow: 0 20px 64px #00000014;
+}
+.login-brand-lockup {
+  display: flex;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.login-logo {
+  --brand-width: 224px;
+  display: block;
+}
+.login-heading h1 {
+  margin: 0;
+  font-size: clamp(28px, 5vw, 34px);
+  line-height: 1.06;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+.login-heading p {
+  margin: 9px 0 28px;
+  max-width: 42ch;
+  color: #625b52;
+  font-size: 14px;
+  line-height: 1.55;
+}
+form { display: grid; gap: 12px; }
+.login-field { display: grid; gap: 7px; }
+label { font-size: 12px; font-weight: 700; color: #625b52; }
+input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid #bbb3a9;
+  border-radius: 9px;
+  background: #fffdfa;
+  color: #27231e;
+  font: inherit;
+  font-size: 14px;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
+}
+input::placeholder { color: #746b5e; opacity: 1; }
+input:hover { border-color: #9d9488; }
+input:focus-visible,
+button:focus-visible {
+  outline: none;
+  border-color: #4f7ba8;
+  box-shadow: 0 0 0 3px #1d4e8640;
+}
+button {
+  min-height: 44px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: #1d4e86;
+  color: white;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 180ms ease, transform 180ms ease;
+}
+button:hover { background: #153c69; }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: .65; cursor: wait; }
+#login-status {
+  min-height: 1.4em;
+  margin: 0;
+  color: #9b302d;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.login-footnote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 22px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid #e7e1d8;
+  color: #746b5e;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.login-footnote-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: #256b48;
+  box-shadow: 0 0 0 3px #e4f0e8;
+}
+::selection { background: #1d4e8638; color: #1e1c18; }
+[data-theme="dark"] body { color: #f5f1ea; background: #211e1b; }
+[data-theme="dark"] .login-shell { background: radial-gradient(circle at 50% 0%, #303033, #211e1b 65%); }
+[data-theme="dark"] .login-panel { background: #292521; border-color: #464039; }
+[data-theme="dark"] .login-heading p,
+[data-theme="dark"] label { color: #c4bdb4; }
+[data-theme="dark"] input { background: #34302b; color: #f5f1ea; border-color: #655c52; }
+[data-theme="dark"] .login-footnote { border-color: #464039; color: #a9a096; }
+[data-theme="dark"] .login-footnote-dot { background: #7fc9a2; box-shadow: 0 0 0 3px #1a3328; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body { color: #f5f1ea; background: #211e1b; }
+  :root:not([data-theme="light"]) .login-shell { background: radial-gradient(circle at 50% 0%, #303033, #211e1b 65%); }
+  :root:not([data-theme="light"]) .login-panel { background: #292521; border-color: #464039; }
+  :root:not([data-theme="light"]) .login-heading p,
+  :root:not([data-theme="light"]) label { color: #c4bdb4; }
+  :root:not([data-theme="light"]) input { background: #34302b; color: #f5f1ea; border-color: #655c52; }
+  :root:not([data-theme="light"]) .login-footnote { border-color: #464039; color: #a9a096; }
+  :root:not([data-theme="light"]) .login-footnote-dot { background: #7fc9a2; box-shadow: 0 0 0 3px #1a3328; }
+}

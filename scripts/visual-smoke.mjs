@@ -162,7 +162,7 @@ try {
   );
   await command("POST", `/session/${sessionId}/element/${cooperativeNetwork}/click`, {});
   await waitFor(() =>
-    execute("return document.body.innerText.includes('Liquidez global')"),
+    execute("return document.body.innerText.includes('Liquidez de la red')"),
   );
   const networkDesktop = await assertPageQuality("Red cooperativa");
   await screenshot("/tmp/qvaapply-cooperative-network-desktop.png");
@@ -354,6 +354,15 @@ try {
       `La gráfica no dibujó sus ejes o curvas: ${JSON.stringify(chartRender)}`,
     );
   await screenshot("/tmp/qvaapply-charts-desktop.png");
+  // El tooltip debe mostrar compra y venta juntas, no solo la serie bajo el
+  // cursor.
+  await execute(`const wrapper=document.querySelector('.market-chart .recharts-wrapper');
+    if (!wrapper) return false;
+    const box=wrapper.getBoundingClientRect();
+    wrapper.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,clientX:box.left+box.width*0.82,clientY:box.top+box.height*0.45}));
+    return true`);
+  await waitFor(() => execute(`const text=document.querySelector('.market-chart .recharts-tooltip-wrapper')?.innerText||''; return text.includes('Compra') && text.includes('Venta')`));
+  await screenshot("/tmp/qvaapply-charts-tooltip-desktop.png");
   const chartsDesktop = await assertPageQuality("Gráficas");
   const feeDisclosure=await find('css selector','summary');
   await execute("document.querySelector('summary')?.scrollIntoView({block:'center'}); return true");
@@ -573,7 +582,7 @@ try {
     ],
     [
       "Cacerías conjuntas",
-      "Liquidez global",
+      "Liquidez de la red",
       "/tmp/qvaapply-cooperative-network-mobile.png",
     ],
     ["Gráficas", "Fluctuación de precios", "/tmp/qvaapply-charts-mobile.png"],

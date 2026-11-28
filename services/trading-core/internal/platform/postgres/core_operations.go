@@ -1,0 +1,261 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AGR55/QvaApp/services/shared/decimal"
+	"github.com/AGR55/QvaApp/services/trading-core/internal/core"
+)
+
+// ErrCoreOperationConflict indica que la operación cambió entre la lectura y
+// la escritura: otra transición ganó la carrera por la misma versión.
+var ErrCoreOperationConflict = errors.New("conflicto concurrente: la operación core cambió de versión")
+
+// ErrCoreOperationExists indica que el INSERT no insertó porque la operación
+// ya estaba persistida. Es distinto de un fallo de base de datos.
+var ErrCoreOperationExists = errors.New("la operación core ya existe")
+
+// CoreOperationRepository persiste operaciones shadow con transiciones
+// optimistas. No mueve dinero: solo guarda el estado y los importes exactos.
+type CoreOperationRepository struct {
+	pool *pgxpool.Pool
+}
+
+// NewCoreOperationRepository crea el repositorio.
+func NewCoreOperationRepository(pool *pgxpool.Pool) *CoreOperationRepository {
+	return &CoreOperationRepository{pool: pool}
+}
+
+// Create inserta una operación nueva en created o reserved. El consumidor
+// crea directamente en reserved para ahorrar una transición y reducir latencia.
+func (repository *CoreOperationRepository) Create(ctx context.Context, operation core.Operation) error {
+	if operation.State != core.StateCreated && operation.State != core.StateReserved {
+		return fmt.Errorf(
+			"operación core %q: solo se puede crear en %q o %q, recibido %q",
+			operation.ID, core.StateCreated, core.StateReserved, operation.State,
+		)
+	}
+	tag, err := repository.pool.Exec(ctx, `
+		INSERT INTO shadow.core_operations
+			(operation_id, state, qusd_amount, fiat_amount, order_uuid, updated_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $6)
+		ON CONFLICT (operation_id) DO NOTHING`,
+		operation.ID, string(operation.State),
+		operation.QusdAmount.Format(8), operation.FiatAmount.Format(8),
+		operation.OrderUUID, operation.UpdatedAt,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %q", ErrCoreOperationExists, operation.ID)
+	}
+	return nil
+}
+
+// Get devuelve la operación persistida. Falla si no existe.
+func (repository *CoreOperationRepository) Get(ctx context.Context, id string) (core.Operation, error) {
+	operation, _, err := repository.load(ctx, id)
+	if err != nil {
+		return core.Operation{}, err
+	}
+	return operation, nil
+}
+
+// Transition valida next con la máquina de estados del core y persiste el
+// cambio con compare-and-swap sobre version. Si la fila cambió desde la
+// lectura, devuelve ErrCoreOperationConflict y no aplica nada.
+func (repository *CoreOperationRepository) Transition(
+	ctx context.Context,
+	id string,
+	next core.OperationState,
+	now int64,
+) (core.Operation, error) {
+	current, version, err := repository.load(ctx, id)
+	if err != nil {
+		return core.Operation{}, err
+	}
+	updated, err := current.Transition(next, now)
+	if err != nil {
+		return core.Operation{}, err
+	}
+	tag, err := repository.pool.Exec(ctx, `
+		UPDATE shadow.core_operations
+		SET state = $3, updated_at = $4, version = version + 1
+		WHERE operation_id = $1 AND version = $2`,
+		id, version, string(updated.State), updated.UpdatedAt,
+	)
+	if err != nil {
+		return core.Operation{}, err
+	}
+	if tag.RowsAffected() == 0 {
+		return core.Operation{}, fmt.Errorf("operación core %q: %w", id, ErrCoreOperationConflict)
+	}
+	return updated, nil
+}
+
+// ActiveForOffer indica si ya existe una operación en curso para la oferta.
+// Evita aplicar dos veces la misma oferta si el hunter la vuelve a publicar.
+func (repository *CoreOperationRepository) ActiveForOffer(
+	ctx context.Context,
+	offerUUID string,
+) (bool, error) {
+	var active bool
+	err := repository.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM shadow.core_operations o
+			JOIN shadow.core_decisions d ON d.event_id = o.operation_id
+			LEFT JOIN shadow.local_operations l ON l.uuid = d.offer_uuid
+			WHERE d.offer_uuid = $1
+			  AND (
+			    o.state IN ('reserved', 'submitted', 'uncertain')
+			    OR (
+			      o.state = 'confirmed'
+			      AND l.state IN ('applied', 'acknowledged', 'paid', 'uncertain')
+			    )
+			  )
+		)`, offerUUID,
+	).Scan(&active)
+	return active, err
+}
+
+// SetOrder persiste la orden flexible que devolvió QvaPay. Se escribe antes de
+// confirmar la operación para no perder la referencia de cancelación.
+func (repository *CoreOperationRepository) SetOrder(
+	ctx context.Context,
+	id, orderUUID string,
+) error {
+	tag, err := repository.pool.Exec(ctx, `
+		UPDATE shadow.core_operations SET order_uuid = $2 WHERE operation_id = $1`,
+		id, orderUUID,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("operación core %q no existe", id)
+	}
+	return nil
+}
+
+// CountByState cuenta las operaciones agrupadas por estado.
+func (repository *CoreOperationRepository) CountByState(
+	ctx context.Context,
+) (map[core.OperationState]int64, error) {
+	rows, err := repository.pool.Query(ctx, `
+		SELECT state, count(*)
+		FROM shadow.core_operations
+		GROUP BY state`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := make(map[core.OperationState]int64)
+	for rows.Next() {
+		var state string
+		var count int64
+		if err := rows.Scan(&state, &count); err != nil {
+			return nil, err
+		}
+		counts[core.OperationState(state)] = count
+	}
+	return counts, rows.Err()
+}
+
+// Usage devuelve la exposición y el volumen ya usados, calculados desde las
+// operaciones persistentes. dailySinceMS marca el inicio del día en UTC.
+func (repository *CoreOperationRepository) Usage(
+	ctx context.Context,
+	dailySinceMS int64,
+) (core.Usage, error) {
+	// Solo se leen operaciones activas y las confirmadas del día: ambas usan el
+	// índice (state, updated_at). Antes el agregado recorría todo el histórico
+	// y cada invalidación de caché pagaba ese coste en el camino caliente.
+	var exposureText, dailyText, sellExposureText string
+	var active int64
+	err := repository.pool.QueryRow(ctx, `
+		WITH active AS (
+			SELECT o.qusd_amount, d.side
+			FROM shadow.core_operations o
+			LEFT JOIN shadow.core_decisions d ON d.event_id = o.operation_id
+			WHERE o.state IN ('reserved', 'submitted', 'uncertain')
+		),
+		daily AS (
+			SELECT COALESCE(SUM(qusd_amount::numeric), 0) AS total
+			FROM shadow.core_operations
+			WHERE state IN ('confirmed', 'reconciled') AND updated_at >= $1
+		)
+		SELECT
+			COALESCE((SELECT SUM(qusd_amount::numeric) FROM active), 0)::text,
+			(SELECT total FROM daily)::text,
+			(SELECT COUNT(*) FROM active),
+			COALESCE((SELECT SUM(qusd_amount::numeric) FROM active WHERE side = 'sell'), 0)::text`,
+		dailySinceMS,
+	).Scan(&exposureText, &dailyText, &active, &sellExposureText)
+	if err != nil {
+		return core.Usage{}, err
+	}
+	exposure, err := decimal.Parse(exposureText)
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("exposición core inválida: %w", err)
+	}
+	daily, err := decimal.Parse(dailyText)
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("volumen diario core inválido: %w", err)
+	}
+	sellExposure, err := decimal.Parse(sellExposureText)
+	if err != nil {
+		return core.Usage{}, fmt.Errorf("exposición de venta invalidada: %w", err)
+	}
+	return core.Usage{
+		ConcurrentQusdExposure: exposure,
+		DailyAppliedQusd:       daily,
+		ActiveOperations:       decimal.FromInt(active),
+		SellQusdExposure:       sellExposure,
+	}, nil
+}
+
+// load lee una operación y su versión actual. Los importes se persisten como
+// texto y se reconstruyen con decimal.Parse, sin pasar por float64.
+func (repository *CoreOperationRepository) load(
+	ctx context.Context,
+	id string,
+) (core.Operation, int, error) {
+	var state, qusdText, fiatText, orderUUID string
+	var updatedAt int64
+	var version int
+	err := repository.pool.QueryRow(ctx, `
+		SELECT state, qusd_amount, fiat_amount, COALESCE(order_uuid, ''), updated_at, version
+		FROM shadow.core_operations
+		WHERE operation_id = $1`,
+		id,
+	).Scan(&state, &qusdText, &fiatText, &orderUUID, &updatedAt, &version)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return core.Operation{}, 0, fmt.Errorf("operación core %q no existe: %w", id, err)
+		}
+		return core.Operation{}, 0, err
+	}
+	qusd, err := decimal.Parse(qusdText)
+	if err != nil {
+		return core.Operation{}, 0, fmt.Errorf("operación core %q: importe QUSD inválido: %w", id, err)
+	}
+	fiat, err := decimal.Parse(fiatText)
+	if err != nil {
+		return core.Operation{}, 0, fmt.Errorf("operación core %q: importe fiat inválido: %w", id, err)
+	}
+	return core.Operation{
+		ID:         id,
+		State:      core.OperationState(state),
+		OrderUUID:  orderUUID,
+		QusdAmount: qusd,
+		FiatAmount: fiat,
+		UpdatedAt:  updatedAt,
+	}, version, nil
+}

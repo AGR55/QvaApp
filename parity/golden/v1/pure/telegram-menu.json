@@ -1,0 +1,357 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "notifier",
+  "module": "src/telegram-menu.ts",
+  "sourceTests": [
+    "test/telegram-menu.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Menú nativo de Telegram: comandos sin duplicados, acciones de cacería dentro de 64 bytes, tasas exactas y flujo de edición con token vigente. · goldenHash=8ed01f381a3ea0d930b8ee7c6dfddf33818413d002b495034e59f3c90a1b9ca2",
+  "cases": [
+    {
+      "caseId": "pure/telegram-menu/commands/0001",
+      "op": "telegram.commands",
+      "source": "test/telegram-menu.test.ts:12",
+      "expect": {
+        "commands": [
+          "panel",
+          "balance",
+          "hunting",
+          "network",
+          "coop",
+          "markets",
+          "offers",
+          "recovery",
+          "operations",
+          "strategy",
+          "automation",
+          "scan",
+          "logs",
+          "diagnostico",
+          "historial",
+          "salud",
+          "rentabilidad",
+          "simular",
+          "help"
+        ],
+        "descriptions": [
+          "Centro de operaciones",
+          "Saldo disponible en QvaPay",
+          "Configurar las cacerías",
+          "Red cooperativa entre bots",
+          "Gestionar mi aporte cooperativo",
+          "Consultar mercados P2P",
+          "Administrar mis ofertas",
+          "Conciliar, registrar evidencia y reconocer avisos",
+          "Operaciones activas",
+          "Estrategia y límites actuales",
+          "Activar o pausar automatización",
+          "Escanear los mercados ahora",
+          "Eventos recientes del bot",
+          "Por qué se toman o descartan ofertas",
+          "Movimientos y saldos del fiat",
+          "Estado del feed, medianas y latencia",
+          "Resultado documentado y estimado por moneda",
+          "Comparar precios sin cambiar las cacerías",
+          "Ayuda y comandos avanzados"
+        ],
+        "unique": true,
+        "allDescribed": true
+      }
+    },
+    {
+      "caseId": "pure/telegram-menu/roundtrip/0001",
+      "op": "telegram.roundtrip",
+      "source": "test/telegram-menu.test.ts:38",
+      "input": {
+        "actions": [
+          {
+            "type": "home"
+          },
+          {
+            "type": "global-toggle",
+            "side": "buy"
+          },
+          {
+            "type": "market",
+            "coin": "BANDECPREPAGO"
+          },
+          {
+            "type": "market-toggle",
+            "side": "sell",
+            "coin": "BANK_CUP"
+          },
+          {
+            "type": "rate-edit",
+            "side": "buy",
+            "coin": "CLASICA"
+          },
+          {
+            "type": "rate-confirm",
+            "token": "ab12cd34"
+          },
+          {
+            "type": "rate-cancel",
+            "token": "ab12cd34"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "encoded": "hunt:home",
+            "bytes": 9,
+            "decoded": {
+              "type": "home"
+            }
+          },
+          {
+            "encoded": "hunt:g:buy",
+            "bytes": 10,
+            "decoded": {
+              "type": "global-toggle",
+              "side": "buy"
+            }
+          },
+          {
+            "encoded": "hunt:m:BANDECPREPAGO",
+            "bytes": 20,
+            "decoded": {
+              "type": "market",
+              "coin": "BANDECPREPAGO"
+            }
+          },
+          {
+            "encoded": "hunt:t:sell:BANK_CUP",
+            "bytes": 20,
+            "decoded": {
+              "type": "market-toggle",
+              "side": "sell",
+              "coin": "BANK_CUP"
+            }
+          },
+          {
+            "encoded": "hunt:e:buy:CLASICA",
+            "bytes": 18,
+            "decoded": {
+              "type": "rate-edit",
+              "side": "buy",
+              "coin": "CLASICA"
+            }
+          },
+          {
+            "encoded": "hunt:y:ab12cd34",
+            "bytes": 15,
+            "decoded": {
+              "type": "rate-confirm",
+              "token": "ab12cd34"
+            }
+          },
+          {
+            "encoded": "hunt:n:ab12cd34",
+            "bytes": 15,
+            "decoded": {
+              "type": "rate-cancel",
+              "token": "ab12cd34"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/telegram-menu/parse-rates/0001",
+      "op": "telegram.parse-rates",
+      "source": "test/telegram-menu.test.ts:58",
+      "input": {
+        "texts": [
+          "930",
+          " 1.125 ",
+          "1,125",
+          "",
+          "0",
+          "-1",
+          "1,2,3",
+          "1e3",
+          "Infinity"
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "value": 930
+          },
+          {
+            "value": 1.125
+          },
+          {
+            "value": 1.125
+          },
+          {
+            "error": "Escribe una tasa positiva usando solo números."
+          },
+          {
+            "error": "La tasa debe ser mayor que cero."
+          },
+          {
+            "error": "Escribe una tasa positiva usando solo números."
+          },
+          {
+            "error": "Escribe una tasa positiva usando solo números."
+          },
+          {
+            "error": "Escribe una tasa positiva usando solo números."
+          },
+          {
+            "error": "Escribe una tasa positiva usando solo números."
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/telegram-menu/rate-sessions/0001",
+      "op": "telegram.rate-sessions",
+      "source": "test/telegram-menu.test.ts:64",
+      "input": {
+        "steps": [
+          {
+            "op": "begin",
+            "chatId": "admin",
+            "coin": "BANK_CUP",
+            "side": "buy",
+            "previousRate": 925
+          },
+          {
+            "op": "propose",
+            "chatId": "admin",
+            "text": "930,5"
+          },
+          {
+            "op": "confirm",
+            "chatId": "admin",
+            "token": "token-equivocado"
+          },
+          {
+            "op": "current",
+            "chatId": "admin"
+          },
+          {
+            "op": "confirm",
+            "chatId": "admin",
+            "token": "token1"
+          },
+          {
+            "op": "current",
+            "chatId": "admin"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "stage": "input",
+            "token": "token1",
+            "coin": "BANK_CUP",
+            "side": "buy",
+            "previousRate": 925
+          },
+          {
+            "stage": "confirm",
+            "token": "token1",
+            "coin": "BANK_CUP",
+            "side": "buy",
+            "previousRate": 925,
+            "proposedRate": 930.5
+          },
+          {
+            "error": "Esta confirmación de tasa ya no está vigente."
+          },
+          {
+            "stage": "confirm",
+            "token": "token1",
+            "coin": "BANK_CUP",
+            "side": "buy",
+            "previousRate": 925,
+            "proposedRate": 930.5
+          },
+          {
+            "stage": "confirm",
+            "token": "token1",
+            "coin": "BANK_CUP",
+            "side": "buy",
+            "previousRate": 925,
+            "proposedRate": 930.5
+          },
+          null
+        ]
+      }
+    },
+    {
+      "caseId": "pure/telegram-menu/cancel/0001",
+      "op": "telegram.rate-sessions",
+      "source": "test/telegram-menu.test.ts:83",
+      "input": {
+        "steps": [
+          {
+            "op": "begin",
+            "chatId": "admin",
+            "coin": "CLASICA",
+            "side": "sell",
+            "previousRate": 1.12
+          },
+          {
+            "op": "cancel",
+            "chatId": "admin"
+          },
+          {
+            "op": "current",
+            "chatId": "admin"
+          },
+          {
+            "op": "confirm",
+            "chatId": "admin",
+            "token": "token1"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "stage": "input",
+            "token": "token1",
+            "coin": "CLASICA",
+            "side": "sell",
+            "previousRate": 1.12
+          },
+          {
+            "stage": "input",
+            "token": "token1",
+            "coin": "CLASICA",
+            "side": "sell",
+            "previousRate": 1.12
+          },
+          null,
+          {
+            "error": "Esta confirmación de tasa ya no está vigente."
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/telegram-menu/decode-invalid/0001",
+      "op": "telegram.decode",
+      "source": "test/telegram-menu.test.ts:53",
+      "input": {
+        "data": "hunt:market:codigo inválido"
+      },
+      "expectError": {
+        "class": "validation",
+        "messageIncludes": "inválida"
+      }
+    }
+  ]
+}

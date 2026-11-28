@@ -1,0 +1,133 @@
+{
+  "cassetteVersion": 1,
+  "name": "k4-mutations-ambiguous",
+  "description": "K4: create/edit/cancel/paid/received. 4xx es definitivo (no bloquea reintento manual), timeout/5xx deja la mutación incierta y la conciliación lee el estado del mundo. `idempotency_key` repetido no duplica la oferta.",
+  "contract": "K4",
+  "clockMs": 1767225600000,
+  "world": {
+    "user": { "uuid": "user-owner-0001" },
+    "offers": [
+      {
+        "uuid": "offer-own-1",
+        "type": "sell",
+        "coin": "QUSD",
+        "amount": "30.00000000",
+        "receive": "30.00000000",
+        "status": "open",
+        "User": { "uuid": "user-owner-0001" },
+        "Peer": {},
+        "details": []
+      }
+    ]
+  },
+  "exchanges": [
+    {
+      "id": "create-with-idempotency-key",
+      "contract": "K4",
+      "match": { "method": "POST", "path": "/v2/p2p/create", "bodyContains": "idem-0001" },
+      "effects": [
+        {
+          "op": "create",
+          "offer": {
+            "uuid": "offer-created-1",
+            "type": "buy",
+            "coin": "QUSD",
+            "amount": "15.00000000",
+            "receive": "15.00000000",
+            "status": "open",
+            "User": { "uuid": "user-owner-0001" },
+            "Peer": {},
+            "details": []
+          }
+        }
+      ],
+      "response": { "status": 200, "body": { "p2p": { "$offer": "offer-created-1" } } }
+    },
+    {
+      "id": "create-duplicate-idempotency-key",
+      "contract": "K4",
+      "match": { "method": "POST", "path": "/v2/p2p/create", "bodyContains": "idem-0001" },
+      "response": { "status": 200, "body": { "p2p": { "$offer": "offer-created-1" } } },
+      "logAssertions": {
+        "method": "POST",
+        "path": "/v2/p2p/create",
+        "bodyContains": "idem-0001"
+      }
+    },
+    {
+      "id": "create-timeout-hang",
+      "contract": "K4",
+      "match": { "method": "POST", "path": "/v2/p2p/create", "bodyContains": "idem-hang-0002" },
+      "abort": "hang"
+    },
+    {
+      "id": "edit-success",
+      "contract": "K4",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-own-1/edit",
+        "body": { "amount": 25, "receive": 25 }
+      },
+      "effects": [{ "op": "patch", "uuid": "offer-own-1", "patch": { "amount": "25.00000000", "receive": "25.00000000" } }],
+      "response": { "status": 200, "body": { "p2p": { "$offer": "offer-own-1" } } }
+    },
+    {
+      "id": "edit-ambiguous",
+      "contract": "K4",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-own-1/edit", "body": { "amount": 20 } },
+      "effects": [{ "op": "patch", "uuid": "offer-own-1", "patch": { "amount": "20.00000000" } }],
+      "abort": "after-headers",
+      "response": { "status": 200, "partialBody": "{\"p2p\":{\"uuid\":\"offer-own-1\"" }
+    },
+    {
+      "id": "edit-400-definitivo",
+      "contract": "K4",
+      "match": { "method": "POST", "path": "/v2/p2p/offer-own-1/edit", "body": { "amount": 0 } },
+      "response": { "status": 400, "body": { "error": "Importe inválido", "code": "HTTP_400" } }
+    },
+    {
+      "id": "cancel-order-ok",
+      "contract": "K4",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-own-1/cancel",
+        "query": { "order": "order-1" }
+      },
+      "effects": [{ "op": "cancel", "uuid": "offer-own-1", "status": "cancelled" }],
+      "response": { "status": 200, "body": { "status": "cancelled" } }
+    },
+    {
+      "id": "cancel-order-5xx",
+      "contract": "K4",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-own-1/cancel",
+        "query": { "order": "order-2" }
+      },
+      "response": { "status": 500, "body": { "error": "Internal Server Error" } }
+    },
+    {
+      "id": "paid-ok",
+      "contract": "K4",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-own-1/paid",
+        "query": { "order": "order-1" },
+        "body": { "tx_id": "tx-ref-0001" }
+      },
+      "effects": [{ "op": "status", "uuid": "offer-own-1", "status": "paid" }],
+      "response": { "status": 200, "body": { "status": "paid" } }
+    },
+    {
+      "id": "received-ok",
+      "contract": "K4",
+      "match": {
+        "method": "POST",
+        "path": "/v2/p2p/offer-own-1/received",
+        "query": { "order": "order-1" }
+      },
+      "effects": [{ "op": "status", "uuid": "offer-own-1", "status": "completed" }],
+      "response": { "status": 200, "body": {} }
+    }
+  ]
+}

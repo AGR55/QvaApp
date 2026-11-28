@@ -1,0 +1,371 @@
+# Despliegue F3 en modo shadow, aislado de producción.
+#
+# - Proyecto, red y volúmenes propios (qvaapply-f3-shadow).
+# - Postgres 16 sin puerto publicado: solo accesible desde esta red.
+# - trading-core se publica únicamente en loopback y nunca comparte datos con
+#   el contenedor Node `qvaapply` ni con /opt/qvaapply.
+# - Los servicios `shadow-migrate`, `shadow-replay`, `shadow-audit` e
+#   `shadow-invariants` son
+#   one-shot y solo se ejecutan explícitamente con `docker compose run`
+#   (perfil `tools`).
+#
+# Rutas relativas: Compose las resuelve desde el directorio de este archivo
+# (deploy/), por eso los montajes usan `../`.
+#
+# Uso local:
+#   F3_POSTGRES_PASSWORD=... docker compose -f deploy/compose.f3-shadow.yaml config
+# En la VPS lo orquesta scripts/deploy-f3-shadow.sh (lee /opt/qvaapply-f3-shadow/.env).
+name: qvaapply-f3-shadow
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: qvaapply-f3-shadow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qvaapply
+      POSTGRES_USER: qvaapply
+      POSTGRES_PASSWORD: ${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}
+    # Sin `ports`: la base de datos no se expone fuera de la red del proyecto.
+    volumes:
+      - qvaapply-f3-shadow-pgdata:/var/lib/postgresql/data
+    networks:
+      - shadow
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U qvaapply -d qvaapply
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  trading-core:
+    build:
+      context: ..
+      dockerfile: services/trading-core/Dockerfile.binary
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    container_name: qvaapply-f3-shadow-trading-core
+    restart: unless-stopped
+    stop_grace_period: 15s
+    env_file:
+      - ${F3_CORE_ENV:-/dev/null}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8090"
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+      SHADOW_MODE: "true"
+      SERVICE_NAME: trading-core-shadow
+      CORE_CONFIG_FILE: /config/core-config.json
+    volumes:
+      - ${F3_CORE_CONFIG_FILE:-../data/core-config.json}:/config/core-config.json:ro
+    ports:
+      # Solo loopback: no se publica en el firewall ni en Nginx.
+      - "127.0.0.1:8090:8090"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/trading-core", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # Servicio de cacerías: polling QvaPay read-only cada segundo. No escribe
+  # dinero ni llama a mutaciones. Se activa con el perfil `hunter`.
+  hunter:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["hunter"]
+    container_name: qvaapply-f3-shadow-hunter
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${F3_HUNTER_ENV:-/dev/null}
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+      HUNTER_CONFIG_FILE: /config/hunter-config.json
+      HUNTER_SPOOL_DIR: /var/lib/hunter-spool
+      HUNTER_POLL_MS: ${HUNTER_POLL_MS:-1000}
+      PORT: "8091"
+    entrypoint: ["/hunter"]
+    volumes:
+      - ${F3_HUNTER_CONFIG_FILE:-../data/hunter-config.json}:/config/hunter-config.json:ro
+      - ${F3_HUNTER_DATA_DIR:-../data}/spool:/var/lib/hunter-spool:rw
+    ports:
+      - "127.0.0.1:8091:8091"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/hunter", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  notifier:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["notifier"]
+    container_name: qvaapply-f3-shadow-notifier
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${F3_NOTIFIER_ENV:-/dev/null}
+    environment:
+      PORT: "8092"
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+    entrypoint: ["/notifier"]
+    ports:
+      - "127.0.0.1:8092:8092"
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/notifier", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  edge:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["edge"]
+    container_name: qvaapply-f3-shadow-edge
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ${F3_EDGE_ENV:-/dev/null}
+    environment:
+      PORT: "8093"
+      STATIC_DIR: /static
+      EDGE_OPERATORS_FILE: /data/operators.json
+      EDGE_CHAT_THREADS_FILE: /data/chat-threads.json
+      EDGE_MOBILE_AUTH_FILE: /data/mobile-auth.json
+      EDGE_DASHBOARD_SNAPSHOT_FILE: /data/dashboard-snapshot.json
+      EDGE_OPERATIONAL_HEALTH_FILE: /data/operational-health.json
+      EDGE_WEB_EXTRAS_FILE: /data/web-extras.json
+      EDGE_COOPERATIVE_FILE: /data/cooperative.json
+      EDGE_MARKET_ICONS_DIR: /data/market-icons
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+    entrypoint: ["/edge"]
+    volumes:
+      - ../public:/static:ro
+      - ${F3_OPERATORS_FILE:-/dev/null}:/data/operators.json:ro
+      - ${F3_CHAT_THREADS_FILE:-/dev/null}:/data/chat-threads.json:ro
+      - ${F3_MOBILE_AUTH_FILE:-/dev/null}:/data/mobile-auth.json:ro
+      - ${F3_DASHBOARD_SNAPSHOT_FILE:-/dev/null}:/data/dashboard-snapshot.json:ro
+      - ${F3_OPERATIONAL_HEALTH_FILE:-/dev/null}:/data/operational-health.json:ro
+      - ${F3_WEB_EXTRAS_FILE:-/dev/null}:/data/web-extras.json:ro
+      - ${F3_COOPERATIVE_FILE:-/dev/null}:/data/cooperative.json:ro
+      - ${F3_MARKET_ICONS_DIR:?F3_MARKET_ICONS_DIR requerida}:/data/market-icons:rw
+    ports:
+      - "127.0.0.1:8093:8093"
+    networks:
+      - shadow
+      - caceria-net
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/edge", "healthcheck"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  # Aplica services/db/migrations/0004_shadow.sql con psql, sin runner.
+  # Se lanza desde scripts/deploy-f3-shadow.sh antes de activar la release.
+  shadow-migrate:
+    image: postgres:16
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: qvaapply
+      PGDATABASE: qvaapply
+      PGPASSWORD: ${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}
+    volumes:
+      - ../services/db/migrations:/migrations:ro
+    command:
+      - psql
+      - -v
+      - ON_ERROR_STOP=1
+      - -f
+      - /migrations/0004_shadow.sql
+      - -f
+      - /migrations/0005_invariants.sql
+      - -f
+      - /migrations/0006_soak.sql
+      - -f
+      - /migrations/0007_qvapay.sql
+      - -f
+      - /migrations/0008_qvapay_offers.sql
+      - -f
+      - /migrations/0009_hunter.sql
+      - -f
+      - /migrations/0010_hunter_events.sql
+      - -f
+      - /migrations/0011_hunter_source.sql
+      - -f
+      - /migrations/0012_core_decisions.sql
+      - -f
+      - /migrations/0013_core_executions.sql
+      - -f
+      - /migrations/0014_core_operations.sql
+      - -f
+      - /migrations/0015_push_subscriptions.sql
+      - -f
+      - /migrations/0016_qvapay_transactions.sql
+      - -f
+      - /migrations/0017_runtime_config.sql
+      - -f
+      - /migrations/0018_service_delivery.sql
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Ejecuta el corpus replay una vez y persiste run/decisiones en shadow.*.
+  # Se lanza manualmente con scripts/f3-shadow-replay.sh (nunca en el deploy).
+  shadow-replay:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+      SHADOW_MODE: "true"
+    entrypoint: ["/shadow-replay"]
+    command: ["-corpus", "/corpus"]
+    volumes:
+      - ../parity/fixtures/replay/2026-11-12:/corpus:ro
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Audita decisiones reales exportadas de SQLite (`decision_events`) con el
+  # dominio Go y persiste la comparación en shadow.*. El JSON se monta desde
+  # el host; este contenedor no accede directamente a la SQLite de producción.
+  shadow-audit:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+      SHADOW_MODE: "true"
+    entrypoint: ["/shadow-audit"]
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  shadow-workflows:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+      SHADOW_MODE: "true"
+    entrypoint: ["/shadow-workflows"]
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  shadow-qvapay:
+    image: qvaapply-f3-shadow-trading-core:${F3_REVISION:-local}
+    profiles: ["tools"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://qvaapply:${F3_POSTGRES_PASSWORD:?F3_POSTGRES_PASSWORD requerida}@postgres:5432/qvaapply?sslmode=disable&pool_max_conns=10
+      SHADOW_MODE: "true"
+    entrypoint: ["/shadow-qvapay"]
+    # El token cifrado y la clave se pasan solo en `docker compose run -e`;
+    # nunca se guardan en este Compose.
+    networks:
+      - shadow
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  shadow:
+    name: qvaapply-f3-shadow
+  caceria-net:
+    external: true
+
+volumes:
+  qvaapply-f3-shadow-pgdata:
+    name: qvaapply-f3-shadow-pgdata

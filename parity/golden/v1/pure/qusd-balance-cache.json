@@ -1,0 +1,963 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "pure",
+  "targetService": "qvapay-adapter",
+  "module": "src/qusd-balance-cache.ts",
+  "sourceTests": [
+    "test/qusd-balance-cache.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Caché de saldo QUSD bruto: TTL de 15 s por época, lecturas normales/urgentes independientes, respuesta remota más reciente, force con reintento, límite de 4 lecturas, cierre y descarte por control. Sin red ni reloj real. · goldenHash=453111f6b693f7400b07f2c7fdfdcbdb93457ca0553fbf6a1faef8f878607a9b",
+  "cases": [
+    {
+      "caseId": "pure/qusd-balance-cache/ttl-epoch/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:12",
+      "input": {
+        "now": 100000,
+        "epoch": "1",
+        "reads": [
+          {
+            "value": 10
+          },
+          {
+            "value": 20
+          },
+          {
+            "value": 30
+          }
+        ],
+        "steps": [
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "advance",
+            "ms": 15000
+          },
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "advance",
+            "ms": 1
+          },
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "setEpoch",
+            "value": "2"
+          },
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "events"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "status": "ok",
+            "value": "10.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "10.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "20.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "30.00000000"
+          },
+          [
+            "miss_absent",
+            "read_fresh",
+            "hit",
+            "miss_expired",
+            "read_fresh",
+            "miss_epoch",
+            "read_fresh"
+          ]
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/priority-independent/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:26",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "normal",
+            "priority": false,
+            "context": "warmup"
+          },
+          {
+            "op": "beginGet",
+            "label": "first",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "beginGet",
+            "label": "second",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "priorities"
+          },
+          {
+            "op": "calls"
+          },
+          {
+            "op": "resolveRead",
+            "index": 1,
+            "value": 25
+          },
+          {
+            "op": "settle"
+          },
+          {
+            "op": "join",
+            "label": "first"
+          },
+          {
+            "op": "join",
+            "label": "second"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 40
+          },
+          {
+            "op": "join",
+            "label": "normal"
+          },
+          {
+            "op": "priorities"
+          },
+          {
+            "op": "calls"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          [
+            false,
+            true
+          ],
+          2,
+          null,
+          null,
+          {
+            "status": "ok",
+            "value": "25.00000000"
+          },
+          {
+            "status": "ok",
+            "value": "25.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "25.00000000"
+          },
+          [
+            false,
+            true
+          ],
+          2
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/urgent-prevails/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:39",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "background",
+            "priority": false,
+            "context": "warmup"
+          },
+          {
+            "op": "beginGet",
+            "label": "priority",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 100
+          },
+          {
+            "op": "join",
+            "label": "background"
+          },
+          {
+            "op": "resolveRead",
+            "index": 1,
+            "value": 0
+          },
+          {
+            "op": "join",
+            "label": "priority"
+          },
+          {
+            "op": "peek"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          {
+            "status": "ok",
+            "value": "100.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "0.00000000"
+          },
+          "0.00000000"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/late-normal/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:51",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "background",
+            "priority": false,
+            "context": "warmup"
+          },
+          {
+            "op": "beginGet",
+            "label": "priority",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "resolveRead",
+            "index": 1,
+            "value": 0
+          },
+          {
+            "op": "join",
+            "label": "priority"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 100
+          },
+          {
+            "op": "join",
+            "label": "background"
+          },
+          {
+            "op": "peek"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          {
+            "status": "ok",
+            "value": "0.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "0.00000000"
+          },
+          "0.00000000"
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/forced-refresh/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:63",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "background",
+            "priority": false,
+            "context": "warmup",
+            "force": true
+          },
+          {
+            "op": "beginGet",
+            "label": "priority",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "resolveRead",
+            "index": 1,
+            "value": 0
+          },
+          {
+            "op": "join",
+            "label": "priority"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 100
+          },
+          {
+            "op": "join",
+            "label": "background"
+          },
+          {
+            "op": "peek"
+          },
+          {
+            "op": "calls"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          {
+            "status": "ok",
+            "value": "0.00000000"
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "0.00000000"
+          },
+          "0.00000000",
+          2
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/epoch-revision/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:77",
+      "input": {
+        "epoch": "old",
+        "reads": [
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "result",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "setEpoch",
+            "value": "new"
+          },
+          {
+            "op": "replace",
+            "value": 20
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 999
+          },
+          {
+            "op": "join",
+            "label": "result"
+          },
+          {
+            "op": "peek"
+          },
+          {
+            "op": "calls"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null,
+          {
+            "status": "ok",
+            "value": "20.00000000"
+          },
+          "20.00000000",
+          1
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/force-retry/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:90",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          },
+          {
+            "value": 9
+          }
+        ],
+        "steps": [
+          {
+            "op": "replace",
+            "value": 5
+          },
+          {
+            "op": "beginGet",
+            "label": "pending",
+            "priority": true,
+            "context": "fast_lane",
+            "force": true
+          },
+          {
+            "op": "replace",
+            "value": 6
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 500
+          },
+          {
+            "op": "join",
+            "label": "pending"
+          },
+          {
+            "op": "calls"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null,
+          {
+            "status": "ok",
+            "value": "9.00000000"
+          },
+          2
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/active-limit/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:101",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          },
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "setEpoch",
+            "value": "0"
+          },
+          {
+            "op": "beginGet",
+            "label": "r0",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "setEpoch",
+            "value": "1"
+          },
+          {
+            "op": "beginGet",
+            "label": "r1",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "setEpoch",
+            "value": "2"
+          },
+          {
+            "op": "beginGet",
+            "label": "r2",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "setEpoch",
+            "value": "3"
+          },
+          {
+            "op": "beginGet",
+            "label": "r3",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "setEpoch",
+            "value": "4"
+          },
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "beginStop",
+            "label": "closing"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 10
+          },
+          {
+            "op": "resolveRead",
+            "index": 1,
+            "value": 10
+          },
+          {
+            "op": "resolveRead",
+            "index": 2,
+            "value": 10
+          },
+          {
+            "op": "resolveRead",
+            "index": 3,
+            "value": 10
+          },
+          {
+            "op": "settle"
+          },
+          {
+            "op": "join",
+            "label": "r0"
+          },
+          {
+            "op": "join",
+            "label": "r1"
+          },
+          {
+            "op": "join",
+            "label": "r2"
+          },
+          {
+            "op": "join",
+            "label": "r3"
+          },
+          {
+            "op": "joinStop",
+            "label": "closing"
+          },
+          {
+            "op": "stopResolved"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "status": "error",
+            "message": "Demasiadas consultas de saldo pendientes."
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          {
+            "status": "error",
+            "message": "Caché de saldo cerrada."
+          },
+          {
+            "status": "error",
+            "message": "Caché de saldo cerrada."
+          },
+          {
+            "status": "error",
+            "message": "Caché de saldo cerrada."
+          },
+          {
+            "status": "error",
+            "message": "Caché de saldo cerrada."
+          },
+          null,
+          true
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/three-invalidations/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:115",
+      "input": {
+        "epoch": "1",
+        "reads": [
+          {
+            "value": 10,
+            "advanceEpoch": true
+          },
+          {
+            "value": 10,
+            "advanceEpoch": true
+          },
+          {
+            "value": 10,
+            "advanceEpoch": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane",
+            "force": true
+          },
+          {
+            "op": "calls"
+          },
+          {
+            "op": "peek"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "status": "error",
+            "message": "El saldo QUSD cambió durante su consulta."
+          },
+          3,
+          null
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/invalid-balance/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:123",
+      "input": {
+        "observeThrows": true,
+        "reads": [
+          {
+            "value": "NaN"
+          },
+          {
+            "value": 8
+          }
+        ],
+        "steps": [
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "peek"
+          },
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "replace",
+            "value": -1
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "status": "error",
+            "message": "Saldo QUSD inválido."
+          },
+          null,
+          {
+            "status": "ok",
+            "value": "8.00000000"
+          },
+          {
+            "status": "error",
+            "message": "Saldo QUSD inválido."
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/preserve-error/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:133",
+      "input": {
+        "reads": [
+          {
+            "error": "límite remoto",
+            "status": 429
+          }
+        ],
+        "steps": [
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          {
+            "status": "error",
+            "message": "límite remoto",
+            "httpStatus": 429
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/stop-waits/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:139",
+      "input": {
+        "reads": [
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "request",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "beginStop",
+            "label": "closing"
+          },
+          {
+            "op": "get",
+            "priority": true,
+            "context": "fast_lane"
+          },
+          {
+            "op": "stopResolved"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 10
+          },
+          {
+            "op": "settle"
+          },
+          {
+            "op": "join",
+            "label": "request"
+          },
+          {
+            "op": "joinStop",
+            "label": "closing"
+          },
+          {
+            "op": "stopResolved"
+          },
+          {
+            "op": "calls"
+          },
+          {
+            "op": "peek"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          {
+            "status": "error",
+            "message": "Caché de saldo cerrada."
+          },
+          false,
+          null,
+          null,
+          {
+            "status": "error",
+            "message": "Caché de saldo cerrada."
+          },
+          null,
+          true,
+          1,
+          null
+        ]
+      }
+    },
+    {
+      "caseId": "pure/qusd-balance-cache/control-change/0001",
+      "op": "qusd.sequence",
+      "source": "test/qusd-balance-cache.test.ts:153",
+      "input": {
+        "epoch": "old",
+        "reads": [
+          {
+            "hang": true
+          }
+        ],
+        "steps": [
+          {
+            "op": "beginGet",
+            "label": "request",
+            "priority": false,
+            "context": "warmup",
+            "force": true,
+            "isCurrent": true
+          },
+          {
+            "op": "setCurrent",
+            "value": false
+          },
+          {
+            "op": "setEpoch",
+            "value": "new"
+          },
+          {
+            "op": "resolveRead",
+            "index": 0,
+            "value": 10
+          },
+          {
+            "op": "join",
+            "label": "request"
+          },
+          {
+            "op": "peek"
+          },
+          {
+            "op": "calls"
+          },
+          {
+            "op": "lastEvent"
+          }
+        ]
+      },
+      "expect": {
+        "results": [
+          null,
+          null,
+          null,
+          null,
+          {
+            "status": "error",
+            "message": "Consulta de saldo detenida."
+          },
+          null,
+          1,
+          "discarded_control"
+        ]
+      }
+    }
+  ]
+}

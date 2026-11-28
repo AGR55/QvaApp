@@ -1,0 +1,3071 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "http",
+  "targetService": "gateway",
+  "sourceTests": [
+    "test/http-dashboard.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Superficie HTTP congelada con `buildDashboard` in-process (26 escenarios). Cookies, CSRF, Bearer, ETag y Last-Modified se normalizan; el body y los efectos sobre el modelo son canónicos. · goldenHash=592a5ca0207deb1a4f4617ea97d93f54d16097f985e95bb6278ad9bfa2beb1fc",
+  "cases": [
+    {
+      "caseId": "http/http-dashboard/03-device-check-revocation",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:108",
+      "input": {
+        "scenario": "http-dashboard/03-device-check-revocation"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/device-check",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "ok": true
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/device-check",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial inválida o revocada."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/device-check",
+              "headers": {
+                "authorization": "Bearer <redacted>"
+              },
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial inválida o revocada."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/devices",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/device-check/extra",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/04-operational-logs",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:144",
+      "input": {
+        "scenario": "http-dashboard/04-operational-logs"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/logs",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/logs?after=7&limit=80&level=error&component=qvapay&query=fiat&since=3600000",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "hasMore": false,
+                "items": [],
+                "newestId": 0
+              },
+              "source": "sqlite"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/logs?level=critical&limit=9999",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "querystring/limit must be <= 200"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "operationalLogs.calls",
+            "value": [
+              {
+                "after": 7,
+                "component": "qvapay",
+                "level": "error",
+                "limit": 80,
+                "query": "fiat",
+                "since": 3600000
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/01-session-origin-csrf",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:16",
+      "input": {
+        "scenario": "http-dashboard/01-session-origin-csrf"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/config",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://malicioso.example",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Origen de solicitud no autorizado."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/control",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "paused": true
+              }
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/control",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "paused": true
+              }
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/control",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "mode": "simulation"
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/mode must NOT be valid"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "controls",
+            "value": [
+              true
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/05-market-readers-no-token",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:191",
+      "input": {
+        "scenario": "http-dashboard/05-market-readers-no-token"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/market-readers",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "intervalSeconds": 3,
+                "label": "Observadora web",
+                "token": "reader-token-from-browser"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "consecutiveErrors": 0,
+                "createdAt": "<timestamp>",
+                "enabled": true,
+                "health": "healthy",
+                "id": "<uuid>",
+                "intervalSeconds": 3,
+                "label": "Observadora web",
+                "lastAttemptAt": null,
+                "lastSuccessAt": null,
+                "nextEligibleAt": 0,
+                "tokenConfigured": true,
+                "updatedAt": "<timestamp>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/market-source",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "accounts": [],
+                "effectiveCadenceSeconds": 3,
+                "estimatedRequestsPerMinute": 20,
+                "healthyAccounts": 1,
+                "mode": "polling",
+                "readers": [
+                  {
+                    "consecutiveErrors": 0,
+                    "createdAt": "<timestamp>",
+                    "enabled": true,
+                    "health": "healthy",
+                    "id": "<uuid>",
+                    "intervalSeconds": 3,
+                    "label": "Observadora web",
+                    "lastAttemptAt": null,
+                    "lastSuccessAt": null,
+                    "nextEligibleAt": 0,
+                    "tokenConfigured": true,
+                    "updatedAt": "<timestamp>"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/market-readers/<uuid>",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "enabled": false
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "consecutiveErrors": 0,
+                "createdAt": "<timestamp>",
+                "enabled": false,
+                "health": "healthy",
+                "id": "<uuid>",
+                "intervalSeconds": 3,
+                "label": "Observadora web",
+                "lastAttemptAt": null,
+                "lastSuccessAt": null,
+                "nextEligibleAt": 0,
+                "tokenConfigured": true,
+                "updatedAt": "<timestamp>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/market-readers/<uuid>/token",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "token": "reader-token-rotated-safely"
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "consecutiveErrors": 0,
+                "createdAt": "<timestamp>",
+                "enabled": false,
+                "health": "healthy",
+                "id": "<uuid>",
+                "intervalSeconds": 3,
+                "label": "Observadora web",
+                "lastAttemptAt": null,
+                "lastSuccessAt": null,
+                "nextEligibleAt": 0,
+                "tokenConfigured": true,
+                "updatedAt": "<timestamp>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "DELETE",
+              "url": "/api/market-readers/<uuid>",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/06-visual-identity-public-only",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:285",
+      "input": {
+        "scenario": "http-dashboard/06-visual-identity-public-only"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "text/html; charset=utf-8",
+              "vary": "Cookie",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><meta name=\"theme-color\" content=\"#123b70\"><script src=\"/auth/theme.js\"></script><link rel=\"icon\" href=\"/logo/encuentro-preciso-favicon.svg\" type=\"image/svg+xml\"><link rel=\"apple-touch-icon\" href=\"/logo/encuentro-preciso-icon-180.png\"><link rel=\"stylesheet\" href=\"/logo/brand.css\"><link rel=\"stylesheet\" href=\"/auth/login.css\"><title>QvaApply · Acceso</title></head><body><main class=\"login-shell\"><section class=\"login-panel\" aria-labelledby=\"login-title\"><span class=\"qva-brand login-logo\" role=\"img\" aria-label=\"QvaApply\"><img class=\"qva-brand-light\" src=\"/logo/encuentro-preciso-horizontal.svg\" alt=\"\" width=\"860\" height=\"180\"><img class=\"qva-brand-inverse\" src=\"/logo/encuentro-preciso-horizontal-inverse.svg\" alt=\"\" width=\"860\" height=\"180\"></span><h1 id=\"login-title\">Mesa de operaciones</h1><p>Todo el control de tus mercados, en un solo lugar.</p><form id=\"login-form\"><label for=\"dashboard-password\">Contraseña administrativa</label><input id=\"dashboard-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" minlength=\"14\" required autofocus placeholder=\"Introduce tu contraseña\"><button type=\"submit\">Entrar de forma segura</button><p id=\"login-status\" role=\"status\" aria-live=\"polite\"></p></form></section></main><script src=\"/auth/login.js\" defer></script></body></html>"
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/icons/qusd.png",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "image/png",
+              "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "8993a4f61c2ad7abc7d2fc90baa7689590661f98b7791ae1b2b5b4a300eb9654",
+              "bytes": 3446
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/logo/logotipo.webp",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "image/webp",
+              "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "b1c1bcfd460eb023284b2ec25baf002458183bc37026b81a3d0c42f4ba60245c",
+              "bytes": 7834
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/logo/encuentro-preciso-horizontal.svg",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "image/svg+xml",
+              "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "7a1f3f8910205645f5c780e373b7e8b421de7011057e217125138f1fca8e4598",
+              "bytes": 7746
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/logo/encuentro-preciso-horizontal-inverse.svg",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "image/svg+xml",
+              "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "77701ca35f01065078a56f56e82b97a1008e62853bbf88f09e818f3d25b7816d",
+              "bytes": 7671
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/logo/encuentro-preciso-icon-180.png",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "image/png",
+              "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "238d1edd86b63d460187faf5b46a4f22df138ec5a8671111c249b765bcec2b21",
+              "bytes": 2681
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/logo/brand.css",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "text/css; charset=utf-8",
+              "cache-control": "public, max-age=86400, stale-while-revalidate=604800",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "/* Natural proportions and identical theme rules for HTML and React surfaces. */\n.qva-brand{display:inline-block;vertical-align:middle;width:var(--brand-width,200px);max-width:100%;line-height:0;flex-shrink:0}\n.qva-brand>img{display:block;width:100%;height:auto;max-width:100%;border-radius:0;filter:none}\n.qva-brand>.qva-brand-inverse{display:none}\n.qva-brand-symbol{--brand-width:56px}\n[data-theme=\"dark\"] .qva-brand>.qva-brand-light{display:none}\n[data-theme=\"dark\"] .qva-brand>.qva-brand-inverse{display:block}\n@media(prefers-color-scheme:dark){:root:not([data-theme]) .qva-brand>.qva-brand-light{display:none}:root:not([data-theme]) .qva-brand>.qva-brand-inverse{display:block}}\n[data-theme=\"light\"]{color-scheme:light}\n[data-theme=\"dark\"]{color-scheme:dark}\n.boot-first-paint{min-height:100dvh}\n@media(prefers-color-scheme:dark){:root:not([data-theme]) .boot-first-paint{background:#191714}}\n"
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/logo/%2e%2e%2fpackage.json",
+              "headers": {},
+              "payload": null
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "text/plain",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "Logotipo no encontrado."
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/images/signin-picture.webp",
+              "headers": {},
+              "payload": null
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Not Found",
+              "message": "Route GET:/images/signin-picture.webp not found",
+              "statusCode": 404
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/dashboard/cachetestfixture.js",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-type": "text/javascript; charset=utf-8",
+              "cache-control": "public, no-cache, must-revalidate",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "export const cacheFixture = true;\n"
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/dashboard/cachetestfixture.js",
+              "headers": {},
+              "payload": null
+            },
+            "status": 304,
+            "headers": {
+              "vary": "Accept-Encoding",
+              "content-type": "text/javascript; charset=utf-8",
+              "cache-control": "public, no-cache, must-revalidate",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": ""
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/icons/%2e%2e%2fpackage.json",
+              "headers": {},
+              "payload": null
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "text/plain",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "Icono no encontrado."
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/images/%2e%2e%2fpackage.json",
+              "headers": {},
+              "payload": null
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Not Found",
+              "message": "Route GET:/images/%2e%2e%2fpackage.json not found",
+              "statusCode": 404
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/07-authenticated-document-bootstrap",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:335",
+      "input": {
+        "scenario": "http-dashboard/07-authenticated-document-bootstrap"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "text/html; charset=utf-8",
+              "vary": "Cookie",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><meta name=\"theme-color\" content=\"#123b70\"><script src=\"/auth/theme.js\"></script><link rel=\"icon\" href=\"/logo/encuentro-preciso-favicon.svg\" type=\"image/svg+xml\"><link rel=\"apple-touch-icon\" href=\"/logo/encuentro-preciso-icon-180.png\"><link rel=\"stylesheet\" href=\"/logo/brand.css\"><title>QvaApply · Mesa de trading</title><link rel=\"stylesheet\" href=\"/dashboard/app.css\"></head><body><template id=\"qvaapply-bootstrap\">{\"session\":{\"authenticated\":true,\"csrfToken\":\"<csrftoken>\",\"expiresAt\":\"<expiresat>\"},\"dashboard\":{\"generatedAt\":123,\"markets\":[],\"freshness\":{},\"marker\":\"\\u003c/template\\u003e\\u003cscript\\u003ealert('no')\\u003c/script\\u003e\"},\"config\":{\"risk\":{},\"markets\":[]},\"configRevisions\":[{\"id\":\"revision-1\"}]}</template><div id=\"root\"><main class=\"boot boot-first-paint\" role=\"status\" aria-label=\"Abriendo QvaApply\"><span class=\"qva-brand boot-logo\" role=\"img\" aria-label=\"QvaApply\"><img class=\"qva-brand-light\" src=\"/logo/encuentro-preciso-horizontal.svg\" alt=\"\" width=\"860\" height=\"180\"><img class=\"qva-brand-inverse\" src=\"/logo/encuentro-preciso-horizontal-inverse.svg\" alt=\"\" width=\"860\" height=\"180\"></span><span class=\"skeleton-pulse\" aria-hidden=\"true\"></span></main></div><script type=\"module\" src=\"/dashboard/app.js\"></script></body></html>"
+          }
+        ],
+        "effects": [
+          {
+            "effect": "value:localReads",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/08-public-document-no-ops",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:389",
+      "input": {
+        "scenario": "http-dashboard/08-public-document-no-ops"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "text/html; charset=utf-8",
+              "vary": "Cookie",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"color-scheme\" content=\"light dark\"><meta name=\"description\" content=\"QvaApply · Mesa privada de operaciones P2P\"><meta name=\"theme-color\" content=\"#123b70\"><script src=\"/auth/theme.js\"></script><link rel=\"icon\" href=\"/logo/encuentro-preciso-favicon.svg\" type=\"image/svg+xml\"><link rel=\"apple-touch-icon\" href=\"/logo/encuentro-preciso-icon-180.png\"><link rel=\"stylesheet\" href=\"/logo/brand.css\"><link rel=\"stylesheet\" href=\"/auth/login.css\"><title>QvaApply · Acceso</title></head><body><main class=\"login-shell\"><section class=\"login-panel\" aria-labelledby=\"login-title\"><span class=\"qva-brand login-logo\" role=\"img\" aria-label=\"QvaApply\"><img class=\"qva-brand-light\" src=\"/logo/encuentro-preciso-horizontal.svg\" alt=\"\" width=\"860\" height=\"180\"><img class=\"qva-brand-inverse\" src=\"/logo/encuentro-preciso-horizontal-inverse.svg\" alt=\"\" width=\"860\" height=\"180\"></span><h1 id=\"login-title\">Mesa de operaciones</h1><p>Todo el control de tus mercados, en un solo lugar.</p><form id=\"login-form\"><label for=\"dashboard-password\">Contraseña administrativa</label><input id=\"dashboard-password\" name=\"password\" type=\"password\" autocomplete=\"current-password\" minlength=\"14\" required autofocus placeholder=\"Introduce tu contraseña\"><button type=\"submit\">Entrar de forma segura</button><p id=\"login-status\" role=\"status\" aria-live=\"polite\"></p></form></section></main><script src=\"/auth/login.js\" defer></script></body></html>"
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/auth/login.js",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "text/javascript; charset=utf-8",
+              "cache-control": "public, no-cache, must-revalidate",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "const form = document.querySelector(\"#login-form\");\nconst status = document.querySelector(\"#login-status\");\nconst button = form.querySelector(\"button\");\n\nform.addEventListener(\"submit\", async (event) => {\n  event.preventDefault();\n  button.disabled = true;\n  button.textContent = \"Verificando…\";\n  status.textContent = \"\";\n  try {\n    const response = await fetch(\"/api/session\", {\n      method: \"POST\",\n      headers: { \"content-type\": \"application/json\" },\n      body: JSON.stringify({ password: form.elements.password.value }),\n    });\n    const payload = await response.json();\n    if (!response.ok) throw new Error(payload.error || \"No se pudo iniciar sesión.\");\n    form.reset();\n    window.location.reload();\n  } catch (error) {\n    status.textContent = error instanceof Error ? error.message : \"No se pudo conectar.\";\n    button.disabled = false;\n    button.textContent = \"Entrar de forma segura\";\n  }\n});\n"
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/09-market-icon-upload",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:407",
+      "input": {
+        "scenario": "http-dashboard/09-market-icon-upload"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/market-icons",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+                "mimeType": "image/png",
+                "name": "etecsa.png"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "url": "/market-icons/hash.png"
+              }
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "uploads",
+            "value": [
+              {
+                "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB",
+                "mimeType": "image/png",
+                "name": "etecsa.png"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/10-invalid-body-before-domain",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:440",
+      "input": {
+        "scenario": "http-dashboard/10-invalid-body-before-domain"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/offers",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "amount": -1,
+                "coin": "BANK_CUP",
+                "rate": 900,
+                "type": "sell"
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/amount must be > 0"
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/11-cooperative-contributions",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:460",
+      "input": {
+        "scenario": "http-dashboard/11-cooperative-contributions"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/cooperative-network/contributions",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "coin": "BANK_CUP",
+                "minimal": 100,
+                "price": 0
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/price must be > 0"
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/cooperative-network/contributions",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "coin": "BANK_CUP",
+                "fiat": 999999,
+                "minimal": 1000,
+                "price": 390
+              }
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "DELETE",
+              "url": "/api/cooperative-network/contributions/BANK_CUP",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/cooperative-network/reconcile",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/cooperative-network/perform",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "externalId": "unsafe"
+              }
+            },
+            "status": 404,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Not Found",
+              "message": "Route POST:/api/cooperative-network/perform not found",
+              "statusCode": 404
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "published",
+            "value": [
+              {
+                "coin": "BANK_CUP",
+                "minimal": 1000,
+                "price": 390
+              }
+            ]
+          },
+          {
+            "effect": "withdrawn",
+            "value": [
+              "BANK_CUP"
+            ]
+          },
+          {
+            "effect": "value:reconciliations",
+            "value": 1
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/12-budget-rebalance-preview",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:534",
+      "input": {
+        "scenario": "http-dashboard/12-budget-rebalance-preview"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/offers/rebalance/preview",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "plans": [
+                  {
+                    "adjustments": [],
+                    "coin": "CLASICA",
+                    "deficit": 2.5
+                  }
+                ],
+                "updatedAt": 123
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/offers/rebalance/preview",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "refresh": true
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "plans": [
+                  {
+                    "adjustments": [],
+                    "coin": "CLASICA",
+                    "deficit": 2.5
+                  }
+                ],
+                "updatedAt": 456
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/offers/rebalance/apply",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "adjustments": [
+                  {
+                    "amount": 8.25,
+                    "uuid": "offer-1"
+                  }
+                ]
+              }
+            },
+            "status": 202,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "adjustments": [],
+                "createdAt": 1,
+                "id": "rebalance-1",
+                "state": "pending",
+                "updatedAt": 1
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/offers/rebalance/rebalance-1",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "adjustments": [],
+                "createdAt": 1,
+                "id": "rebalance-1",
+                "state": "pending",
+                "updatedAt": 1
+              },
+              "source": "sqlite"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "rebalance.calls",
+            "value": [
+              [
+                {
+                  "amount": 8.25,
+                  "uuid": "offer-1"
+                }
+              ]
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/13-hunting-controls",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:576",
+      "input": {
+        "scenario": "http-dashboard/13-hunting-controls"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/hunting",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "market": {
+                  "code": "BANDECPREPAGO",
+                  "huntSellEnabled": false,
+                  "sellMinRate": 1.13
+                }
+              }
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "hunting.updates",
+            "value": [
+              {
+                "market": {
+                  "code": "BANDECPREPAGO",
+                  "huntSellEnabled": false,
+                  "sellMinRate": 1.13
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/14-blocked-offers-confirmation",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:599",
+      "input": {
+        "scenario": "http-dashboard/14-blocked-offers-confirmation"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/blocked-offers/blocked-1/preview",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "rate": 1010,
+                "uuid": "blocked-1"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/blocked-offers/blocked-1/apply",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "overridePriceGuard": false
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "body/overridePriceGuard must be equal to constant"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/blocked-offers/blocked-1/apply",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "overridePriceGuard": true
+              }
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "message": "confirmada"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/blocked-offers/blocked-2/dismiss",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "blocked.calls",
+            "value": [
+              "apply:blocked-1",
+              "dismiss:blocked-2"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/15-localhost-login",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:625",
+      "input": {
+        "scenario": "http-dashboard/15-localhost-login"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://localhost:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/16-domain-rejection-safe",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:639",
+      "input": {
+        "scenario": "http-dashboard/16-domain-rejection-safe"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/control",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "paused": false
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "QvaPay no tiene una sesión válida."
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/17-internal-failure-not-exposed",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:666",
+      "input": {
+        "scenario": "http-dashboard/17-internal-failure-not-exposed"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/control",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "paused": false
+              }
+            },
+            "status": 500,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "No se pudo completar la solicitud."
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/18-emergency-stop-atomic",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:696",
+      "input": {
+        "scenario": "http-dashboard/18-emergency-stop-atomic"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "PUT",
+              "url": "/api/control",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "emergencyStop": true,
+                "paused": false
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "La parada de emergencia debe enviarse como una acción independiente."
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "value:mutations",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/19-dashboard-startup-sqlite-only",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:723",
+      "input": {
+        "scenario": "http-dashboard/19-dashboard-startup-sqlite-only"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/dashboard",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "freshness": {},
+                "generatedAt": 123,
+                "markets": []
+              },
+              "source": "sqlite"
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "value:remoteCalls",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/02-mobile-receipts-structured",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:75",
+      "input": {
+        "scenario": "http-dashboard/02-mobile-receipts-structured"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/payment-receipts",
+              "headers": {
+                "content-type": "application/json"
+              },
+              "payload": {}
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de dispositivo requerida."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/payment-receipts",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "sms": "texto íntegro del SMS"
+              }
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Comprobante estructurado inválido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/payment-receipts",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "amount": 100,
+                "bank": "BPA",
+                "beneficiaryMasked": "1234****5678",
+                "currency": "CUP",
+                "receivedAt": "<receivedat>",
+                "sender": "BPA",
+                "transactionId": "TX-1"
+              }
+            },
+            "status": 202,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "duplicate": false,
+              "ok": true,
+              "receiptId": "receipt-1",
+              "status": "review"
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/payment-receipts",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Autenticación requerida."
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "stored",
+            "value": [
+              {
+                "amount": 100,
+                "bank": "BPA",
+                "beneficiaryMasked": "1234****5678",
+                "currency": "CUP",
+                "receivedAt": "<receivedat>",
+                "sender": "BPA",
+                "transactionId": "TX-1"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/20-remote-failure-keeps-sqlite",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:753",
+      "input": {
+        "scenario": "http-dashboard/20-remote-failure-keeps-sqlite"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/live/balance",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": 18.5,
+              "error": "conexión inestable",
+              "stale": true,
+              "updatedAt": "<timestamp>"
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/21-decision-events-csrf",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:798",
+      "input": {
+        "scenario": "http-dashboard/21-decision-events-csrf"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/decision-events?decision=blocked&status=pending&page=2&pageSize=5",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "items": [],
+                "options": {
+                  "decision": "blocked",
+                  "page": 2,
+                  "pageSize": 5,
+                  "status": "pending"
+                },
+                "page": 2,
+                "pageSize": 5,
+                "pending": 0,
+                "total": 0
+              },
+              "source": "sqlite"
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/7/dismiss",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {}
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/decision-events/7/dismiss",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "dismissed",
+            "value": [
+              7
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/22-notifications-ack",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:819",
+      "input": {
+        "scenario": "http-dashboard/22-notifications-ack"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/notifications",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": [
+                {
+                  "id": "operation-applied:one",
+                  "type": "operation-applied"
+                }
+              ]
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/notifications/operation-applied%3Aone/ack",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "acknowledged",
+            "value": [
+              "operation-applied:one"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/23-service-worker-identity",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:845",
+      "input": {
+        "scenario": "http-dashboard/23-service-worker-identity"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "GET",
+              "url": "/service-worker.js",
+              "headers": {},
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "text/javascript; charset=utf-8",
+              "cache-control": "no-cache",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": "self.addEventListener(\"push\", (event) => {\n    let payload = {};\n    try { payload = event.data ? event.data.json() : {}; } catch {}\n    const alert = payload.alert || {};\n    const title = payload.type === \"chat-message\" || payload.type === \"system-health\" || payload.type === \"informational-summary\" ? payload.title || \"Actividad de QvaApply\" : payload.type === \"blocked-offer\"\n      ? \"Oferta requiere revisión\"\n      : payload.type === \"operation-applied\"\n        ? \"Aplicación confirmada\"\n        : payload.type === \"rebalance-completed\"\n          ? \"Reajuste completado\"\n          : payload.type === \"rebalance-attention\"\n            ? \"Reajuste requiere atención\"\n        : \"Actividad de QvaApply\";\n    const body = payload.type === \"chat-message\" || payload.type === \"system-health\" || payload.type === \"informational-summary\" ? payload.body || \"Consulta el estado del bot.\" : [alert.coin, alert.amount ? alert.amount + \" QUSD\" : \"\", alert.reason || \"\"].filter(Boolean).join(\" · \");\n    const url = payload.url || \"/?view=auditoria\";\n    event.waitUntil(self.clients.matchAll({ type: \"window\", includeUncontrolled: true }).then((clients) => {\n      const visible = clients.find((client) => client.visibilityState === \"visible\");\n      if (visible) { visible.postMessage({ type: \"qvaapply-notification\", payload }); return; }\n      return self.registration.showNotification(title, {\n        body,\n        tag: payload.version || payload.type,\n        data: { url },\n        icon: \"/logo/encuentro-preciso-icon-192.png\",\n        badge: \"/logo/encuentro-preciso-badge.png\",\n        requireInteraction: payload.type === \"operation-applied\" || payload.type === \"rebalance-attention\"\n      });\n    }));\n  });\n  self.addEventListener(\"notificationclick\", (event) => {\n    event.notification.close();\n    const target = new URL(event.notification.data?.url || \"/\", self.location.origin).href;\n    event.waitUntil(self.clients.matchAll({ type: \"window\", includeUncontrolled: true }).then(async (clients) => {\n      const existing = clients[0];\n      if (existing) { await existing.navigate(target); return existing.focus(); }\n      return self.clients.openWindow(target);\n    }));\n  });"
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/24-cancel-empty-paid-reference",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:854",
+      "input": {
+        "scenario": "http-dashboard/24-cancel-empty-paid-reference"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/operation-1/cancel",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/operations/operation-2/paid",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {}
+            },
+            "status": 400,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "La referencia del pago es obligatoria."
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "operations.calls",
+            "value": [
+              "cancel:operation-1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/25-mobile-operator-scopes",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:875",
+      "input": {
+        "scenario": "http-dashboard/25-mobile-operator-scopes"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operators",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "label": "Android"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "operator": {
+                  "createdAt": 1,
+                  "id": "op-1",
+                  "label": "Android",
+                  "scopes": [
+                    "read",
+                    "actions"
+                  ]
+                },
+                "token": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": [
+                {
+                  "actions": [
+                    "paid",
+                    "cancel"
+                  ],
+                  "amount": 2,
+                  "createdAt": 1,
+                  "currency": "CUP",
+                  "market": "BAND",
+                  "marketLabel": "Bandec",
+                  "rate": 50,
+                  "receive": 100,
+                  "side": "buy",
+                  "status": "applied",
+                  "uuid": "u1"
+                }
+              ]
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/alerts",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": [
+                {
+                  "createdAt": 1,
+                  "id": "alert-1",
+                  "message": "Nueva operación",
+                  "type": "operation-applied"
+                }
+              ]
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/markets",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": [
+                {
+                  "code": "BAND",
+                  "currency": "CUP",
+                  "label": "Bandec"
+                }
+              ]
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/receipt-outcomes",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": [
+                {
+                  "id": "receipt-1",
+                  "operationUuid": "u1",
+                  "receivedAt": "<receivedat>",
+                  "status": "matched"
+                }
+              ]
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/u1/cancel",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json",
+                "cookie": "qvaapply_session=<redacted>",
+                "origin": "http://127.0.0.1:3000"
+              },
+              "payload": {}
+            },
+            "status": 403,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Token CSRF no válido."
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/u1/paid",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "reference": "REF-1"
+              }
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/mobile/operations/u1/cancel",
+              "headers": {
+                "authorization": "Bearer <redacted>",
+                "content-type": "application/json"
+              },
+              "payload": {}
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/mobile/operations",
+              "headers": {},
+              "payload": null
+            },
+            "status": 401,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "error": "Credencial de operador requerida o revocada."
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "mobile.actions",
+            "value": [
+              "paid:u1:REF-1",
+              "cancel:u1"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "http/http-dashboard/26-web-push-session-csrf",
+      "kind": "pure",
+      "op": "http.run",
+      "source": "test/http-dashboard.test.ts:912",
+      "input": {
+        "scenario": "http-dashboard/26-web-push-session-csrf"
+      },
+      "expect": {
+        "steps": [
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/session",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "content-type": "application/json"
+              },
+              "payload": {
+                "password": "contraseña-local-segura-2026"
+              }
+            },
+            "status": 201,
+            "headers": {
+              "set-cookie": [
+                "qvaapply_session=<redacted>"
+              ],
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "authenticated": true,
+                "csrfToken": "<csrftoken>",
+                "expiresAt": "<expiresat>"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "GET",
+              "url": "/api/push/public-key",
+              "headers": {
+                "cookie": "qvaapply_session=<redacted>"
+              },
+              "payload": null
+            },
+            "status": 200,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "publicKey": "public-key"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "POST",
+              "url": "/api/push/subscriptions",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "endpoint": "https://push.example/device",
+                "expirationTime": null,
+                "keys": {
+                  "auth": "auth",
+                  "p256dh": "key"
+                }
+              }
+            },
+            "status": 201,
+            "headers": {
+              "content-type": "application/json; charset=utf-8",
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "data": {
+                "endpoint": "https://push.example/device"
+              }
+            }
+          },
+          {
+            "request": {
+              "method": "DELETE",
+              "url": "/api/push/subscriptions",
+              "headers": {
+                "origin": "http://127.0.0.1:3000",
+                "cookie": "qvaapply_session=<redacted>",
+                "content-type": "application/json",
+                "x-csrf-token": "<csrf>"
+              },
+              "payload": {
+                "endpoint": "https://push.example/device"
+              }
+            },
+            "status": 204,
+            "headers": {
+              "cache-control": "no-store",
+              "x-content-type-options": "nosniff",
+              "x-frame-options": "DENY"
+            },
+            "body": {
+              "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+              "bytes": 0
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "push.subscriptions",
+            "value": []
+          }
+        ]
+      }
+    }
+  ]
+}

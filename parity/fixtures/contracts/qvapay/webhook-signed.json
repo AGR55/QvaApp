@@ -1,0 +1,13 @@
+{
+  "cassetteVersion": 1,
+  "name": "webhook-signed",
+  "description": "K5/K13: webhook entrante firmado con HMAC-SHA256 sobre el cuerpo crudo, timestamp ±5 min, dedupe por event+uuid+versión y 202 solo tras persistir. También sirve de receptor de referencia para el emisor /__fake/webhook/send. No hay exchanges de API: estos requests no consumen cassette.",
+  "contract": "K5",
+  "clockMs": 1767225600000,
+  "webhookSecret": "whsec_fake_test_0123456789abcdef",
+  "world": {
+    "user": { "uuid": "user-owner-0001" },
+    "offers": []
+  },
+  "exchanges": []
+}

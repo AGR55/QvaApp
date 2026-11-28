@@ -1,0 +1,300 @@
+{
+  "schema": "qvaapply.parity/v1",
+  "suite": "contract",
+  "targetService": "notifier",
+  "sourceTests": [
+    "test/web-push.test.ts"
+  ],
+  "generatedFrom": {
+    "impl": "typescript",
+    "commit": "02bb5afc04b5eb95f5ac3996ef7634dedf073d02",
+    "approvedBy": "f0-bootstrap"
+  },
+  "notes": "Contrato de adaptador congelado con runtime inyectado (5 escenarios). Resultados, errores, timings y llamadas upstream son canónicos; nunca hay red externa ni reloj real. · goldenHash=cceca9b5592eb87460e0b18cb5b9c00e3df58aa6f5c96a224a4121beee2eb6fc",
+  "cases": [
+    {
+      "caseId": "contract/web-push/01-real-esm-vapid",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/web-push.test.ts:36",
+      "input": {
+        "scenario": "web-push/01-real-esm-vapid"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "publicKey",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "length": 87,
+                "matches": true
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/web-push/02-subscribe-notify-once",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/web-push.test.ts:46",
+      "input": {
+        "scenario": "web-push/02-subscribe-notify-once"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "notifyBlocked#1",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "notifyBlocked#2",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "publicKey",
+            "outcome": {
+              "ok": true,
+              "value": "public-key"
+            }
+          },
+          {
+            "label": "sent",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "endpoint": "https://push.example/one",
+                  "payload": {
+                    "alert": {
+                      "amount": 20,
+                      "coin": "BANK_CUP",
+                      "offerType": "buy",
+                      "rate": 1054,
+                      "reason": "Precio sobre la mediana",
+                      "receive": 21080,
+                      "referenceRate": 1012,
+                      "updatedAt": 1000,
+                      "uuid": "blocked-1"
+                    },
+                    "id": "blocked-1:1054:Precio sobre la mediana",
+                    "type": "blocked-offer",
+                    "url": "/?view=auditoria&offer=blocked-1",
+                    "version": "blocked-1:1054:Precio sobre la mediana"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "sendNotification",
+            "value": [
+              "https://push.example/one"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "caseId": "contract/web-push/03-replace-subscription-expired",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/web-push.test.ts:58",
+      "input": {
+        "scenario": "web-push/03-replace-subscription-expired"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "notifyBlocked",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "subscriptions",
+            "outcome": {
+              "ok": true,
+              "value": {
+                "final": 0,
+                "remaining": [
+                  "https://push.example/two"
+                ],
+                "unsubscribed": true
+              }
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/web-push/04-reject-invalid-endpoint",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/web-push.test.ts:72",
+      "input": {
+        "scenario": "web-push/04-reject-invalid-endpoint"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "subscribe",
+            "outcome": {
+              "error": {
+                "message": "Suscripción Push inválida.",
+                "name": "Error"
+              },
+              "ok": false
+            }
+          }
+        ],
+        "effects": []
+      }
+    },
+    {
+      "caseId": "contract/web-push/05-operation-contextual-routes",
+      "kind": "pure",
+      "op": "contract.run",
+      "source": "test/web-push.test.ts:77",
+      "input": {
+        "scenario": "web-push/05-operation-contextual-routes"
+      },
+      "expect": {
+        "observations": [
+          {
+            "label": "notifyOperation:applied",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "notifyOperation:reconciliation",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "notifyOperation:own-offer",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "notifyOperation:own-offer-version",
+            "outcome": {
+              "ok": true,
+              "value": null
+            }
+          },
+          {
+            "label": "sent",
+            "outcome": {
+              "ok": true,
+              "value": [
+                {
+                  "endpoint": "https://push.example/phone",
+                  "payload": {
+                    "alert": {
+                      "amount": 8,
+                      "coin": "BANK_CUP",
+                      "uuid": "operation-1"
+                    },
+                    "id": "operation-applied:operation-1",
+                    "type": "operation-applied",
+                    "url": "/?view=operaciones&operation=operation-1",
+                    "version": "operation-applied:operation-1"
+                  }
+                },
+                {
+                  "endpoint": "https://push.example/phone",
+                  "payload": {
+                    "alert": {
+                      "amount": 9,
+                      "coin": "BANK_CUP",
+                      "uuid": "operation-2"
+                    },
+                    "id": "reconciliation-required:operation-2",
+                    "type": "reconciliation-required",
+                    "url": "/?view=auditoria&operation=operation-2",
+                    "version": "reconciliation-required:operation-2"
+                  }
+                },
+                {
+                  "endpoint": "https://push.example/phone",
+                  "payload": {
+                    "alert": {
+                      "amount": 9,
+                      "coin": "BANK_CUP",
+                      "uuid": "owned-offer"
+                    },
+                    "id": "own-offer-applied:owned-offer",
+                    "type": "own-offer-applied",
+                    "url": "/?view=operaciones&operation=owned-offer",
+                    "version": "own-offer-applied:owned-offer"
+                  }
+                },
+                {
+                  "endpoint": "https://push.example/phone",
+                  "payload": {
+                    "alert": {
+                      "amount": 9,
+                      "coin": "BANK_CUP",
+                      "uuid": "owned-offer"
+                    },
+                    "id": "own-offer-applied:owned-offer:cycle-1:updated-2026-09-30T10:05:00Z",
+                    "type": "own-offer-applied",
+                    "url": "/?view=operaciones&operation=owned-offer",
+                    "version": "own-offer-applied:owned-offer:cycle-1:updated-2026-09-30T10:05:00Z"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "effects": [
+          {
+            "effect": "sendNotification",
+            "value": [
+              {
+                "endpoint": "https://push.example/phone",
+                "url": "/?view=operaciones&operation=operation-1",
+                "version": "operation-applied:operation-1"
+              },
+              {
+                "endpoint": "https://push.example/phone",
+                "url": "/?view=auditoria&operation=operation-2",
+                "version": "reconciliation-required:operation-2"
+              },
+              {
+                "endpoint": "https://push.example/phone",
+                "url": "/?view=operaciones&operation=owned-offer",
+                "version": "own-offer-applied:owned-offer"
+              },
+              {
+                "endpoint": "https://push.example/phone",
+                "url": "/?view=operaciones&operation=owned-offer",
+                "version": "own-offer-applied:owned-offer:cycle-1:updated-2026-09-30T10:05:00Z"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -33,6 +33,7 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
     <div className="page-stack">
       <ViewHead
         title="Cockpit"
+        description="Estado operativo, liquidez y límites en una sola lectura."
       />
       <section className="control-deck" aria-label="Controles operativos">
         <div>
@@ -73,10 +74,12 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
       ) : null}
       <div className="freshness-row">
         <Freshness
+          label="Balance"
           state={resources.balance}
           cachedAt={data.freshness?.balance}
         />
         <Freshness
+          label="Ofertas"
           state={resources.ownOffers}
           cachedAt={data.freshness?.ownOffers}
         />
@@ -101,8 +104,8 @@ export function Cockpit({ data, label, unit, onChanged, resources }) {
                 <b>{money(rate ? availability.available / rate : 0)} QUSD</b>
               </p>
               <small>
-                {money(availability.committed)} comprometidos · límite{" "}
-                {money(rate, unit(market.code) === "USD" ? 4 : 2)}
+                <span>{money(availability.committed)} comprometidos</span>
+                <span>límite {money(rate, unit(market.code) === "USD" ? 4 : 2)}</span>
               </small>
             </article>
           );
